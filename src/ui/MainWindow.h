@@ -13,6 +13,7 @@
 
 class QComboBox;
 class QLabel;
+class QLineEdit;
 class QProgressBar;
 class QPushButton;
 class QScreen;
@@ -63,6 +64,8 @@ private:
     QProgressBar* micLevelBar_ = nullptr;
     QVideoWidget* videoPreview_ = nullptr;
     QVideoWidget* screenPreview_ = nullptr;
+    QLineEdit* loginEdit_ = nullptr;
+    QLineEdit* passwordEdit_ = nullptr;
     QLabel* authStatusLabel_ = nullptr;
 };
 

@@ -2,26 +2,70 @@
 
 #include <gtest/gtest.h>
 
+#include <QDateTime>
 #include <QEventLoop>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QTimer>
 #include <QUrl>
 
 #include <cstdlib>
 
-// Requires a live auth-service (see services/auth-service) reachable at
-// AUTH_SERVICE_URL (default http://127.0.0.1:8080). Skips itself rather
-// than failing when the service isn't running — CI doesn't currently
-// orchestrate both services together, so this is a manual/local
-// end-to-end check, not part of the automated suite's guarantees.
+// Requires a live auth-service, user-service, and Postgres (see
+// services/auth-service, services/user-service, docker-compose.yml).
+// Reachable at AUTH_SERVICE_URL / USER_SERVICE_URL (defaults
+// http://127.0.0.1:8080 / http://127.0.0.1:8081). Skips itself rather
+// than failing when they're not running — CI doesn't currently
+// orchestrate all three together, so this is a manual/local end-to-end
+// check, not part of the automated suite's guarantees.
 
 namespace devicehub {
 namespace {
 
-TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
-    const char* urlEnv = std::getenv("AUTH_SERVICE_URL");
-    const QUrl baseUrl(urlEnv != nullptr ? QString::fromLocal8Bit(urlEnv) : QStringLiteral("http://127.0.0.1:8080"));
+bool registerTestUser(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& login,
+                       const QString& password) {
+    QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/register"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
-    AuthClient client(baseUrl);
+    const QJsonObject body{{"login", login}, {"password", password}};
+    QNetworkReply* reply = manager.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    bool succeeded = false;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, [&]() {
+        succeeded = (reply->error() == QNetworkReply::NoError);
+        reply->deleteLater();
+        loop.quit();
+    });
+    loop.exec();
+
+    return succeeded;
+}
+
+TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+    const char* userUrlEnv = std::getenv("USER_SERVICE_URL");
+    const QUrl userBaseUrl(userUrlEnv != nullptr ? QString::fromLocal8Bit(userUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8081"));
+
+    // Unique per run so this never collides with a leftover row from a
+    // previous run against the same Postgres instance.
+    const QString login = QStringLiteral("integration-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager setupManager;
+    if (!registerTestUser(setupManager, userBaseUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable at " << userBaseUrl.toString().toStdString()
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+
+    AuthClient client(authBaseUrl);
 
     QString receivedToken;
     QString errorMessage;
@@ -36,12 +80,12 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
             errorMessage = message;
             loop.quit();
         });
-        client.requestToken();
+        client.requestToken(login, password);
         loop.exec();
     }
 
     if (receivedToken.isEmpty()) {
-        GTEST_SKIP() << "auth-service not reachable at " << baseUrl.toString().toStdString() << " (error: "
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString() << " (error: "
                       << errorMessage.toStdString() << ") — start it locally to run this test.";
     }
 
@@ -60,7 +104,7 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     }
 
     EXPECT_TRUE(verified);
-    EXPECT_EQ(subject, QStringLiteral("devicehub-client"));
+    EXPECT_EQ(subject, login);
 }
 
 }  // namespace

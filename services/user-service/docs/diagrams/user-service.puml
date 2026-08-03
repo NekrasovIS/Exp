@@ -1,0 +1,59 @@
+@startuml user-service
+title user-service — src/
+
+package "cpp-httplib" {
+  class "httplib::Server" as HttplibServer
+}
+
+package "libpqxx / libsodium / nlohmann-json" {
+  class "pqxx::connection" as PqxxConnection
+  class "Argon2id (crypto_pwhash)" as Argon2
+  class "nlohmann::json" as Json
+}
+
+namespace password_hash {
+  class password_hash <<namespace>> {
+    +{static} hash(password: string) : string
+    +{static} verify(hash: string, password: string) : bool
+  }
+}
+
+class UserRepository {
+  +createUser(login: string, passwordHash: string) : bool
+  +findPasswordHash(login: string) : optional<string>
+}
+UserRepository ..> PqxxConnection : opens per call
+
+class UserService {
+  +registerUser(login: string, password: string) : bool
+  +verifyCredentials(login: string, password: string) : bool
+}
+UserService --> UserRepository : delegates storage to (&)
+UserService ..> password_hash.password_hash : uses
+password_hash.password_hash ..> Argon2 : implemented with
+
+class HttpServer {
+  +listen(host: string, port: int)
+  +stop()
+  -handleRegister(request, response)
+  -handleVerifyCredentials(request, response)
+}
+HttpServer --> UserService : delegates to (&)
+HttpServer *-- HttplibServer : owns
+HttpServer ..> Json : encodes responses as
+
+note right of HttpServer
+  Routes:
+  POST /users/register           -> handleRegister
+  POST /users/verify-credentials -> handleVerifyCredentials
+end note
+
+note bottom of UserRepository
+  Postgres, via docker-compose.yml
+  locally. One connection per call —
+  pqxx::connection isn't thread-safe
+  and httplib may dispatch from
+  multiple threads.
+end note
+
+@enduml

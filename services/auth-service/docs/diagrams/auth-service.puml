@@ -31,6 +31,11 @@ TokenService ..> Hmac : signs/verifies with
 TokenService ..> Json : encodes payload as
 TokenService ..> base64_utils.base64_utils : uses
 
+class UserServiceClient {
+  +verifyCredentials(login: string, password: string) : bool
+}
+UserServiceClient ..> "user-service" : POST /users/verify-credentials
+
 class HttpServer {
   +listen(host: string, port: int)
   +stop()
@@ -38,11 +43,14 @@ class HttpServer {
   -handleVerifyToken(request, response)
 }
 HttpServer --> TokenService : delegates to (const&)
+HttpServer --> UserServiceClient : checks credentials via (const&)
 HttpServer *-- HttplibServer : owns
 
 note right of HttpServer
   Routes:
   POST /auth/token  -> handleIssueToken
+                       (verifies login/password via
+                       UserServiceClient first)
   POST /auth/verify -> handleVerifyToken
 end note
 

@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: user_service
+      # Local-dev-only default; override via POSTGRES_PASSWORD for anything
+      # beyond a throwaway local instance — see CLAUDE.md, "Безопасность".
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-password}
+      POSTGRES_DB: user_service
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./services/user-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_service"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres-data:

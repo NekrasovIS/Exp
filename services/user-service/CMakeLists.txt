@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
         CACHE STRING "Vcpkg toolchain file")
 endif()
 
-project(AuthService LANGUAGES CXX)
+project(UserService LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,40 +39,42 @@ else()
 endif()
 
 find_package(httplib CONFIG REQUIRED)
-find_package(OpenSSL REQUIRED)
+find_package(libpqxx CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-add_library(auth_service_core
-    src/base64_utils.h
-    src/base64_utils.cpp
-    src/TokenService.h
-    src/TokenService.cpp
+add_library(user_service_core
+    src/password_hash.h
+    src/password_hash.cpp
+    src/UserRepository.h
+    src/UserRepository.cpp
+    src/UserService.h
+    src/UserService.cpp
     src/HttpServer.h
     src/HttpServer.cpp
-    src/UserServiceClient.h
-    src/UserServiceClient.cpp
 )
-target_include_directories(auth_service_core PUBLIC src)
-target_link_libraries(auth_service_core PUBLIC
+target_include_directories(user_service_core PUBLIC src)
+target_link_libraries(user_service_core PUBLIC
     httplib::httplib
-    OpenSSL::Crypto
+    libpqxx::pqxx
+    unofficial-sodium::sodium
     nlohmann_json::nlohmann_json
 )
 
-add_executable(auth-service src/main.cpp)
-target_link_libraries(auth-service PRIVATE auth_service_core)
+add_executable(user-service src/main.cpp)
+target_link_libraries(user-service PRIVATE user_service_core)
 
 enable_testing()
 find_package(GTest CONFIG REQUIRED)
 
-add_executable(auth_service_tests
-    test/TokenServiceTest.cpp
-    test/UserServiceClientIntegrationTest.cpp
+add_executable(user_service_tests
+    test/PasswordHashTest.cpp
+    test/UserServiceIntegrationTest.cpp
 )
-target_link_libraries(auth_service_tests PRIVATE
-    auth_service_core
+target_link_libraries(user_service_tests PRIVATE
+    user_service_core
     GTest::gtest
     GTest::gtest_main
 )
 include(GoogleTest)
-gtest_discover_tests(auth_service_tests)
+gtest_discover_tests(user_service_tests)

@@ -19,8 +19,10 @@ class AuthClient : public QObject {
 public:
     explicit AuthClient(QUrl baseUrl, QObject* parent = nullptr);
 
-    /// Requests a new token for @p subject from POST {baseUrl}/auth/token.
-    void requestToken(const QString& subject = QStringLiteral("devicehub-client"));
+    /// Requests a new token for (@p login, @p password) from
+    /// POST {baseUrl}/auth/token — auth-service checks these against
+    /// user-service before issuing anything.
+    void requestToken(const QString& login, const QString& password);
 
     /// Asks the service to verify @p token via POST {baseUrl}/auth/verify.
     void verifyToken(const QString& token);

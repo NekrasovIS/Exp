@@ -13,17 +13,19 @@ constexpr const char* kJsonContentType = "application/json";
 
 AuthClient::AuthClient(QUrl baseUrl, QObject* parent) : QObject(parent), baseUrl_(std::move(baseUrl)) {}
 
-void AuthClient::requestToken(const QString& subject) {
+void AuthClient::requestToken(const QString& login, const QString& password) {
     QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/token"))));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral(kJsonContentType));
 
-    const QJsonObject body{{"subject", subject}};
+    const QJsonObject body{{"login", login}, {"password", password}};
     QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(reply->errorString());
+            const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
+            const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
+            emit errorOccurred(detail.isEmpty() ? reply->errorString() : detail);
             return;
         }
 

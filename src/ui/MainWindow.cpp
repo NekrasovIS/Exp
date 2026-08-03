@@ -3,6 +3,7 @@
 #include <QComboBox>
 #include <QGroupBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
@@ -100,10 +101,19 @@ void MainWindow::buildUi() {
 
     auto* authGroup = new QGroupBox(tr("Authorization"), central);
     auto* authLayout = new QVBoxLayout(authGroup);
+    loginEdit_ = new QLineEdit(authGroup);
+    loginEdit_->setObjectName(QStringLiteral("loginEdit"));
+    loginEdit_->setPlaceholderText(tr("Login"));
+    passwordEdit_ = new QLineEdit(authGroup);
+    passwordEdit_->setObjectName(QStringLiteral("passwordEdit"));
+    passwordEdit_->setPlaceholderText(tr("Password"));
+    passwordEdit_->setEchoMode(QLineEdit::Password);
     requestTokenButton_ = new QPushButton(tr("Get token & verify"), authGroup);
     requestTokenButton_->setObjectName(QStringLiteral("requestTokenButton"));
     authStatusLabel_ = new QLabel(tr("No token requested yet"), authGroup);
     authStatusLabel_->setObjectName(QStringLiteral("authStatusLabel"));
+    authLayout->addWidget(loginEdit_);
+    authLayout->addWidget(passwordEdit_);
     authLayout->addWidget(requestTokenButton_);
     authLayout->addWidget(authStatusLabel_);
 
@@ -178,7 +188,7 @@ void MainWindow::onToggleScreenCaptureClicked() {
 
 void MainWindow::onRequestTokenClicked() {
     authStatusLabel_->setText(tr("Requesting token..."));
-    authClient_.requestToken();
+    authClient_.requestToken(loginEdit_->text(), passwordEdit_->text());
 }
 
 }  // namespace devicehub
