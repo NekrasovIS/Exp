@@ -1,0 +1,57 @@
+@startuml devices
+title DeviceHub — src/devices
+
+package "Qt Multimedia" {
+  class QAudioDevice
+  class QCameraDevice
+  class QAudioSink
+  class QAudioSource
+  class QCamera
+  class QMediaCaptureSession
+}
+
+class DeviceEnumerator {
+  +audioOutputs() : QList<QAudioDevice>
+  +audioInputs() : QList<QAudioDevice>
+  +cameras() : QList<QCameraDevice>
+}
+DeviceEnumerator ..> QAudioDevice : lists
+DeviceEnumerator ..> QCameraDevice : lists
+
+class AudioOutputDevice {
+  +playTestTone(device: QAudioDevice, frequencyHz: double = 440.0)
+  +stop()
+  +isPlaying() : bool
+  .. signals ..
+  +finished()
+  -generateSineWave(format: QAudioFormat, frequencyHz: double, durationSeconds: double) : QByteArray
+}
+AudioOutputDevice --> "0..1" QAudioSink : owns (unique_ptr)
+AudioOutputDevice ..> QAudioDevice : uses
+
+class AudioInputDevice {
+  +start(device: QAudioDevice)
+  +stop()
+  +isCapturing() : bool
+  .. signals ..
+  +levelChanged(level: float)
+  -readAvailableData()
+  -{static} computeLevel(pcmData: QByteArray, format: QAudioFormat) : float
+}
+AudioInputDevice --> "0..1" QAudioSource : owns (unique_ptr)
+AudioInputDevice ..> QAudioDevice : uses
+
+class CameraDevice {
+  +setDevice(device: QCameraDevice)
+  +start()
+  +stop()
+  +isActive() : bool
+  +captureSession() : QMediaCaptureSession&
+  .. signals ..
+  +errorOccurred(message: QString)
+}
+CameraDevice --> "0..1" QCamera : owns (unique_ptr)
+CameraDevice *-- QMediaCaptureSession : owns
+CameraDevice ..> QCameraDevice : uses
+
+@enduml

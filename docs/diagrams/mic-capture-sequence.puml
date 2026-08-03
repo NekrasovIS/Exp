@@ -1,0 +1,25 @@
+@startuml mic_capture_sequence
+title Запуск захвата с микрофона (AudioInputDevice::start)
+
+actor User
+participant MainWindow
+participant AudioInputDevice
+participant "QAudioSource" as Source
+participant "QIODevice (stream)" as Stream
+
+User -> MainWindow : click "Start capture"
+MainWindow -> AudioInputDevice : start(device)
+AudioInputDevice -> Source : new QAudioSource(device, format)
+AudioInputDevice -> Source : start()
+Source --> AudioInputDevice : stream (QIODevice*)
+AudioInputDevice -> Stream : connect(readyRead -> readAvailableData)
+
+loop while capturing
+  Stream -> AudioInputDevice : readyRead()
+  AudioInputDevice -> Stream : readAll()
+  AudioInputDevice -> AudioInputDevice : computeLevel(pcmData, format)
+  AudioInputDevice -> MainWindow : levelChanged(level)
+  MainWindow -> MainWindow : micLevelBar->setValue(level * 100)
+end
+
+@enduml

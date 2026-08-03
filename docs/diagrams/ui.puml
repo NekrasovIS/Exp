@@ -1,0 +1,32 @@
+@startuml ui
+title DeviceHub — src/ui
+
+class MainWindow {
+  -buildUi()
+  -populateDevices()
+  -onPlayToneClicked()
+  -onToggleMicClicked()
+  -onToggleCameraClicked()
+}
+
+package "src/devices" {
+  class DeviceEnumerator
+  class AudioOutputDevice
+  class AudioInputDevice
+  class CameraDevice
+}
+
+MainWindow *-- DeviceEnumerator : owns
+MainWindow *-- AudioOutputDevice : owns
+MainWindow *-- AudioInputDevice : owns
+MainWindow *-- CameraDevice : owns
+
+MainWindow ..> AudioInputDevice : levelChanged() >
+
+note right of MainWindow
+  Только Qt Widgets + сигналы/слоты
+  от devices/. Не обращается к
+  low-level Qt Multimedia API напрямую.
+end note
+
+@enduml
