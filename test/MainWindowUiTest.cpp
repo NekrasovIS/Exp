@@ -77,24 +77,51 @@ TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
     EXPECT_EQ(passwordEdit->echoMode(), QLineEdit::Password);
 }
 
-TEST(MainWindowUiTest, ChatControlsExist) {
+TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     const MainWindow window;
 
-    auto* channelIdEdit = window.findChild<QLineEdit*>("channelIdEdit");
     auto* connectToChannelButton = window.findChild<QPushButton*>("connectToChannelButton");
     auto* chatLog = window.findChild<QPlainTextEdit*>("chatLog");
     auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
     auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
 
-    ASSERT_NE(channelIdEdit, nullptr);
     ASSERT_NE(connectToChannelButton, nullptr);
     ASSERT_NE(chatLog, nullptr);
     ASSERT_NE(chatMessageEdit, nullptr);
     ASSERT_NE(sendChatMessageButton, nullptr);
 
     EXPECT_TRUE(chatLog->isReadOnly());
-    EXPECT_EQ(connectToChannelButton->text(), QStringLiteral("Connect to channel"));
+    EXPECT_EQ(connectToChannelButton->text(), QStringLiteral("Connect to selected channel"));
     EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
+}
+
+TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
+    const MainWindow window;
+
+    auto* communityNameEdit = window.findChild<QLineEdit*>("communityNameEdit");
+    auto* createCommunityButton = window.findChild<QPushButton*>("createCommunityButton");
+    auto* communityCombo = window.findChild<QComboBox*>("communityCombo");
+    auto* refreshCommunitiesButton = window.findChild<QPushButton*>("refreshCommunitiesButton");
+    auto* joinCommunityButton = window.findChild<QPushButton*>("joinCommunityButton");
+    auto* channelNameEdit = window.findChild<QLineEdit*>("channelNameEdit");
+    auto* createChannelButton = window.findChild<QPushButton*>("createChannelButton");
+    auto* channelCombo = window.findChild<QComboBox*>("channelCombo");
+    auto* refreshChannelsButton = window.findChild<QPushButton*>("refreshChannelsButton");
+
+    ASSERT_NE(communityNameEdit, nullptr);
+    ASSERT_NE(createCommunityButton, nullptr);
+    ASSERT_NE(communityCombo, nullptr);
+    ASSERT_NE(refreshCommunitiesButton, nullptr);
+    ASSERT_NE(joinCommunityButton, nullptr);
+    ASSERT_NE(channelNameEdit, nullptr);
+    ASSERT_NE(createChannelButton, nullptr);
+    ASSERT_NE(channelCombo, nullptr);
+    ASSERT_NE(refreshChannelsButton, nullptr);
+
+    EXPECT_EQ(communityCombo->count(), 0);
+    EXPECT_EQ(channelCombo->count(), 0);
+    EXPECT_EQ(createCommunityButton->text(), QStringLiteral("Create community"));
+    EXPECT_EQ(joinCommunityButton->text(), QStringLiteral("Join selected community"));
 }
 
 }  // namespace
