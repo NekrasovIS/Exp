@@ -11,6 +11,28 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+# Maximum warnings + pedantic mode for the whole project, not per-target.
+if(MSVC)
+    add_compile_options(/W4 /permissive-)
+else()
+    add_compile_options(
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wshadow
+        -Wnon-virtual-dtor
+        -Wold-style-cast
+        -Wcast-align
+        -Woverloaded-virtual
+        -Wconversion
+        -Wsign-conversion
+        -Wnull-dereference
+        -Wdouble-promotion
+        -Wformat=2
+        -Wimplicit-fallthrough
+    )
+endif()
+
 list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/qt")
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
@@ -31,8 +53,6 @@ target_link_libraries(devicehub_core PUBLIC
     Qt6::Multimedia
     Qt6::MultimediaWidgets
 )
-target_compile_options(devicehub_core PRIVATE -Wall -Wextra)
-
 add_executable(DeviceHub MACOSX_BUNDLE
     src/main.cpp
     src/ui/MainWindow.h

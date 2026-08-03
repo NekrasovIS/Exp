@@ -11,6 +11,8 @@
 - Предпочитать композицию глубоким иерархиям наследования; Qt-сигналы/слоты — основной механизм связи между слоями (устройства ↔ UI), а не прямые вызовы вверх по иерархии.
 - Стиль Qt: `QObject`-наследники для классов с сигналами/слотами, `Q_OBJECT` макрос, `parent`-owned объекты для управления временем жизни (избегать ручного `delete`, где это можно доверить дереву `QObject`).
 
+- Сборка всегда идёт с максимальным набором предупреждений и в pedantic-режиме: `-Wall -Wextra -Wpedantic` и остальные значимые предупреждения для GCC/Clang (`-Wshadow`, `-Wconversion`, `-Wsign-conversion`, `-Wnon-virtual-dtor`, `-Wold-style-cast`, `-Wcast-align`, `-Woverloaded-virtual`, `-Wnull-dereference`, `-Wdouble-promotion`, `-Wformat=2`, `-Wimplicit-fallthrough`), `/W4 /permissive-` для MSVC. Настраивается один раз в `CMakeLists.txt` на весь проект, а не точечно на отдельные цели.
+
 ## Структура
 
 - **Один класс на файл** (пара `.h`/`.cpp`).
