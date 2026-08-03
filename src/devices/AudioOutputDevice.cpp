@@ -25,7 +25,7 @@ QByteArray AudioOutputDevice::generateSineWave(const QAudioFormat& format, doubl
 
     for (qsizetype i = 0; i < sampleCount; ++i) {
         const double t = static_cast<double>(i) / format.sampleRate();
-        const float sample = static_cast<float>(qSin(2.0 * M_PI * frequencyHz * t));
+        const double sample = qSin(2.0 * M_PI * frequencyHz * t);
         for (int channel = 0; channel < format.channelCount(); ++channel) {
             const int32_t pcm = static_cast<int32_t>(sample * 0.5 * std::numeric_limits<int16_t>::max());
             const int16_t pcm16 = static_cast<int16_t>(pcm);

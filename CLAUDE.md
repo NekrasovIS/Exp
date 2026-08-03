@@ -14,6 +14,8 @@
 - Переменную, нужную только для проверки внутри `if`, объявлять прямо в нём (init-statement, C++17): `if (auto it = map.find(key); it != map.end()) { ... }`, а не заводить отдельной строкой до `if`, где она "утекает" в область видимости за пределами проверки.
 - Предпочитать **RAII-обёртки** ручному управлению ресурсами — умные указатели (`std::unique_ptr`, как уже используется для `QAudioSink`/`QAudioSource`/`QCamera`), лок-гварды, файловые/сокетные обёртки с освобождением в деструкторе — вместо парных `acquire`/`release`, которые легко забыть вызвать на ветке с ранним `return` или исключением.
 
+- Сборка всегда идёт с максимальным набором предупреждений и в pedantic-режиме: `-Wall -Wextra -Wpedantic` и остальные значимые предупреждения для GCC/Clang (`-Wshadow`, `-Wconversion`, `-Wsign-conversion`, `-Wnon-virtual-dtor`, `-Wold-style-cast`, `-Wcast-align`, `-Woverloaded-virtual`, `-Wnull-dereference`, `-Wdouble-promotion`, `-Wformat=2`, `-Wimplicit-fallthrough`), `/W4 /permissive-` для MSVC. Настраивается один раз в `CMakeLists.txt` на весь проект, а не точечно на отдельные цели.
+
 ## Структура
 
 - **Один класс на файл** (пара `.h`/`.cpp`).
