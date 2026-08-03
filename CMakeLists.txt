@@ -77,6 +77,21 @@ add_executable(DeviceHub MACOSX_BUNDLE
 )
 target_link_libraries(DeviceHub PRIVATE devicehub_core)
 
+# vcpkg's Qt6 is built statically, so plugins aren't picked up at
+# runtime unless explicitly linked in — the platform (cocoa) and
+# multimedia backend plugins ride along automatically as part of the
+# Widgets/Multimedia components, but the "permissions" category doesn't.
+# Without this, QCamera::start()/QMicrophonePermission silently report
+# "not granted" without ever asking macOS, because Qt can't even find a
+# permission plugin to check with.
+if(APPLE)
+    qt_import_plugins(DeviceHub
+        INCLUDE
+            Qt6::QDarwinCameraPermissionPlugin
+            Qt6::QDarwinMicrophonePermissionPlugin
+    )
+endif()
+
 set_target_properties(DeviceHub PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist.in"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.devicehub.app"

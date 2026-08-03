@@ -37,6 +37,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&audioInput_, &AudioInputDevice::levelChanged, micLevelBar_, [this](float level) {
         micLevelBar_->setValue(static_cast<int>(level * 100.0f));
     });
+    connect(&camera_, &CameraDevice::errorOccurred, this,
+            [this](const QString& message) { cameraStatusLabel_->setText(tr("Error: %1").arg(message)); });
+    connect(&screenCapture_, &ScreenCaptureDevice::errorOccurred, this,
+            [this](const QString& message) { screenStatusLabel_->setText(tr("Error: %1").arg(message)); });
     connect(&authClient_, &AuthClient::tokenReceived, this, [this](const QString& token) {
         lastToken_ = token;
         authStatusLabel_->setText(tr("Token received, verifying..."));
@@ -137,9 +141,12 @@ void MainWindow::buildUi() {
     toggleCameraButton_->setObjectName(QStringLiteral("toggleCameraButton"));
     videoPreview_ = new QVideoWidget(cameraGroup);
     videoPreview_->setMinimumSize(320, 240);
+    cameraStatusLabel_ = new QLabel(cameraGroup);
+    cameraStatusLabel_->setObjectName(QStringLiteral("cameraStatusLabel"));
     cameraLayout->addWidget(cameraCombo_);
     cameraLayout->addWidget(toggleCameraButton_);
     cameraLayout->addWidget(videoPreview_);
+    cameraLayout->addWidget(cameraStatusLabel_);
 
     auto* screenGroup = new QGroupBox(tr("Screen capture"), central);
     auto* screenLayout = new QVBoxLayout(screenGroup);
@@ -149,9 +156,12 @@ void MainWindow::buildUi() {
     toggleScreenCaptureButton_->setObjectName(QStringLiteral("toggleScreenCaptureButton"));
     screenPreview_ = new QVideoWidget(screenGroup);
     screenPreview_->setMinimumSize(320, 240);
+    screenStatusLabel_ = new QLabel(screenGroup);
+    screenStatusLabel_->setObjectName(QStringLiteral("screenStatusLabel"));
     screenLayout->addWidget(screenCombo_);
     screenLayout->addWidget(toggleScreenCaptureButton_);
     screenLayout->addWidget(screenPreview_);
+    screenLayout->addWidget(screenStatusLabel_);
 
     auto* authGroup = new QGroupBox(tr("Authorization"), central);
     auto* authLayout = new QVBoxLayout(authGroup);
@@ -269,12 +279,19 @@ void MainWindow::onToggleCameraClicked() {
     if (camera_.isActive()) {
         camera_.stop();
         toggleCameraButton_->setText(tr("Start camera"));
-    } else {
-        const QCameraDevice device = cameraCombo_->currentData().value<QCameraDevice>();
-        camera_.setDevice(device);
-        camera_.start();
-        toggleCameraButton_->setText(tr("Stop camera"));
+        return;
     }
+
+    if (cameraCombo_->currentIndex() < 0) {
+        cameraStatusLabel_->setText(tr("No camera available"));
+        return;
+    }
+
+    cameraStatusLabel_->clear();
+    const QCameraDevice device = cameraCombo_->currentData().value<QCameraDevice>();
+    camera_.setDevice(device);
+    camera_.start();
+    toggleCameraButton_->setText(tr("Stop camera"));
 }
 
 void MainWindow::onToggleScreenCaptureClicked() {
@@ -285,9 +302,12 @@ void MainWindow::onToggleScreenCaptureClicked() {
     }
 
     if (const int index = screenCombo_->currentIndex(); index >= 0 && index < screens_.size()) {
+        screenStatusLabel_->clear();
         screenCapture_.setScreen(screens_[index]);
         screenCapture_.start();
         toggleScreenCaptureButton_->setText(tr("Stop screen capture"));
+    } else {
+        screenStatusLabel_->setText(tr("No screen available"));
     }
 }
 
