@@ -18,25 +18,33 @@ Qt Multimedia; развивается в сторону клиент-серве�
 
 ## Сборка
 
-Зависимости: CMake ≥ 3.21, компилятор с поддержкой C++20, Qt6
-(Widgets, Multimedia, MultimediaWidgets), GoogleTest.
+Зависимости: CMake ≥ 3.21, компилятор с поддержкой C++20. Qt6 и
+GoogleTest ставятся не через системный пакетный менеджер, а через
+[vcpkg](https://vcpkg.io) (см. CLAUDE.md, «Кроссплатформенность») —
+он подключён как git submodule, зависимости описаны в
+[vcpkg.json](vcpkg.json).
 
-На macOS зависимости ставятся через Homebrew:
+Клонировать с submodule (или инициализировать в уже склонированном
+репозитории):
 
 ```bash
-brew install qt@6 googletest
+git clone --recurse-submodules <url>
+# или, если уже склонировано без --recurse-submodules:
+git submodule update --init --recursive
 ```
 
-Сборка:
+Сборка (vcpkg сам соберёт Qt6 из исходников при первой конфигурации —
+это медленно, от часа и дольше, и требует нескольких гигабайт диска;
+повторные сборки используют кэш и быстрые):
 
 ```bash
 cmake -S . -B build
 cmake --build build --parallel
 ```
 
-На macOS путь к Qt6 определяется автоматически через `brew --prefix
-qt@6`; на других платформах передайте его явно через
-`-DCMAKE_PREFIX_PATH=<путь к Qt6>`.
+Путь к toolchain-файлу vcpkg прописан в `CMakeLists.txt` относительно
+корня репозитория — передавать `-DCMAKE_TOOLCHAIN_FILE` вручную не
+нужно, если submodule на месте.
 
 Запуск:
 
