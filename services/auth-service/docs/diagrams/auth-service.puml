@@ -1,0 +1,49 @@
+@startuml auth-service
+title auth-service — src/
+
+package "cpp-httplib" {
+  class "httplib::Server" as HttplibServer
+}
+
+package "nlohmann-json / OpenSSL" {
+  class "nlohmann::json" as Json
+  class "HMAC-SHA256" as Hmac
+}
+
+namespace base64_utils {
+  class base64_utils <<namespace>> {
+    +{static} encodeUrl(data: vector<uint8_t>) : string
+    +{static} decodeUrl(text: string) : vector<uint8_t>
+  }
+}
+
+class Token {
+  +value : string
+  +expiresAt : int64
+}
+
+class TokenService {
+  +issueToken(subject: string) : Token
+  +verifyToken(token: string) : optional<string>
+}
+TokenService ..> Token : creates
+TokenService ..> Hmac : signs/verifies with
+TokenService ..> Json : encodes payload as
+TokenService ..> base64_utils.base64_utils : uses
+
+class HttpServer {
+  +listen(host: string, port: int)
+  +stop()
+  -handleIssueToken(request, response)
+  -handleVerifyToken(request, response)
+}
+HttpServer --> TokenService : delegates to (const&)
+HttpServer *-- HttplibServer : owns
+
+note right of HttpServer
+  Routes:
+  POST /auth/token  -> handleIssueToken
+  POST /auth/verify -> handleVerifyToken
+end note
+
+@enduml

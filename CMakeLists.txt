@@ -42,7 +42,7 @@ else()
     )
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network)
 
 add_library(devicehub_core
     src/devices/DeviceEnumerator.h
@@ -55,6 +55,8 @@ add_library(devicehub_core
     src/devices/CameraDevice.cpp
     src/devices/ScreenCaptureDevice.h
     src/devices/ScreenCaptureDevice.cpp
+    src/auth/AuthClient.h
+    src/auth/AuthClient.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
 )
@@ -63,6 +65,7 @@ target_link_libraries(devicehub_core PUBLIC
     Qt6::Widgets
     Qt6::Multimedia
     Qt6::MultimediaWidgets
+    Qt6::Network
 )
 add_executable(DeviceHub MACOSX_BUNDLE
     src/main.cpp
@@ -85,6 +88,7 @@ add_executable(devicehub_tests
     test/QtTestEnvironment.cpp
     test/DeviceEnumeratorTest.cpp
     test/MainWindowUiTest.cpp
+    test/AuthClientIntegrationTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core

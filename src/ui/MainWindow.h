@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <memory>
 
+#include "auth/AuthClient.h"
 #include "devices/AudioInputDevice.h"
 #include "devices/AudioOutputDevice.h"
 #include "devices/CameraDevice.h"
@@ -11,6 +12,7 @@
 #include "devices/ScreenCaptureDevice.h"
 
 class QComboBox;
+class QLabel;
 class QProgressBar;
 class QPushButton;
 class QScreen;
@@ -39,12 +41,14 @@ private:
     void onToggleMicClicked();
     void onToggleCameraClicked();
     void onToggleScreenCaptureClicked();
+    void onRequestTokenClicked();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
     AudioInputDevice audioInput_;
     CameraDevice camera_;
     ScreenCaptureDevice screenCapture_;
+    AuthClient authClient_;
     QList<QScreen*> screens_;
 
     QComboBox* outputCombo_ = nullptr;
@@ -55,9 +59,11 @@ private:
     QPushButton* toggleMicButton_ = nullptr;
     QPushButton* toggleCameraButton_ = nullptr;
     QPushButton* toggleScreenCaptureButton_ = nullptr;
+    QPushButton* requestTokenButton_ = nullptr;
     QProgressBar* micLevelBar_ = nullptr;
     QVideoWidget* videoPreview_ = nullptr;
     QVideoWidget* screenPreview_ = nullptr;
+    QLabel* authStatusLabel_ = nullptr;
 };
 
 }  // namespace devicehub

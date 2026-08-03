@@ -13,7 +13,12 @@
 
 namespace devicehub {
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+namespace {
+constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
+}  // namespace
+
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent), authClient_(QUrl(qEnvironmentVariable("AUTH_SERVICE_URL", kDefaultAuthServiceUrl))) {
     buildUi();
     populateDevices();
 
@@ -21,8 +26,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(toggleMicButton_, &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
     connect(toggleCameraButton_, &QPushButton::clicked, this, &MainWindow::onToggleCameraClicked);
     connect(toggleScreenCaptureButton_, &QPushButton::clicked, this, &MainWindow::onToggleScreenCaptureClicked);
+    connect(requestTokenButton_, &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
     connect(&audioInput_, &AudioInputDevice::levelChanged, micLevelBar_, [this](float level) {
         micLevelBar_->setValue(static_cast<int>(level * 100.0f));
+    });
+    connect(&authClient_, &AuthClient::tokenReceived, this, [this](const QString& token) {
+        authStatusLabel_->setText(tr("Token received, verifying..."));
+        authClient_.verifyToken(token);
+    });
+    connect(&authClient_, &AuthClient::tokenVerified, this, [this](bool valid, const QString& subject) {
+        authStatusLabel_->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
+    });
+    connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
+        authStatusLabel_->setText(tr("Error: %1").arg(message));
     });
 
     camera_.captureSession().setVideoOutput(videoPreview_);
@@ -82,10 +98,20 @@ void MainWindow::buildUi() {
     screenLayout->addWidget(toggleScreenCaptureButton_);
     screenLayout->addWidget(screenPreview_);
 
+    auto* authGroup = new QGroupBox(tr("Authorization"), central);
+    auto* authLayout = new QVBoxLayout(authGroup);
+    requestTokenButton_ = new QPushButton(tr("Get token & verify"), authGroup);
+    requestTokenButton_->setObjectName(QStringLiteral("requestTokenButton"));
+    authStatusLabel_ = new QLabel(tr("No token requested yet"), authGroup);
+    authStatusLabel_->setObjectName(QStringLiteral("authStatusLabel"));
+    authLayout->addWidget(requestTokenButton_);
+    authLayout->addWidget(authStatusLabel_);
+
     layout->addWidget(outputGroup);
     layout->addWidget(inputGroup);
     layout->addWidget(cameraGroup);
     layout->addWidget(screenGroup);
+    layout->addWidget(authGroup);
 
     setCentralWidget(central);
 }
@@ -148,6 +174,11 @@ void MainWindow::onToggleScreenCaptureClicked() {
         screenCapture_.start();
         toggleScreenCaptureButton_->setText(tr("Stop screen capture"));
     }
+}
+
+void MainWindow::onRequestTokenClicked() {
+    authStatusLabel_->setText(tr("Requesting token..."));
+    authClient_.requestToken();
 }
 
 }  // namespace devicehub
