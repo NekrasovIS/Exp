@@ -11,7 +11,20 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/qt")
+# On macOS, Qt6 installed via Homebrew isn't on the default CMake search
+# path; ask Homebrew where it lives instead of hardcoding a path.
+# Other platforms/setups pass CMAKE_PREFIX_PATH in from outside.
+if(APPLE)
+    execute_process(
+        COMMAND brew --prefix qt@6
+        OUTPUT_VARIABLE HOMEBREW_QT6_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(HOMEBREW_QT6_PREFIX)
+        list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_QT6_PREFIX}")
+    endif()
+endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 
