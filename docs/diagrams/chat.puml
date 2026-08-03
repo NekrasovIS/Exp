@@ -1,0 +1,29 @@
+@startuml chat
+title DeviceHub — src/chat
+
+package "Qt WebSockets" {
+  class QWebSocket
+}
+
+class ChatClient {
+  +connectToChannel(token: QString, channelId: qint64)
+  +sendMessage(body: QString)
+  +disconnectFromChannel()
+  .. signals ..
+  +subscribed(channelId: qint64)
+  +messageReceived(author: QString, body: QString, sentAt: QString)
+  +errorOccurred(message: QString)
+}
+ChatClient *-- QWebSocket : owns
+ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebSocket
+
+note right of ChatClient
+  Async only — every call returns
+  immediately, result comes back
+  via signals. First frame after
+  connecting authenticates and
+  subscribes to a channel; every
+  frame after that is a chat message.
+end note
+
+@enduml

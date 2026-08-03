@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "auth/AuthClient.h"
+#include "chat/ChatClient.h"
 #include "devices/AudioInputDevice.h"
 #include "devices/AudioOutputDevice.h"
 #include "devices/CameraDevice.h"
@@ -14,6 +15,7 @@
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
 class QScreen;
@@ -43,6 +45,8 @@ private:
     void onToggleCameraClicked();
     void onToggleScreenCaptureClicked();
     void onRequestTokenClicked();
+    void onConnectToChannelClicked();
+    void onSendChatMessageClicked();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
@@ -50,6 +54,8 @@ private:
     CameraDevice camera_;
     ScreenCaptureDevice screenCapture_;
     AuthClient authClient_;
+    ChatClient chatClient_;
+    QString lastToken_;
     QList<QScreen*> screens_;
 
     QComboBox* outputCombo_ = nullptr;
@@ -67,6 +73,11 @@ private:
     QLineEdit* loginEdit_ = nullptr;
     QLineEdit* passwordEdit_ = nullptr;
     QLabel* authStatusLabel_ = nullptr;
+    QLineEdit* channelIdEdit_ = nullptr;
+    QPushButton* connectToChannelButton_ = nullptr;
+    QPlainTextEdit* chatLog_ = nullptr;
+    QLineEdit* chatMessageEdit_ = nullptr;
+    QPushButton* sendChatMessageButton_ = nullptr;
 };
 
 }  // namespace devicehub

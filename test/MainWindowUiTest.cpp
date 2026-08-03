@@ -4,6 +4,7 @@
 
 #include <QComboBox>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 
 #include "devices/DeviceEnumerator.h"
@@ -74,6 +75,26 @@ TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
     ASSERT_NE(loginEdit, nullptr);
     ASSERT_NE(passwordEdit, nullptr);
     EXPECT_EQ(passwordEdit->echoMode(), QLineEdit::Password);
+}
+
+TEST(MainWindowUiTest, ChatControlsExist) {
+    const MainWindow window;
+
+    auto* channelIdEdit = window.findChild<QLineEdit*>("channelIdEdit");
+    auto* connectToChannelButton = window.findChild<QPushButton*>("connectToChannelButton");
+    auto* chatLog = window.findChild<QPlainTextEdit*>("chatLog");
+    auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
+    auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
+
+    ASSERT_NE(channelIdEdit, nullptr);
+    ASSERT_NE(connectToChannelButton, nullptr);
+    ASSERT_NE(chatLog, nullptr);
+    ASSERT_NE(chatMessageEdit, nullptr);
+    ASSERT_NE(sendChatMessageButton, nullptr);
+
+    EXPECT_TRUE(chatLog->isReadOnly());
+    EXPECT_EQ(connectToChannelButton->text(), QStringLiteral("Connect to channel"));
+    EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
 }
 
 }  // namespace

@@ -4,6 +4,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
@@ -16,10 +17,13 @@ namespace devicehub {
 
 namespace {
 constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
+constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent), authClient_(QUrl(qEnvironmentVariable("AUTH_SERVICE_URL", kDefaultAuthServiceUrl))) {
+    : QMainWindow(parent),
+      authClient_(QUrl(qEnvironmentVariable("AUTH_SERVICE_URL", kDefaultAuthServiceUrl))),
+      chatClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_WS_URL", kDefaultChatServiceWsUrl))) {
     buildUi();
     populateDevices();
 
@@ -32,6 +36,7 @@ MainWindow::MainWindow(QWidget* parent)
         micLevelBar_->setValue(static_cast<int>(level * 100.0f));
     });
     connect(&authClient_, &AuthClient::tokenReceived, this, [this](const QString& token) {
+        lastToken_ = token;
         authStatusLabel_->setText(tr("Token received, verifying..."));
         authClient_.verifyToken(token);
     });
@@ -40,6 +45,19 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
         authStatusLabel_->setText(tr("Error: %1").arg(message));
+    });
+
+    connect(connectToChannelButton_, &QPushButton::clicked, this, &MainWindow::onConnectToChannelClicked);
+    connect(sendChatMessageButton_, &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
+    connect(&chatClient_, &ChatClient::subscribed, this, [this](qint64 channelId) {
+        chatLog_->appendPlainText(tr("-- subscribed to channel %1 --").arg(channelId));
+    });
+    connect(&chatClient_, &ChatClient::messageReceived, this,
+            [this](const QString& author, const QString& body, const QString& sentAt) {
+                chatLog_->appendPlainText(QStringLiteral("[%1] %2: %3").arg(sentAt, author, body));
+            });
+    connect(&chatClient_, &ChatClient::errorOccurred, this, [this](const QString& message) {
+        chatLog_->appendPlainText(tr("-- error: %1 --").arg(message));
     });
 
     camera_.captureSession().setVideoOutput(videoPreview_);
@@ -117,11 +135,33 @@ void MainWindow::buildUi() {
     authLayout->addWidget(requestTokenButton_);
     authLayout->addWidget(authStatusLabel_);
 
+    auto* chatGroup = new QGroupBox(tr("Chat"), central);
+    auto* chatLayout = new QVBoxLayout(chatGroup);
+    channelIdEdit_ = new QLineEdit(chatGroup);
+    channelIdEdit_->setObjectName(QStringLiteral("channelIdEdit"));
+    channelIdEdit_->setPlaceholderText(tr("Channel ID"));
+    connectToChannelButton_ = new QPushButton(tr("Connect to channel"), chatGroup);
+    connectToChannelButton_->setObjectName(QStringLiteral("connectToChannelButton"));
+    chatLog_ = new QPlainTextEdit(chatGroup);
+    chatLog_->setObjectName(QStringLiteral("chatLog"));
+    chatLog_->setReadOnly(true);
+    chatMessageEdit_ = new QLineEdit(chatGroup);
+    chatMessageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
+    chatMessageEdit_->setPlaceholderText(tr("Message"));
+    sendChatMessageButton_ = new QPushButton(tr("Send"), chatGroup);
+    sendChatMessageButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
+    chatLayout->addWidget(channelIdEdit_);
+    chatLayout->addWidget(connectToChannelButton_);
+    chatLayout->addWidget(chatLog_);
+    chatLayout->addWidget(chatMessageEdit_);
+    chatLayout->addWidget(sendChatMessageButton_);
+
     layout->addWidget(outputGroup);
     layout->addWidget(inputGroup);
     layout->addWidget(cameraGroup);
     layout->addWidget(screenGroup);
     layout->addWidget(authGroup);
+    layout->addWidget(chatGroup);
 
     setCentralWidget(central);
 }
@@ -189,6 +229,19 @@ void MainWindow::onToggleScreenCaptureClicked() {
 void MainWindow::onRequestTokenClicked() {
     authStatusLabel_->setText(tr("Requesting token..."));
     authClient_.requestToken(loginEdit_->text(), passwordEdit_->text());
+}
+
+void MainWindow::onConnectToChannelClicked() {
+    if (lastToken_.isEmpty()) {
+        chatLog_->appendPlainText(tr("-- get a token first (Authorization section) --"));
+        return;
+    }
+    chatClient_.connectToChannel(lastToken_, channelIdEdit_->text().toLongLong());
+}
+
+void MainWindow::onSendChatMessageClicked() {
+    chatClient_.sendMessage(chatMessageEdit_->text());
+    chatMessageEdit_->clear();
 }
 
 }  // namespace devicehub

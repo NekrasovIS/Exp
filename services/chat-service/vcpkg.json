@@ -1,0 +1,11 @@
+{
+  "name": "chat-service",
+  "version": "0.1.0",
+  "dependencies": [
+    "cpp-httplib",
+    "ixwebsocket",
+    "libpqxx",
+    "nlohmann-json",
+    "gtest"
+  ]
+}
