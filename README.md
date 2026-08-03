@@ -50,7 +50,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 Тот же набор тестов гоняется в CI при каждом push и PR
-([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+([.github/workflows/ci.yml](.github/workflows/ci.yml)). Помимо
+юнит-тестов на `devices/`, есть UI-тесты на `MainWindow` (построение
+окна, заполнение списков устройств) — они не запускают реальный захват
+(микрофон/камера/экран), т.к. голый тестовый бинарник не имеет
+`Info.plist` с разрешениями macOS.
 
 ## Правила разработки
 

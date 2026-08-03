@@ -40,14 +40,18 @@ void MainWindow::buildUi() {
     auto* outputGroup = new QGroupBox(tr("Audio output"), central);
     auto* outputLayout = new QVBoxLayout(outputGroup);
     outputCombo_ = new QComboBox(outputGroup);
+    outputCombo_->setObjectName(QStringLiteral("outputCombo"));
     playToneButton_ = new QPushButton(tr("Play test tone"), outputGroup);
+    playToneButton_->setObjectName(QStringLiteral("playToneButton"));
     outputLayout->addWidget(outputCombo_);
     outputLayout->addWidget(playToneButton_);
 
     auto* inputGroup = new QGroupBox(tr("Microphone"), central);
     auto* inputLayout = new QVBoxLayout(inputGroup);
     inputCombo_ = new QComboBox(inputGroup);
+    inputCombo_->setObjectName(QStringLiteral("inputCombo"));
     toggleMicButton_ = new QPushButton(tr("Start capture"), inputGroup);
+    toggleMicButton_->setObjectName(QStringLiteral("toggleMicButton"));
     micLevelBar_ = new QProgressBar(inputGroup);
     micLevelBar_->setRange(0, 100);
     inputLayout->addWidget(inputCombo_);
@@ -57,7 +61,9 @@ void MainWindow::buildUi() {
     auto* cameraGroup = new QGroupBox(tr("Camera"), central);
     auto* cameraLayout = new QVBoxLayout(cameraGroup);
     cameraCombo_ = new QComboBox(cameraGroup);
+    cameraCombo_->setObjectName(QStringLiteral("cameraCombo"));
     toggleCameraButton_ = new QPushButton(tr("Start camera"), cameraGroup);
+    toggleCameraButton_->setObjectName(QStringLiteral("toggleCameraButton"));
     videoPreview_ = new QVideoWidget(cameraGroup);
     videoPreview_->setMinimumSize(320, 240);
     cameraLayout->addWidget(cameraCombo_);
@@ -67,7 +73,9 @@ void MainWindow::buildUi() {
     auto* screenGroup = new QGroupBox(tr("Screen capture"), central);
     auto* screenLayout = new QVBoxLayout(screenGroup);
     screenCombo_ = new QComboBox(screenGroup);
+    screenCombo_->setObjectName(QStringLiteral("screenCombo"));
     toggleScreenCaptureButton_ = new QPushButton(tr("Start screen capture"), screenGroup);
+    toggleScreenCaptureButton_->setObjectName(QStringLiteral("toggleScreenCaptureButton"));
     screenPreview_ = new QVideoWidget(screenGroup);
     screenPreview_->setMinimumSize(320, 240);
     screenLayout->addWidget(screenCombo_);

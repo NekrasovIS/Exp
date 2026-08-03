@@ -61,6 +61,8 @@ add_library(devicehub_core
     src/devices/CameraDevice.cpp
     src/devices/ScreenCaptureDevice.h
     src/devices/ScreenCaptureDevice.cpp
+    src/ui/MainWindow.h
+    src/ui/MainWindow.cpp
 )
 target_include_directories(devicehub_core PUBLIC src)
 target_link_libraries(devicehub_core PUBLIC
@@ -70,8 +72,6 @@ target_link_libraries(devicehub_core PUBLIC
 )
 add_executable(DeviceHub MACOSX_BUNDLE
     src/main.cpp
-    src/ui/MainWindow.h
-    src/ui/MainWindow.cpp
 )
 target_link_libraries(DeviceHub PRIVATE devicehub_core)
 
@@ -87,7 +87,10 @@ enable_testing()
 find_package(GTest CONFIG REQUIRED)
 
 add_executable(devicehub_tests
+    test/QtTestEnvironment.h
+    test/QtTestEnvironment.cpp
     test/DeviceEnumeratorTest.cpp
+    test/MainWindowUiTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core
