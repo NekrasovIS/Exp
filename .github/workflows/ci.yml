@@ -8,13 +8,21 @@ on:
 jobs:
   build-and-test:
     runs-on: macos-14
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Install Qt6 and GoogleTest
-        run: brew install qt@6 googletest
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
       - name: Configure
         run: cmake -S . -B build

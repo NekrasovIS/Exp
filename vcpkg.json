@@ -1,0 +1,15 @@
+{
+  "name": "devicehub",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "features": ["widgets"]
+    },
+    {
+      "name": "qtmultimedia",
+      "features": ["widgets"]
+    },
+    "gtest"
+  ]
+}
