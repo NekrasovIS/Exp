@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTabWidget>
 
 #include "devices/DeviceEnumerator.h"
 
@@ -23,6 +24,14 @@ namespace {
 TEST(MainWindowUiTest, ConstructsWithoutCrashing) {
     const MainWindow window;
     EXPECT_EQ(window.windowTitle(), QStringLiteral("DeviceHub"));
+}
+
+TEST(MainWindowUiTest, SectionsAreSeparateTabs) {
+    const MainWindow window;
+
+    auto* tabs = window.findChild<QTabWidget*>("mainTabs");
+    ASSERT_NE(tabs, nullptr);
+    EXPECT_EQ(tabs->count(), 6);
 }
 
 TEST(MainWindowUiTest, DeviceCombosMatchEnumerator) {

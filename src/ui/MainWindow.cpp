@@ -8,6 +8,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QVideoWidget>
 
@@ -109,10 +110,10 @@ MainWindow::~MainWindow() = default;
 void MainWindow::buildUi() {
     setWindowTitle(tr("DeviceHub"));
 
-    auto* central = new QWidget(this);
-    auto* layout = new QVBoxLayout(central);
+    auto* tabs = new QTabWidget(this);
+    tabs->setObjectName(QStringLiteral("mainTabs"));
 
-    auto* outputGroup = new QGroupBox(tr("Audio output"), central);
+    auto* outputGroup = new QGroupBox(tr("Audio output"));
     auto* outputLayout = new QVBoxLayout(outputGroup);
     outputCombo_ = new QComboBox(outputGroup);
     outputCombo_->setObjectName(QStringLiteral("outputCombo"));
@@ -121,7 +122,7 @@ void MainWindow::buildUi() {
     outputLayout->addWidget(outputCombo_);
     outputLayout->addWidget(playToneButton_);
 
-    auto* inputGroup = new QGroupBox(tr("Microphone"), central);
+    auto* inputGroup = new QGroupBox(tr("Microphone"));
     auto* inputLayout = new QVBoxLayout(inputGroup);
     inputCombo_ = new QComboBox(inputGroup);
     inputCombo_->setObjectName(QStringLiteral("inputCombo"));
@@ -133,7 +134,7 @@ void MainWindow::buildUi() {
     inputLayout->addWidget(toggleMicButton_);
     inputLayout->addWidget(micLevelBar_);
 
-    auto* cameraGroup = new QGroupBox(tr("Camera"), central);
+    auto* cameraGroup = new QGroupBox(tr("Camera"));
     auto* cameraLayout = new QVBoxLayout(cameraGroup);
     cameraCombo_ = new QComboBox(cameraGroup);
     cameraCombo_->setObjectName(QStringLiteral("cameraCombo"));
@@ -148,7 +149,7 @@ void MainWindow::buildUi() {
     cameraLayout->addWidget(videoPreview_);
     cameraLayout->addWidget(cameraStatusLabel_);
 
-    auto* screenGroup = new QGroupBox(tr("Screen capture"), central);
+    auto* screenGroup = new QGroupBox(tr("Screen capture"));
     auto* screenLayout = new QVBoxLayout(screenGroup);
     screenCombo_ = new QComboBox(screenGroup);
     screenCombo_->setObjectName(QStringLiteral("screenCombo"));
@@ -163,7 +164,7 @@ void MainWindow::buildUi() {
     screenLayout->addWidget(screenPreview_);
     screenLayout->addWidget(screenStatusLabel_);
 
-    auto* authGroup = new QGroupBox(tr("Authorization"), central);
+    auto* authGroup = new QGroupBox(tr("Authorization"));
     auto* authLayout = new QVBoxLayout(authGroup);
     loginEdit_ = new QLineEdit(authGroup);
     loginEdit_->setObjectName(QStringLiteral("loginEdit"));
@@ -181,7 +182,7 @@ void MainWindow::buildUi() {
     authLayout->addWidget(requestTokenButton_);
     authLayout->addWidget(authStatusLabel_);
 
-    auto* chatGroup = new QGroupBox(tr("Chat"), central);
+    auto* chatGroup = new QGroupBox(tr("Chat"));
     auto* chatLayout = new QVBoxLayout(chatGroup);
 
     communityNameEdit_ = new QLineEdit(chatGroup);
@@ -231,14 +232,14 @@ void MainWindow::buildUi() {
     chatLayout->addWidget(chatMessageEdit_);
     chatLayout->addWidget(sendChatMessageButton_);
 
-    layout->addWidget(outputGroup);
-    layout->addWidget(inputGroup);
-    layout->addWidget(cameraGroup);
-    layout->addWidget(screenGroup);
-    layout->addWidget(authGroup);
-    layout->addWidget(chatGroup);
+    tabs->addTab(outputGroup, tr("Audio Output"));
+    tabs->addTab(inputGroup, tr("Microphone"));
+    tabs->addTab(cameraGroup, tr("Camera"));
+    tabs->addTab(screenGroup, tr("Screen Capture"));
+    tabs->addTab(authGroup, tr("Authorization"));
+    tabs->addTab(chatGroup, tr("Chat"));
 
-    setCentralWidget(central);
+    setCentralWidget(tabs);
 }
 
 void MainWindow::populateDevices() {
