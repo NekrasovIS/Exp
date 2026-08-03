@@ -7,6 +7,7 @@ class MainWindow {
   -onPlayToneClicked()
   -onToggleMicClicked()
   -onToggleCameraClicked()
+  -onToggleScreenCaptureClicked()
 }
 
 package "src/devices" {
@@ -14,12 +15,14 @@ package "src/devices" {
   class AudioOutputDevice
   class AudioInputDevice
   class CameraDevice
+  class ScreenCaptureDevice
 }
 
 MainWindow *-- DeviceEnumerator : owns
 MainWindow *-- AudioOutputDevice : owns
 MainWindow *-- AudioInputDevice : owns
 MainWindow *-- CameraDevice : owns
+MainWindow *-- ScreenCaptureDevice : owns
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 

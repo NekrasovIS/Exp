@@ -59,6 +59,8 @@ add_library(devicehub_core
     src/devices/AudioInputDevice.cpp
     src/devices/CameraDevice.h
     src/devices/CameraDevice.cpp
+    src/devices/ScreenCaptureDevice.h
+    src/devices/ScreenCaptureDevice.cpp
 )
 target_include_directories(devicehub_core PUBLIC src)
 target_link_libraries(devicehub_core PUBLIC

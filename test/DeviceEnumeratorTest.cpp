@@ -2,13 +2,15 @@
 
 #include <gtest/gtest.h>
 
-#include <QCoreApplication>
+#include <QGuiApplication>
 
 namespace devicehub {
 namespace {
 
-// QMediaDevices needs a QCoreApplication event loop context to initialize
-// its backend; GTest's main() alone isn't enough, so provide one here.
+// QMediaDevices and QGuiApplication::screens() need an application event
+// loop context (the latter specifically a QGuiApplication, for the
+// platform plugin) to initialize their backend; GTest's main() alone
+// isn't enough, so provide one here.
 class QtEnvironment : public ::testing::Environment {
 public:
     void SetUp() override {
@@ -16,12 +18,12 @@ public:
         static char argv0[] = "devicehub_tests";
         static char* argv[] = {argv0};
         if (QCoreApplication::instance() == nullptr) {
-            app_ = std::make_unique<QCoreApplication>(argc, argv);
+            app_ = std::make_unique<QGuiApplication>(argc, argv);
         }
     }
 
 private:
-    std::unique_ptr<QCoreApplication> app_;
+    std::unique_ptr<QGuiApplication> app_;
 };
 
 const ::testing::Environment* const kQtEnv = ::testing::AddGlobalTestEnvironment(new QtEnvironment());
@@ -42,6 +44,12 @@ TEST(DeviceEnumeratorTest, CamerasReturnsAListWithoutCrashing) {
     DeviceEnumerator enumerator;
     const QList<QCameraDevice> cameras = enumerator.cameras();
     EXPECT_GE(cameras.size(), 0);
+}
+
+TEST(DeviceEnumeratorTest, ScreensReturnsAListWithoutCrashing) {
+    DeviceEnumerator enumerator;
+    const QList<QScreen*> screens = enumerator.screens();
+    EXPECT_GE(screens.size(), 0);
 }
 
 }  // namespace

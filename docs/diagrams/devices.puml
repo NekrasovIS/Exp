@@ -7,16 +7,23 @@ package "Qt Multimedia" {
   class QAudioSink
   class QAudioSource
   class QCamera
+  class QScreenCapture
   class QMediaCaptureSession
+}
+
+package "Qt GUI" {
+  class QScreen
 }
 
 class DeviceEnumerator {
   +audioOutputs() : QList<QAudioDevice>
   +audioInputs() : QList<QAudioDevice>
   +cameras() : QList<QCameraDevice>
+  +screens() : QList<QScreen*>
 }
 DeviceEnumerator ..> QAudioDevice : lists
 DeviceEnumerator ..> QCameraDevice : lists
+DeviceEnumerator ..> QScreen : lists
 
 class AudioOutputDevice {
   +playTestTone(device: QAudioDevice, frequencyHz: double = 440.0)
@@ -53,5 +60,18 @@ class CameraDevice {
 CameraDevice --> "0..1" QCamera : owns (unique_ptr)
 CameraDevice *-- QMediaCaptureSession : owns
 CameraDevice ..> QCameraDevice : uses
+
+class ScreenCaptureDevice {
+  +setScreen(screen: QScreen*)
+  +start()
+  +stop()
+  +isActive() : bool
+  +captureSession() : QMediaCaptureSession&
+  .. signals ..
+  +errorOccurred(message: QString)
+}
+ScreenCaptureDevice --> "0..1" QScreenCapture : owns (unique_ptr)
+ScreenCaptureDevice *-- QMediaCaptureSession : owns
+ScreenCaptureDevice ..> QScreen : uses
 
 @enduml
