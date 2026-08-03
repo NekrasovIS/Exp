@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QMainWindow>
 #include <memory>
 
@@ -7,10 +8,12 @@
 #include "devices/AudioOutputDevice.h"
 #include "devices/CameraDevice.h"
 #include "devices/DeviceEnumerator.h"
+#include "devices/ScreenCaptureDevice.h"
 
 class QComboBox;
 class QProgressBar;
 class QPushButton;
+class QScreen;
 class QVideoWidget;
 
 namespace devicehub {
@@ -35,20 +38,26 @@ private:
     void onPlayToneClicked();
     void onToggleMicClicked();
     void onToggleCameraClicked();
+    void onToggleScreenCaptureClicked();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
     AudioInputDevice audioInput_;
     CameraDevice camera_;
+    ScreenCaptureDevice screenCapture_;
+    QList<QScreen*> screens_;
 
     QComboBox* outputCombo_ = nullptr;
     QComboBox* inputCombo_ = nullptr;
     QComboBox* cameraCombo_ = nullptr;
+    QComboBox* screenCombo_ = nullptr;
     QPushButton* playToneButton_ = nullptr;
     QPushButton* toggleMicButton_ = nullptr;
     QPushButton* toggleCameraButton_ = nullptr;
+    QPushButton* toggleScreenCaptureButton_ = nullptr;
     QProgressBar* micLevelBar_ = nullptr;
     QVideoWidget* videoPreview_ = nullptr;
+    QVideoWidget* screenPreview_ = nullptr;
 };
 
 }  // namespace devicehub

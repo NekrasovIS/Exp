@@ -5,8 +5,11 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScreen>
 #include <QVBoxLayout>
 #include <QVideoWidget>
+
+#include <utility>
 
 namespace devicehub {
 
@@ -17,11 +20,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(playToneButton_, &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
     connect(toggleMicButton_, &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
     connect(toggleCameraButton_, &QPushButton::clicked, this, &MainWindow::onToggleCameraClicked);
+    connect(toggleScreenCaptureButton_, &QPushButton::clicked, this, &MainWindow::onToggleScreenCaptureClicked);
     connect(&audioInput_, &AudioInputDevice::levelChanged, micLevelBar_, [this](float level) {
         micLevelBar_->setValue(static_cast<int>(level * 100.0f));
     });
 
     camera_.captureSession().setVideoOutput(videoPreview_);
+    screenCapture_.captureSession().setVideoOutput(screenPreview_);
 }
 
 MainWindow::~MainWindow() = default;
@@ -59,9 +64,20 @@ void MainWindow::buildUi() {
     cameraLayout->addWidget(toggleCameraButton_);
     cameraLayout->addWidget(videoPreview_);
 
+    auto* screenGroup = new QGroupBox(tr("Screen capture"), central);
+    auto* screenLayout = new QVBoxLayout(screenGroup);
+    screenCombo_ = new QComboBox(screenGroup);
+    toggleScreenCaptureButton_ = new QPushButton(tr("Start screen capture"), screenGroup);
+    screenPreview_ = new QVideoWidget(screenGroup);
+    screenPreview_->setMinimumSize(320, 240);
+    screenLayout->addWidget(screenCombo_);
+    screenLayout->addWidget(toggleScreenCaptureButton_);
+    screenLayout->addWidget(screenPreview_);
+
     layout->addWidget(outputGroup);
     layout->addWidget(inputGroup);
     layout->addWidget(cameraGroup);
+    layout->addWidget(screenGroup);
 
     setCentralWidget(central);
 }
@@ -75,6 +91,11 @@ void MainWindow::populateDevices() {
     }
     for (const QCameraDevice& device : enumerator_.cameras()) {
         cameraCombo_->addItem(device.description(), QVariant::fromValue(device));
+    }
+
+    screens_ = enumerator_.screens();
+    for (const QScreen* screen : std::as_const(screens_)) {
+        screenCombo_->addItem(screen->name());
     }
 }
 
@@ -104,6 +125,20 @@ void MainWindow::onToggleCameraClicked() {
         camera_.setDevice(device);
         camera_.start();
         toggleCameraButton_->setText(tr("Stop camera"));
+    }
+}
+
+void MainWindow::onToggleScreenCaptureClicked() {
+    if (screenCapture_.isActive()) {
+        screenCapture_.stop();
+        toggleScreenCaptureButton_->setText(tr("Start screen capture"));
+        return;
+    }
+
+    if (const int index = screenCombo_->currentIndex(); index >= 0 && index < screens_.size()) {
+        screenCapture_.setScreen(screens_[index]);
+        screenCapture_.start();
+        toggleScreenCaptureButton_->setText(tr("Stop screen capture"));
     }
 }
 

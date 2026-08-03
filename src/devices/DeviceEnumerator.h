@@ -4,6 +4,8 @@
 #include <QCameraDevice>
 #include <QList>
 
+class QScreen;
+
 namespace devicehub {
 
 /**
@@ -23,6 +25,9 @@ public:
 
     /// @return All available camera devices.
     [[nodiscard]] QList<QCameraDevice> cameras() const;
+
+    /// @return All available screens (monitors) that can be captured.
+    [[nodiscard]] QList<QScreen*> screens() const;
 };
 
 }  // namespace devicehub

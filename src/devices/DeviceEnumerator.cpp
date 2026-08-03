@@ -1,6 +1,8 @@
 #include "devices/DeviceEnumerator.h"
 
+#include <QGuiApplication>
 #include <QMediaDevices>
+#include <QScreen>
 
 namespace devicehub {
 
@@ -14,6 +16,10 @@ QList<QAudioDevice> DeviceEnumerator::audioInputs() const {
 
 QList<QCameraDevice> DeviceEnumerator::cameras() const {
     return QMediaDevices::videoInputs();
+}
+
+QList<QScreen*> DeviceEnumerator::screens() const {
+    return QGuiApplication::screens();
 }
 
 }  // namespace devicehub
