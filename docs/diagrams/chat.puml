@@ -1,8 +1,14 @@
 @startuml chat
 title DeviceHub — src/chat
 
-package "Qt WebSockets" {
+package "Qt WebSockets / Qt Network" {
   class QWebSocket
+  class QNetworkAccessManager
+}
+
+class ChatItem {
+  +id : qint64
+  +name : QString
 }
 
 class ChatClient {
@@ -17,6 +23,24 @@ class ChatClient {
 ChatClient *-- QWebSocket : owns
 ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebSocket
 
+class ChatRestClient {
+  +createCommunity(token: QString, name: QString)
+  +listCommunities(token: QString)
+  +joinCommunity(token: QString, communityId: qint64)
+  +createChannel(token: QString, communityId: qint64, name: QString)
+  +listChannels(token: QString, communityId: qint64)
+  .. signals ..
+  +communityCreated(id: qint64, name: QString)
+  +communitiesListed(communities: QList<ChatItem>)
+  +communityJoined(communityId: qint64)
+  +channelCreated(id: qint64, name: QString)
+  +channelsListed(channels: QList<ChatItem>)
+  +errorOccurred(message: QString)
+}
+ChatRestClient *-- QNetworkAccessManager : owns
+ChatRestClient ..> ChatItem : emits lists of
+ChatRestClient ..> "chat-service" : REST (Authorization: Bearer <token>)
+
 note right of ChatClient
   Async only — every call returns
   immediately, result comes back
@@ -24,6 +48,13 @@ note right of ChatClient
   connecting authenticates and
   subscribes to a channel; every
   frame after that is a chat message.
+end note
+
+note right of ChatRestClient
+  Separate from ChatClient on purpose:
+  CRUD/management (this class) vs. the
+  live message stream (ChatClient) are
+  different responsibilities.
 end note
 
 @enduml

@@ -1,5 +1,6 @@
 #include "auth/AuthClient.h"
 #include "chat/ChatClient.h"
+#include "chat/ChatRestClient.h"
 
 #include <gtest/gtest.h>
 
@@ -29,32 +30,26 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
     return value != nullptr ? std::string(value) : defaultValue;
 }
 
-struct RestResult {
-    bool ok = false;
-    QJsonObject body;
-};
-
-RestResult postJson(QNetworkAccessManager& manager, const QUrl& url, const QJsonObject& body,
-                     const QString& bearerToken = QString()) {
-    QNetworkRequest request(url);
+// user-service registration isn't part of ChatRestClient's scope (that
+// client only talks to chat-service), so this stays a one-off helper.
+bool registerTestUser(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& login,
+                       const QString& password) {
+    QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/register"))));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    if (!bearerToken.isEmpty()) {
-        request.setRawHeader("Authorization", "Bearer " + bearerToken.toUtf8());
-    }
 
-    QNetworkReply* reply = manager.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    QNetworkReply* reply =
+        manager.post(request, QJsonDocument(QJsonObject{{"login", login}, {"password", password}}).toJson());
 
-    RestResult result;
+    bool succeeded = false;
     QEventLoop loop;
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     QObject::connect(reply, &QNetworkReply::finished, &loop, [&]() {
-        result.ok = (reply->error() == QNetworkReply::NoError);
-        result.body = QJsonDocument::fromJson(reply->readAll()).object();
+        succeeded = (reply->error() == QNetworkReply::NoError);
         reply->deleteLater();
         loop.quit();
     });
     loop.exec();
-    return result;
+    return succeeded;
 }
 
 TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
@@ -67,10 +62,7 @@ TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
     const QString password = QStringLiteral("integration-test-password");
 
     QNetworkAccessManager manager;
-
-    const RestResult registerResult =
-        postJson(manager, userUrl.resolved(QUrl("/users/register")), {{"login", login}, {"password", password}});
-    if (!registerResult.ok) {
+    if (!registerTestUser(manager, userUrl, login, password)) {
         GTEST_SKIP() << "user-service not reachable — start the full stack (docker compose + all three "
                         "services) to run this test.";
     }
@@ -92,16 +84,33 @@ TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
         GTEST_SKIP() << "auth-service not reachable.";
     }
 
-    const RestResult communityResult =
-        postJson(manager, chatRestUrl.resolved(QUrl("/communities")), {{"name", "integration-test"}}, token);
-    ASSERT_TRUE(communityResult.ok);
-    const auto communityId = communityResult.body.value("id").toVariant().toLongLong();
+    ChatRestClient chatRestClient(chatRestUrl);
 
-    const RestResult channelResult = postJson(
-        manager, chatRestUrl.resolved(QUrl(QStringLiteral("/communities/%1/channels").arg(communityId))),
-        {{"name", "general"}}, token);
-    ASSERT_TRUE(channelResult.ok);
-    const auto channelId = channelResult.body.value("id").toVariant().toLongLong();
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(token, QStringLiteral("integration-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
 
     ChatClient chatClient(chatWsUrl);
     bool subscribed = false;

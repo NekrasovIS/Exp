@@ -11,6 +11,11 @@ class MainWindow {
   -onRequestTokenClicked()
   -onConnectToChannelClicked()
   -onSendChatMessageClicked()
+  -onCreateCommunityClicked()
+  -onRefreshCommunitiesClicked()
+  -onJoinCommunityClicked()
+  -onCreateChannelClicked()
+  -onRefreshChannelsClicked()
 }
 
 package "src/devices" {
@@ -27,6 +32,7 @@ package "src/auth" {
 
 package "src/chat" {
   class ChatClient
+  class ChatRestClient
 }
 
 MainWindow *-- DeviceEnumerator : owns
@@ -36,10 +42,12 @@ MainWindow *-- CameraDevice : owns
 MainWindow *-- ScreenCaptureDevice : owns
 MainWindow *-- AuthClient : owns
 MainWindow *-- ChatClient : owns
+MainWindow *-- ChatRestClient : owns
 
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
 MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
+MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 

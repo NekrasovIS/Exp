@@ -6,6 +6,7 @@
 
 #include "auth/AuthClient.h"
 #include "chat/ChatClient.h"
+#include "chat/ChatRestClient.h"
 #include "devices/AudioInputDevice.h"
 #include "devices/AudioOutputDevice.h"
 #include "devices/CameraDevice.h"
@@ -47,6 +48,11 @@ private:
     void onRequestTokenClicked();
     void onConnectToChannelClicked();
     void onSendChatMessageClicked();
+    void onCreateCommunityClicked();
+    void onRefreshCommunitiesClicked();
+    void onJoinCommunityClicked();
+    void onCreateChannelClicked();
+    void onRefreshChannelsClicked();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
@@ -55,8 +61,11 @@ private:
     ScreenCaptureDevice screenCapture_;
     AuthClient authClient_;
     ChatClient chatClient_;
+    ChatRestClient chatRestClient_;
     QString lastToken_;
     QList<QScreen*> screens_;
+    QList<ChatItem> communities_;
+    QList<ChatItem> channels_;
 
     QComboBox* outputCombo_ = nullptr;
     QComboBox* inputCombo_ = nullptr;
@@ -73,7 +82,15 @@ private:
     QLineEdit* loginEdit_ = nullptr;
     QLineEdit* passwordEdit_ = nullptr;
     QLabel* authStatusLabel_ = nullptr;
-    QLineEdit* channelIdEdit_ = nullptr;
+    QLineEdit* communityNameEdit_ = nullptr;
+    QPushButton* createCommunityButton_ = nullptr;
+    QComboBox* communityCombo_ = nullptr;
+    QPushButton* refreshCommunitiesButton_ = nullptr;
+    QPushButton* joinCommunityButton_ = nullptr;
+    QLineEdit* channelNameEdit_ = nullptr;
+    QPushButton* createChannelButton_ = nullptr;
+    QComboBox* channelCombo_ = nullptr;
+    QPushButton* refreshChannelsButton_ = nullptr;
     QPushButton* connectToChannelButton_ = nullptr;
     QPlainTextEdit* chatLog_ = nullptr;
     QLineEdit* chatMessageEdit_ = nullptr;
