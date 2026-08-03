@@ -24,6 +24,9 @@ jobs:
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
+      - name: Install autotools (needed by vcpkg's libb2 port, a qtbase dependency)
+        run: brew install autoconf autoconf-archive automake libtool
+
       - name: Configure
         run: cmake -S . -B build
 
