@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -75,6 +76,18 @@ TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
     ASSERT_NE(loginEdit, nullptr);
     ASSERT_NE(passwordEdit, nullptr);
     EXPECT_EQ(passwordEdit->echoMode(), QLineEdit::Password);
+}
+
+TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {
+    const MainWindow window;
+
+    auto* cameraStatusLabel = window.findChild<QLabel*>("cameraStatusLabel");
+    auto* screenStatusLabel = window.findChild<QLabel*>("screenStatusLabel");
+
+    ASSERT_NE(cameraStatusLabel, nullptr);
+    ASSERT_NE(screenStatusLabel, nullptr);
+    EXPECT_TRUE(cameraStatusLabel->text().isEmpty());
+    EXPECT_TRUE(screenStatusLabel->text().isEmpty());
 }
 
 TEST(MainWindowUiTest, ChatMessagingControlsExist) {
