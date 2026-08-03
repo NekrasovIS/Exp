@@ -22,7 +22,7 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
 
 TEST(UserServiceIntegrationTest, RegisterThenVerifyCredentialsRoundTrip) {
     const std::string connectionString = envOrDefault(
-        "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5432/user_service");
+        "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5433/user_service");
 
     UserRepository repository(connectionString);
     UserService service(repository);

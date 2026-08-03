@@ -11,7 +11,7 @@ bool UserRepository::createUser(const std::string& login, const std::string& pas
     pqxx::work transaction(connection);
 
     try {
-        transaction.exec_params("INSERT INTO users (login, password_hash) VALUES ($1, $2)", login, passwordHash);
+        transaction.exec("INSERT INTO users (login, password_hash) VALUES ($1, $2)", pqxx::params{login, passwordHash});
         transaction.commit();
         return true;
     } catch (const pqxx::unique_violation&) {
@@ -23,7 +23,7 @@ std::optional<std::string> UserRepository::findPasswordHash(const std::string& l
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows = transaction.exec_params("SELECT password_hash FROM users WHERE login = $1", login);
+    const pqxx::result rows = transaction.exec("SELECT password_hash FROM users WHERE login = $1", pqxx::params{login});
     if (rows.empty()) {
         return std::nullopt;
     }

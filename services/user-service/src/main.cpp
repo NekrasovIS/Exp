@@ -19,7 +19,7 @@ int main() {
     // Matches docker-compose.yml's default local Postgres — override for
     // anything beyond a throwaway local instance.
     const std::string connectionString = envOrDefault(
-        "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5432/user_service");
+        "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5433/user_service");
     const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
     const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
 

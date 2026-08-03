@@ -7,15 +7,11 @@
 
 namespace devicehub {
 
-namespace {
-constexpr const char* kJsonContentType = "application/json";
-}  // namespace
-
 AuthClient::AuthClient(QUrl baseUrl, QObject* parent) : QObject(parent), baseUrl_(std::move(baseUrl)) {}
 
 void AuthClient::requestToken(const QString& login, const QString& password) {
     QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/token"))));
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral(kJsonContentType));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
     const QJsonObject body{{"login", login}, {"password", password}};
     QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -41,7 +37,7 @@ void AuthClient::requestToken(const QString& login, const QString& password) {
 
 void AuthClient::verifyToken(const QString& token) {
     QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/verify"))));
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral(kJsonContentType));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
     const QJsonObject body{{"token", token}};
     QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));

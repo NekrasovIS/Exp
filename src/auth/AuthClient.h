@@ -10,7 +10,7 @@ namespace devicehub {
  * @brief Talks to auth-service over HTTP: requests a token, then can ask
  *        the same service to verify one.
  *
- * Async via signals, like the devices/* classes — never blocks the GUI
+ * Async via signals, like the classes in devices/ — never blocks the GUI
  * thread on a network round trip.
  */
 class AuthClient : public QObject {

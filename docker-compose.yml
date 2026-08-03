@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-password}
       POSTGRES_DB: user_service
     ports:
-      - "5432:5432"
+      # Host port 5433, not 5432 — this machine may already run another
+      # project's Postgres on the default port.
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./services/user-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
