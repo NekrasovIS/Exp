@@ -1,7 +1,8 @@
 # C++ Coding Standards — DeviceHub (Qt6 desktop app)
 
 Адаптировано из /Users/ilya/App/MyProject/CLAUDE.md для десктопного Qt6-приложения.
-Действует для всего кода в `src/` и `test/`.
+Действует для всего C++-кода в репозитории: DeviceHub (`src/`, `test/`) и
+каждый микросервис в `services/<name>/` (свои `src/`, `test/`, `CMakeLists.txt`, `vcpkg.json`).
 
 ## Язык и стиль
 
@@ -20,10 +21,14 @@
 
 - **Один класс на файл** (пара `.h`/`.cpp`).
 - Утилиты и хэлперы — всегда в отдельном файле, а не как приватные функции внутри класса, которому они сейчас нужны: в любой момент они могут понадобиться в другом месте. Оборачивать в именованный namespace по функциональной области (например, `namespace audio_utils { ... }`), не складывать в общий "utils" без области.
-- Каталоги:
-  - `src/devices/` — доступ к железу (аудио, микрофон, камера): `AudioOutputDevice`, `AudioInputDevice`, `CameraDevice`, `DeviceEnumerator`.
-  - `src/ui/` — Qt Widgets, ничего не знает о low-level API захвата, только сигналы/слоты от `devices/`.
+- Каталоги (DeviceHub):
+  - `src/devices/` — доступ к железу (аудио, микрофон, камера, экран): `AudioOutputDevice`, `AudioInputDevice`, `CameraDevice`, `ScreenCaptureDevice`, `DeviceEnumerator`.
+  - `src/auth/` — сетевой клиент к сервисам (`AuthClient`), асинхронно через сигналы, как и `devices/`.
+  - `src/ui/` — Qt Widgets, ничего не знает о low-level API устройств/сети, только сигналы/слоты от `devices/`/`auth/`.
   - `test/` — GTest.
+- Каталоги (микросервисы, например `services/auth-service/`):
+  - `src/` — бизнес-логика и HTTP-слой сервиса, по тем же правилам (один класс на файл, хэлперы отдельно).
+  - `test/` — GTest на бизнес-логику сервиса; интеграционные тесты между сервисами — где нужен реально запущенный второй сервис — пропускают себя (`GTEST_SKIP`), если он недоступен.
 
 ## Кроссплатформенность
 

@@ -8,6 +8,7 @@ class MainWindow {
   -onToggleMicClicked()
   -onToggleCameraClicked()
   -onToggleScreenCaptureClicked()
+  -onRequestTokenClicked()
 }
 
 package "src/devices" {
@@ -18,11 +19,19 @@ package "src/devices" {
   class ScreenCaptureDevice
 }
 
+package "src/auth" {
+  class AuthClient
+}
+
 MainWindow *-- DeviceEnumerator : owns
 MainWindow *-- AudioOutputDevice : owns
 MainWindow *-- AudioInputDevice : owns
 MainWindow *-- CameraDevice : owns
 MainWindow *-- ScreenCaptureDevice : owns
+MainWindow *-- AuthClient : owns
+
+MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
+MainWindow ..> AuthClient : errorOccurred() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 

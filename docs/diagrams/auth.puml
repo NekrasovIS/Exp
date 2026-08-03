@@ -1,0 +1,26 @@
+@startuml auth
+title DeviceHub — src/auth
+
+package "Qt Network" {
+  class QNetworkAccessManager
+}
+
+class AuthClient {
+  +requestToken(subject: QString = "devicehub-client")
+  +verifyToken(token: QString)
+  .. signals ..
+  +tokenReceived(token: QString)
+  +tokenVerified(valid: bool, subject: QString)
+  +errorOccurred(message: QString)
+}
+AuthClient *-- QNetworkAccessManager : owns
+AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify
+
+note right of AuthClient
+  Async only — every call returns
+  immediately, result comes back
+  via signals. Never blocks the
+  GUI thread on a network round trip.
+end note
+
+@enduml
