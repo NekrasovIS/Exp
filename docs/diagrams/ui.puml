@@ -9,6 +9,8 @@ class MainWindow {
   -onToggleCameraClicked()
   -onToggleScreenCaptureClicked()
   -onRequestTokenClicked()
+  -onConnectToChannelClicked()
+  -onSendChatMessageClicked()
 }
 
 package "src/devices" {
@@ -23,15 +25,21 @@ package "src/auth" {
   class AuthClient
 }
 
+package "src/chat" {
+  class ChatClient
+}
+
 MainWindow *-- DeviceEnumerator : owns
 MainWindow *-- AudioOutputDevice : owns
 MainWindow *-- AudioInputDevice : owns
 MainWindow *-- CameraDevice : owns
 MainWindow *-- ScreenCaptureDevice : owns
 MainWindow *-- AuthClient : owns
+MainWindow *-- ChatClient : owns
 
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
+MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 

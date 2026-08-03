@@ -1,0 +1,36 @@
+#include "ChatService.h"
+
+namespace chat_service {
+
+ChatService::ChatService(ChatRepository& repository) : repository_(repository) {}
+
+Community ChatService::createCommunity(const std::string& name) {
+    return repository_.createCommunity(name);
+}
+
+std::vector<Community> ChatService::listCommunities() {
+    return repository_.listCommunities();
+}
+
+std::optional<std::int64_t> ChatService::createChannel(std::int64_t communityId, const std::string& name) {
+    return repository_.createChannel(communityId, name);
+}
+
+std::vector<Channel> ChatService::listChannels(std::int64_t communityId) {
+    return repository_.listChannels(communityId);
+}
+
+bool ChatService::joinCommunity(std::int64_t communityId, const std::string& login) {
+    return repository_.joinCommunity(communityId, login);
+}
+
+std::optional<Message> ChatService::postMessage(std::int64_t channelId, const std::string& authorLogin,
+                                                  const std::string& body) {
+    return repository_.insertMessage(channelId, authorLogin, body);
+}
+
+std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int limit) {
+    return repository_.listRecentMessages(channelId, limit);
+}
+
+}  // namespace chat_service

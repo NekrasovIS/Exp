@@ -16,6 +16,8 @@ Qt Multimedia; развивается в сторону клиент-серве�
 - Список экранов и захват содержимого выбранного экрана с превью.
 - Вход по логину/паролю: получение и проверка токена авторизации через
   отдельные сервисы `auth-service` + `user-service` (Postgres).
+- Чаты и сообщества: подключение к каналу по ID и обмен сообщениями в
+  реальном времени через `chat-service` (Postgres, WebSocket).
 
 ## Сборка
 
@@ -68,15 +70,18 @@ ctest --test-dir build --output-on-failure
 
 ## Сервисы
 
-Три независимо собираемых компонента: DeviceHub (этот репозиторий,
-корень), `services/auth-service` и `services/user-service` — у каждого
-свой `vcpkg.json` и своя сборка.
+Четыре независимо собираемых компонента: DeviceHub (этот репозиторий,
+корень), `services/auth-service`, `services/user-service` и
+`services/chat-service` — у каждого свой `vcpkg.json` и своя сборка.
 
 ### user-service
 
 Владеет Postgres (пользователи: логин + Argon2id-хеш пароля, пароли в
-открытом виде не хранятся и не логируются). Локальный Postgres — через
-Docker:
+открытом виде не хранятся и не логируются). `docker compose up -d`
+поднимает Postgres для user-service (порт 5433) и chat-service (порт
+5434) разом — у каждого сервиса своя база (database-per-service), и
+оба порта выбраны так, чтобы не конфликтовать с Postgres на 5432,
+если он уже используется другим проектом на этой машине.
 
 ```bash
 docker compose up -d
@@ -107,11 +112,46 @@ CLAUDE.md, «Безопасность»). По умолчанию слушает
 `USER_SERVICE_HOST`/`USER_SERVICE_PORT` (по умолчанию `127.0.0.1:8081`).
 REST: `POST /auth/token` (`{"login", "password"}`), `POST /auth/verify`.
 
+### chat-service
+
+Сообщества (communities) содержат каналы (channels); пользователи
+вступают в сообщества; в каналах — сообщения. Владеет своим Postgres
+(поднимается тем же `docker compose up -d`, порт 5434). Каждый запрос
+требует `Authorization: Bearer <token>`, проверяемый через auth-service
+(`POST /auth/verify`) — тот же паттерн, что auth-service ⇄ user-service:
+
+```bash
+cmake -S services/chat-service -B services/chat-service/build
+cmake --build services/chat-service/build --parallel
+./services/chat-service/build/chat-service
+```
+
+Два порта: REST на `127.0.0.1:8082` (`CHAT_SERVICE_REST_PORT`) и
+WebSocket на `127.0.0.1:8083` (`CHAT_SERVICE_WS_PORT`) —
+`CHAT_SERVICE_HOST` меняет адрес для обоих. Ходит в auth-service по
+`AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`.
+
+REST: `POST /communities`, `GET /communities`,
+`POST /communities/{id}/join`, `POST /communities/{id}/channels`,
+`GET /communities/{id}/channels`, `GET /channels/{id}/messages`.
+
+WebSocket (`ws://host:8083`): первый фрейм от клиента —
+`{"token", "channel_id"}`, дальше — `{"body"}`; сервер рассылает новое
+сообщение всем, кто подписан на тот же канал (включая отправителя).
+REST остаётся источником истории, WebSocket — только доставка в
+реальном времени, пока клиент подключён.
+
 ### DeviceHub ↔ сервисы
 
 Секция «Authorization» в UI запрашивает токен по введённым
 логину/паролю (адрес auth-service — `AUTH_SERVICE_URL`, по умолчанию
 `http://127.0.0.1:8080`) и сразу проверяет его тем же сервисом.
+
+Секция «Chat» подключается к каналу по ID (адрес chat-service —
+`CHAT_SERVICE_WS_URL`, по умолчанию `ws://127.0.0.1:8083`), используя
+токен, полученный в «Authorization» — управление сообществами/каналами
+(создание, список, вступление) в UI пока нет, доступно через REST
+chat-service напрямую (см. выше).
 
 Реальные end-to-end тесты требуют запущенных сервисов и Postgres и
 пропускают себя (`GTEST_SKIP`), если те недоступны — CI пока не
@@ -119,10 +159,14 @@ REST: `POST /auth/token` (`{"login", "password"}`), `POST /auth/verify`.
 
 - `AuthClientIntegrationTest` (DeviceHub) — регистрирует пользователя в
   user-service, получает и проверяет токен через auth-service.
+- `ChatClientIntegrationTest` (DeviceHub) — то же плюс создаёт
+  сообщество/канал и реальный round-trip через WebSocket chat-service.
 - `UserServiceClientIntegrationTest` (auth-service) — то же самое, но
   напрямую от лица auth-service.
 - `UserServiceIntegrationTest` (user-service) — регистрация и проверка
   учётных данных напрямую в Postgres.
+- `ChatServiceIntegrationTest` (chat-service) — сообщества/каналы/
+  сообщения напрямую в Postgres.
 
 ## Правила разработки
 

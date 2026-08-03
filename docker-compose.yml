@@ -1,5 +1,5 @@
 services:
-  postgres:
+  user-service-postgres:
     image: postgres:16
     environment:
       POSTGRES_USER: user_service
@@ -12,7 +12,7 @@ services:
       # project's Postgres on the default port.
       - "5433:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - user-service-postgres-data:/var/lib/postgresql/data
       - ./services/user-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user_service"]
@@ -20,5 +20,24 @@ services:
       timeout: 3s
       retries: 5
 
+  chat-service-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: chat_service
+      POSTGRES_PASSWORD: ${CHAT_SERVICE_POSTGRES_PASSWORD:-dev-only-password}
+      POSTGRES_DB: chat_service
+    ports:
+      # 5432 and 5433 are already taken (see above) — next free port.
+      - "5434:5432"
+    volumes:
+      - chat-service-postgres-data:/var/lib/postgresql/data
+      - ./services/chat-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat_service"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
-  postgres-data:
+  user-service-postgres-data:
+  chat-service-postgres-data:

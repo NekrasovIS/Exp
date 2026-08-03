@@ -1,0 +1,104 @@
+@startuml chat-service
+title chat-service — src/
+
+package "cpp-httplib / ixwebsocket" {
+  class "httplib::Server" as HttplibServer
+  class "ix::WebSocketServer" as IxWebSocketServer
+}
+
+package "libpqxx" {
+  class "pqxx::connection" as PqxxConnection
+}
+
+class Community {
+  +id : int64
+  +name : string
+}
+class Channel {
+  +id : int64
+  +communityId : int64
+  +name : string
+}
+class Message {
+  +id : int64
+  +authorLogin : string
+  +body : string
+  +sentAt : string
+}
+
+class ChatRepository {
+  +createCommunity(name: string) : Community
+  +listCommunities() : vector<Community>
+  +createChannel(communityId: int64, name: string) : optional<int64>
+  +listChannels(communityId: int64) : vector<Channel>
+  +joinCommunity(communityId: int64, login: string) : bool
+  +insertMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
+  +listRecentMessages(channelId: int64, limit: int) : vector<Message>
+}
+ChatRepository ..> Community : creates
+ChatRepository ..> Channel : creates
+ChatRepository ..> Message : creates
+ChatRepository ..> PqxxConnection : opens per call
+
+class ChatService {
+  +createCommunity(name: string) : Community
+  +listCommunities() : vector<Community>
+  +createChannel(communityId: int64, name: string) : optional<int64>
+  +listChannels(communityId: int64) : vector<Channel>
+  +joinCommunity(communityId: int64, login: string) : bool
+  +postMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
+  +recentMessages(channelId: int64, limit: int) : vector<Message>
+}
+ChatService --> ChatRepository : delegates to (&)
+
+class AuthServiceClient {
+  +verifyToken(token: string) : optional<string>
+}
+AuthServiceClient ..> "auth-service" : POST /auth/verify
+
+class HttpServer {
+  +listen(host: string, port: int)
+  +stop()
+  -authenticate(request) : optional<string>
+  -handleCreateCommunity(request, response)
+  -handleListCommunities(request, response)
+  -handleJoinCommunity(request, response)
+  -handleCreateChannel(request, response)
+  -handleListChannels(request, response)
+  -handleListMessages(request, response)
+}
+HttpServer --> ChatService : delegates to (&)
+HttpServer --> AuthServiceClient : authenticates via (const&)
+HttpServer *-- HttplibServer : owns
+
+class WebSocketServer {
+  +start() : bool
+  +stop()
+  -handleMessage(connectionState, webSocket, message)
+  -handleHello(webSocket, payload)
+  -handleChatMessage(webSocket, payload)
+  -broadcastToChannel(channelId: int64, json: string)
+}
+WebSocketServer --> ChatService : delegates to (&)
+WebSocketServer --> AuthServiceClient : authenticates via (const&)
+WebSocketServer *-- IxWebSocketServer : owns
+
+note right of HttpServer
+  Routes (all require
+  Authorization: Bearer <token>):
+  POST /communities
+  GET  /communities
+  POST /communities/{id}/join
+  POST /communities/{id}/channels
+  GET  /communities/{id}/channels
+  GET  /channels/{id}/messages
+end note
+
+note right of WebSocketServer
+  Protocol per connection:
+  1st frame: {"token", "channel_id"}
+  after that: {"body"} -> broadcast
+  to every subscriber of that channel
+end note
+
+@enduml
