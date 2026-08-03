@@ -6,7 +6,7 @@ package "Qt Network" {
 }
 
 class AuthClient {
-  +requestToken(subject: QString = "devicehub-client")
+  +requestToken(login: QString, password: QString)
   +verifyToken(token: QString)
   .. signals ..
   +tokenReceived(token: QString)

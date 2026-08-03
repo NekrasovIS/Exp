@@ -5,18 +5,21 @@
 #include <string>
 
 #include "TokenService.h"
+#include "UserServiceClient.h"
 
 namespace auth_service {
 
 /**
  * @brief REST front-end for TokenService: POST /auth/token, POST /auth/verify.
  *
- * Thin wrapper around httplib::Server — all token logic lives in
- * TokenService, this class only translates HTTP requests/responses.
+ * POST /auth/token now requires valid {"login", "password"} — checked
+ * against user-service via UserServiceClient — before a token is issued.
+ * Thin wrapper around httplib::Server otherwise — all token logic lives
+ * in TokenService, this class only translates HTTP requests/responses.
  */
 class HttpServer {
 public:
-    explicit HttpServer(const TokenService& tokenService);
+    HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient);
 
     /// Blocks, serving requests until stop() is called from another thread.
     void listen(const std::string& host, int port);
@@ -30,6 +33,7 @@ private:
     void handleVerifyToken(const httplib::Request& request, httplib::Response& response);
 
     const TokenService& tokenService_;
+    const UserServiceClient& userServiceClient_;
     httplib::Server server_;
 };
 

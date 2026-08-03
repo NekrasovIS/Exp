@@ -4,6 +4,7 @@
 
 #include "HttpServer.h"
 #include "TokenService.h"
+#include "UserServiceClient.h"
 
 namespace {
 
@@ -24,9 +25,12 @@ int main() {
 
     const std::string host = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
     const int port = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
 
     const auth_service::TokenService tokenService(secret);
-    auth_service::HttpServer server(tokenService);
+    const auth_service::UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    auth_service::HttpServer server(tokenService, userServiceClient);
 
     std::cout << "auth-service listening on " << host << ":" << port << "\n";
     server.listen(host, port);

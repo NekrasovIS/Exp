@@ -1,0 +1,11 @@
+{
+  "name": "user-service",
+  "version": "0.1.0",
+  "dependencies": [
+    "cpp-httplib",
+    "libpqxx",
+    "libsodium",
+    "nlohmann-json",
+    "gtest"
+  ]
+}

@@ -6,10 +6,10 @@ namespace auth_service {
 
 namespace {
 constexpr const char* kJsonContentType = "application/json";
-constexpr const char* kDefaultSubject = "devicehub-client";
 }  // namespace
 
-HttpServer::HttpServer(const TokenService& tokenService) : tokenService_(tokenService) {
+HttpServer::HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient)
+    : tokenService_(tokenService), userServiceClient_(userServiceClient) {
     registerRoutes();
 }
 
@@ -23,14 +23,23 @@ void HttpServer::registerRoutes() {
 }
 
 void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Response& response) {
-    std::string subject = kDefaultSubject;
-
-    if (const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
-        !body.is_discarded() && body.contains("subject") && body["subject"].is_string()) {
-        subject = body["subject"].get<std::string>();
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("login") || !body.contains("password") ||
+        !body["login"].is_string() || !body["password"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'login' and 'password' strings"}}.dump(),
+                              kJsonContentType);
+        return;
     }
 
-    const Token token = tokenService_.issueToken(subject);
+    const std::string login = body["login"].get<std::string>();
+    if (!userServiceClient_.verifyCredentials(login, body["password"].get<std::string>())) {
+        response.status = 401;
+        response.set_content(nlohmann::json{{"error", "invalid credentials"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const Token token = tokenService_.issueToken(login);
     const nlohmann::json responseBody{{"token", token.value}, {"expires_at", token.expiresAt}};
     response.set_content(responseBody.dump(), kJsonContentType);
 }

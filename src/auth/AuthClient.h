@@ -10,7 +10,7 @@ namespace devicehub {
  * @brief Talks to auth-service over HTTP: requests a token, then can ask
  *        the same service to verify one.
  *
- * Async via signals, like the devices/* classes — never blocks the GUI
+ * Async via signals, like the classes in devices/ — never blocks the GUI
  * thread on a network round trip.
  */
 class AuthClient : public QObject {
@@ -19,8 +19,10 @@ class AuthClient : public QObject {
 public:
     explicit AuthClient(QUrl baseUrl, QObject* parent = nullptr);
 
-    /// Requests a new token for @p subject from POST {baseUrl}/auth/token.
-    void requestToken(const QString& subject = QStringLiteral("devicehub-client"));
+    /// Requests a new token for (@p login, @p password) from
+    /// POST {baseUrl}/auth/token — auth-service checks these against
+    /// user-service before issuing anything.
+    void requestToken(const QString& login, const QString& password);
 
     /// Asks the service to verify @p token via POST {baseUrl}/auth/verify.
     void verifyToken(const QString& token);
