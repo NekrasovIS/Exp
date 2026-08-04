@@ -9,6 +9,11 @@ QString discordDarkStyleSheet() {
     // brighter variant on hover and a darker one when pressed — QSS can't
     // algorithmically lighten/darken a gradient, so each state spells out
     // its own stops.
+    //
+    // Paddings below are %1/%2/%3 placeholders for kSpacingSm/Md/Lg
+    // (filled in via .arg() at the end) rather than hardcoded numbers,
+    // so QSS spacing can't silently drift from the same scale the C++
+    // layout code uses.
     return QStringLiteral(R"(
         QMainWindow, QDialog {
             background-color: #1c1e21;
@@ -67,7 +72,7 @@ QString discordDarkStyleSheet() {
             color: #e3e6e8;
             border: 1px solid #383c41;
             border-radius: 8px;
-            padding: 7px 14px;
+            padding: %1px %3px;
         }
 
         QPushButton:hover {
@@ -103,7 +108,7 @@ QString discordDarkStyleSheet() {
             color: #e3e6e8;
             border: 1px solid #2a2d31;
             border-radius: 8px;
-            padding: 7px 10px;
+            padding: %1px %2px;
             selection-background-color: #10b981;
         }
 
@@ -123,7 +128,7 @@ QString discordDarkStyleSheet() {
         QTabBar::tab {
             background-color: #202327;
             color: #8b939c;
-            padding: 8px 16px;
+            padding: %1px %3px;
             border-top-left-radius: 8px;
             border-top-right-radius: 8px;
         }
@@ -165,7 +170,10 @@ QString discordDarkStyleSheet() {
             border: 1px solid #2a2d31;
             border-radius: 12px;
         }
-    )");
+    )")
+        .arg(kSpacingSm)
+        .arg(kSpacingMd)
+        .arg(kSpacingLg);
 }
 
 }  // namespace devicehub::ui_theme
