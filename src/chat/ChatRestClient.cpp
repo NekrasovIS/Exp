@@ -30,6 +30,16 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
     return items;
 }
 
+// chat-service reports the actual failure reason (e.g. "no such community,
+// or channel name already taken") in the response body — falling back to
+// reply->errorString() alone only ever shows a generic "server replied:
+// Not Found", which hides why the request actually failed.
+QString extractErrorMessage(QNetworkReply* reply) {
+    const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
+    const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
+    return detail.isEmpty() ? reply->errorString() : detail;
+}
+
 }  // namespace
 
 ChatRestClient::ChatRestClient(QUrl baseUrl, QObject* parent) : QObject(parent), baseUrl_(std::move(baseUrl)) {}
@@ -40,7 +50,7 @@ void ChatRestClient::createCommunity(const QString& token, const QString& name) 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(reply->errorString());
+            emit errorOccurred(extractErrorMessage(reply));
             return;
         }
         const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
@@ -53,7 +63,7 @@ void ChatRestClient::listCommunities(const QString& token) {
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(reply->errorString());
+            emit errorOccurred(extractErrorMessage(reply));
             return;
         }
         emit communitiesListed(parseItemList(reply->readAll()));
@@ -66,7 +76,7 @@ void ChatRestClient::joinCommunity(const QString& token, qint64 communityId) {
     connect(reply, &QNetworkReply::finished, this, [this, reply, communityId]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(reply->errorString());
+            emit errorOccurred(extractErrorMessage(reply));
             return;
         }
         emit communityJoined(communityId);
@@ -80,7 +90,7 @@ void ChatRestClient::createChannel(const QString& token, qint64 communityId, con
     connect(reply, &QNetworkReply::finished, this, [this, reply, name]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(reply->errorString());
+            emit errorOccurred(extractErrorMessage(reply));
             return;
         }
         const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
@@ -94,7 +104,7 @@ void ChatRestClient::listChannels(const QString& token, qint64 communityId) {
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(reply->errorString());
+            emit errorOccurred(extractErrorMessage(reply));
             return;
         }
         emit channelsListed(parseItemList(reply->readAll()));
