@@ -113,7 +113,11 @@ AUTH_SERVICE_SECRET=dev-only-secret ./services/auth-service/build/auth-service
 CLAUDE.md, «Безопасность»). По умолчанию слушает `127.0.0.1:8080`
 (`AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`), ходит в user-service по
 `USER_SERVICE_HOST`/`USER_SERVICE_PORT` (по умолчанию `127.0.0.1:8081`).
-REST: `POST /auth/token` (`{"login", "password"}`), `POST /auth/verify`.
+REST: `POST /auth/token` (`{"login", "password"}`), `POST /auth/verify`,
+`POST /auth/register` (`{"login", "password"}` — forwards to
+user-service's own registration and, on success, immediately issues a
+token too, so a fresh account is auto-logged-in without a second
+request).
 
 ### chat-service
 
@@ -146,11 +150,14 @@ REST остаётся источником истории, WebSocket — тол�
 
 ### DeviceHub ↔ сервисы
 
-Секция «Authorization» в UI запрашивает токен по введённым
-логину/паролю (адрес auth-service — `AUTH_SERVICE_URL`, по умолчанию
-`http://127.0.0.1:8080`) и сразу проверяет его тем же сервисом.
+Меню аккаунта (кнопка Account в правом верхнем углу) запрашивает
+токен по введённым логину/паролю (адрес auth-service —
+`AUTH_SERVICE_URL`, по умолчанию `http://127.0.0.1:8080`) и сразу
+проверяет его тем же сервисом; кнопка «Register» тем же способом
+регистрирует новый аккаунт через `POST /auth/register` и сразу
+входит под ним — без токена «Chat» и «Communities» не работают.
 
-Секция «Chat» использует токен, полученный в «Authorization», чтобы
+Сайдбар «Chat» использует токен, полученный в меню аккаунта, чтобы
 через REST chat-service (`CHAT_SERVICE_URL`, по умолчанию
 `http://127.0.0.1:8082`): создать сообщество/вступить, создать
 канал, обновить списки сообществ/каналов (выпадающие списки) — и

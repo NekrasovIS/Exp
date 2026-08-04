@@ -25,6 +25,7 @@ public:
     [[nodiscard]] QLineEdit* loginEdit() const { return loginEdit_; }
     [[nodiscard]] QLineEdit* passwordEdit() const { return passwordEdit_; }
     [[nodiscard]] QPushButton* requestTokenButton() const { return requestTokenButton_; }
+    [[nodiscard]] QPushButton* registerButton() const { return registerButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
     [[nodiscard]] QPushButton* toggleButton() const { return toggleButton_; }
 
@@ -36,6 +37,7 @@ private:
     QLineEdit* loginEdit_ = nullptr;
     QLineEdit* passwordEdit_ = nullptr;
     QPushButton* requestTokenButton_ = nullptr;
+    QPushButton* registerButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };
 

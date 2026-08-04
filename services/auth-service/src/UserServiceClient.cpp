@@ -22,4 +22,13 @@ bool UserServiceClient::verifyCredentials(const std::string& login, const std::s
     return !response.is_discarded() && response.value("valid", false);
 }
 
+bool UserServiceClient::registerUser(const std::string& login, const std::string& password) const {
+    httplib::Client client(host_, port_);
+
+    const nlohmann::json body{{"login", login}, {"password", password}};
+    const httplib::Result result = client.Post("/users/register", body.dump(), "application/json");
+
+    return result && result->status == 201;
+}
+
 }  // namespace auth_service

@@ -41,6 +41,7 @@ class AccountMenu {
   +loginEdit() : QLineEdit*
   +passwordEdit() : QLineEdit*
   +requestTokenButton() : QPushButton*
+  +registerButton() : QPushButton*
   +statusLabel() : QLabel*
   +toggleButton() : QPushButton*
   -togglePopup()

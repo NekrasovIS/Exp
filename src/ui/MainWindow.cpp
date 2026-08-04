@@ -42,6 +42,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(settingsDialog_->toggleScreenCaptureButton(), &QPushButton::clicked, this,
             &MainWindow::onToggleScreenCaptureClicked);
     connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
+    connect(accountMenu_->registerButton(), &QPushButton::clicked, this, &MainWindow::onRegisterClicked);
     connect(&audioInput_, &AudioInputDevice::levelChanged, settingsDialog_->micLevelBar(), [this](float level) {
         settingsDialog_->micLevelBar()->setValue(static_cast<int>(level * 100.0f));
     });
@@ -65,6 +66,13 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
         accountMenu_->statusLabel()->setText(tr("Error: %1").arg(message));
+    });
+    connect(&authClient_, &AuthClient::registrationCompleted, this, [this](bool registered) {
+        if (!registered) {
+            accountMenu_->statusLabel()->setText(tr("Registration failed — login already taken"));
+        }
+        // On success, tokenReceived() (auto-login) fires right after this
+        // and takes the status label the rest of the way to "Verified".
     });
 
     connect(chatPanel_->connectButton(), &QPushButton::clicked, this, &MainWindow::onConnectToChannelClicked);
@@ -246,6 +254,11 @@ void MainWindow::onToggleScreenCaptureClicked() {
 void MainWindow::onRequestTokenClicked() {
     accountMenu_->statusLabel()->setText(tr("Requesting token..."));
     authClient_.requestToken(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
+}
+
+void MainWindow::onRegisterClicked() {
+    accountMenu_->statusLabel()->setText(tr("Registering..."));
+    authClient_.registerUser(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
 }
 
 void MainWindow::onConnectToChannelClicked() {

@@ -20,6 +20,9 @@ void HttpServer::registerRoutes() {
     server_.Post("/auth/verify", [this](const httplib::Request& request, httplib::Response& response) {
         handleVerifyToken(request, response);
     });
+    server_.Post("/auth/register", [this](const httplib::Request& request, httplib::Response& response) {
+        handleRegister(request, response);
+    });
 }
 
 void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Response& response) {
@@ -58,6 +61,30 @@ void HttpServer::handleVerifyToken(const httplib::Request& request, httplib::Res
     } else {
         response.set_content(nlohmann::json{{"valid", false}}.dump(), kJsonContentType);
     }
+}
+
+void HttpServer::handleRegister(const httplib::Request& request, httplib::Response& response) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("login") || !body.contains("password") ||
+        !body["login"].is_string() || !body["password"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'login' and 'password' strings"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const std::string login = body["login"].get<std::string>();
+    if (!userServiceClient_.registerUser(login, body["password"].get<std::string>())) {
+        response.status = 409;
+        response.set_content(nlohmann::json{{"registered", false}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const Token token = tokenService_.issueToken(login);
+    response.status = 201;
+    response.set_content(
+        nlohmann::json{{"registered", true}, {"token", token.value}, {"expires_at", token.expiresAt}}.dump(),
+        kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

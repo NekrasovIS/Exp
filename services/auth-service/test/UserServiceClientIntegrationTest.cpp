@@ -49,5 +49,34 @@ TEST(UserServiceClientIntegrationTest, VerifiesRegisteredUserAndRejectsWrongPass
     EXPECT_FALSE(client.verifyCredentials(login, "wrong-password"));
 }
 
+TEST(UserServiceClientIntegrationTest, RegisterUserSucceedsOnceThenRejectsDuplicateLogin) {
+    const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+
+    const std::string loginPrefix =
+        "auth-service-register-test-" +
+        std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    const std::string password = "integration-test-password";
+
+    // Confirms reachability the same way VerifiesRegisteredUserAndRejectsWrongPassword
+    // does: a real registration through the raw client, skipping if the
+    // service isn't reachable rather than failing.
+    httplib::Client setupClient(host, port);
+    const nlohmann::json probeBody{{"login", loginPrefix + "-probe"}, {"password", password}};
+    const httplib::Result probeResult = setupClient.Post("/users/register", probeBody.dump(), "application/json");
+    if (!probeResult) {
+        GTEST_SKIP() << "user-service not reachable at " << host << ":" << port
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+    ASSERT_EQ(probeResult->status, 201);
+
+    const UserServiceClient client(host, port);
+    const std::string login = loginPrefix + "-wrapper";
+    EXPECT_TRUE(client.registerUser(login, password));
+    EXPECT_FALSE(client.registerUser(login, password));
+}
+
 }  // namespace
 }  // namespace auth_service

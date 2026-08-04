@@ -34,13 +34,20 @@ AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
     requestTokenButton_ = new QPushButton(tr("Get token & verify"), popup_);
     requestTokenButton_->setObjectName(QStringLiteral("requestTokenButton"));
 
+    registerButton_ = new QPushButton(tr("Register"), popup_);
+    registerButton_->setObjectName(QStringLiteral("registerButton"));
+
+    auto* actionsLayout = new QHBoxLayout;
+    actionsLayout->addWidget(requestTokenButton_);
+    actionsLayout->addWidget(registerButton_);
+
     statusLabel_ = new QLabel(tr("No token requested yet"), popup_);
     statusLabel_->setObjectName(QStringLiteral("authStatusLabel"));
     statusLabel_->setWordWrap(true);
 
     popupLayout->addWidget(loginEdit_);
     popupLayout->addWidget(passwordEdit_);
-    popupLayout->addWidget(requestTokenButton_);
+    popupLayout->addLayout(actionsLayout);
     popupLayout->addWidget(statusLabel_);
 
     connect(toggleButton_, &QPushButton::clicked, this, &AccountMenu::togglePopup);

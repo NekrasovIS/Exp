@@ -8,13 +8,23 @@ package "Qt Network" {
 class AuthClient {
   +requestToken(login: QString, password: QString)
   +verifyToken(token: QString)
+  +registerUser(login: QString, password: QString)
   .. signals ..
   +tokenReceived(token: QString)
   +tokenVerified(valid: bool, subject: QString)
+  +registrationCompleted(registered: bool)
   +errorOccurred(message: QString)
 }
 AuthClient *-- QNetworkAccessManager : owns
-AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify
+AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register
+
+note left of AuthClient
+  registerUser() success also emits
+  tokenReceived() — auth-service
+  auto-issues a token right after
+  registering, so callers don't need
+  a second requestToken() round trip.
+end note
 
 note right of AuthClient
   Async only — every call returns
