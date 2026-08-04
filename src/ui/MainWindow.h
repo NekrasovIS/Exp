@@ -18,15 +18,17 @@ class QScreen;
 namespace devicehub {
 
 class AccountMenu;
-class ChatPanel;
+class ChannelsPanel;
+class ChatView;
 class CommunitiesPanel;
 class FooterBar;
 class SettingsDialog;
 
 /**
- * @brief Main window shell: communities/chat sidebar on the left, an
- *        account menu top-right, and a footer with the profile and
- *        settings entry point.
+ * @brief Main window shell: communities/channels sidebar on the left,
+ *        the open channel's chat in the main area, an account menu
+ *        top-right, and a footer with the profile and settings entry
+ *        point.
  *
  * Pure presentation/wiring — all device and network access is delegated
  * to the devicehub::* classes in src/devices, src/auth and src/chat; all
@@ -48,13 +50,19 @@ private:
     void onToggleScreenCaptureClicked();
     void onRequestTokenClicked();
     void onRegisterClicked();
-    void onConnectToChannelClicked();
     void onSendChatMessageClicked();
-    void onCreateCommunityClicked();
-    void onRefreshCommunitiesClicked();
-    void onJoinCommunityClicked();
-    void onCreateChannelClicked();
-    void onRefreshChannelsClicked();
+
+    /// Re-lists communities from chat-service (no-op, with a status bar
+    /// message, if not signed in yet).
+    void refreshCommunities();
+    /// Re-lists channels for selectedCommunityId_ (no-op, with a status
+    /// bar message, if no community is selected).
+    void refreshChannelsForSelectedCommunity();
+    /// Switches ChatView to @p id/@p name, (re)connecting ChatClient.
+    void openChannel(qint64 id, const QString& name);
+    /// Drops the current channel selection/connection and shows
+    /// ChatView's placeholder again.
+    void closeChatView();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
@@ -65,14 +73,18 @@ private:
     ChatClient chatClient_;
     ChatRestClient chatRestClient_;
     QString lastToken_;
+    QString currentUserLogin_;
     QList<QScreen*> screens_;
     QList<ChatItem> communities_;
     QList<ChatItem> channels_;
+    qint64 selectedCommunityId_ = -1;
+    qint64 selectedChannelId_ = -1;
     qint64 pendingCommunitySelection_ = -1;
     qint64 pendingChannelSelection_ = -1;
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
-    ChatPanel* chatPanel_ = nullptr;
+    ChannelsPanel* channelsPanel_ = nullptr;
+    ChatView* chatView_ = nullptr;
     AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;

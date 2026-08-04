@@ -9,29 +9,52 @@ class MainWindow {
   -onToggleCameraClicked()
   -onToggleScreenCaptureClicked()
   -onRequestTokenClicked()
-  -onConnectToChannelClicked()
+  -onRegisterClicked()
   -onSendChatMessageClicked()
-  -onCreateCommunityClicked()
-  -onRefreshCommunitiesClicked()
-  -onJoinCommunityClicked()
-  -onCreateChannelClicked()
-  -onRefreshChannelsClicked()
+  -refreshCommunities()
+  -refreshChannelsForSelectedCommunity()
+  -openChannel(id: int64, name: QString)
+  -closeChatView()
 }
 
 class CommunitiesPanel {
-  +nameEdit() : QLineEdit*
-  +createButton() : QPushButton*
-  +communityCombo() : QComboBox*
+  +setCommunities(communities: QList<ChatItem>)
+  +selectCommunityId(id: int64)
+  +setCurrentUserLogin(login: QString)
+  +listWidget() : QListWidget*
+  +addButton() : QPushButton*
   +refreshButton() : QPushButton*
-  +joinButton() : QPushButton*
+  -showAddDialog()
+  -showContextMenu(pos: QPoint)
+  .. signals ..
+  +createRequested(name: QString)
+  +renameRequested(id: int64, newName: QString)
+  +deleteRequested(id: int64)
+  +joinRequested(id: int64)
+  +communitySelected(id: int64)
 }
 
-class ChatPanel {
-  +channelNameEdit() : QLineEdit*
-  +createChannelButton() : QPushButton*
-  +channelCombo() : QComboBox*
-  +refreshChannelsButton() : QPushButton*
-  +connectButton() : QPushButton*
+class ChannelsPanel {
+  +setChannels(channels: QList<ChatItem>)
+  +selectChannelId(id: int64)
+  +setCurrentUserLogin(login: QString)
+  +listWidget() : QListWidget*
+  +addButton() : QPushButton*
+  +refreshButton() : QPushButton*
+  -showAddDialog()
+  -showContextMenu(pos: QPoint)
+  .. signals ..
+  +createRequested(name: QString)
+  +renameRequested(id: int64, newName: QString)
+  +deleteRequested(id: int64)
+  +channelSelected(id: int64, name: QString)
+}
+
+class ChatView {
+  +showPlaceholder()
+  +showChannel(channelName: QString)
+  +appendLine(text: QString)
+  +clearLog()
   +chatLog() : QPlainTextEdit*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
@@ -87,7 +110,8 @@ package "src/chat" {
 }
 
 MainWindow *-- CommunitiesPanel : owns (top-left sidebar)
-MainWindow *-- ChatPanel : owns (bottom-left sidebar)
+MainWindow *-- ChannelsPanel : owns (bottom-left sidebar)
+MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- FooterBar : owns (bottom)
@@ -105,6 +129,11 @@ MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
 MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
+MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
+
+CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
+ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendLine()/clearLog() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -115,13 +144,23 @@ note right of MainWindow
   от devices/. Не обращается к
   low-level Qt Multimedia API напрямую.
 
-  Панели (CommunitiesPanel/ChatPanel/
-  AccountMenu/SettingsDialog/FooterBar)
-  — чистое представление: строят свои
-  контролы и отдают на них указатели.
-  MainWindow остаётся единственным
-  владельцем бизнес-логики и всех
-  устройств/клиентов, как и раньше.
+  Панели (CommunitiesPanel/ChannelsPanel/
+  ChatView/AccountMenu/SettingsDialog/
+  FooterBar) — чистое представление:
+  строят свои контролы и шлют
+  request-сигналы. MainWindow остаётся
+  единственным владельцем бизнес-логики
+  и всех устройств/клиентов, как и раньше.
+
+  Выбор сообщества в CommunitiesPanel
+  подгружает его каналы в ChannelsPanel;
+  выбор канала там открывает чат в
+  ChatView и (пере)подключает ChatClient.
+  Владелец сообщества/канала (из ответа
+  chat-service) решает, показывать ли
+  в контекстном меню Rename/Delete —
+  сервер всё равно проверяет права
+  повторно (403 для не-владельца).
 end note
 
 @enduml

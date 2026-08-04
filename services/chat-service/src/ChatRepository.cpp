@@ -8,39 +8,81 @@ namespace chat_service {
 
 ChatRepository::ChatRepository(std::string connectionString) : connectionString_(std::move(connectionString)) {}
 
-Community ChatRepository::createCommunity(const std::string& name) {
+Community ChatRepository::createCommunity(const std::string& name, const std::string& ownerLogin) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows =
-        transaction.exec("INSERT INTO communities (name) VALUES ($1) RETURNING id", pqxx::params{name});
+    const pqxx::result rows = transaction.exec(
+        "INSERT INTO communities (name, owner_login) VALUES ($1, $2) RETURNING id", pqxx::params{name, ownerLogin});
     transaction.commit();
 
-    return Community{.id = rows[0][0].as<std::int64_t>(), .name = name};
+    return Community{.id = rows[0][0].as<std::int64_t>(), .name = name, .ownerLogin = ownerLogin};
 }
 
 std::vector<Community> ChatRepository::listCommunities() {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows = transaction.exec("SELECT id, name FROM communities ORDER BY id");
+    const pqxx::result rows = transaction.exec("SELECT id, name, owner_login FROM communities ORDER BY id");
 
     std::vector<Community> communities;
     communities.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
-        communities.push_back(Community{.id = row[0].as<std::int64_t>(), .name = row[1].as<std::string>()});
+        communities.push_back(Community{.id = row[0].as<std::int64_t>(),
+                                         .name = row[1].as<std::string>(),
+                                         .ownerLogin = row[2].as<std::string>()});
     }
     return communities;
 }
 
-std::optional<std::int64_t> ChatRepository::createChannel(std::int64_t communityId, const std::string& name) {
+MutationResult ChatRepository::renameCommunity(std::int64_t id, const std::string& newName,
+                                                const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{id});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    transaction.exec("UPDATE communities SET name = $1 WHERE id = $2", pqxx::params{newName, id});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+MutationResult ChatRepository::deleteCommunity(std::int64_t id, const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{id});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    // channels/memberships/messages cascade via ON DELETE CASCADE (see db/init.sql).
+    transaction.exec("DELETE FROM communities WHERE id = $1", pqxx::params{id});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::optional<std::int64_t> ChatRepository::createChannel(std::int64_t communityId, const std::string& name,
+                                                            const std::string& ownerLogin) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
     try {
         const pqxx::result rows =
-            transaction.exec("INSERT INTO channels (community_id, name) VALUES ($1, $2) RETURNING id",
-                              pqxx::params{communityId, name});
+            transaction.exec("INSERT INTO channels (community_id, name, owner_login) VALUES ($1, $2, $3) "
+                              "RETURNING id",
+                              pqxx::params{communityId, name, ownerLogin});
         transaction.commit();
         return rows[0][0].as<std::int64_t>();
     } catch (const pqxx::foreign_key_violation&) {
@@ -54,18 +96,60 @@ std::vector<Channel> ChatRepository::listChannels(std::int64_t communityId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows = transaction.exec("SELECT id, community_id, name FROM channels WHERE community_id = $1 "
-                                                "ORDER BY id",
-                                                pqxx::params{communityId});
+    const pqxx::result rows =
+        transaction.exec("SELECT id, community_id, name, owner_login FROM channels WHERE community_id = $1 "
+                          "ORDER BY id",
+                          pqxx::params{communityId});
 
     std::vector<Channel> channels;
     channels.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
         channels.push_back(Channel{.id = row[0].as<std::int64_t>(),
                                     .communityId = row[1].as<std::int64_t>(),
-                                    .name = row[2].as<std::string>()});
+                                    .name = row[2].as<std::string>(),
+                                    .ownerLogin = row[3].as<std::string>()});
     }
     return channels;
+}
+
+MutationResult ChatRepository::renameChannel(std::int64_t id, const std::string& newName,
+                                              const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows = transaction.exec("SELECT owner_login FROM channels WHERE id = $1", pqxx::params{id});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    try {
+        transaction.exec("UPDATE channels SET name = $1 WHERE id = $2", pqxx::params{newName, id});
+        transaction.commit();
+        return MutationResult::kSuccess;
+    } catch (const pqxx::unique_violation&) {
+        return MutationResult::kConflict;
+    }
+}
+
+MutationResult ChatRepository::deleteChannel(std::int64_t id, const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows = transaction.exec("SELECT owner_login FROM channels WHERE id = $1", pqxx::params{id});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    // messages cascade via ON DELETE CASCADE (see db/init.sql).
+    transaction.exec("DELETE FROM channels WHERE id = $1", pqxx::params{id});
+    transaction.commit();
+    return MutationResult::kSuccess;
 }
 
 bool ChatRepository::joinCommunity(std::int64_t communityId, const std::string& login) {

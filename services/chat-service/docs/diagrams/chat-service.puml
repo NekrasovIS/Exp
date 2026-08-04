@@ -13,11 +13,13 @@ package "libpqxx" {
 class Community {
   +id : int64
   +name : string
+  +ownerLogin : string
 }
 class Channel {
   +id : int64
   +communityId : int64
   +name : string
+  +ownerLogin : string
 }
 class Message {
   +id : int64
@@ -25,12 +27,22 @@ class Message {
   +body : string
   +sentAt : string
 }
+enum MutationResult {
+  kSuccess
+  kNotFound
+  kForbidden
+  kConflict
+}
 
 class ChatRepository {
-  +createCommunity(name: string) : Community
+  +createCommunity(name: string, ownerLogin: string) : Community
   +listCommunities() : vector<Community>
-  +createChannel(communityId: int64, name: string) : optional<int64>
+  +renameCommunity(id: int64, newName: string, requesterLogin: string) : MutationResult
+  +deleteCommunity(id: int64, requesterLogin: string) : MutationResult
+  +createChannel(communityId: int64, name: string, ownerLogin: string) : optional<int64>
   +listChannels(communityId: int64) : vector<Channel>
+  +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
+  +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
   +insertMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
   +listRecentMessages(channelId: int64, limit: int) : vector<Message>
@@ -38,13 +50,18 @@ class ChatRepository {
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
+ChatRepository ..> MutationResult : returns
 ChatRepository ..> PqxxConnection : opens per call
 
 class ChatService {
-  +createCommunity(name: string) : Community
+  +createCommunity(name: string, ownerLogin: string) : Community
   +listCommunities() : vector<Community>
-  +createChannel(communityId: int64, name: string) : optional<int64>
+  +renameCommunity(id: int64, newName: string, requesterLogin: string) : MutationResult
+  +deleteCommunity(id: int64, requesterLogin: string) : MutationResult
+  +createChannel(communityId: int64, name: string, ownerLogin: string) : optional<int64>
   +listChannels(communityId: int64) : vector<Channel>
+  +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
+  +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
   +postMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
   +recentMessages(channelId: int64, limit: int) : vector<Message>
@@ -62,10 +79,15 @@ class HttpServer {
   -authenticate(request) : optional<string>
   -handleCreateCommunity(request, response)
   -handleListCommunities(request, response)
+  -handleRenameCommunity(request, response)
+  -handleDeleteCommunity(request, response)
   -handleJoinCommunity(request, response)
   -handleCreateChannel(request, response)
   -handleListChannels(request, response)
+  -handleRenameChannel(request, response)
+  -handleDeleteChannel(request, response)
   -handleListMessages(request, response)
+  -writeMutationResult(result: MutationResult, response)
 }
 HttpServer --> ChatService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
@@ -86,12 +108,21 @@ WebSocketServer *-- IxWebSocketServer : owns
 note right of HttpServer
   Routes (all require
   Authorization: Bearer <token>):
-  POST /communities
-  GET  /communities
-  POST /communities/{id}/join
-  POST /communities/{id}/channels
-  GET  /communities/{id}/channels
-  GET  /channels/{id}/messages
+  POST   /communities
+  GET    /communities
+  PATCH  /communities/{id}   (owner only)
+  DELETE /communities/{id}   (owner only)
+  POST   /communities/{id}/join
+  POST   /communities/{id}/channels
+  GET    /communities/{id}/channels
+  PATCH  /channels/{id}      (owner only)
+  DELETE /channels/{id}      (owner only)
+  GET    /channels/{id}/messages
+
+  Owner-only routes answer 403 for
+  non-owners, 404 for a nonexistent
+  id — MutationResult keeps those
+  two cases distinct end-to-end.
 end note
 
 note right of WebSocketServer

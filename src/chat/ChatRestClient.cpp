@@ -25,7 +25,9 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
     }
     for (const QJsonValue& value : document.array()) {
         const QJsonObject object = value.toObject();
-        items.push_back(ChatItem{.id = object.value("id").toVariant().toLongLong(), .name = object.value("name").toString()});
+        items.push_back(ChatItem{.id = object.value("id").toVariant().toLongLong(),
+                                  .name = object.value("name").toString(),
+                                  .ownerLogin = object.value("owner").toString()});
     }
     return items;
 }
@@ -70,6 +72,33 @@ void ChatRestClient::listCommunities(const QString& token) {
     });
 }
 
+void ChatRestClient::renameCommunity(const QString& token, qint64 communityId, const QString& newName) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1").arg(communityId)));
+    QNetworkReply* reply = networkManager_.sendCustomRequest(
+        buildRequest(url, token), "PATCH", QJsonDocument(QJsonObject{{"name", newName}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId, newName]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit communityRenamed(communityId, newName);
+    });
+}
+
+void ChatRestClient::deleteCommunity(const QString& token, qint64 communityId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1").arg(communityId)));
+    QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit communityDeleted(communityId);
+    });
+}
+
 void ChatRestClient::joinCommunity(const QString& token, qint64 communityId) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/join").arg(communityId)));
     QNetworkReply* reply = networkManager_.post(buildRequest(url, token), QByteArray());
@@ -108,6 +137,33 @@ void ChatRestClient::listChannels(const QString& token, qint64 communityId) {
             return;
         }
         emit channelsListed(parseItemList(reply->readAll()));
+    });
+}
+
+void ChatRestClient::renameChannel(const QString& token, qint64 channelId, const QString& newName) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1").arg(channelId)));
+    QNetworkReply* reply = networkManager_.sendCustomRequest(
+        buildRequest(url, token), "PATCH", QJsonDocument(QJsonObject{{"name", newName}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId, newName]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit channelRenamed(channelId, newName);
+    });
+}
+
+void ChatRestClient::deleteChannel(const QString& token, qint64 channelId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1").arg(channelId)));
+    QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit channelDeleted(channelId);
     });
 }
 

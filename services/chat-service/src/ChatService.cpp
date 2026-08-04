@@ -4,20 +4,39 @@ namespace chat_service {
 
 ChatService::ChatService(ChatRepository& repository) : repository_(repository) {}
 
-Community ChatService::createCommunity(const std::string& name) {
-    return repository_.createCommunity(name);
+Community ChatService::createCommunity(const std::string& name, const std::string& ownerLogin) {
+    return repository_.createCommunity(name, ownerLogin);
 }
 
 std::vector<Community> ChatService::listCommunities() {
     return repository_.listCommunities();
 }
 
-std::optional<std::int64_t> ChatService::createChannel(std::int64_t communityId, const std::string& name) {
-    return repository_.createChannel(communityId, name);
+MutationResult ChatService::renameCommunity(std::int64_t id, const std::string& newName,
+                                             const std::string& requesterLogin) {
+    return repository_.renameCommunity(id, newName, requesterLogin);
+}
+
+MutationResult ChatService::deleteCommunity(std::int64_t id, const std::string& requesterLogin) {
+    return repository_.deleteCommunity(id, requesterLogin);
+}
+
+std::optional<std::int64_t> ChatService::createChannel(std::int64_t communityId, const std::string& name,
+                                                         const std::string& ownerLogin) {
+    return repository_.createChannel(communityId, name, ownerLogin);
 }
 
 std::vector<Channel> ChatService::listChannels(std::int64_t communityId) {
     return repository_.listChannels(communityId);
+}
+
+MutationResult ChatService::renameChannel(std::int64_t id, const std::string& newName,
+                                           const std::string& requesterLogin) {
+    return repository_.renameChannel(id, newName, requesterLogin);
+}
+
+MutationResult ChatService::deleteChannel(std::int64_t id, const std::string& requesterLogin) {
+    return repository_.deleteChannel(id, requesterLogin);
 }
 
 bool ChatService::joinCommunity(std::int64_t communityId, const std::string& login) {

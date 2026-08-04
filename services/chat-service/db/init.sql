@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS communities (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
+    owner_login TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -8,6 +9,7 @@ CREATE TABLE IF NOT EXISTS channels (
     id BIGSERIAL PRIMARY KEY,
     community_id BIGINT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
+    owner_login TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (community_id, name)
 );

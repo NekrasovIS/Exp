@@ -5,6 +5,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabWidget>
@@ -126,48 +127,41 @@ TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {
 TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     const MainWindow window;
 
-    auto* connectToChannelButton = window.findChild<QPushButton*>("connectToChannelButton");
     auto* chatLog = window.findChild<QPlainTextEdit*>("chatLog");
     auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
     auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
+    auto* channelTitle = window.findChild<QLabel*>("chatChannelTitle");
 
-    ASSERT_NE(connectToChannelButton, nullptr);
     ASSERT_NE(chatLog, nullptr);
     ASSERT_NE(chatMessageEdit, nullptr);
     ASSERT_NE(sendChatMessageButton, nullptr);
+    ASSERT_NE(channelTitle, nullptr);
 
     EXPECT_TRUE(chatLog->isReadOnly());
-    EXPECT_EQ(connectToChannelButton->text(), QStringLiteral("Connect to selected channel"));
     EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
 }
 
 TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
     const MainWindow window;
 
-    auto* communityNameEdit = window.findChild<QLineEdit*>("communityNameEdit");
+    auto* communityList = window.findChild<QListWidget*>("communityList");
     auto* createCommunityButton = window.findChild<QPushButton*>("createCommunityButton");
-    auto* communityCombo = window.findChild<QComboBox*>("communityCombo");
     auto* refreshCommunitiesButton = window.findChild<QPushButton*>("refreshCommunitiesButton");
-    auto* joinCommunityButton = window.findChild<QPushButton*>("joinCommunityButton");
-    auto* channelNameEdit = window.findChild<QLineEdit*>("channelNameEdit");
+    auto* channelList = window.findChild<QListWidget*>("channelList");
     auto* createChannelButton = window.findChild<QPushButton*>("createChannelButton");
-    auto* channelCombo = window.findChild<QComboBox*>("channelCombo");
     auto* refreshChannelsButton = window.findChild<QPushButton*>("refreshChannelsButton");
 
-    ASSERT_NE(communityNameEdit, nullptr);
+    ASSERT_NE(communityList, nullptr);
     ASSERT_NE(createCommunityButton, nullptr);
-    ASSERT_NE(communityCombo, nullptr);
     ASSERT_NE(refreshCommunitiesButton, nullptr);
-    ASSERT_NE(joinCommunityButton, nullptr);
-    ASSERT_NE(channelNameEdit, nullptr);
+    ASSERT_NE(channelList, nullptr);
     ASSERT_NE(createChannelButton, nullptr);
-    ASSERT_NE(channelCombo, nullptr);
     ASSERT_NE(refreshChannelsButton, nullptr);
 
-    EXPECT_EQ(communityCombo->count(), 0);
-    EXPECT_EQ(channelCombo->count(), 0);
-    EXPECT_EQ(createCommunityButton->text(), QStringLiteral("Create community"));
-    EXPECT_EQ(joinCommunityButton->text(), QStringLiteral("Join selected community"));
+    EXPECT_EQ(communityList->count(), 0);
+    EXPECT_EQ(channelList->count(), 0);
+    EXPECT_EQ(createCommunityButton->text(), QStringLiteral("+"));
+    EXPECT_EQ(createChannelButton->text(), QStringLiteral("+"));
 }
 
 }  // namespace
