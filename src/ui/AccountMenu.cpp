@@ -7,6 +7,8 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include "ui/Theme.h"
+
 namespace devicehub {
 
 AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
@@ -23,6 +25,9 @@ AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
     popup_->setObjectName(QStringLiteral("accountMenuPopup"));
     popup_->setFrameShape(QFrame::StyledPanel);
     auto* popupLayout = new QVBoxLayout(popup_);
+    popupLayout->setContentsMargins(ui_theme::kSpacingMd, ui_theme::kSpacingMd, ui_theme::kSpacingMd,
+                                     ui_theme::kSpacingMd);
+    popupLayout->setSpacing(ui_theme::kSpacingSm);
 
     loginEdit_ = new QLineEdit(popup_);
     loginEdit_->setObjectName(QStringLiteral("loginEdit"));

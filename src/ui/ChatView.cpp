@@ -8,6 +8,8 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
+#include "ui/Theme.h"
+
 namespace devicehub {
 
 namespace {
@@ -30,6 +32,9 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
 
     auto* channelPage = new QWidget(stack_);
     auto* channelLayout = new QVBoxLayout(channelPage);
+    channelLayout->setContentsMargins(ui_theme::kSpacingMd, ui_theme::kSpacingMd, ui_theme::kSpacingMd,
+                                       ui_theme::kSpacingMd);
+    channelLayout->setSpacing(ui_theme::kSpacingSm);
 
     channelTitleLabel_ = new QLabel(channelPage);
     channelTitleLabel_->setObjectName(QStringLiteral("chatChannelTitle"));
@@ -40,6 +45,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     chatLog_->setReadOnly(true);
 
     auto* sendRow = new QHBoxLayout;
+    sendRow->setSpacing(ui_theme::kSpacingSm);
     messageEdit_ = new QLineEdit(channelPage);
     messageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
     messageEdit_->setPlaceholderText(tr("Message"));

@@ -4,6 +4,8 @@
 #include <QLabel>
 #include <QPushButton>
 
+#include "ui/Theme.h"
+
 namespace devicehub {
 
 namespace {
@@ -14,7 +16,9 @@ FooterBar::FooterBar(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_StyledBackground, true);
 
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(8, 4, 8, 4);
+    layout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
+                                ui_theme::kSpacingSm);
+    layout->setSpacing(ui_theme::kSpacingSm);
 
     avatarLabel_ = new QLabel(QStringLiteral("?"), this);
     avatarLabel_->setObjectName(QStringLiteral("footerAvatar"));

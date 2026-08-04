@@ -14,6 +14,7 @@
 #include <QVBoxLayout>
 
 #include "ui/IconFactory.h"
+#include "ui/Theme.h"
 
 namespace devicehub {
 
@@ -28,9 +29,12 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_StyledBackground, true);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
+                                ui_theme::kSpacingSm);
+    layout->setSpacing(ui_theme::kSpacingSm);
 
     auto* header = new QHBoxLayout;
+    header->setSpacing(ui_theme::kSpacingSm);
     auto* title = new QLabel(tr("Channels"), this);
     title->setProperty("sectionTitle", true);
 

@@ -22,6 +22,7 @@
 #include "ui/CommunitiesPanel.h"
 #include "ui/FooterBar.h"
 #include "ui/SettingsDialog.h"
+#include "ui/Theme.h"
 
 namespace devicehub {
 
@@ -220,6 +221,8 @@ void MainWindow::buildUi() {
     topBar->setObjectName(QStringLiteral("topBar"));
     topBar->setAttribute(Qt::WA_StyledBackground, true);
     auto* topBarLayout = new QHBoxLayout(topBar);
+    topBarLayout->setContentsMargins(ui_theme::kSpacingMd, ui_theme::kSpacingSm, ui_theme::kSpacingMd,
+                                      ui_theme::kSpacingSm);
     accountMenu_ = new AccountMenu(topBar);
     topBarLayout->addStretch();
     topBarLayout->addWidget(accountMenu_);
