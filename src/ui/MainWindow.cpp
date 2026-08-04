@@ -1,18 +1,24 @@
 #include "ui/MainWindow.h"
 
 #include <QComboBox>
-#include <QGroupBox>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
-#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QVideoWidget>
+#include <QWidget>
 
 #include <utility>
+
+#include "ui/AccountMenu.h"
+#include "ui/ChatPanel.h"
+#include "ui/CommunitiesPanel.h"
+#include "ui/FooterBar.h"
+#include "ui/SettingsDialog.h"
 
 namespace devicehub {
 
@@ -30,353 +36,274 @@ MainWindow::MainWindow(QWidget* parent)
     buildUi();
     populateDevices();
 
-    connect(playToneButton_, &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
-    connect(toggleMicButton_, &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
-    connect(toggleCameraButton_, &QPushButton::clicked, this, &MainWindow::onToggleCameraClicked);
-    connect(toggleScreenCaptureButton_, &QPushButton::clicked, this, &MainWindow::onToggleScreenCaptureClicked);
-    connect(requestTokenButton_, &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
-    connect(&audioInput_, &AudioInputDevice::levelChanged, micLevelBar_, [this](float level) {
-        micLevelBar_->setValue(static_cast<int>(level * 100.0f));
+    connect(settingsDialog_->playToneButton(), &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
+    connect(settingsDialog_->toggleMicButton(), &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
+    connect(settingsDialog_->toggleCameraButton(), &QPushButton::clicked, this, &MainWindow::onToggleCameraClicked);
+    connect(settingsDialog_->toggleScreenCaptureButton(), &QPushButton::clicked, this,
+            &MainWindow::onToggleScreenCaptureClicked);
+    connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
+    connect(&audioInput_, &AudioInputDevice::levelChanged, settingsDialog_->micLevelBar(), [this](float level) {
+        settingsDialog_->micLevelBar()->setValue(static_cast<int>(level * 100.0f));
     });
-    connect(&audioInput_, &AudioInputDevice::errorOccurred, this,
-            [this](const QString& message) { micStatusLabel_->setText(tr("Error: %1").arg(message)); });
-    connect(&camera_, &CameraDevice::errorOccurred, this,
-            [this](const QString& message) { cameraStatusLabel_->setText(tr("Error: %1").arg(message)); });
-    connect(&screenCapture_, &ScreenCaptureDevice::errorOccurred, this,
-            [this](const QString& message) { screenStatusLabel_->setText(tr("Error: %1").arg(message)); });
+    connect(&audioInput_, &AudioInputDevice::errorOccurred, this, [this](const QString& message) {
+        settingsDialog_->micStatusLabel()->setText(tr("Error: %1").arg(message));
+    });
+    connect(&camera_, &CameraDevice::errorOccurred, this, [this](const QString& message) {
+        settingsDialog_->cameraStatusLabel()->setText(tr("Error: %1").arg(message));
+    });
+    connect(&screenCapture_, &ScreenCaptureDevice::errorOccurred, this, [this](const QString& message) {
+        settingsDialog_->screenStatusLabel()->setText(tr("Error: %1").arg(message));
+    });
     connect(&authClient_, &AuthClient::tokenReceived, this, [this](const QString& token) {
         lastToken_ = token;
-        authStatusLabel_->setText(tr("Token received, verifying..."));
+        accountMenu_->statusLabel()->setText(tr("Token received, verifying..."));
         authClient_.verifyToken(token);
     });
     connect(&authClient_, &AuthClient::tokenVerified, this, [this](bool valid, const QString& subject) {
-        authStatusLabel_->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
+        accountMenu_->statusLabel()->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
+        footerBar_->setProfileText(valid ? subject : tr("Not signed in"));
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
-        authStatusLabel_->setText(tr("Error: %1").arg(message));
+        accountMenu_->statusLabel()->setText(tr("Error: %1").arg(message));
     });
 
-    connect(connectToChannelButton_, &QPushButton::clicked, this, &MainWindow::onConnectToChannelClicked);
-    connect(sendChatMessageButton_, &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
+    connect(chatPanel_->connectButton(), &QPushButton::clicked, this, &MainWindow::onConnectToChannelClicked);
+    connect(chatPanel_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
     connect(&chatClient_, &ChatClient::subscribed, this, [this](qint64 channelId) {
-        chatLog_->appendPlainText(tr("-- subscribed to channel %1 --").arg(channelId));
+        chatPanel_->chatLog()->appendPlainText(tr("-- subscribed to channel %1 --").arg(channelId));
     });
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](const QString& author, const QString& body, const QString& sentAt) {
-                chatLog_->appendPlainText(QStringLiteral("[%1] %2: %3").arg(sentAt, author, body));
+                chatPanel_->chatLog()->appendPlainText(QStringLiteral("[%1] %2: %3").arg(sentAt, author, body));
             });
     connect(&chatClient_, &ChatClient::errorOccurred, this, [this](const QString& message) {
-        chatLog_->appendPlainText(tr("-- error: %1 --").arg(message));
+        chatPanel_->chatLog()->appendPlainText(tr("-- error: %1 --").arg(message));
     });
 
-    connect(createCommunityButton_, &QPushButton::clicked, this, &MainWindow::onCreateCommunityClicked);
-    connect(refreshCommunitiesButton_, &QPushButton::clicked, this, &MainWindow::onRefreshCommunitiesClicked);
-    connect(joinCommunityButton_, &QPushButton::clicked, this, &MainWindow::onJoinCommunityClicked);
-    connect(createChannelButton_, &QPushButton::clicked, this, &MainWindow::onCreateChannelClicked);
-    connect(refreshChannelsButton_, &QPushButton::clicked, this, &MainWindow::onRefreshChannelsClicked);
+    connect(communitiesPanel_->createButton(), &QPushButton::clicked, this, &MainWindow::onCreateCommunityClicked);
+    connect(communitiesPanel_->refreshButton(), &QPushButton::clicked, this, &MainWindow::onRefreshCommunitiesClicked);
+    connect(communitiesPanel_->joinButton(), &QPushButton::clicked, this, &MainWindow::onJoinCommunityClicked);
+    connect(chatPanel_->createChannelButton(), &QPushButton::clicked, this, &MainWindow::onCreateChannelClicked);
+    connect(chatPanel_->refreshChannelsButton(), &QPushButton::clicked, this, &MainWindow::onRefreshChannelsClicked);
 
     connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64, const QString& name) {
-        chatLog_->appendPlainText(tr("-- community '%1' created --").arg(name));
+        chatPanel_->chatLog()->appendPlainText(tr("-- community '%1' created --").arg(name));
         onRefreshCommunitiesClicked();
     });
     connect(&chatRestClient_, &ChatRestClient::communitiesListed, this, [this](const QList<ChatItem>& communities) {
         communities_ = communities;
-        communityCombo_->clear();
+        communitiesPanel_->communityCombo()->clear();
         for (const ChatItem& community : communities_) {
-            communityCombo_->addItem(community.name, community.id);
+            communitiesPanel_->communityCombo()->addItem(community.name, community.id);
         }
     });
-    connect(&chatRestClient_, &ChatRestClient::communityJoined, this,
-            [this](qint64 communityId) { chatLog_->appendPlainText(tr("-- joined community %1 --").arg(communityId)); });
+    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 communityId) {
+        chatPanel_->chatLog()->appendPlainText(tr("-- joined community %1 --").arg(communityId));
+    });
     connect(&chatRestClient_, &ChatRestClient::channelCreated, this, [this](qint64, const QString& name) {
-        chatLog_->appendPlainText(tr("-- channel '%1' created --").arg(name));
+        chatPanel_->chatLog()->appendPlainText(tr("-- channel '%1' created --").arg(name));
         onRefreshChannelsClicked();
     });
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
         channels_ = channels;
-        channelCombo_->clear();
+        chatPanel_->channelCombo()->clear();
         for (const ChatItem& channel : channels_) {
-            channelCombo_->addItem(channel.name, channel.id);
+            chatPanel_->channelCombo()->addItem(channel.name, channel.id);
         }
     });
     connect(&chatRestClient_, &ChatRestClient::errorOccurred, this, [this](const QString& message) {
-        chatLog_->appendPlainText(tr("-- error: %1 --").arg(message));
+        chatPanel_->chatLog()->appendPlainText(tr("-- error: %1 --").arg(message));
     });
 
-    camera_.captureSession().setVideoOutput(videoPreview_);
-    screenCapture_.captureSession().setVideoOutput(screenPreview_);
+    connect(footerBar_->settingsButton(), &QPushButton::clicked, this, [this]() {
+        settingsDialog_->show();
+        settingsDialog_->raise();
+        settingsDialog_->activateWindow();
+    });
+
+    camera_.captureSession().setVideoOutput(settingsDialog_->videoPreview());
+    screenCapture_.captureSession().setVideoOutput(settingsDialog_->screenPreview());
 }
 
 MainWindow::~MainWindow() = default;
 
 void MainWindow::buildUi() {
     setWindowTitle(tr("DeviceHub"));
+    resize(1000, 700);
 
-    auto* tabs = new QTabWidget(this);
-    tabs->setObjectName(QStringLiteral("mainTabs"));
+    auto* central = new QWidget(this);
+    auto* rootLayout = new QVBoxLayout(central);
+    rootLayout->setContentsMargins(0, 0, 0, 0);
+    rootLayout->setSpacing(0);
 
-    auto* outputGroup = new QGroupBox(tr("Audio output"));
-    auto* outputLayout = new QVBoxLayout(outputGroup);
-    outputCombo_ = new QComboBox(outputGroup);
-    outputCombo_->setObjectName(QStringLiteral("outputCombo"));
-    playToneButton_ = new QPushButton(tr("Play test tone"), outputGroup);
-    playToneButton_->setObjectName(QStringLiteral("playToneButton"));
-    outputLayout->addWidget(outputCombo_);
-    outputLayout->addWidget(playToneButton_);
+    auto* topBar = new QWidget(central);
+    auto* topBarLayout = new QHBoxLayout(topBar);
+    accountMenu_ = new AccountMenu(topBar);
+    topBarLayout->addStretch();
+    topBarLayout->addWidget(accountMenu_);
 
-    auto* inputGroup = new QGroupBox(tr("Microphone"));
-    auto* inputLayout = new QVBoxLayout(inputGroup);
-    inputCombo_ = new QComboBox(inputGroup);
-    inputCombo_->setObjectName(QStringLiteral("inputCombo"));
-    toggleMicButton_ = new QPushButton(tr("Start capture"), inputGroup);
-    toggleMicButton_->setObjectName(QStringLiteral("toggleMicButton"));
-    micLevelBar_ = new QProgressBar(inputGroup);
-    micLevelBar_->setRange(0, 100);
-    micStatusLabel_ = new QLabel(inputGroup);
-    micStatusLabel_->setObjectName(QStringLiteral("micStatusLabel"));
-    inputLayout->addWidget(inputCombo_);
-    inputLayout->addWidget(toggleMicButton_);
-    inputLayout->addWidget(micLevelBar_);
-    inputLayout->addWidget(micStatusLabel_);
+    auto* sidebar = new QWidget(central);
+    sidebar->setObjectName(QStringLiteral("sidebar"));
+    sidebar->setFixedWidth(280);
+    auto* sidebarLayout = new QVBoxLayout(sidebar);
+    sidebarLayout->setContentsMargins(0, 0, 0, 0);
+    communitiesPanel_ = new CommunitiesPanel(sidebar);
+    chatPanel_ = new ChatPanel(sidebar);
+    sidebarLayout->addWidget(communitiesPanel_, /*stretch=*/1);
+    sidebarLayout->addWidget(chatPanel_, /*stretch=*/2);
 
-    auto* cameraGroup = new QGroupBox(tr("Camera"));
-    auto* cameraLayout = new QVBoxLayout(cameraGroup);
-    cameraCombo_ = new QComboBox(cameraGroup);
-    cameraCombo_->setObjectName(QStringLiteral("cameraCombo"));
-    toggleCameraButton_ = new QPushButton(tr("Start camera"), cameraGroup);
-    toggleCameraButton_->setObjectName(QStringLiteral("toggleCameraButton"));
-    videoPreview_ = new QVideoWidget(cameraGroup);
-    videoPreview_->setMinimumSize(320, 240);
-    cameraStatusLabel_ = new QLabel(cameraGroup);
-    cameraStatusLabel_->setObjectName(QStringLiteral("cameraStatusLabel"));
-    cameraLayout->addWidget(cameraCombo_);
-    cameraLayout->addWidget(toggleCameraButton_);
-    cameraLayout->addWidget(videoPreview_);
-    cameraLayout->addWidget(cameraStatusLabel_);
+    auto* mainContentPlaceholder = new QLabel(tr("Select a channel to start chatting"), central);
+    mainContentPlaceholder->setObjectName(QStringLiteral("mainContentPlaceholder"));
+    mainContentPlaceholder->setAlignment(Qt::AlignCenter);
 
-    auto* screenGroup = new QGroupBox(tr("Screen capture"));
-    auto* screenLayout = new QVBoxLayout(screenGroup);
-    screenCombo_ = new QComboBox(screenGroup);
-    screenCombo_->setObjectName(QStringLiteral("screenCombo"));
-    toggleScreenCaptureButton_ = new QPushButton(tr("Start screen capture"), screenGroup);
-    toggleScreenCaptureButton_->setObjectName(QStringLiteral("toggleScreenCaptureButton"));
-    screenPreview_ = new QVideoWidget(screenGroup);
-    screenPreview_->setMinimumSize(320, 240);
-    screenStatusLabel_ = new QLabel(screenGroup);
-    screenStatusLabel_->setObjectName(QStringLiteral("screenStatusLabel"));
-    screenLayout->addWidget(screenCombo_);
-    screenLayout->addWidget(toggleScreenCaptureButton_);
-    screenLayout->addWidget(screenPreview_);
-    screenLayout->addWidget(screenStatusLabel_);
+    auto* middleLayout = new QHBoxLayout;
+    middleLayout->setContentsMargins(0, 0, 0, 0);
+    middleLayout->addWidget(sidebar);
+    middleLayout->addWidget(mainContentPlaceholder, /*stretch=*/1);
 
-    auto* authGroup = new QGroupBox(tr("Authorization"));
-    auto* authLayout = new QVBoxLayout(authGroup);
-    loginEdit_ = new QLineEdit(authGroup);
-    loginEdit_->setObjectName(QStringLiteral("loginEdit"));
-    loginEdit_->setPlaceholderText(tr("Login"));
-    passwordEdit_ = new QLineEdit(authGroup);
-    passwordEdit_->setObjectName(QStringLiteral("passwordEdit"));
-    passwordEdit_->setPlaceholderText(tr("Password"));
-    passwordEdit_->setEchoMode(QLineEdit::Password);
-    requestTokenButton_ = new QPushButton(tr("Get token & verify"), authGroup);
-    requestTokenButton_->setObjectName(QStringLiteral("requestTokenButton"));
-    authStatusLabel_ = new QLabel(tr("No token requested yet"), authGroup);
-    authStatusLabel_->setObjectName(QStringLiteral("authStatusLabel"));
-    authLayout->addWidget(loginEdit_);
-    authLayout->addWidget(passwordEdit_);
-    authLayout->addWidget(requestTokenButton_);
-    authLayout->addWidget(authStatusLabel_);
+    footerBar_ = new FooterBar(central);
 
-    auto* chatGroup = new QGroupBox(tr("Chat"));
-    auto* chatLayout = new QVBoxLayout(chatGroup);
+    rootLayout->addWidget(topBar);
+    rootLayout->addLayout(middleLayout, /*stretch=*/1);
+    rootLayout->addWidget(footerBar_);
 
-    communityNameEdit_ = new QLineEdit(chatGroup);
-    communityNameEdit_->setObjectName(QStringLiteral("communityNameEdit"));
-    communityNameEdit_->setPlaceholderText(tr("New community name"));
-    createCommunityButton_ = new QPushButton(tr("Create community"), chatGroup);
-    createCommunityButton_->setObjectName(QStringLiteral("createCommunityButton"));
-    communityCombo_ = new QComboBox(chatGroup);
-    communityCombo_->setObjectName(QStringLiteral("communityCombo"));
-    refreshCommunitiesButton_ = new QPushButton(tr("Refresh communities"), chatGroup);
-    refreshCommunitiesButton_->setObjectName(QStringLiteral("refreshCommunitiesButton"));
-    joinCommunityButton_ = new QPushButton(tr("Join selected community"), chatGroup);
-    joinCommunityButton_->setObjectName(QStringLiteral("joinCommunityButton"));
+    setCentralWidget(central);
 
-    channelNameEdit_ = new QLineEdit(chatGroup);
-    channelNameEdit_->setObjectName(QStringLiteral("channelNameEdit"));
-    channelNameEdit_->setPlaceholderText(tr("New channel name"));
-    createChannelButton_ = new QPushButton(tr("Create channel in selected community"), chatGroup);
-    createChannelButton_->setObjectName(QStringLiteral("createChannelButton"));
-    channelCombo_ = new QComboBox(chatGroup);
-    channelCombo_->setObjectName(QStringLiteral("channelCombo"));
-    refreshChannelsButton_ = new QPushButton(tr("Refresh channels"), chatGroup);
-    refreshChannelsButton_->setObjectName(QStringLiteral("refreshChannelsButton"));
-    connectToChannelButton_ = new QPushButton(tr("Connect to selected channel"), chatGroup);
-    connectToChannelButton_->setObjectName(QStringLiteral("connectToChannelButton"));
-
-    chatLog_ = new QPlainTextEdit(chatGroup);
-    chatLog_->setObjectName(QStringLiteral("chatLog"));
-    chatLog_->setReadOnly(true);
-    chatMessageEdit_ = new QLineEdit(chatGroup);
-    chatMessageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
-    chatMessageEdit_->setPlaceholderText(tr("Message"));
-    sendChatMessageButton_ = new QPushButton(tr("Send"), chatGroup);
-    sendChatMessageButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
-
-    chatLayout->addWidget(communityNameEdit_);
-    chatLayout->addWidget(createCommunityButton_);
-    chatLayout->addWidget(communityCombo_);
-    chatLayout->addWidget(refreshCommunitiesButton_);
-    chatLayout->addWidget(joinCommunityButton_);
-    chatLayout->addWidget(channelNameEdit_);
-    chatLayout->addWidget(createChannelButton_);
-    chatLayout->addWidget(channelCombo_);
-    chatLayout->addWidget(refreshChannelsButton_);
-    chatLayout->addWidget(connectToChannelButton_);
-    chatLayout->addWidget(chatLog_);
-    chatLayout->addWidget(chatMessageEdit_);
-    chatLayout->addWidget(sendChatMessageButton_);
-
-    tabs->addTab(outputGroup, tr("Audio Output"));
-    tabs->addTab(inputGroup, tr("Microphone"));
-    tabs->addTab(cameraGroup, tr("Camera"));
-    tabs->addTab(screenGroup, tr("Screen Capture"));
-    tabs->addTab(authGroup, tr("Authorization"));
-    tabs->addTab(chatGroup, tr("Chat"));
-
-    setCentralWidget(tabs);
+    settingsDialog_ = new SettingsDialog(this);
 }
 
 void MainWindow::populateDevices() {
     for (const QAudioDevice& device : enumerator_.audioOutputs()) {
-        outputCombo_->addItem(device.description(), QVariant::fromValue(device));
+        settingsDialog_->outputCombo()->addItem(device.description(), QVariant::fromValue(device));
     }
     for (const QAudioDevice& device : enumerator_.audioInputs()) {
-        inputCombo_->addItem(device.description(), QVariant::fromValue(device));
+        settingsDialog_->inputCombo()->addItem(device.description(), QVariant::fromValue(device));
     }
     for (const QCameraDevice& device : enumerator_.cameras()) {
-        cameraCombo_->addItem(device.description(), QVariant::fromValue(device));
+        settingsDialog_->cameraCombo()->addItem(device.description(), QVariant::fromValue(device));
     }
 
     screens_ = enumerator_.screens();
     for (const QScreen* screen : std::as_const(screens_)) {
-        screenCombo_->addItem(screen->name());
+        settingsDialog_->screenCombo()->addItem(screen->name());
     }
 }
 
 void MainWindow::onPlayToneClicked() {
-    const QAudioDevice device = outputCombo_->currentData().value<QAudioDevice>();
+    const QAudioDevice device = settingsDialog_->outputCombo()->currentData().value<QAudioDevice>();
     audioOutput_.playTestTone(device);
 }
 
 void MainWindow::onToggleMicClicked() {
     if (audioInput_.isCapturing()) {
         audioInput_.stop();
-        toggleMicButton_->setText(tr("Start capture"));
-        micLevelBar_->setValue(0);
+        settingsDialog_->toggleMicButton()->setText(tr("Start capture"));
+        settingsDialog_->micLevelBar()->setValue(0);
     } else {
-        micStatusLabel_->clear();
-        const QAudioDevice device = inputCombo_->currentData().value<QAudioDevice>();
+        settingsDialog_->micStatusLabel()->clear();
+        const QAudioDevice device = settingsDialog_->inputCombo()->currentData().value<QAudioDevice>();
         audioInput_.start(device);
-        toggleMicButton_->setText(tr("Stop capture"));
+        settingsDialog_->toggleMicButton()->setText(tr("Stop capture"));
     }
 }
 
 void MainWindow::onToggleCameraClicked() {
     if (camera_.isActive()) {
         camera_.stop();
-        toggleCameraButton_->setText(tr("Start camera"));
+        settingsDialog_->toggleCameraButton()->setText(tr("Start camera"));
         return;
     }
 
-    if (cameraCombo_->currentIndex() < 0) {
-        cameraStatusLabel_->setText(tr("No camera available"));
+    if (settingsDialog_->cameraCombo()->currentIndex() < 0) {
+        settingsDialog_->cameraStatusLabel()->setText(tr("No camera available"));
         return;
     }
 
-    cameraStatusLabel_->clear();
-    const QCameraDevice device = cameraCombo_->currentData().value<QCameraDevice>();
+    settingsDialog_->cameraStatusLabel()->clear();
+    const QCameraDevice device = settingsDialog_->cameraCombo()->currentData().value<QCameraDevice>();
     camera_.setDevice(device);
     camera_.start();
-    toggleCameraButton_->setText(tr("Stop camera"));
+    settingsDialog_->toggleCameraButton()->setText(tr("Stop camera"));
 }
 
 void MainWindow::onToggleScreenCaptureClicked() {
     if (screenCapture_.isActive()) {
         screenCapture_.stop();
-        toggleScreenCaptureButton_->setText(tr("Start screen capture"));
+        settingsDialog_->toggleScreenCaptureButton()->setText(tr("Start screen capture"));
         return;
     }
 
-    if (const int index = screenCombo_->currentIndex(); index >= 0 && index < screens_.size()) {
-        screenStatusLabel_->clear();
+    if (const int index = settingsDialog_->screenCombo()->currentIndex(); index >= 0 && index < screens_.size()) {
+        settingsDialog_->screenStatusLabel()->clear();
         screenCapture_.setScreen(screens_[index]);
         screenCapture_.start();
-        toggleScreenCaptureButton_->setText(tr("Stop screen capture"));
+        settingsDialog_->toggleScreenCaptureButton()->setText(tr("Stop screen capture"));
     } else {
-        screenStatusLabel_->setText(tr("No screen available"));
+        settingsDialog_->screenStatusLabel()->setText(tr("No screen available"));
     }
 }
 
 void MainWindow::onRequestTokenClicked() {
-    authStatusLabel_->setText(tr("Requesting token..."));
-    authClient_.requestToken(loginEdit_->text(), passwordEdit_->text());
+    accountMenu_->statusLabel()->setText(tr("Requesting token..."));
+    authClient_.requestToken(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
 }
 
 void MainWindow::onConnectToChannelClicked() {
     if (lastToken_.isEmpty()) {
-        chatLog_->appendPlainText(tr("-- get a token first (Authorization section) --"));
+        chatPanel_->chatLog()->appendPlainText(tr("-- get a token first (Account menu, top right) --"));
         return;
     }
-    if (const int index = channelCombo_->currentIndex(); index >= 0) {
-        chatClient_.connectToChannel(lastToken_, channelCombo_->currentData().toLongLong());
+    if (const int index = chatPanel_->channelCombo()->currentIndex(); index >= 0) {
+        chatClient_.connectToChannel(lastToken_, chatPanel_->channelCombo()->currentData().toLongLong());
     } else {
-        chatLog_->appendPlainText(tr("-- refresh and pick a channel first --"));
+        chatPanel_->chatLog()->appendPlainText(tr("-- refresh and pick a channel first --"));
     }
 }
 
 void MainWindow::onSendChatMessageClicked() {
-    chatClient_.sendMessage(chatMessageEdit_->text());
-    chatMessageEdit_->clear();
+    chatClient_.sendMessage(chatPanel_->messageEdit()->text());
+    chatPanel_->messageEdit()->clear();
 }
 
 void MainWindow::onCreateCommunityClicked() {
-    if (lastToken_.isEmpty() || communityNameEdit_->text().isEmpty()) {
+    if (lastToken_.isEmpty() || communitiesPanel_->nameEdit()->text().isEmpty()) {
         return;
     }
-    chatRestClient_.createCommunity(lastToken_, communityNameEdit_->text());
-    communityNameEdit_->clear();
+    chatRestClient_.createCommunity(lastToken_, communitiesPanel_->nameEdit()->text());
+    communitiesPanel_->nameEdit()->clear();
 }
 
 void MainWindow::onRefreshCommunitiesClicked() {
     if (lastToken_.isEmpty()) {
-        chatLog_->appendPlainText(tr("-- get a token first (Authorization section) --"));
+        chatPanel_->chatLog()->appendPlainText(tr("-- get a token first (Account menu, top right) --"));
         return;
     }
     chatRestClient_.listCommunities(lastToken_);
 }
 
 void MainWindow::onJoinCommunityClicked() {
-    if (lastToken_.isEmpty() || communityCombo_->currentIndex() < 0) {
+    if (lastToken_.isEmpty() || communitiesPanel_->communityCombo()->currentIndex() < 0) {
         return;
     }
-    chatRestClient_.joinCommunity(lastToken_, communityCombo_->currentData().toLongLong());
+    chatRestClient_.joinCommunity(lastToken_, communitiesPanel_->communityCombo()->currentData().toLongLong());
 }
 
 void MainWindow::onCreateChannelClicked() {
-    if (lastToken_.isEmpty() || communityCombo_->currentIndex() < 0 || channelNameEdit_->text().isEmpty()) {
+    if (lastToken_.isEmpty() || communitiesPanel_->communityCombo()->currentIndex() < 0 ||
+        chatPanel_->channelNameEdit()->text().isEmpty()) {
         return;
     }
-    chatRestClient_.createChannel(lastToken_, communityCombo_->currentData().toLongLong(), channelNameEdit_->text());
-    channelNameEdit_->clear();
+    chatRestClient_.createChannel(lastToken_, communitiesPanel_->communityCombo()->currentData().toLongLong(),
+                                   chatPanel_->channelNameEdit()->text());
+    chatPanel_->channelNameEdit()->clear();
 }
 
 void MainWindow::onRefreshChannelsClicked() {
-    if (lastToken_.isEmpty() || communityCombo_->currentIndex() < 0) {
-        chatLog_->appendPlainText(tr("-- pick a community first --"));
+    if (lastToken_.isEmpty() || communitiesPanel_->communityCombo()->currentIndex() < 0) {
+        chatPanel_->chatLog()->appendPlainText(tr("-- pick a community first --"));
         return;
     }
-    chatRestClient_.listChannels(lastToken_, communityCombo_->currentData().toLongLong());
+    chatRestClient_.listChannels(lastToken_, communitiesPanel_->communityCombo()->currentData().toLongLong());
 }
 
 }  // namespace devicehub

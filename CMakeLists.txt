@@ -61,6 +61,16 @@ add_library(devicehub_core
     src/chat/ChatClient.cpp
     src/chat/ChatRestClient.h
     src/chat/ChatRestClient.cpp
+    src/ui/CommunitiesPanel.h
+    src/ui/CommunitiesPanel.cpp
+    src/ui/ChatPanel.h
+    src/ui/ChatPanel.cpp
+    src/ui/AccountMenu.h
+    src/ui/AccountMenu.cpp
+    src/ui/SettingsDialog.h
+    src/ui/SettingsDialog.cpp
+    src/ui/FooterBar.h
+    src/ui/FooterBar.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
 )

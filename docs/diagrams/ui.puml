@@ -18,6 +18,56 @@ class MainWindow {
   -onRefreshChannelsClicked()
 }
 
+class CommunitiesPanel {
+  +nameEdit() : QLineEdit*
+  +createButton() : QPushButton*
+  +communityCombo() : QComboBox*
+  +refreshButton() : QPushButton*
+  +joinButton() : QPushButton*
+}
+
+class ChatPanel {
+  +channelNameEdit() : QLineEdit*
+  +createChannelButton() : QPushButton*
+  +channelCombo() : QComboBox*
+  +refreshChannelsButton() : QPushButton*
+  +connectButton() : QPushButton*
+  +chatLog() : QPlainTextEdit*
+  +messageEdit() : QLineEdit*
+  +sendButton() : QPushButton*
+}
+
+class AccountMenu {
+  +loginEdit() : QLineEdit*
+  +passwordEdit() : QLineEdit*
+  +requestTokenButton() : QPushButton*
+  +statusLabel() : QLabel*
+  +toggleButton() : QPushButton*
+  -togglePopup()
+}
+
+class SettingsDialog {
+  +outputCombo() : QComboBox*
+  +playToneButton() : QPushButton*
+  +inputCombo() : QComboBox*
+  +toggleMicButton() : QPushButton*
+  +micLevelBar() : QProgressBar*
+  +micStatusLabel() : QLabel*
+  +cameraCombo() : QComboBox*
+  +toggleCameraButton() : QPushButton*
+  +videoPreview() : QVideoWidget*
+  +cameraStatusLabel() : QLabel*
+  +screenCombo() : QComboBox*
+  +toggleScreenCaptureButton() : QPushButton*
+  +screenPreview() : QVideoWidget*
+  +screenStatusLabel() : QLabel*
+}
+
+class FooterBar {
+  +setProfileText(text: QString)
+  +settingsButton() : QPushButton*
+}
+
 package "src/devices" {
   class DeviceEnumerator
   class AudioOutputDevice
@@ -35,6 +85,12 @@ package "src/chat" {
   class ChatRestClient
 }
 
+MainWindow *-- CommunitiesPanel : owns (top-left sidebar)
+MainWindow *-- ChatPanel : owns (bottom-left sidebar)
+MainWindow *-- AccountMenu : owns (top-right)
+MainWindow *-- SettingsDialog : owns (opened from FooterBar)
+MainWindow *-- FooterBar : owns (bottom)
+
 MainWindow *-- DeviceEnumerator : owns
 MainWindow *-- AudioOutputDevice : owns
 MainWindow *-- AudioInputDevice : owns
@@ -50,11 +106,21 @@ MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
+MainWindow ..> FooterBar : settingsButton().clicked() >
+FooterBar ..> SettingsDialog : show()/raise() <
 
 note right of MainWindow
   Только Qt Widgets + сигналы/слоты
   от devices/. Не обращается к
   low-level Qt Multimedia API напрямую.
+
+  Панели (CommunitiesPanel/ChatPanel/
+  AccountMenu/SettingsDialog/FooterBar)
+  — чистое представление: строят свои
+  контролы и отдают на них указатели.
+  MainWindow остаётся единственным
+  владельцем бизнес-логики и всех
+  устройств/клиентов, как и раньше.
 end note
 
 @enduml

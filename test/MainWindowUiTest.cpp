@@ -26,12 +26,30 @@ TEST(MainWindowUiTest, ConstructsWithoutCrashing) {
     EXPECT_EQ(window.windowTitle(), QStringLiteral("DeviceHub"));
 }
 
-TEST(MainWindowUiTest, SectionsAreSeparateTabs) {
+TEST(MainWindowUiTest, DeviceSettingsAreSeparateTabsInDialog) {
     const MainWindow window;
 
-    auto* tabs = window.findChild<QTabWidget*>("mainTabs");
+    auto* tabs = window.findChild<QTabWidget*>("settingsTabs");
     ASSERT_NE(tabs, nullptr);
-    EXPECT_EQ(tabs->count(), 6);
+    EXPECT_EQ(tabs->count(), 4);
+}
+
+TEST(MainWindowUiTest, SidebarFooterAndAccountMenuExist) {
+    const MainWindow window;
+
+    auto* sidebar = window.findChild<QWidget*>("sidebar");
+    auto* mainContentPlaceholder = window.findChild<QLabel*>("mainContentPlaceholder");
+    auto* footerProfileLabel = window.findChild<QLabel*>("footerProfileLabel");
+    auto* footerSettingsButton = window.findChild<QPushButton*>("footerSettingsButton");
+    auto* accountMenuButton = window.findChild<QPushButton*>("accountMenuButton");
+
+    ASSERT_NE(sidebar, nullptr);
+    ASSERT_NE(mainContentPlaceholder, nullptr);
+    ASSERT_NE(footerProfileLabel, nullptr);
+    ASSERT_NE(footerSettingsButton, nullptr);
+    ASSERT_NE(accountMenuButton, nullptr);
+
+    EXPECT_EQ(footerProfileLabel->text(), QStringLiteral("Not signed in"));
 }
 
 TEST(MainWindowUiTest, DeviceCombosMatchEnumerator) {
