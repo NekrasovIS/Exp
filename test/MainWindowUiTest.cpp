@@ -160,8 +160,8 @@ TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
 
     EXPECT_EQ(communityList->count(), 0);
     EXPECT_EQ(channelList->count(), 0);
-    EXPECT_EQ(createCommunityButton->text(), QStringLiteral("+"));
-    EXPECT_EQ(createChannelButton->text(), QStringLiteral("+"));
+    EXPECT_FALSE(createCommunityButton->icon().isNull());
+    EXPECT_FALSE(createChannelButton->icon().isNull());
 }
 
 }  // namespace

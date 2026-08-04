@@ -1,5 +1,6 @@
 #include "ui/ChannelsPanel.h"
 
+#include <QColor>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -9,13 +10,18 @@
 #include <QMessageBox>
 #include <QPoint>
 #include <QPushButton>
+#include <QSize>
 #include <QVBoxLayout>
+
+#include "ui/IconFactory.h"
 
 namespace devicehub {
 
 namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
+constexpr int kIconButtonSize = 28;
+constexpr int kIconSize = 14;
 }  // namespace
 
 ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
@@ -28,16 +34,22 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     auto* title = new QLabel(tr("Channels"), this);
     title->setProperty("sectionTitle", true);
 
-    refreshButton_ = new QPushButton(tr("⟳"), this);
+    refreshButton_ = new QPushButton(this);
     refreshButton_->setObjectName(QStringLiteral("refreshChannelsButton"));
     refreshButton_->setToolTip(tr("Refresh channels"));
-    refreshButton_->setFixedWidth(28);
+    refreshButton_->setIcon(ui_icons::refreshIcon());
+    refreshButton_->setIconSize(QSize(kIconSize, kIconSize));
+    refreshButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    refreshButton_->setProperty("iconOnly", true);
 
-    addButton_ = new QPushButton(tr("+"), this);
+    addButton_ = new QPushButton(this);
     addButton_->setObjectName(QStringLiteral("createChannelButton"));
     addButton_->setToolTip(tr("Create channel"));
     addButton_->setProperty("accent", true);
-    addButton_->setFixedWidth(28);
+    addButton_->setIcon(ui_icons::plusIcon(QColor("#ffffff")));
+    addButton_->setIconSize(QSize(kIconSize, kIconSize));
+    addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    addButton_->setProperty("iconOnly", true);
 
     header->addWidget(title);
     header->addStretch();
