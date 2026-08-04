@@ -137,6 +137,8 @@ void MainWindow::buildUi() {
     rootLayout->setSpacing(0);
 
     auto* topBar = new QWidget(central);
+    topBar->setObjectName(QStringLiteral("topBar"));
+    topBar->setAttribute(Qt::WA_StyledBackground, true);
     auto* topBarLayout = new QHBoxLayout(topBar);
     accountMenu_ = new AccountMenu(topBar);
     topBarLayout->addStretch();
@@ -144,6 +146,7 @@ void MainWindow::buildUi() {
 
     auto* sidebar = new QWidget(central);
     sidebar->setObjectName(QStringLiteral("sidebar"));
+    sidebar->setAttribute(Qt::WA_StyledBackground, true);
     sidebar->setFixedWidth(280);
     auto* sidebarLayout = new QVBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);

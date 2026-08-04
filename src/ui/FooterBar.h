@@ -24,6 +24,7 @@ public:
     [[nodiscard]] QPushButton* settingsButton() const { return settingsButton_; }
 
 private:
+    QLabel* avatarLabel_ = nullptr;
     QLabel* profileLabel_ = nullptr;
     QPushButton* settingsButton_ = nullptr;
 };

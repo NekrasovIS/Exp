@@ -71,6 +71,8 @@ add_library(devicehub_core
     src/ui/SettingsDialog.cpp
     src/ui/FooterBar.h
     src/ui/FooterBar.cpp
+    src/ui/Theme.h
+    src/ui/Theme.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
 )

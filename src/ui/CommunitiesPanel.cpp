@@ -1,7 +1,6 @@
 #include "ui/CommunitiesPanel.h"
 
 #include <QComboBox>
-#include <QFont>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -10,13 +9,13 @@
 namespace devicehub {
 
 CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
+    setAttribute(Qt::WA_StyledBackground, true);
+
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
 
     auto* title = new QLabel(tr("Communities"), this);
-    QFont titleFont = title->font();
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setProperty("sectionTitle", true);
 
     nameEdit_ = new QLineEdit(this);
     nameEdit_->setObjectName(QStringLiteral("communityNameEdit"));
@@ -24,6 +23,7 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
 
     createButton_ = new QPushButton(tr("Create community"), this);
     createButton_->setObjectName(QStringLiteral("createCommunityButton"));
+    createButton_->setProperty("accent", true);
 
     communityCombo_ = new QComboBox(this);
     communityCombo_->setObjectName(QStringLiteral("communityCombo"));
@@ -33,6 +33,7 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
 
     joinButton_ = new QPushButton(tr("Join selected community"), this);
     joinButton_->setObjectName(QStringLiteral("joinCommunityButton"));
+    joinButton_->setProperty("accent", true);
 
     layout->addWidget(title);
     layout->addWidget(nameEdit_);
