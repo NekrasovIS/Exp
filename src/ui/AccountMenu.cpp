@@ -10,6 +10,8 @@
 namespace devicehub {
 
 AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
+    setAttribute(Qt::WA_StyledBackground, true);
+
     auto* outerLayout = new QHBoxLayout(this);
     outerLayout->setContentsMargins(0, 0, 0, 0);
 
@@ -33,6 +35,7 @@ AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
 
     requestTokenButton_ = new QPushButton(tr("Get token & verify"), popup_);
     requestTokenButton_->setObjectName(QStringLiteral("requestTokenButton"));
+    requestTokenButton_->setProperty("accent", true);
 
     statusLabel_ = new QLabel(tr("No token requested yet"), popup_);
     statusLabel_->setObjectName(QStringLiteral("authStatusLabel"));

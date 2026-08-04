@@ -1,7 +1,6 @@
 #include "ui/ChatPanel.h"
 
 #include <QComboBox>
-#include <QFont>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -11,13 +10,13 @@
 namespace devicehub {
 
 ChatPanel::ChatPanel(QWidget* parent) : QWidget(parent) {
+    setAttribute(Qt::WA_StyledBackground, true);
+
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
 
     auto* title = new QLabel(tr("Chat"), this);
-    QFont titleFont = title->font();
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setProperty("sectionTitle", true);
 
     channelNameEdit_ = new QLineEdit(this);
     channelNameEdit_->setObjectName(QStringLiteral("channelNameEdit"));
@@ -25,6 +24,7 @@ ChatPanel::ChatPanel(QWidget* parent) : QWidget(parent) {
 
     createChannelButton_ = new QPushButton(tr("Create channel in selected community"), this);
     createChannelButton_->setObjectName(QStringLiteral("createChannelButton"));
+    createChannelButton_->setProperty("accent", true);
 
     channelCombo_ = new QComboBox(this);
     channelCombo_->setObjectName(QStringLiteral("channelCombo"));
@@ -34,6 +34,7 @@ ChatPanel::ChatPanel(QWidget* parent) : QWidget(parent) {
 
     connectButton_ = new QPushButton(tr("Connect to selected channel"), this);
     connectButton_->setObjectName(QStringLiteral("connectToChannelButton"));
+    connectButton_->setProperty("accent", true);
 
     chatLog_ = new QPlainTextEdit(this);
     chatLog_->setObjectName(QStringLiteral("chatLog"));
@@ -45,6 +46,7 @@ ChatPanel::ChatPanel(QWidget* parent) : QWidget(parent) {
 
     sendButton_ = new QPushButton(tr("Send"), this);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
+    sendButton_->setProperty("accent", true);
 
     layout->addWidget(title);
     layout->addWidget(channelNameEdit_);

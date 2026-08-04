@@ -8,7 +8,8 @@ Qt Multimedia; развивается в сторону клиент-серве�
 подключением по web-ссылке (см. [CLAUDE.md](CLAUDE.md)). Раскладка
 UI — сайдбар слева (сообщества сверху, чат снизу), кнопка аккаунта в
 правом верхнем углу, футер с профилем и настройками устройств
-(Audio Output, Microphone, Camera, Screen Capture) слева.
+(Audio Output, Microphone, Camera, Screen Capture) слева. Тёмная тема
+в стиле Discord (`src/ui/Theme.h`).
 
 ## Возможности
 
