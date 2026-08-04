@@ -11,6 +11,7 @@
       "features": ["widgets"]
     },
     "qtwebsockets",
-    "gtest"
+    "gtest",
+    "webrtc"
   ]
 }
