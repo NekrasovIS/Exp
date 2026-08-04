@@ -1,6 +1,8 @@
 #include "devices/CameraDevice.h"
 
 #include <QCamera>
+#include <QCoreApplication>
+#include <QPermissions>
 
 namespace devicehub {
 
@@ -23,9 +25,34 @@ void CameraDevice::setDevice(const QCameraDevice& device) {
 }
 
 void CameraDevice::start() {
-    if (camera_) {
-        camera_->start();
+    if (!camera_) {
+        return;
     }
+
+    // Qt only checks camera permission status on its own — it never shows
+    // the macOS prompt unless the app explicitly requests it. Without this,
+    // an Undetermined status just leaves the camera refusing to start with
+    // no error and no prompt ever appearing.
+    switch (qApp->checkPermission(QCameraPermission{})) {
+        case Qt::PermissionStatus::Undetermined:
+            qApp->requestPermission(QCameraPermission{}, this, [this](const QPermission& permission) {
+                if (permission.status() == Qt::PermissionStatus::Granted) {
+                    if (camera_) {
+                        camera_->start();
+                    }
+                } else {
+                    emit errorOccurred(tr("Camera access denied"));
+                }
+            });
+            return;
+        case Qt::PermissionStatus::Denied:
+            emit errorOccurred(tr("Camera access denied — enable it in System Settings"));
+            return;
+        case Qt::PermissionStatus::Granted:
+            break;
+    }
+
+    camera_->start();
 }
 
 void CameraDevice::stop() {

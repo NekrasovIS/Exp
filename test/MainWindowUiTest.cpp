@@ -90,11 +90,14 @@ TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
 TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {
     const MainWindow window;
 
+    auto* micStatusLabel = window.findChild<QLabel*>("micStatusLabel");
     auto* cameraStatusLabel = window.findChild<QLabel*>("cameraStatusLabel");
     auto* screenStatusLabel = window.findChild<QLabel*>("screenStatusLabel");
 
+    ASSERT_NE(micStatusLabel, nullptr);
     ASSERT_NE(cameraStatusLabel, nullptr);
     ASSERT_NE(screenStatusLabel, nullptr);
+    EXPECT_TRUE(micStatusLabel->text().isEmpty());
     EXPECT_TRUE(cameraStatusLabel->text().isEmpty());
     EXPECT_TRUE(screenStatusLabel->text().isEmpty());
 }

@@ -79,6 +79,7 @@ private:
     QProgressBar* micLevelBar_ = nullptr;
     QVideoWidget* videoPreview_ = nullptr;
     QVideoWidget* screenPreview_ = nullptr;
+    QLabel* micStatusLabel_ = nullptr;
     QLabel* cameraStatusLabel_ = nullptr;
     QLabel* screenStatusLabel_ = nullptr;
     QLineEdit* loginEdit_ = nullptr;
