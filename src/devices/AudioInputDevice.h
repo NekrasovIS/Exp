@@ -36,10 +36,14 @@ signals:
     /// Emitted as new audio arrives, level normalized to [0, 1].
     void levelChanged(float level);
 
+    /// Emitted when capture can't start (including permission denial).
+    void errorOccurred(const QString& message);
+
 private slots:
     void readAvailableData();
 
 private:
+    void startCapture(const QAudioDevice& device);
     [[nodiscard]] static float computeLevel(const QByteArray& pcmData, const QAudioFormat& format);
 
     std::unique_ptr<QAudioSource> source_;

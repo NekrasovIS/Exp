@@ -1,7 +1,9 @@
 #include "devices/AudioInputDevice.h"
 
 #include <QAudioSource>
+#include <QCoreApplication>
 #include <QIODevice>
+#include <QPermissions>
 #include <limits>
 
 #include <algorithm>
@@ -17,6 +19,31 @@ AudioInputDevice::~AudioInputDevice() = default;
 void AudioInputDevice::start(const QAudioDevice& device) {
     stop();
 
+    // Qt only checks microphone permission status on its own — it never
+    // shows the macOS prompt unless the app explicitly requests it. Without
+    // this, an Undetermined status just leaves capture silently not
+    // starting, with no error and no prompt ever appearing.
+    switch (qApp->checkPermission(QMicrophonePermission{})) {
+        case Qt::PermissionStatus::Undetermined:
+            qApp->requestPermission(QMicrophonePermission{}, this, [this, device](const QPermission& permission) {
+                if (permission.status() == Qt::PermissionStatus::Granted) {
+                    startCapture(device);
+                } else {
+                    emit errorOccurred(tr("Microphone access denied"));
+                }
+            });
+            return;
+        case Qt::PermissionStatus::Denied:
+            emit errorOccurred(tr("Microphone access denied — enable it in System Settings"));
+            return;
+        case Qt::PermissionStatus::Granted:
+            break;
+    }
+
+    startCapture(device);
+}
+
+void AudioInputDevice::startCapture(const QAudioDevice& device) {
     format_ = device.preferredFormat();
     format_.setSampleFormat(QAudioFormat::Int16);
 

@@ -4,15 +4,36 @@ title Запуск захвата с микрофона (AudioInputDevice::start
 actor User
 participant MainWindow
 participant AudioInputDevice
+participant "qApp\n(QCoreApplication)" as App
 participant "QAudioSource" as Source
 participant "QIODevice (stream)" as Stream
 
 User -> MainWindow : click "Start capture"
 MainWindow -> AudioInputDevice : start(device)
-AudioInputDevice -> Source : new QAudioSource(device, format)
-AudioInputDevice -> Source : start()
-Source --> AudioInputDevice : stream (QIODevice*)
-AudioInputDevice -> Stream : connect(readyRead -> readAvailableData)
+AudioInputDevice -> App : checkPermission(QMicrophonePermission)
+
+alt Undetermined
+  AudioInputDevice -> App : requestPermission(QMicrophonePermission, callback)
+  App -> User : show macOS permission dialog
+  User --> App : Allow / Don't Allow
+  App --> AudioInputDevice : callback(permission)
+  alt Granted
+    AudioInputDevice -> AudioInputDevice : startCapture(device)
+  else Denied
+    AudioInputDevice -> MainWindow : errorOccurred("Microphone access denied")
+  end
+else Denied
+  AudioInputDevice -> MainWindow : errorOccurred("... enable it in System Settings")
+else Granted
+  AudioInputDevice -> AudioInputDevice : startCapture(device)
+end
+
+group startCapture(device)
+  AudioInputDevice -> Source : new QAudioSource(device, format)
+  AudioInputDevice -> Source : start()
+  Source --> AudioInputDevice : stream (QIODevice*)
+  AudioInputDevice -> Stream : connect(readyRead -> readAvailableData)
+end
 
 loop while capturing
   Stream -> AudioInputDevice : readyRead()

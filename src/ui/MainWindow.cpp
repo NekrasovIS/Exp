@@ -38,6 +38,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&audioInput_, &AudioInputDevice::levelChanged, micLevelBar_, [this](float level) {
         micLevelBar_->setValue(static_cast<int>(level * 100.0f));
     });
+    connect(&audioInput_, &AudioInputDevice::errorOccurred, this,
+            [this](const QString& message) { micStatusLabel_->setText(tr("Error: %1").arg(message)); });
     connect(&camera_, &CameraDevice::errorOccurred, this,
             [this](const QString& message) { cameraStatusLabel_->setText(tr("Error: %1").arg(message)); });
     connect(&screenCapture_, &ScreenCaptureDevice::errorOccurred, this,
@@ -130,9 +132,12 @@ void MainWindow::buildUi() {
     toggleMicButton_->setObjectName(QStringLiteral("toggleMicButton"));
     micLevelBar_ = new QProgressBar(inputGroup);
     micLevelBar_->setRange(0, 100);
+    micStatusLabel_ = new QLabel(inputGroup);
+    micStatusLabel_->setObjectName(QStringLiteral("micStatusLabel"));
     inputLayout->addWidget(inputCombo_);
     inputLayout->addWidget(toggleMicButton_);
     inputLayout->addWidget(micLevelBar_);
+    inputLayout->addWidget(micStatusLabel_);
 
     auto* cameraGroup = new QGroupBox(tr("Camera"));
     auto* cameraLayout = new QVBoxLayout(cameraGroup);
@@ -270,6 +275,7 @@ void MainWindow::onToggleMicClicked() {
         toggleMicButton_->setText(tr("Start capture"));
         micLevelBar_->setValue(0);
     } else {
+        micStatusLabel_->clear();
         const QAudioDevice device = inputCombo_->currentData().value<QAudioDevice>();
         audioInput_.start(device);
         toggleMicButton_->setText(tr("Stop capture"));

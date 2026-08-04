@@ -42,9 +42,17 @@ class AudioInputDevice {
   +isCapturing() : bool
   .. signals ..
   +levelChanged(level: float)
+  +errorOccurred(message: QString)
+  -startCapture(device: QAudioDevice)
   -readAvailableData()
   -{static} computeLevel(pcmData: QByteArray, format: QAudioFormat) : float
 }
+note right of AudioInputDevice
+  start() calls QCoreApplication::checkPermission()/
+  requestPermission() (QMicrophonePermission) before
+  startCapture() — Qt never shows the macOS prompt on
+  its own for an Undetermined status.
+end note
 AudioInputDevice --> "0..1" QAudioSource : owns (unique_ptr)
 AudioInputDevice ..> QAudioDevice : uses
 
@@ -60,6 +68,12 @@ class CameraDevice {
 CameraDevice --> "0..1" QCamera : owns (unique_ptr)
 CameraDevice *-- QMediaCaptureSession : owns
 CameraDevice ..> QCameraDevice : uses
+note right of CameraDevice
+  start() calls QCoreApplication::checkPermission()/
+  requestPermission() (QCameraPermission) before
+  camera_->start() — same requestPermission() gap as
+  AudioInputDevice.
+end note
 
 class ScreenCaptureDevice {
   +setScreen(screen: QScreen*)
