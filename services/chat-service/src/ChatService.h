@@ -15,11 +15,18 @@ class ChatService {
 public:
     explicit ChatService(ChatRepository& repository);
 
-    [[nodiscard]] Community createCommunity(const std::string& name);
+    [[nodiscard]] Community createCommunity(const std::string& name, const std::string& ownerLogin);
     [[nodiscard]] std::vector<Community> listCommunities();
+    [[nodiscard]] MutationResult renameCommunity(std::int64_t id, const std::string& newName,
+                                                  const std::string& requesterLogin);
+    [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);
 
-    [[nodiscard]] std::optional<std::int64_t> createChannel(std::int64_t communityId, const std::string& name);
+    [[nodiscard]] std::optional<std::int64_t> createChannel(std::int64_t communityId, const std::string& name,
+                                                             const std::string& ownerLogin);
     [[nodiscard]] std::vector<Channel> listChannels(std::int64_t communityId);
+    [[nodiscard]] MutationResult renameChannel(std::int64_t id, const std::string& newName,
+                                                const std::string& requesterLogin);
+    [[nodiscard]] MutationResult deleteChannel(std::int64_t id, const std::string& requesterLogin);
 
     [[nodiscard]] bool joinCommunity(std::int64_t communityId, const std::string& login);
 

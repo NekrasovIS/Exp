@@ -12,11 +12,14 @@ constexpr std::string_view kBearerPrefix = "Bearer ";
 constexpr int kDefaultMessageLimit = 50;
 
 nlohmann::json toJson(const Community& community) {
-    return nlohmann::json{{"id", community.id}, {"name", community.name}};
+    return nlohmann::json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
 }
 
 nlohmann::json toJson(const Channel& channel) {
-    return nlohmann::json{{"id", channel.id}, {"community_id", channel.communityId}, {"name", channel.name}};
+    return nlohmann::json{{"id", channel.id},
+                           {"community_id", channel.communityId},
+                           {"name", channel.name},
+                           {"owner", channel.ownerLogin}};
 }
 
 nlohmann::json toJson(const Message& message) {
@@ -45,6 +48,12 @@ void HttpServer::registerRoutes() {
     server_.Get("/communities", [this](const httplib::Request& request, httplib::Response& response) {
         handleListCommunities(request, response);
     });
+    server_.Patch(R"(/communities/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleRenameCommunity(request, response);
+    });
+    server_.Delete(R"(/communities/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleDeleteCommunity(request, response);
+    });
     server_.Post(R"(/communities/(\d+)/join)",
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleJoinCommunity(request, response);
@@ -57,6 +66,12 @@ void HttpServer::registerRoutes() {
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListChannels(request, response);
                  });
+    server_.Patch(R"(/channels/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleRenameChannel(request, response);
+    });
+    server_.Delete(R"(/channels/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleDeleteChannel(request, response);
+    });
     server_.Get(R"(/channels/(\d+)/messages)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMessages(request, response);
@@ -64,7 +79,8 @@ void HttpServer::registerRoutes() {
 }
 
 void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
@@ -76,7 +92,7 @@ void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib:
         return;
     }
 
-    const Community community = chatService_.createCommunity(body["name"].get<std::string>());
+    const Community community = chatService_.createCommunity(body["name"].get<std::string>(), *login);
     response.status = 201;
     response.set_content(toJson(community).dump(), kJsonContentType);
 }
@@ -92,6 +108,56 @@ void HttpServer::handleListCommunities(const httplib::Request& request, httplib:
         communities.push_back(toJson(community));
     }
     response.set_content(communities.dump(), kJsonContentType);
+}
+
+void HttpServer::writeMutationResult(MutationResult result, httplib::Response& response) {
+    switch (result) {
+        case MutationResult::kSuccess:
+            response.status = 200;
+            response.set_content(nlohmann::json{{"ok", true}}.dump(), kJsonContentType);
+            return;
+        case MutationResult::kNotFound:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no such community or channel"}}.dump(), kJsonContentType);
+            return;
+        case MutationResult::kForbidden:
+            response.status = 403;
+            response.set_content(nlohmann::json{{"error", "only the owner can do that"}}.dump(), kJsonContentType);
+            return;
+        case MutationResult::kConflict:
+            response.status = 409;
+            response.set_content(nlohmann::json{{"error", "name already taken"}}.dump(), kJsonContentType);
+            return;
+    }
+}
+
+void HttpServer::handleRenameCommunity(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'name' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.renameCommunity(communityId, body["name"].get<std::string>(), *login), response);
+}
+
+void HttpServer::handleDeleteCommunity(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.deleteCommunity(communityId, *login), response);
 }
 
 void HttpServer::handleJoinCommunity(const httplib::Request& request, httplib::Response& response) {
@@ -111,7 +177,8 @@ void HttpServer::handleJoinCommunity(const httplib::Request& request, httplib::R
 }
 
 void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
@@ -124,7 +191,8 @@ void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::R
     }
 
     const auto communityId = std::stoll(request.matches[1].str());
-    const std::optional<std::int64_t> channelId = chatService_.createChannel(communityId, body["name"].get<std::string>());
+    const std::optional<std::int64_t> channelId =
+        chatService_.createChannel(communityId, body["name"].get<std::string>(), *login);
     if (!channelId.has_value()) {
         response.status = 404;
         response.set_content(nlohmann::json{{"error", "no such community, or channel name already taken"}}.dump(),
@@ -148,6 +216,35 @@ void HttpServer::handleListChannels(const httplib::Request& request, httplib::Re
         channels.push_back(toJson(channel));
     }
     response.set_content(channels.dump(), kJsonContentType);
+}
+
+void HttpServer::handleRenameChannel(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'name' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.renameChannel(channelId, body["name"].get<std::string>(), *login), response);
+}
+
+void HttpServer::handleDeleteChannel(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.deleteChannel(channelId, *login), response);
 }
 
 void HttpServer::handleListMessages(const httplib::Request& request, httplib::Response& response) {

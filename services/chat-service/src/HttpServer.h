@@ -35,10 +35,15 @@ private:
 
     void handleCreateCommunity(const httplib::Request& request, httplib::Response& response);
     void handleListCommunities(const httplib::Request& request, httplib::Response& response);
+    void handleRenameCommunity(const httplib::Request& request, httplib::Response& response);
+    void handleDeleteCommunity(const httplib::Request& request, httplib::Response& response);
     void handleJoinCommunity(const httplib::Request& request, httplib::Response& response);
     void handleCreateChannel(const httplib::Request& request, httplib::Response& response);
     void handleListChannels(const httplib::Request& request, httplib::Response& response);
+    void handleRenameChannel(const httplib::Request& request, httplib::Response& response);
+    void handleDeleteChannel(const httplib::Request& request, httplib::Response& response);
     void handleListMessages(const httplib::Request& request, httplib::Response& response);
+    void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;

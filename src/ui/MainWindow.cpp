@@ -8,14 +8,17 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QStatusBar>
 #include <QVBoxLayout>
 #include <QVideoWidget>
 #include <QWidget>
 
+#include <algorithm>
 #include <utility>
 
 #include "ui/AccountMenu.h"
-#include "ui/ChatPanel.h"
+#include "ui/ChannelsPanel.h"
+#include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
 #include "ui/FooterBar.h"
 #include "ui/SettingsDialog.h"
@@ -26,6 +29,7 @@ namespace {
 constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
 constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
+constexpr int kStatusMessageTimeoutMs = 4000;
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -62,7 +66,13 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&authClient_, &AuthClient::tokenVerified, this, [this](bool valid, const QString& subject) {
         accountMenu_->statusLabel()->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
+        currentUserLogin_ = valid ? subject : QString();
         footerBar_->setProfileText(valid ? subject : tr("Not signed in"));
+        communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
+        channelsPanel_->setCurrentUserLogin(currentUserLogin_);
+        if (valid) {
+            refreshCommunities();
+        }
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
         accountMenu_->statusLabel()->setText(tr("Error: %1").arg(message));
@@ -75,62 +85,114 @@ MainWindow::MainWindow(QWidget* parent)
         // and takes the status label the rest of the way to "Verified".
     });
 
-    connect(chatPanel_->connectButton(), &QPushButton::clicked, this, &MainWindow::onConnectToChannelClicked);
-    connect(chatPanel_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
-    connect(&chatClient_, &ChatClient::subscribed, this, [this](qint64 channelId) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- subscribed to channel %1 --").arg(channelId));
-    });
+    connect(chatView_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
+    connect(&chatClient_, &ChatClient::subscribed, this,
+            [this](qint64 channelId) { chatView_->appendLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](const QString& author, const QString& body, const QString& sentAt) {
-                chatPanel_->chatLog()->appendPlainText(QStringLiteral("[%1] %2: %3").arg(sentAt, author, body));
+                chatView_->appendLine(QStringLiteral("[%1] %2: %3").arg(sentAt, author, body));
             });
-    connect(&chatClient_, &ChatClient::errorOccurred, this, [this](const QString& message) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- error: %1 --").arg(message));
+    connect(&chatClient_, &ChatClient::errorOccurred, this,
+            [this](const QString& message) { chatView_->appendLine(tr("-- error: %1 --").arg(message)); });
+
+    connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
+        if (lastToken_.isEmpty()) {
+            statusBar()->showMessage(tr("Sign in first (Account menu, top right)"), kStatusMessageTimeoutMs);
+            return;
+        }
+        chatRestClient_.createCommunity(lastToken_, name);
+    });
+    connect(communitiesPanel_, &CommunitiesPanel::renameRequested, this,
+            [this](qint64 id, const QString& newName) { chatRestClient_.renameCommunity(lastToken_, id, newName); });
+    connect(communitiesPanel_, &CommunitiesPanel::deleteRequested, this,
+            [this](qint64 id) { chatRestClient_.deleteCommunity(lastToken_, id); });
+    connect(communitiesPanel_, &CommunitiesPanel::joinRequested, this,
+            [this](qint64 id) { chatRestClient_.joinCommunity(lastToken_, id); });
+    connect(communitiesPanel_, &CommunitiesPanel::communitySelected, this, [this](qint64 id) {
+        selectedCommunityId_ = id;
+        closeChatView();
+        refreshChannelsForSelectedCommunity();
     });
 
-    connect(communitiesPanel_->createButton(), &QPushButton::clicked, this, &MainWindow::onCreateCommunityClicked);
-    connect(communitiesPanel_->refreshButton(), &QPushButton::clicked, this, &MainWindow::onRefreshCommunitiesClicked);
-    connect(communitiesPanel_->joinButton(), &QPushButton::clicked, this, &MainWindow::onJoinCommunityClicked);
-    connect(chatPanel_->createChannelButton(), &QPushButton::clicked, this, &MainWindow::onCreateChannelClicked);
-    connect(chatPanel_->refreshChannelsButton(), &QPushButton::clicked, this, &MainWindow::onRefreshChannelsClicked);
+    connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name) {
+        if (selectedCommunityId_ < 0) {
+            statusBar()->showMessage(tr("Pick a community first"), kStatusMessageTimeoutMs);
+            return;
+        }
+        chatRestClient_.createChannel(lastToken_, selectedCommunityId_, name);
+    });
+    connect(channelsPanel_, &ChannelsPanel::renameRequested, this,
+            [this](qint64 id, const QString& newName) { chatRestClient_.renameChannel(lastToken_, id, newName); });
+    connect(channelsPanel_, &ChannelsPanel::deleteRequested, this,
+            [this](qint64 id) { chatRestClient_.deleteChannel(lastToken_, id); });
+    connect(channelsPanel_, &ChannelsPanel::channelSelected, this,
+            [this](qint64 id, const QString& name) { openChannel(id, name); });
 
     connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- community '%1' created --").arg(name));
+        statusBar()->showMessage(tr("Community '%1' created").arg(name), kStatusMessageTimeoutMs);
         pendingCommunitySelection_ = id;
-        onRefreshCommunitiesClicked();
+        refreshCommunities();
     });
     connect(&chatRestClient_, &ChatRestClient::communitiesListed, this, [this](const QList<ChatItem>& communities) {
         communities_ = communities;
-        communitiesPanel_->communityCombo()->clear();
-        for (const ChatItem& community : communities_) {
-            communitiesPanel_->communityCombo()->addItem(community.name, community.id);
-        }
-        if (const int index = communitiesPanel_->communityCombo()->findData(pendingCommunitySelection_); index >= 0) {
-            communitiesPanel_->communityCombo()->setCurrentIndex(index);
+        communitiesPanel_->setCommunities(communities_);
+        if (pendingCommunitySelection_ >= 0) {
+            communitiesPanel_->selectCommunityId(pendingCommunitySelection_);
+            selectedCommunityId_ = pendingCommunitySelection_;
+            refreshChannelsForSelectedCommunity();
         }
         pendingCommunitySelection_ = -1;
     });
-    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 communityId) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- joined community %1 --").arg(communityId));
+    connect(&chatRestClient_, &ChatRestClient::communityRenamed, this, [this](qint64, const QString& newName) {
+        statusBar()->showMessage(tr("Community renamed to '%1'").arg(newName), kStatusMessageTimeoutMs);
+        refreshCommunities();
+    });
+    connect(&chatRestClient_, &ChatRestClient::communityDeleted, this, [this](qint64 id) {
+        statusBar()->showMessage(tr("Community deleted"), kStatusMessageTimeoutMs);
+        if (id == selectedCommunityId_) {
+            selectedCommunityId_ = -1;
+            channelsPanel_->setChannels({});
+            closeChatView();
+        }
+        refreshCommunities();
+    });
+    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64) {
+        statusBar()->showMessage(tr("Joined community"), kStatusMessageTimeoutMs);
     });
     connect(&chatRestClient_, &ChatRestClient::channelCreated, this, [this](qint64 id, const QString& name) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- channel '%1' created --").arg(name));
+        statusBar()->showMessage(tr("Channel '%1' created").arg(name), kStatusMessageTimeoutMs);
         pendingChannelSelection_ = id;
-        onRefreshChannelsClicked();
+        refreshChannelsForSelectedCommunity();
     });
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
         channels_ = channels;
-        chatPanel_->channelCombo()->clear();
-        for (const ChatItem& channel : channels_) {
-            chatPanel_->channelCombo()->addItem(channel.name, channel.id);
-        }
-        if (const int index = chatPanel_->channelCombo()->findData(pendingChannelSelection_); index >= 0) {
-            chatPanel_->channelCombo()->setCurrentIndex(index);
+        channelsPanel_->setChannels(channels_);
+        if (pendingChannelSelection_ >= 0) {
+            channelsPanel_->selectChannelId(pendingChannelSelection_);
+            const auto it = std::find_if(channels_.cbegin(), channels_.cend(),
+                                          [this](const ChatItem& item) { return item.id == pendingChannelSelection_; });
+            if (it != channels_.cend()) {
+                openChannel(it->id, it->name);
+            }
         }
         pendingChannelSelection_ = -1;
     });
+    connect(&chatRestClient_, &ChatRestClient::channelRenamed, this, [this](qint64 id, const QString& newName) {
+        statusBar()->showMessage(tr("Channel renamed to '%1'").arg(newName), kStatusMessageTimeoutMs);
+        if (id == selectedChannelId_) {
+            chatView_->showChannel(newName);
+        }
+        refreshChannelsForSelectedCommunity();
+    });
+    connect(&chatRestClient_, &ChatRestClient::channelDeleted, this, [this](qint64 id) {
+        statusBar()->showMessage(tr("Channel deleted"), kStatusMessageTimeoutMs);
+        if (id == selectedChannelId_) {
+            closeChatView();
+        }
+        refreshChannelsForSelectedCommunity();
+    });
     connect(&chatRestClient_, &ChatRestClient::errorOccurred, this, [this](const QString& message) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- error: %1 --").arg(message));
+        statusBar()->showMessage(tr("Error: %1").arg(message), kStatusMessageTimeoutMs);
     });
 
     connect(footerBar_->settingsButton(), &QPushButton::clicked, this, [this]() {
@@ -169,18 +231,16 @@ void MainWindow::buildUi() {
     auto* sidebarLayout = new QVBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
     communitiesPanel_ = new CommunitiesPanel(sidebar);
-    chatPanel_ = new ChatPanel(sidebar);
+    channelsPanel_ = new ChannelsPanel(sidebar);
     sidebarLayout->addWidget(communitiesPanel_, /*stretch=*/1);
-    sidebarLayout->addWidget(chatPanel_, /*stretch=*/2);
+    sidebarLayout->addWidget(channelsPanel_, /*stretch=*/1);
 
-    auto* mainContentPlaceholder = new QLabel(tr("Select a channel to start chatting"), central);
-    mainContentPlaceholder->setObjectName(QStringLiteral("mainContentPlaceholder"));
-    mainContentPlaceholder->setAlignment(Qt::AlignCenter);
+    chatView_ = new ChatView(central);
 
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
     middleLayout->addWidget(sidebar);
-    middleLayout->addWidget(mainContentPlaceholder, /*stretch=*/1);
+    middleLayout->addWidget(chatView_, /*stretch=*/1);
 
     footerBar_ = new FooterBar(central);
 
@@ -274,62 +334,44 @@ void MainWindow::onRegisterClicked() {
     authClient_.registerUser(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
 }
 
-void MainWindow::onConnectToChannelClicked() {
-    if (lastToken_.isEmpty()) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- get a token first (Account menu, top right) --"));
-        return;
-    }
-    if (const int index = chatPanel_->channelCombo()->currentIndex(); index >= 0) {
-        chatClient_.connectToChannel(lastToken_, chatPanel_->channelCombo()->currentData().toLongLong());
-    } else {
-        chatPanel_->chatLog()->appendPlainText(tr("-- refresh and pick a channel first --"));
-    }
-}
-
 void MainWindow::onSendChatMessageClicked() {
-    chatClient_.sendMessage(chatPanel_->messageEdit()->text());
-    chatPanel_->messageEdit()->clear();
-}
-
-void MainWindow::onCreateCommunityClicked() {
-    if (lastToken_.isEmpty() || communitiesPanel_->nameEdit()->text().isEmpty()) {
+    if (selectedChannelId_ < 0) {
         return;
     }
-    chatRestClient_.createCommunity(lastToken_, communitiesPanel_->nameEdit()->text());
-    communitiesPanel_->nameEdit()->clear();
+    chatClient_.sendMessage(chatView_->messageEdit()->text());
+    chatView_->messageEdit()->clear();
 }
 
-void MainWindow::onRefreshCommunitiesClicked() {
+void MainWindow::refreshCommunities() {
     if (lastToken_.isEmpty()) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- get a token first (Account menu, top right) --"));
+        statusBar()->showMessage(tr("Sign in first (Account menu, top right)"), kStatusMessageTimeoutMs);
         return;
     }
     chatRestClient_.listCommunities(lastToken_);
 }
 
-void MainWindow::onJoinCommunityClicked() {
-    if (lastToken_.isEmpty() || communitiesPanel_->communityCombo()->currentIndex() < 0) {
+void MainWindow::refreshChannelsForSelectedCommunity() {
+    if (selectedCommunityId_ < 0) {
+        channelsPanel_->setChannels({});
         return;
     }
-    chatRestClient_.joinCommunity(lastToken_, communitiesPanel_->communityCombo()->currentData().toLongLong());
+    chatRestClient_.listChannels(lastToken_, selectedCommunityId_);
 }
 
-void MainWindow::onCreateChannelClicked() {
-    if (lastToken_.isEmpty() || communitiesPanel_->communityCombo()->currentIndex() < 0 ||
-        chatPanel_->channelNameEdit()->text().isEmpty()) {
-        return;
-    }
-    chatRestClient_.createChannel(lastToken_, communitiesPanel_->communityCombo()->currentData().toLongLong(),
-                                   chatPanel_->channelNameEdit()->text());
-    chatPanel_->channelNameEdit()->clear();
+void MainWindow::openChannel(qint64 id, const QString& name) {
+    selectedChannelId_ = id;
+    chatClient_.disconnectFromChannel();
+    chatView_->showChannel(name);
+    chatView_->clearLog();
+    chatClient_.connectToChannel(lastToken_, id);
 }
 
-void MainWindow::onRefreshChannelsClicked() {
-    if (lastToken_.isEmpty() || communitiesPanel_->communityCombo()->currentIndex() < 0) {
-        chatPanel_->chatLog()->appendPlainText(tr("-- pick a community first --"));
-        return;
+void MainWindow::closeChatView() {
+    if (selectedChannelId_ >= 0) {
+        chatClient_.disconnectFromChannel();
     }
-    chatRestClient_.listChannels(lastToken_, communitiesPanel_->communityCombo()->currentData().toLongLong());
+    selectedChannelId_ = -1;
+    chatView_->showPlaceholder();
 }
 
 }  // namespace devicehub
