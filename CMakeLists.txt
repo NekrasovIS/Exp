@@ -77,6 +77,8 @@ add_library(devicehub_core
     src/ui/Theme.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
+    src/ui/IconFactory.h
+    src/ui/IconFactory.cpp
 )
 target_include_directories(devicehub_core PUBLIC src)
 target_link_libraries(devicehub_core PUBLIC

@@ -92,6 +92,13 @@ class FooterBar {
   +settingsButton() : QPushButton*
 }
 
+package "devicehub::ui_icons" <<Rectangle>> {
+  class IconFactory << (N,orchid) namespace >> {
+    +plusIcon(strokeColor: QColor) : QIcon
+    +refreshIcon() : QIcon
+  }
+}
+
 package "src/devices" {
   class DeviceEnumerator
   class AudioOutputDevice
@@ -133,6 +140,8 @@ MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelC
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
+CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon() >
+ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendLine()/clearLog() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >

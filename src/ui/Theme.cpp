@@ -94,6 +94,10 @@ QString discordDarkStyleSheet() {
             background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #059669, stop:1 #047857);
         }
 
+        QPushButton[iconOnly="true"] {
+            padding: 0;
+        }
+
         QLineEdit, QComboBox, QPlainTextEdit {
             background-color: #17191c;
             color: #e3e6e8;
