@@ -94,8 +94,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatPanel_->createChannelButton(), &QPushButton::clicked, this, &MainWindow::onCreateChannelClicked);
     connect(chatPanel_->refreshChannelsButton(), &QPushButton::clicked, this, &MainWindow::onRefreshChannelsClicked);
 
-    connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64, const QString& name) {
+    connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
         chatPanel_->chatLog()->appendPlainText(tr("-- community '%1' created --").arg(name));
+        pendingCommunitySelection_ = id;
         onRefreshCommunitiesClicked();
     });
     connect(&chatRestClient_, &ChatRestClient::communitiesListed, this, [this](const QList<ChatItem>& communities) {
@@ -104,12 +105,17 @@ MainWindow::MainWindow(QWidget* parent)
         for (const ChatItem& community : communities_) {
             communitiesPanel_->communityCombo()->addItem(community.name, community.id);
         }
+        if (const int index = communitiesPanel_->communityCombo()->findData(pendingCommunitySelection_); index >= 0) {
+            communitiesPanel_->communityCombo()->setCurrentIndex(index);
+        }
+        pendingCommunitySelection_ = -1;
     });
     connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 communityId) {
         chatPanel_->chatLog()->appendPlainText(tr("-- joined community %1 --").arg(communityId));
     });
-    connect(&chatRestClient_, &ChatRestClient::channelCreated, this, [this](qint64, const QString& name) {
+    connect(&chatRestClient_, &ChatRestClient::channelCreated, this, [this](qint64 id, const QString& name) {
         chatPanel_->chatLog()->appendPlainText(tr("-- channel '%1' created --").arg(name));
+        pendingChannelSelection_ = id;
         onRefreshChannelsClicked();
     });
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
@@ -118,6 +124,10 @@ MainWindow::MainWindow(QWidget* parent)
         for (const ChatItem& channel : channels_) {
             chatPanel_->channelCombo()->addItem(channel.name, channel.id);
         }
+        if (const int index = chatPanel_->channelCombo()->findData(pendingChannelSelection_); index >= 0) {
+            chatPanel_->channelCombo()->setCurrentIndex(index);
+        }
+        pendingChannelSelection_ = -1;
     });
     connect(&chatRestClient_, &ChatRestClient::errorOccurred, this, [this](const QString& message) {
         chatPanel_->chatLog()->appendPlainText(tr("-- error: %1 --").arg(message));

@@ -68,6 +68,8 @@ private:
     QList<QScreen*> screens_;
     QList<ChatItem> communities_;
     QList<ChatItem> channels_;
+    qint64 pendingCommunitySelection_ = -1;
+    qint64 pendingChannelSelection_ = -1;
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChatPanel* chatPanel_ = nullptr;
