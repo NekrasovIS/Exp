@@ -13,23 +13,24 @@
 #include "devices/DeviceEnumerator.h"
 #include "devices/ScreenCaptureDevice.h"
 
-class QComboBox;
-class QLabel;
-class QLineEdit;
-class QPlainTextEdit;
-class QProgressBar;
-class QPushButton;
 class QScreen;
-class QVideoWidget;
 
 namespace devicehub {
 
+class AccountMenu;
+class ChatPanel;
+class CommunitiesPanel;
+class FooterBar;
+class SettingsDialog;
+
 /**
- * @brief Main window: lets the user pick and exercise an audio output,
- *        a microphone, and a camera, one at a time.
+ * @brief Main window shell: communities/chat sidebar on the left, an
+ *        account menu top-right, and a footer with the profile and
+ *        settings entry point.
  *
- * Pure presentation/wiring — all device access is delegated to the
- * devicehub::* classes in src/devices.
+ * Pure presentation/wiring — all device and network access is delegated
+ * to the devicehub::* classes in src/devices, src/auth and src/chat; all
+ * widget construction is delegated to the panel classes in src/ui.
  */
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -67,37 +68,11 @@ private:
     QList<ChatItem> communities_;
     QList<ChatItem> channels_;
 
-    QComboBox* outputCombo_ = nullptr;
-    QComboBox* inputCombo_ = nullptr;
-    QComboBox* cameraCombo_ = nullptr;
-    QComboBox* screenCombo_ = nullptr;
-    QPushButton* playToneButton_ = nullptr;
-    QPushButton* toggleMicButton_ = nullptr;
-    QPushButton* toggleCameraButton_ = nullptr;
-    QPushButton* toggleScreenCaptureButton_ = nullptr;
-    QPushButton* requestTokenButton_ = nullptr;
-    QProgressBar* micLevelBar_ = nullptr;
-    QVideoWidget* videoPreview_ = nullptr;
-    QVideoWidget* screenPreview_ = nullptr;
-    QLabel* micStatusLabel_ = nullptr;
-    QLabel* cameraStatusLabel_ = nullptr;
-    QLabel* screenStatusLabel_ = nullptr;
-    QLineEdit* loginEdit_ = nullptr;
-    QLineEdit* passwordEdit_ = nullptr;
-    QLabel* authStatusLabel_ = nullptr;
-    QLineEdit* communityNameEdit_ = nullptr;
-    QPushButton* createCommunityButton_ = nullptr;
-    QComboBox* communityCombo_ = nullptr;
-    QPushButton* refreshCommunitiesButton_ = nullptr;
-    QPushButton* joinCommunityButton_ = nullptr;
-    QLineEdit* channelNameEdit_ = nullptr;
-    QPushButton* createChannelButton_ = nullptr;
-    QComboBox* channelCombo_ = nullptr;
-    QPushButton* refreshChannelsButton_ = nullptr;
-    QPushButton* connectToChannelButton_ = nullptr;
-    QPlainTextEdit* chatLog_ = nullptr;
-    QLineEdit* chatMessageEdit_ = nullptr;
-    QPushButton* sendChatMessageButton_ = nullptr;
+    CommunitiesPanel* communitiesPanel_ = nullptr;
+    ChatPanel* chatPanel_ = nullptr;
+    AccountMenu* accountMenu_ = nullptr;
+    FooterBar* footerBar_ = nullptr;
+    SettingsDialog* settingsDialog_ = nullptr;
 };
 
 }  // namespace devicehub
