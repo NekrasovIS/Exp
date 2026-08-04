@@ -47,6 +47,7 @@ private:
     void onToggleCameraClicked();
     void onToggleScreenCaptureClicked();
     void onRequestTokenClicked();
+    void onRegisterClicked();
     void onConnectToChannelClicked();
     void onSendChatMessageClicked();
     void onCreateCommunityClicked();

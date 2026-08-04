@@ -99,10 +99,13 @@ TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
 
     auto* loginEdit = window.findChild<QLineEdit*>("loginEdit");
     auto* passwordEdit = window.findChild<QLineEdit*>("passwordEdit");
+    auto* registerButton = window.findChild<QPushButton*>("registerButton");
 
     ASSERT_NE(loginEdit, nullptr);
     ASSERT_NE(passwordEdit, nullptr);
+    ASSERT_NE(registerButton, nullptr);
     EXPECT_EQ(passwordEdit->echoMode(), QLineEdit::Password);
+    EXPECT_EQ(registerButton->text(), QStringLiteral("Register"));
 }
 
 TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {

@@ -107,5 +107,64 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     EXPECT_EQ(subject, login);
 }
 
+TEST(AuthClientIntegrationTest, RegisterUserAutoIssuesAVerifiableToken) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+
+    const QString login = QStringLiteral("integration-register-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    AuthClient client(authBaseUrl);
+
+    bool registrationResult = false;
+    bool registrationCompletedFired = false;
+    QString receivedToken;
+    QString errorMessage;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::registrationCompleted, &loop, [&](bool registered) {
+            registrationCompletedFired = true;
+            registrationResult = registered;
+        });
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            receivedToken = token;
+            loop.quit();
+        });
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
+            errorMessage = message;
+            loop.quit();
+        });
+        client.registerUser(login, password);
+        loop.exec();
+    }
+
+    if (!registrationCompletedFired && receivedToken.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString() << " (error: "
+                      << errorMessage.toStdString() << ") — start it locally to run this test.";
+    }
+
+    ASSERT_TRUE(registrationResult);
+    ASSERT_FALSE(receivedToken.isEmpty());
+
+    bool verified = false;
+    QString subject;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenVerified, &loop, [&](bool valid, const QString& verifiedSubject) {
+            verified = valid;
+            subject = verifiedSubject;
+            loop.quit();
+        });
+        client.verifyToken(receivedToken);
+        loop.exec();
+    }
+
+    EXPECT_TRUE(verified);
+    EXPECT_EQ(subject, login);
+}
+
 }  // namespace
 }  // namespace devicehub
