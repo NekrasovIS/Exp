@@ -6,7 +6,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabWidget>
 
@@ -127,17 +126,19 @@ TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {
 TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     const MainWindow window;
 
-    auto* chatLog = window.findChild<QPlainTextEdit*>("chatLog");
+    // #51: the flat QPlainTextEdit log was replaced by a scrollable,
+    // dynamically-populated message list (ChatMessageRow widgets) — see
+    // ChatMessageGroupingTest for the header-grouping logic itself.
+    auto* chatMessagesContainer = window.findChild<QWidget*>("chatMessagesContainer");
     auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
     auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
     auto* channelTitle = window.findChild<QLabel*>("chatChannelTitle");
 
-    ASSERT_NE(chatLog, nullptr);
+    ASSERT_NE(chatMessagesContainer, nullptr);
     ASSERT_NE(chatMessageEdit, nullptr);
     ASSERT_NE(sendChatMessageButton, nullptr);
     ASSERT_NE(channelTitle, nullptr);
 
-    EXPECT_TRUE(chatLog->isReadOnly());
     EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
 }
 

@@ -67,6 +67,10 @@ add_library(devicehub_core
     src/ui/ChannelsPanel.cpp
     src/ui/ChatView.h
     src/ui/ChatView.cpp
+    src/ui/ChatMessageRow.h
+    src/ui/ChatMessageRow.cpp
+    src/ui/ChatMessageGrouping.h
+    src/ui/ChatMessageGrouping.cpp
     src/ui/AccountMenu.h
     src/ui/AccountMenu.cpp
     src/ui/SettingsDialog.h
@@ -127,6 +131,7 @@ add_executable(devicehub_tests
     test/DeviceEnumeratorTest.cpp
     test/MainWindowUiTest.cpp
     test/ToastBannerTest.cpp
+    test/ChatMessageGroupingTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
 )

@@ -54,14 +54,36 @@ class ChannelsPanel {
 class ChatView {
   +showPlaceholder()
   +showChannel(channelName: QString)
-  +appendLine(text: QString)
+  +appendMessage(message: ChatMessage)
+  +appendSystemLine(text: QString)
   +clearLog()
-  +chatLog() : QPlainTextEdit*
+  +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
   .. signals ..
   +createChannelRequested()
 }
+
+struct ChatMessage {
+  +author: QString
+  +body: QString
+  +sentAt: QString
+}
+
+class ChatMessageRow {
+  ChatMessageRow(message: ChatMessage, showHeader: bool)
+}
+ChatView *-- ChatMessageRow : creates one per message
+ChatMessageRow ..> ChatMessage : renders
+
+package "devicehub::chat_message_grouping" <<Rectangle>> {
+  class ChatMessageGrouping << (N,orchid) namespace >> {
+    +parseSentAt(raw: QString) : QDateTime
+    +shouldGroupWithPrevious(previous: ChatMessage, current: ChatMessage) : bool
+  }
+}
+ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious() >
+ChatMessageRow ..> ChatMessageGrouping : parseSentAt() (time label) >
 
 class AccountMenu {
   +loginEdit() : QLineEdit*
@@ -159,9 +181,10 @@ MainWindow ..> ToastBanner : showMessage() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
-CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon() >
+CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
-MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendLine()/clearLog() >
+ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >

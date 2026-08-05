@@ -17,6 +17,7 @@
 
 #include "ui/AccountMenu.h"
 #include "ui/ChannelsPanel.h"
+#include "ui/ChatMessageRow.h"
 #include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
 #include "ui/FooterBar.h"
@@ -87,13 +88,13 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(chatView_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
     connect(&chatClient_, &ChatClient::subscribed, this,
-            [this](qint64 channelId) { chatView_->appendLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
+            [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](const QString& author, const QString& body, const QString& sentAt) {
-                chatView_->appendLine(QStringLiteral("[%1] %2: %3").arg(sentAt, author, body));
+                chatView_->appendMessage(ChatMessage{author, body, sentAt});
             });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
-            [this](const QString& message) { chatView_->appendLine(tr("-- error: %1 --").arg(message)); });
+            [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
 
     connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
         if (lastToken_.isEmpty()) {
