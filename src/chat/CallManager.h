@@ -4,6 +4,8 @@
 #include "devices/AudioInputDevice.h"
 #include "devices/AudioOutputDevice.h"
 #include "devices/CallAudioDeviceModule.h"
+#include "devices/CallVideoTrackSource.h"
+#include "devices/CameraDevice.h"
 
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
@@ -11,9 +13,11 @@
 
 #include <QAudioDevice>
 #include <QByteArray>
+#include <QCameraDevice>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QVideoFrame>
 
 #include <memory>
 #include <string>
@@ -59,13 +63,36 @@ namespace devicehub {
  * while the other is active silently takes over the underlying
  * QAudioSource/QAudioSink. Accepted first-pass tradeoff, not solved
  * here — matches the existing settings-dialog device semantics.
+ *
+ * Camera video (issue #72) is opt-in and separate from joinCall(). The
+ * shared video track is created once, on the first ever enableVideo()
+ * call, and attached to every PeerConnection that exists at that point
+ * — the one case that adds a track to an already-negotiated
+ * connection, so enableVideo() calls negotiateLocal() for each of them
+ * right there, explicitly (same as ensurePeerConnection()/
+ * onCallRosterReceived() already do for the initial audio track,
+ * rather than reacting to WebRTC's own OnRenegotiationNeeded()
+ * notification — see PeerObserver's doc comment on that method for
+ * why: relying on both an explicit call and that notification for the
+ * same track change raced the two against each other during live
+ * testing, corrupting the exchange). A PeerConnection created later
+ * (ensurePeerConnection()) picks up the track as part of its own
+ * initial offer/answer instead. After that first attach,
+ * enableVideo()/disableVideo() only ever toggle
+ * VideoTrackInterface::set_enabled() — same mechanism setMuted() uses
+ * for audio — and deliberately never remove the track again:
+ * RemoveTrackOrError() hit a real fatal assertion inside WebRTC's own
+ * codec-list handling during live testing of an earlier version of
+ * this class (media/base/codec_list.cc, "Check failed: present_codec
+ * == codec"), so this class avoids that path entirely rather than
+ * relying on an internal WebRTC bug being fixed.
  */
 class CallManager : public QObject {
     Q_OBJECT
 
 public:
     CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, AudioOutputDevice& audioOutput,
-                QObject* parent = nullptr);
+                CameraDevice& camera, QObject* parent = nullptr);
     ~CallManager() override;
 
     /// Sends call_join, starts capturing from @p inputDevice and
@@ -86,6 +113,18 @@ public:
 
     [[nodiscard]] bool isMuted() const { return muted_; }
 
+    /// Starts capturing from @p device and sending it as a video track
+    /// to every current and future peer — added to existing
+    /// PeerConnections via renegotiation, to new ones as part of their
+    /// initial offer/answer. Safe to call whether or not a call is
+    /// active.
+    void enableVideo(const QCameraDevice& device);
+
+    /// Stops the camera and removes the video track from every peer.
+    void disableVideo();
+
+    [[nodiscard]] bool videoEnabled() const { return videoEnabled_; }
+
 signals:
     void participantJoined(const QString& login);
     void participantLeft(const QString& login);
@@ -102,6 +141,12 @@ private:
     struct PeerConnectionEntry {
         webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection;
         std::unique_ptr<PeerObserver> observer;
+        /// Non-null once localVideoTrack_ has been attached to this
+        /// peer — guards attachVideoTrack() against adding it twice.
+        /// The track is never removed again once attached (see
+        /// enableVideo()'s doc comment), so this never goes back to
+        /// null.
+        webrtc::scoped_refptr<webrtc::RtpSenderInterface> videoSender;
     };
 
     void onCallRosterReceived(const QStringList& participants);
@@ -126,9 +171,21 @@ private:
     /// call is active.
     void onCapturedPcm(const QByteArray& data, const QAudioFormat& format);
 
+    /// Forwards a captured frame from camera_ into videoTrackSource_,
+    /// while video is enabled.
+    void onCameraFrame(const QVideoFrame& frame);
+
+    /// Adds localVideoTrack_ to `entry`'s connection if it exists and
+    /// isn't already attached — independent of whether video is
+    /// currently enabled (see enableVideo()'s doc comment for why the
+    /// track, once created, is never removed again, only toggled via
+    /// set_enabled()).
+    void attachVideoTrack(PeerConnectionEntry& entry);
+
     ChatClient& chatClient_;
     AudioInputDevice& audioInput_;
     AudioOutputDevice& audioOutput_;
+    CameraDevice& camera_;
 
     std::unique_ptr<webrtc::Thread> networkThread_;
     std::unique_ptr<webrtc::Thread> workerThread_;
@@ -136,10 +193,13 @@ private:
     webrtc::scoped_refptr<CallAudioDeviceModule> audioDeviceModule_;
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peerConnectionFactory_;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> localAudioTrack_;
+    webrtc::scoped_refptr<CallVideoTrackSource> videoTrackSource_;
+    webrtc::scoped_refptr<webrtc::VideoTrackInterface> localVideoTrack_;
 
     std::unordered_map<std::string, PeerConnectionEntry> peers_;
     bool inCall_ = false;
     bool muted_ = false;
+    bool videoEnabled_ = false;
 };
 
 }  // namespace devicehub
