@@ -79,6 +79,8 @@ add_library(devicehub_core
     src/ui/MainWindow.cpp
     src/ui/IconFactory.h
     src/ui/IconFactory.cpp
+    src/ui/ToastBanner.h
+    src/ui/ToastBanner.cpp
 )
 target_include_directories(devicehub_core PUBLIC src)
 target_link_libraries(devicehub_core PUBLIC
@@ -124,6 +126,7 @@ add_executable(devicehub_tests
     test/QtTestEnvironment.cpp
     test/DeviceEnumeratorTest.cpp
     test/MainWindowUiTest.cpp
+    test/ToastBannerTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
 )
