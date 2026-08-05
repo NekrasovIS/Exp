@@ -98,8 +98,14 @@ class WebSocketServer {
   +stop()
   -handleMessage(connectionState, webSocket, message)
   -handleHello(webSocket, payload)
-  -handleChatMessage(webSocket, payload)
+  -handleSubscribedMessage(webSocket, payload)
+  -handleChatMessage(webSocket, subscription, body)
+  -handleCallJoin(webSocket, subscription)
+  -handleCallLeave(webSocket, subscription)
+  -handleCallSignal(webSocket, subscription, body)
+  -removeCallParticipant(subscription, socket)
   -broadcastToChannel(channelId: int64, json: string)
+  -broadcastToCallParticipants(channelId: int64, json: string, excludeSocket)
 }
 WebSocketServer --> ChatService : delegates to (&)
 WebSocketServer --> AuthServiceClient : authenticates via (const&)
@@ -128,8 +134,38 @@ end note
 note right of WebSocketServer
   Protocol per connection:
   1st frame: {"token", "channel_id"}
-  after that: {"body"} -> broadcast
-  to every subscriber of that channel
+  after that, key-presence dispatch
+  (checked in this order):
+    {"call_join": true}
+      -> {"call_roster": [...]} to
+         sender, {"call_peer_joined"}
+         to other call participants
+    {"call_leave": true}
+      -> {"call_peer_left"} to the
+         remaining call participants
+         (same on Close/Error without
+         an explicit leave)
+    {"call_signal": {"to","payload"}}
+      -> relayed verbatim as
+         {"call_signal": {"from",
+         "payload"}} to that one
+         participant's socket, or
+         {"error": "peer not in
+         call"} to the sender
+    {"body"} (fallback)
+      -> broadcast to every *chat*
+         subscriber of that channel
+
+  Call participants (callParticipants_)
+  are a separate, per-channel presence
+  set from *chat* subscribers
+  (subscriptions_) — being subscribed
+  to a channel's text chat does not
+  imply being in its call, and vice
+  versa. This server only relays call
+  signaling (SDP/ICE payloads) — it
+  never inspects "payload" contents.
+  See issue #46.
 end note
 
 @enduml
