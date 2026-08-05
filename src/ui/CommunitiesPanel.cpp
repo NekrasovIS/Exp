@@ -1,9 +1,7 @@
 #include "ui/CommunitiesPanel.h"
 
 #include <QColor>
-#include <QHBoxLayout>
 #include <QInputDialog>
-#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -11,7 +9,6 @@
 #include <QPoint>
 #include <QPushButton>
 #include <QSize>
-#include <QStackedWidget>
 #include <QVBoxLayout>
 
 #include "ui/IconFactory.h"
@@ -22,79 +19,57 @@ namespace devicehub {
 namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
+constexpr int kNameRole = Qt::UserRole + 2;
+constexpr int kRailWidth = 64;
 constexpr int kIconButtonSize = 28;
-constexpr int kIconSize = 14;
-constexpr int kListPageIndex = 0;
-constexpr int kEmptyStatePageIndex = 1;
+constexpr int kIconButtonIconSize = 14;
+constexpr int kAvatarIconSize = 32;
+constexpr int kAvatarGridSize = 48;
 }  // namespace
 
 CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_StyledBackground, true);
+    setFixedWidth(kRailWidth);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
                                 ui_theme::kSpacingSm);
     layout->setSpacing(ui_theme::kSpacingSm);
 
-    auto* header = new QHBoxLayout;
-    header->setSpacing(ui_theme::kSpacingSm);
-    auto* title = new QLabel(tr("Communities"), this);
-    title->setProperty("sectionTitle", true);
-
     refreshButton_ = new QPushButton(this);
     refreshButton_->setObjectName(QStringLiteral("refreshCommunitiesButton"));
     refreshButton_->setToolTip(tr("Refresh communities"));
     refreshButton_->setIcon(ui_icons::refreshIcon());
-    refreshButton_->setIconSize(QSize(kIconSize, kIconSize));
+    refreshButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
     refreshButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     refreshButton_->setProperty("iconOnly", true);
+
+    listWidget_ = new QListWidget(this);
+    listWidget_->setObjectName(QStringLiteral("communityList"));
+    listWidget_->setContextMenuPolicy(Qt::CustomContextMenu);
+    listWidget_->setViewMode(QListView::IconMode);
+    listWidget_->setFlow(QListView::TopToBottom);
+    listWidget_->setWrapping(false);
+    listWidget_->setMovement(QListView::Static);
+    listWidget_->setUniformItemSizes(true);
+    listWidget_->setResizeMode(QListView::Adjust);
+    listWidget_->setIconSize(QSize(kAvatarIconSize, kAvatarIconSize));
+    listWidget_->setGridSize(QSize(kAvatarGridSize, kAvatarGridSize));
+    listWidget_->setFrameShape(QFrame::NoFrame);
+    listWidget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     addButton_ = new QPushButton(this);
     addButton_->setObjectName(QStringLiteral("createCommunityButton"));
     addButton_->setToolTip(tr("Create community"));
     addButton_->setProperty("accent", true);
     addButton_->setIcon(ui_icons::plusIcon(QColor("#ffffff")));
-    addButton_->setIconSize(QSize(kIconSize, kIconSize));
+    addButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
     addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addButton_->setProperty("iconOnly", true);
 
-    header->addWidget(title);
-    header->addStretch();
-    header->addWidget(refreshButton_);
-    header->addWidget(addButton_);
-
-    listWidget_ = new QListWidget(this);
-    listWidget_->setObjectName(QStringLiteral("communityList"));
-    listWidget_->setContextMenuPolicy(Qt::CustomContextMenu);
-
-    auto* emptyState = new QWidget(this);
-    emptyState->setObjectName(QStringLiteral("communityListEmptyState"));
-    auto* emptyStateLayout = new QVBoxLayout(emptyState);
-    emptyStateLayout->setSpacing(ui_theme::kSpacingSm);
-    emptyStateLayout->addStretch();
-    auto* emptyStateTitle = new QLabel(tr("No communities yet"), emptyState);
-    emptyStateTitle->setAlignment(Qt::AlignCenter);
-    emptyStateTitle->setWordWrap(true);
-    auto* emptyStateDescription = new QLabel(tr("Create one to start chatting."), emptyState);
-    emptyStateDescription->setObjectName(QStringLiteral("mutedDescription"));
-    emptyStateDescription->setAlignment(Qt::AlignCenter);
-    emptyStateDescription->setWordWrap(true);
-    auto* emptyStateButton = new QPushButton(tr("Create community"), emptyState);
-    emptyStateButton->setObjectName(QStringLiteral("emptyStateCreateCommunityButton"));
-    emptyStateButton->setProperty("accent", true);
-    emptyStateLayout->addWidget(emptyStateTitle);
-    emptyStateLayout->addWidget(emptyStateDescription);
-    emptyStateLayout->addWidget(emptyStateButton, /*stretch=*/0, Qt::AlignHCenter);
-    emptyStateLayout->addStretch();
-    connect(emptyStateButton, &QPushButton::clicked, this, &CommunitiesPanel::showAddDialog);
-
-    listStack_ = new QStackedWidget(this);
-    listStack_->insertWidget(kListPageIndex, listWidget_);
-    listStack_->insertWidget(kEmptyStatePageIndex, emptyState);
-    listStack_->setCurrentIndex(kEmptyStatePageIndex);
-
-    layout->addLayout(header);
-    layout->addWidget(listStack_, /*stretch=*/1);
+    layout->addWidget(refreshButton_, /*stretch=*/0, Qt::AlignHCenter);
+    layout->addWidget(listWidget_, /*stretch=*/1);
+    layout->addWidget(addButton_, /*stretch=*/0, Qt::AlignHCenter);
 
     connect(addButton_, &QPushButton::clicked, this, &CommunitiesPanel::showAddDialog);
     connect(listWidget_, &QListWidget::customContextMenuRequested, this, &CommunitiesPanel::showContextMenu);
@@ -106,11 +81,13 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
 void CommunitiesPanel::setCommunities(const QList<ChatItem>& communities) {
     listWidget_->clear();
     for (const ChatItem& community : communities) {
-        auto* item = new QListWidgetItem(community.name, listWidget_);
+        auto* item = new QListWidgetItem(listWidget_);
+        item->setIcon(ui_icons::communityAvatarIcon(community.name.left(1).toUpper()));
+        item->setToolTip(community.name);
         item->setData(kIdRole, community.id);
         item->setData(kOwnerRole, community.ownerLogin);
+        item->setData(kNameRole, community.name);
     }
-    listStack_->setCurrentIndex(communities.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
 }
 
 void CommunitiesPanel::selectCommunityId(qint64 id) {
@@ -142,6 +119,7 @@ void CommunitiesPanel::showContextMenu(const QPoint& pos) {
     }
 
     const qint64 id = item->data(kIdRole).toLongLong();
+    const QString name = item->data(kNameRole).toString();
     const bool isOwner = !currentUserLogin_.isEmpty() && item->data(kOwnerRole).toString() == currentUserLogin_;
 
     QMenu menu(this);
@@ -159,13 +137,13 @@ void CommunitiesPanel::showContextMenu(const QPoint& pos) {
     } else if (chosen == renameAction) {
         bool ok = false;
         const QString newName =
-            QInputDialog::getText(this, tr("Rename community"), tr("New name:"), QLineEdit::Normal, item->text(), &ok);
+            QInputDialog::getText(this, tr("Rename community"), tr("New name:"), QLineEdit::Normal, name, &ok);
         if (ok && !newName.trimmed().isEmpty()) {
             emit renameRequested(id, newName.trimmed());
         }
     } else if (chosen == deleteAction) {
         if (QMessageBox::question(this, tr("Delete community"),
-                                   tr("Delete '%1' and all of its channels? This can't be undone.").arg(item->text())) ==
+                                   tr("Delete '%1' and all of its channels? This can't be undone.").arg(name)) ==
             QMessageBox::Yes) {
             emit deleteRequested(id);
         }

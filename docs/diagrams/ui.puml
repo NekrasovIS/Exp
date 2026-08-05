@@ -112,6 +112,7 @@ package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
     +refreshIcon() : QIcon
+    +communityAvatarIcon(label: QString) : QIcon
   }
 }
 
@@ -132,8 +133,8 @@ package "src/chat" {
   class ChatRestClient
 }
 
-MainWindow *-- CommunitiesPanel : owns (top-left sidebar)
-MainWindow *-- ChannelsPanel : owns (bottom-left sidebar)
+MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
+MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)

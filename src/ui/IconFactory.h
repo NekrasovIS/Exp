@@ -3,6 +3,7 @@
 #include <QIcon>
 
 class QColor;
+class QString;
 
 namespace devicehub::ui_icons {
 
@@ -17,5 +18,10 @@ QIcon plusIcon(const QColor& strokeColor);
 /// painted by QCommonStyle rather than loaded from a resource, so it's
 /// exempt from the same SVG-plugin gap without us hand-drawing arcs.
 QIcon refreshIcon();
+
+/// Rounded-square, green-gradient "avatar" badge with @p label (the
+/// community's first letter) centered in white — used by
+/// CommunitiesPanel's icon rail in place of a text row.
+QIcon communityAvatarIcon(const QString& label);
 
 }  // namespace devicehub::ui_icons
