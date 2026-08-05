@@ -16,11 +16,15 @@ constexpr double kToneDurationSeconds = 1.5;
 // Streamed audio (a live call) arrives in small chunks from another
 // thread, hopping through a queued cross-thread call before it reaches
 // writeAudio() — unlike a tight low-latency playback callback, that hop
-// is subject to Qt GUI event-loop scheduling jitter. QAudioSink's
-// default buffer is sized for the low-latency case and underruns
-// easily under that jitter, which is audible as crackling/clicking.
-// This buffer trades a bit of added latency for headroom to absorb it.
-constexpr qint64 kStreamingBufferDurationUs = 200'000;
+// is subject to Qt GUI event-loop scheduling jitter, and the feeding
+// thread itself is a normal-priority std::thread with no real-time
+// scheduling guarantee, so occasional multi-ms wake-up delays are
+// expected even with self-correcting timing. QAudioSink's default
+// buffer is sized for the low-latency case and underruns easily under
+// that jitter, audible as crackling/clicking. 500ms is generous but
+// this is a voice call, not an interactive instrument — added latency
+// here is a much smaller cost than audible glitches.
+constexpr qint64 kStreamingBufferDurationUs = 500'000;
 }  // namespace
 
 AudioOutputDevice::AudioOutputDevice(QObject* parent) : QObject(parent) {}
