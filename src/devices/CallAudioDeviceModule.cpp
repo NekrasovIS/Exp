@@ -21,6 +21,10 @@ void CallAudioDeviceModule::setPlayoutFormat(int sampleRateHz, size_t channels) 
     playoutChannels_ = channels;
 }
 
+void CallAudioDeviceModule::setTotalDelayMs(int delayMs) {
+    totalDelayMs_.store(delayMs);
+}
+
 webrtc::AudioTransport* CallAudioDeviceModule::transport() const {
     const std::lock_guard<std::mutex> lock(transportMutex_);
     return transport_;
@@ -41,7 +45,8 @@ void CallAudioDeviceModule::pushCapturedAudio(const int16_t* samples, size_t fra
     // AudioTransportImpl asserts sizeof(int16_t) * nChannels ==
     // nBytesPerSample and aborts (fatal CHECK) if it doesn't hold.
     callback->RecordedDataIsAvailable(samples, frameCount, sizeof(int16_t) * channels, channels,
-                                       static_cast<uint32_t>(sampleRateHz), /*totalDelayMS=*/0, /*clockDrift=*/0,
+                                       static_cast<uint32_t>(sampleRateHz),
+                                       static_cast<uint32_t>(totalDelayMs_.load()), /*clockDrift=*/0,
                                        /*currentMicLevel=*/0, /*keyPressed=*/false, newMicLevel);
 }
 

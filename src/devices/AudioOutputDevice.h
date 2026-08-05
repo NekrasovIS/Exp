@@ -54,6 +54,22 @@ public:
     /// @return True while a test tone or a stream is actively playing.
     [[nodiscard]] bool isPlaying() const;
 
+    /// The buffer duration startStreaming() sizes its QAudioSink to.
+    /// Streamed audio (a live call) arrives in small chunks from
+    /// another thread, hopping through a queued cross-thread call
+    /// before it reaches writeAudio() — unlike a tight low-latency
+    /// playback callback, that hop is subject to Qt GUI event-loop
+    /// scheduling jitter, and the feeding thread itself is a
+    /// normal-priority std::thread with no real-time scheduling
+    /// guarantee. QAudioSink's own default buffer is sized for the
+    /// low-latency case and underruns easily under that jitter,
+    /// audible as crackling; this is generous but a voice call
+    /// tolerates the added latency far better than audible glitches.
+    /// Exposed so a caller that also feeds WebRTC's echo canceller
+    /// (e.g. CallManager, via CallAudioDeviceModule::setTotalDelayMs())
+    /// can report accurate playout delay instead of guessing.
+    [[nodiscard]] static constexpr int streamingBufferDurationMs() { return 500; }
+
 signals:
     /// Emitted when test-tone playback finishes (buffer drained or
     /// stopped) — not emitted for startStreaming() sessions, where an
