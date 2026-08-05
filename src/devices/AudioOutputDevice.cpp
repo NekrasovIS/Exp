@@ -12,6 +12,15 @@ namespace devicehub {
 namespace {
 constexpr int kSampleRate = 44100;
 constexpr double kToneDurationSeconds = 1.5;
+
+// Streamed audio (a live call) arrives in small chunks from another
+// thread, hopping through a queued cross-thread call before it reaches
+// writeAudio() — unlike a tight low-latency playback callback, that hop
+// is subject to Qt GUI event-loop scheduling jitter. QAudioSink's
+// default buffer is sized for the low-latency case and underruns
+// easily under that jitter, which is audible as crackling/clicking.
+// This buffer trades a bit of added latency for headroom to absorb it.
+constexpr qint64 kStreamingBufferDurationUs = 200'000;
 }  // namespace
 
 AudioOutputDevice::AudioOutputDevice(QObject* parent) : QObject(parent) {}
@@ -71,6 +80,7 @@ bool AudioOutputDevice::startStreaming(const QAudioDevice& device, const QAudioF
 
     streaming_ = true;
     sink_ = std::make_unique<QAudioSink>(device, format);
+    sink_->setBufferSize(format.bytesForDuration(kStreamingBufferDurationUs));
     connect(sink_.get(), &QAudioSink::stateChanged, this, [this](QAudio::State state) {
         if (!streaming_ && (state == QAudio::IdleState || state == QAudio::StoppedState)) {
             emit finished();

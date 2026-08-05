@@ -37,6 +37,11 @@ public:
     /// in-memory buffer. @p format must already be exactly what the
     /// caller will write — no resampling happens here. Returns false
     /// (and emits errorOccurred()) if @p device doesn't support it.
+    /// Uses a larger-than-default QAudioSink buffer (~200ms) since the
+    /// caller (e.g. CallManager) delivers chunks from another thread
+    /// via a queued cross-thread call, not a tight low-latency
+    /// callback — without the extra headroom, GUI event-loop
+    /// scheduling jitter causes audible underrun crackling.
     bool startStreaming(const QAudioDevice& device, const QAudioFormat& format);
 
     /// Writes @p pcm to the sink started by startStreaming(). No-op if
