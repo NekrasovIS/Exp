@@ -58,6 +58,8 @@ class ChatView {
   +chatLog() : QPlainTextEdit*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
+  .. signals ..
+  +createChannelRequested()
 }
 
 class AccountMenu {
@@ -143,6 +145,7 @@ ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteReques
 CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendLine()/clearLog() >
+ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >

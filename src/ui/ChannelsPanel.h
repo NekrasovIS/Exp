@@ -7,6 +7,7 @@
 class QListWidget;
 class QPoint;
 class QPushButton;
+class QStackedWidget;
 
 namespace devicehub {
 
@@ -52,6 +53,7 @@ private:
     void showContextMenu(const QPoint& pos);
 
     QListWidget* listWidget_ = nullptr;
+    QStackedWidget* listStack_ = nullptr;
     QPushButton* addButton_ = nullptr;
     QPushButton* refreshButton_ = nullptr;
     QString currentUserLogin_;

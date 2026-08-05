@@ -25,10 +25,28 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
 
     auto* placeholderPage = new QWidget(stack_);
     auto* placeholderLayout = new QVBoxLayout(placeholderPage);
+    placeholderLayout->setSpacing(ui_theme::kSpacingSm);
+    placeholderLayout->addStretch();
+
     auto* placeholderLabel = new QLabel(tr("Select a channel to start chatting"), placeholderPage);
     placeholderLabel->setObjectName(QStringLiteral("mainContentPlaceholder"));
     placeholderLabel->setAlignment(Qt::AlignCenter);
+
+    auto* placeholderDescription =
+        new QLabel(tr("Pick a channel on the left, or create a new one to get the conversation going."), placeholderPage);
+    placeholderDescription->setObjectName(QStringLiteral("mutedDescription"));
+    placeholderDescription->setAlignment(Qt::AlignCenter);
+    placeholderDescription->setWordWrap(true);
+
+    auto* placeholderCreateButton = new QPushButton(tr("Create channel"), placeholderPage);
+    placeholderCreateButton->setObjectName(QStringLiteral("placeholderCreateChannelButton"));
+    placeholderCreateButton->setProperty("accent", true);
+    connect(placeholderCreateButton, &QPushButton::clicked, this, &ChatView::createChannelRequested);
+
     placeholderLayout->addWidget(placeholderLabel);
+    placeholderLayout->addWidget(placeholderDescription);
+    placeholderLayout->addWidget(placeholderCreateButton, /*stretch=*/0, Qt::AlignHCenter);
+    placeholderLayout->addStretch();
 
     auto* channelPage = new QWidget(stack_);
     auto* channelLayout = new QVBoxLayout(channelPage);

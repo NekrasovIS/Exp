@@ -129,6 +129,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(channelsPanel_, &ChannelsPanel::channelSelected, this,
             [this](qint64 id, const QString& name) { openChannel(id, name); });
 
+    connect(chatView_, &ChatView::createChannelRequested, channelsPanel_->addButton(), &QPushButton::click);
+
     connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
         statusBar()->showMessage(tr("Community '%1' created").arg(name), kStatusMessageTimeoutMs);
         pendingCommunitySelection_ = id;
