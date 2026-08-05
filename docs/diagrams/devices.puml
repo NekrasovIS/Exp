@@ -15,6 +15,11 @@ package "Qt GUI" {
   class QScreen
 }
 
+package "libwebrtc" {
+  class "webrtc::AudioDeviceModule" as WebrtcAudioDeviceModule
+  class "webrtc::AudioTransport" as WebrtcAudioTransport
+}
+
 class DeviceEnumerator {
   +audioOutputs() : QList<QAudioDevice>
   +audioInputs() : QList<QAudioDevice>
@@ -87,5 +92,53 @@ class ScreenCaptureDevice {
 ScreenCaptureDevice --> "0..1" QScreenCapture : owns (unique_ptr)
 ScreenCaptureDevice *-- QMediaCaptureSession : owns
 ScreenCaptureDevice ..> QScreen : uses
+
+class CallAudioDeviceModule {
+  +pushCapturedAudio(samples: const int16_t*, frameCount: size_t, sampleRateHz: int, channels: size_t)
+  +RegisterAudioCallback(audioCallback: AudioTransport*) : int32_t
+  +Init() : int32_t
+  +PlayoutIsAvailable(available: bool*) : int32_t
+  +InitPlayout() : int32_t
+  +PlayoutIsInitialized() : bool
+  +StartPlayout() : int32_t
+  +StopPlayout() : int32_t
+  +Playing() : bool
+  +RecordingIsAvailable(available: bool*) : int32_t
+  +InitRecording() : int32_t
+  +RecordingIsInitialized() : bool
+  +StartRecording() : int32_t
+  +StopRecording() : int32_t
+  +Recording() : bool
+  -playoutLoop()
+  -transport() : AudioTransport*
+}
+CallAudioDeviceModule --|> WebrtcAudioDeviceModule
+CallAudioDeviceModule ..> WebrtcAudioTransport : drives (10ms thread) / feeds
+note right of CallAudioDeviceModule
+  Bridges libwebrtc's audio pipeline to Qt
+  Multimedia — libwebrtc has no pluggable
+  "push samples into an AudioSource" API,
+  only this device-module interface (issue #46).
+
+  Capture is push-style: whoever owns real
+  microphone PCM (future CallAudioSource,
+  issue #46 Phase 3) calls pushCapturedAudio()
+  whenever a buffer is ready; forwarded to
+  AudioTransport::RecordedDataIsAvailable()
+  while StartRecording() is active.
+
+  Playout is pull-style but WebRTC does not
+  drive the timing itself: this class runs its
+  own ~10ms std::thread loop calling
+  AudioTransport::NeedMorePlayData() and
+  forwards decoded PCM to a caller-supplied
+  PlayoutSink callback — invoked on that
+  thread, NOT the Qt GUI thread. First-pass
+  simplification, not yet tuned for glitch-free
+  playback under real load; a caller touching
+  Qt objects from the sink must marshal back
+  itself (e.g. QMetaObject::invokeMethod with
+  Qt::QueuedConnection).
+end note
 
 @enduml
