@@ -120,6 +120,25 @@ if(APPLE)
             Qt6::QDarwinCameraPermissionPlugin
             Qt6::QDarwinMicrophonePermissionPlugin
     )
+
+    # macOS ties Camera/Microphone permission grants to the app's code
+    # signature. The default ad-hoc signature ("-") is derived from the
+    # binary's own content and changes on every rebuild, silently
+    # invalidating permissions granted to the previous build. Signing
+    # with a stable local identity instead (see README for how to
+    # create one in Keychain Access) keeps the signature — and granted
+    # permissions — the same across rebuilds. Left as "-" by default so
+    # this doesn't require every machine to have that identity set up;
+    # set once per machine with
+    # -DDEVICEHUB_CODESIGN_IDENTITY="<identity name>".
+    set(DEVICEHUB_CODESIGN_IDENTITY "-" CACHE STRING
+        "Code signing identity for DeviceHub.app. \"-\" (default) is ad-hoc.")
+    add_custom_command(TARGET DeviceHub POST_BUILD
+        COMMAND codesign --force --deep --sign "${DEVICEHUB_CODESIGN_IDENTITY}"
+                "$<TARGET_BUNDLE_DIR:DeviceHub>"
+        COMMENT "Code-signing DeviceHub.app (identity: ${DEVICEHUB_CODESIGN_IDENTITY})"
+        VERBATIM
+    )
 endif()
 
 set_target_properties(DeviceHub PROPERTIES
