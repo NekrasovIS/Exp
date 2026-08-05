@@ -6,7 +6,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabWidget>
 
@@ -127,17 +126,19 @@ TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {
 TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     const MainWindow window;
 
-    auto* chatLog = window.findChild<QPlainTextEdit*>("chatLog");
+    // #51: the flat QPlainTextEdit log was replaced by a scrollable,
+    // dynamically-populated message list (ChatMessageRow widgets) — see
+    // ChatMessageGroupingTest for the header-grouping logic itself.
+    auto* chatMessagesContainer = window.findChild<QWidget*>("chatMessagesContainer");
     auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
     auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
     auto* channelTitle = window.findChild<QLabel*>("chatChannelTitle");
 
-    ASSERT_NE(chatLog, nullptr);
+    ASSERT_NE(chatMessagesContainer, nullptr);
     ASSERT_NE(chatMessageEdit, nullptr);
     ASSERT_NE(sendChatMessageButton, nullptr);
     ASSERT_NE(channelTitle, nullptr);
 
-    EXPECT_TRUE(chatLog->isReadOnly());
     EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
 }
 
@@ -160,8 +161,25 @@ TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
 
     EXPECT_EQ(communityList->count(), 0);
     EXPECT_EQ(channelList->count(), 0);
-    EXPECT_EQ(createCommunityButton->text(), QStringLiteral("+"));
-    EXPECT_EQ(createChannelButton->text(), QStringLiteral("+"));
+    EXPECT_FALSE(createCommunityButton->icon().isNull());
+    EXPECT_FALSE(createChannelButton->icon().isNull());
+}
+
+TEST(MainWindowUiTest, EmptyStatesOfferAnActionButton) {
+    const MainWindow window;
+
+    // CommunitiesPanel is now a narrow icon rail (#50) with no room for
+    // descriptive empty-state text — its ever-present "+" button is the
+    // rail's own call to action, so only ChannelsPanel and ChatView's
+    // placeholder still have a dedicated empty-state button.
+    auto* channelEmptyStateButton = window.findChild<QPushButton*>("emptyStateCreateChannelButton");
+    auto* placeholderCreateButton = window.findChild<QPushButton*>("placeholderCreateChannelButton");
+
+    ASSERT_NE(channelEmptyStateButton, nullptr);
+    ASSERT_NE(placeholderCreateButton, nullptr);
+
+    EXPECT_EQ(channelEmptyStateButton->text(), QStringLiteral("Create channel"));
+    EXPECT_EQ(placeholderCreateButton->text(), QStringLiteral("Create channel"));
 }
 
 }  // namespace

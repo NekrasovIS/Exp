@@ -12,6 +12,7 @@
 #include "devices/CameraDevice.h"
 #include "devices/DeviceEnumerator.h"
 #include "devices/ScreenCaptureDevice.h"
+#include "ui/ToastBanner.h"
 
 class QScreen;
 
@@ -63,6 +64,9 @@ private:
     /// Drops the current channel selection/connection and shows
     /// ChatView's placeholder again.
     void closeChatView();
+    /// CRUD feedback (create/rename/delete/join, errors) goes through
+    /// this toast rather than statusBar() — much easier to notice.
+    void showToast(const QString& text, ToastBanner::Variant variant);
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
@@ -88,6 +92,7 @@ private:
     AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
+    ToastBanner* toastBanner_ = nullptr;
 };
 
 }  // namespace devicehub

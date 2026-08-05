@@ -11,9 +11,10 @@ class QPushButton;
 namespace devicehub {
 
 /**
- * @brief Top-left sidebar section: a list of communities plus a "+"
- *        button to create one and a right-click menu to join/rename/
- *        delete.
+ * @brief Narrow icon rail on the far left of the sidebar: one avatar
+ *        badge per community (first letter, green gradient), a
+ *        refresh button on top and a "+" button pinned to the bottom
+ *        to create one; right-click for join/rename/delete.
  *
  * Pure presentation — owns no network state. MainWindow feeds it the
  * current community list and the signed-in user's login (so it can

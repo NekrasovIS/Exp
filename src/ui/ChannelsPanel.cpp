@@ -1,5 +1,6 @@
 #include "ui/ChannelsPanel.h"
 
+#include <QColor>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -9,35 +10,53 @@
 #include <QMessageBox>
 #include <QPoint>
 #include <QPushButton>
+#include <QSize>
+#include <QStackedWidget>
 #include <QVBoxLayout>
+
+#include "ui/IconFactory.h"
+#include "ui/Theme.h"
 
 namespace devicehub {
 
 namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
+constexpr int kIconButtonSize = 28;
+constexpr int kIconSize = 14;
+constexpr int kListPageIndex = 0;
+constexpr int kEmptyStatePageIndex = 1;
 }  // namespace
 
 ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_StyledBackground, true);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
+                                ui_theme::kSpacingSm);
+    layout->setSpacing(ui_theme::kSpacingSm);
 
     auto* header = new QHBoxLayout;
+    header->setSpacing(ui_theme::kSpacingSm);
     auto* title = new QLabel(tr("Channels"), this);
     title->setProperty("sectionTitle", true);
 
-    refreshButton_ = new QPushButton(tr("⟳"), this);
+    refreshButton_ = new QPushButton(this);
     refreshButton_->setObjectName(QStringLiteral("refreshChannelsButton"));
     refreshButton_->setToolTip(tr("Refresh channels"));
-    refreshButton_->setFixedWidth(28);
+    refreshButton_->setIcon(ui_icons::refreshIcon());
+    refreshButton_->setIconSize(QSize(kIconSize, kIconSize));
+    refreshButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    refreshButton_->setProperty("iconOnly", true);
 
-    addButton_ = new QPushButton(tr("+"), this);
+    addButton_ = new QPushButton(this);
     addButton_->setObjectName(QStringLiteral("createChannelButton"));
     addButton_->setToolTip(tr("Create channel"));
     addButton_->setProperty("accent", true);
-    addButton_->setFixedWidth(28);
+    addButton_->setIcon(ui_icons::plusIcon(QColor("#ffffff")));
+    addButton_->setIconSize(QSize(kIconSize, kIconSize));
+    addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    addButton_->setProperty("iconOnly", true);
 
     header->addWidget(title);
     header->addStretch();
@@ -48,8 +67,34 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     listWidget_->setObjectName(QStringLiteral("channelList"));
     listWidget_->setContextMenuPolicy(Qt::CustomContextMenu);
 
+    auto* emptyState = new QWidget(this);
+    emptyState->setObjectName(QStringLiteral("channelListEmptyState"));
+    auto* emptyStateLayout = new QVBoxLayout(emptyState);
+    emptyStateLayout->setSpacing(ui_theme::kSpacingSm);
+    emptyStateLayout->addStretch();
+    auto* emptyStateTitle = new QLabel(tr("No channels yet"), emptyState);
+    emptyStateTitle->setAlignment(Qt::AlignCenter);
+    emptyStateTitle->setWordWrap(true);
+    auto* emptyStateDescription = new QLabel(tr("Create one to start chatting."), emptyState);
+    emptyStateDescription->setObjectName(QStringLiteral("mutedDescription"));
+    emptyStateDescription->setAlignment(Qt::AlignCenter);
+    emptyStateDescription->setWordWrap(true);
+    auto* emptyStateButton = new QPushButton(tr("Create channel"), emptyState);
+    emptyStateButton->setObjectName(QStringLiteral("emptyStateCreateChannelButton"));
+    emptyStateButton->setProperty("accent", true);
+    emptyStateLayout->addWidget(emptyStateTitle);
+    emptyStateLayout->addWidget(emptyStateDescription);
+    emptyStateLayout->addWidget(emptyStateButton, /*stretch=*/0, Qt::AlignHCenter);
+    emptyStateLayout->addStretch();
+    connect(emptyStateButton, &QPushButton::clicked, this, &ChannelsPanel::showAddDialog);
+
+    listStack_ = new QStackedWidget(this);
+    listStack_->insertWidget(kListPageIndex, listWidget_);
+    listStack_->insertWidget(kEmptyStatePageIndex, emptyState);
+    listStack_->setCurrentIndex(kEmptyStatePageIndex);
+
     layout->addLayout(header);
-    layout->addWidget(listWidget_, /*stretch=*/1);
+    layout->addWidget(listStack_, /*stretch=*/1);
 
     connect(addButton_, &QPushButton::clicked, this, &ChannelsPanel::showAddDialog);
     connect(listWidget_, &QListWidget::customContextMenuRequested, this, &ChannelsPanel::showContextMenu);
@@ -65,6 +110,7 @@ void ChannelsPanel::setChannels(const QList<ChatItem>& channels) {
         item->setData(kIdRole, channel.id);
         item->setData(kOwnerRole, channel.ownerLogin);
     }
+    listStack_->setCurrentIndex(channels.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
 }
 
 void ChannelsPanel::selectChannelId(qint64 id) {
