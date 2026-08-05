@@ -63,6 +63,16 @@ QString discordDarkStyleSheet() {
             font-size: 12px;
         }
 
+        QLabel[chatAuthor="true"] {
+            font-weight: 600;
+        }
+
+        QScrollArea#chatMessagesScrollArea, QScrollArea#chatMessagesScrollArea > QWidget > QWidget,
+        QWidget#chatMessagesContainer {
+            background: transparent;
+            border: none;
+        }
+
         QLabel#footerProfileLabel {
             color: #e3e6e8;
             font-weight: 600;
