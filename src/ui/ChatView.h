@@ -38,6 +38,12 @@ public:
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
 
+signals:
+    /// Emitted when the placeholder's "Create channel" button is
+    /// clicked — MainWindow wires this to the same handling as
+    /// ChannelsPanel's own "+" button.
+    void createChannelRequested();
+
 private:
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;

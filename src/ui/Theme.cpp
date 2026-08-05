@@ -29,8 +29,9 @@ QString discordDarkStyleSheet() {
         }
 
         QLabel#mainContentPlaceholder {
-            color: #8b939c;
-            font-size: 14px;
+            color: #e3e6e8;
+            font-size: 15px;
+            font-weight: 600;
         }
 
         devicehub--FooterBar {
@@ -50,6 +51,11 @@ QString discordDarkStyleSheet() {
             color: #8b939c;
             font-size: 12px;
             font-weight: 700;
+        }
+
+        QLabel#mutedDescription {
+            color: #8b939c;
+            font-size: 12px;
         }
 
         QLabel#footerProfileLabel {

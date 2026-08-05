@@ -11,6 +11,7 @@
 #include <QPoint>
 #include <QPushButton>
 #include <QSize>
+#include <QStackedWidget>
 #include <QVBoxLayout>
 
 #include "ui/IconFactory.h"
@@ -23,6 +24,8 @@ constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
 constexpr int kIconButtonSize = 28;
 constexpr int kIconSize = 14;
+constexpr int kListPageIndex = 0;
+constexpr int kEmptyStatePageIndex = 1;
 }  // namespace
 
 CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
@@ -64,8 +67,34 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     listWidget_->setObjectName(QStringLiteral("communityList"));
     listWidget_->setContextMenuPolicy(Qt::CustomContextMenu);
 
+    auto* emptyState = new QWidget(this);
+    emptyState->setObjectName(QStringLiteral("communityListEmptyState"));
+    auto* emptyStateLayout = new QVBoxLayout(emptyState);
+    emptyStateLayout->setSpacing(ui_theme::kSpacingSm);
+    emptyStateLayout->addStretch();
+    auto* emptyStateTitle = new QLabel(tr("No communities yet"), emptyState);
+    emptyStateTitle->setAlignment(Qt::AlignCenter);
+    emptyStateTitle->setWordWrap(true);
+    auto* emptyStateDescription = new QLabel(tr("Create one to start chatting."), emptyState);
+    emptyStateDescription->setObjectName(QStringLiteral("mutedDescription"));
+    emptyStateDescription->setAlignment(Qt::AlignCenter);
+    emptyStateDescription->setWordWrap(true);
+    auto* emptyStateButton = new QPushButton(tr("Create community"), emptyState);
+    emptyStateButton->setObjectName(QStringLiteral("emptyStateCreateCommunityButton"));
+    emptyStateButton->setProperty("accent", true);
+    emptyStateLayout->addWidget(emptyStateTitle);
+    emptyStateLayout->addWidget(emptyStateDescription);
+    emptyStateLayout->addWidget(emptyStateButton, /*stretch=*/0, Qt::AlignHCenter);
+    emptyStateLayout->addStretch();
+    connect(emptyStateButton, &QPushButton::clicked, this, &CommunitiesPanel::showAddDialog);
+
+    listStack_ = new QStackedWidget(this);
+    listStack_->insertWidget(kListPageIndex, listWidget_);
+    listStack_->insertWidget(kEmptyStatePageIndex, emptyState);
+    listStack_->setCurrentIndex(kEmptyStatePageIndex);
+
     layout->addLayout(header);
-    layout->addWidget(listWidget_, /*stretch=*/1);
+    layout->addWidget(listStack_, /*stretch=*/1);
 
     connect(addButton_, &QPushButton::clicked, this, &CommunitiesPanel::showAddDialog);
     connect(listWidget_, &QListWidget::customContextMenuRequested, this, &CommunitiesPanel::showContextMenu);
@@ -81,6 +110,7 @@ void CommunitiesPanel::setCommunities(const QList<ChatItem>& communities) {
         item->setData(kIdRole, community.id);
         item->setData(kOwnerRole, community.ownerLogin);
     }
+    listStack_->setCurrentIndex(communities.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
 }
 
 void CommunitiesPanel::selectCommunityId(qint64 id) {
