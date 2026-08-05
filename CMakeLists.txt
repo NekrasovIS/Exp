@@ -43,6 +43,7 @@ else()
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network WebSockets)
+find_package(unofficial-webrtc CONFIG REQUIRED)
 
 add_library(devicehub_core
     src/devices/DeviceEnumerator.h
@@ -55,6 +56,8 @@ add_library(devicehub_core
     src/devices/CameraDevice.cpp
     src/devices/ScreenCaptureDevice.h
     src/devices/ScreenCaptureDevice.cpp
+    src/devices/CallAudioDeviceModule.h
+    src/devices/CallAudioDeviceModule.cpp
     src/auth/AuthClient.h
     src/auth/AuthClient.cpp
     src/chat/ChatClient.h
@@ -95,6 +98,7 @@ target_link_libraries(devicehub_core PUBLIC
     Qt6::MultimediaWidgets
     Qt6::Network
     Qt6::WebSockets
+    unofficial::webrtc::webrtc
 )
 add_executable(DeviceHub MACOSX_BUNDLE
     src/main.cpp
@@ -136,6 +140,7 @@ add_executable(devicehub_tests
     test/ChatMessageGroupingTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
+    test/CallAudioDeviceModuleTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core
