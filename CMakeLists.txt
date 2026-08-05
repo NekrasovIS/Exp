@@ -64,6 +64,8 @@ add_library(devicehub_core
     src/chat/ChatClient.cpp
     src/chat/ChatRestClient.h
     src/chat/ChatRestClient.cpp
+    src/chat/CallManager.h
+    src/chat/CallManager.cpp
     src/ui/CommunitiesPanel.h
     src/ui/CommunitiesPanel.cpp
     src/ui/ChannelsPanel.h
@@ -141,6 +143,7 @@ add_executable(devicehub_tests
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
     test/CallAudioDeviceModuleTest.cpp
+    test/CallManagerIntegrationTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core

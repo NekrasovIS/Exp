@@ -206,9 +206,28 @@ push (внешний код зовёт `pushCapturedAudio()`, когда ест�
 через callback (не в Qt GUI-потоке — маршалинг туда, если он нужен,
 на совести вызывающего). Это первый проход именно моста между
 либвебртц и Qt Multimedia — реальная привязка к живому `AudioInputDevice`/
-`AudioOutputDevice` и к `PeerConnection`-mesh придёт в следующих фазах
-(#46 Phase 3/4); кросс-поточная передача аудио здесь ещё не тюнингована
-под живую нагрузку, это осознанный риск первой версии.
+`AudioOutputDevice` придёт отдельной задачей (см. ниже); кросс-поточная
+передача аудио здесь ещё не тюнингована под живую нагрузку, это
+осознанный риск первой версии.
+
+Оркестрация самого mesh-звонка (issue #46, Phase 3) — в
+`src/chat/CallManager`: одна `webrtc::PeerConnectionFactoryInterface` (с
+`CallAudioDeviceModule` в роли ADM) и по одному `webrtc::PeerConnection`
+на каждого удалённого участника, без SFU. Подписан на call-сигналинг
+`ChatClient` (`callRosterReceived`/`callPeerJoined`/`callPeerLeft`/
+`callSignalReceived`) и правило инициации mesh соблюдает буквально:
+только что присоединившийся участник сам предлагает (`offer`) каждому,
+кто уже в ростере; существующие участники только отвечают (`answer`) —
+так в одной паре не бывает двух одновременных offer. Callback'и
+`PeerConnectionObserver`/`SetLocal-`/`SetRemoteDescriptionObserverInterface`
+прилетают на собственном потоке WebRTC, а не на потоке Qt GUI — каждый
+сразу перескакивает обратно через `QMetaObject::invokeMethod(...,
+Qt::QueuedConnection)`, прежде чем трогать состояние `CallManager` или
+звать `ChatClient`. Как и `CallAudioDeviceModule`, это первый проход
+именно mesh-сигналинга: реальный микрофон/динамики ещё не подключены
+(`pushCapturedAudio()` никто не зовёт, playout-sink не задан) — участники
+корректно соединяются и обмениваются SDP/ICE, но несут тишину, пока не
+появится отдельная задача с привязкой к живым Qt-устройствам.
 
 Реальные end-to-end тесты требуют запущенных сервисов и Postgres и
 пропускают себя (`GTEST_SKIP`), если те недоступны — CI пока не
@@ -218,6 +237,12 @@ push (внешний код зовёт `pushCapturedAudio()`, когда ест�
   user-service, получает и проверяет токен через auth-service.
 - `ChatClientIntegrationTest` (DeviceHub) — то же плюс создаёт
   сообщество/канал и реальный round-trip через WebSocket chat-service.
+- `CallManagerIntegrationTest` (DeviceHub) — два пользователя, один канал:
+  оба присоединяются к звонку, второй по правилу инициации mesh шлёт offer
+  первому через живой chat-service, проверяется реальный SDP offer/answer
+  round-trip (без `callError`) и что leave/join долетают друг до друга;
+  полную ICE/DTLS-связность намеренно не ждёт (не привязываться к
+  доступности STUN в конкретном окружении).
 - `UserServiceClientIntegrationTest` (auth-service) — то же самое, но
   напрямую от лица auth-service.
 - `UserServiceIntegrationTest` (user-service) — регистрация и проверка

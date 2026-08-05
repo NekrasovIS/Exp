@@ -6,6 +6,15 @@ package "Qt WebSockets / Qt Network" {
   class QNetworkAccessManager
 }
 
+package "libwebrtc" {
+  class "webrtc::PeerConnectionFactoryInterface" as WebrtcPeerConnectionFactory
+  class "webrtc::PeerConnectionInterface" as WebrtcPeerConnection
+}
+
+package "src/devices" {
+  class CallAudioDeviceModule
+}
+
 class ChatItem {
   +id : qint64
   +name : QString
@@ -15,13 +24,62 @@ class ChatClient {
   +connectToChannel(token: QString, channelId: qint64)
   +sendMessage(body: QString)
   +disconnectFromChannel()
+  +joinCall()
+  +leaveCall()
+  +sendCallSignal(to: QString, payload: QJsonObject)
   .. signals ..
   +subscribed(channelId: qint64)
   +messageReceived(author: QString, body: QString, sentAt: QString)
   +errorOccurred(message: QString)
+  +callRosterReceived(participants: QStringList)
+  +callPeerJoined(login: QString)
+  +callPeerLeft(login: QString)
+  +callSignalReceived(from: QString, payload: QJsonObject)
 }
 ChatClient *-- QWebSocket : owns
 ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebSocket
+ChatClient ..> "chat-service" : call_join/call_leave/call_signal\n(issue #46 signaling relay)
+
+class CallManager {
+  +joinCall()
+  +leaveCall()
+  +inCall() : bool
+  .. signals ..
+  +participantJoined(login: QString)
+  +participantLeft(login: QString)
+  +callError(message: QString)
+  -ensureFactory()
+  -ensurePeerConnection(peerLogin: QString) : PeerConnectionEntry*
+  -closePeerConnection(peerLogin: QString)
+  -negotiateLocal(peerLogin: QString)
+}
+CallManager --> ChatClient : uses (&), listens to call_* signals
+CallManager *-- WebrtcPeerConnectionFactory : owns (built lazily on joinCall())
+CallManager "1" *-- "0..*" WebrtcPeerConnection : owns, one per\nremote participant (mesh)
+CallManager *-- CallAudioDeviceModule : owns (issue #64), registered\nas the factory's ADM
+note right of CallManager
+  Mesh initiation rule (issue #46): the newly
+  joining peer always offers to everyone
+  already in call_roster; existing participants
+  only ever answer, in response to an incoming
+  offer via callSignalReceived() — never on
+  callPeerJoined(), which is purely informational.
+
+  PeerConnectionObserver / SetLocal-/
+  SetRemoteDescriptionObserverInterface
+  callbacks fire on WebRTC's own signaling
+  thread; every one hops back to this class's
+  own (GUI) thread via QMetaObject::invokeMethod
+  before touching any shared state.
+
+  First-pass scope: mesh signaling only — the
+  audio bridge's capture side is never fed real
+  microphone PCM here, and its playout sink is
+  left unset. Peers connect and negotiate
+  correctly but carry silence until real
+  AudioInputDevice/AudioOutputDevice wiring
+  lands in a follow-up.
+end note
 
 class ChatRestClient {
   +createCommunity(token: QString, name: QString)
