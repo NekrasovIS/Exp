@@ -54,6 +54,7 @@ class ChannelsPanel {
 class ChatView {
   +showPlaceholder()
   +showChannel(channelName: QString)
+  +setCurrentUserLogin(login: QString)
   +appendMessage(message: ChatMessage)
   +appendSystemLine(text: QString)
   +clearLog()
@@ -71,10 +72,16 @@ struct ChatMessage {
 }
 
 class ChatMessageRow {
-  ChatMessageRow(message: ChatMessage, showHeader: bool)
+  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
+  #resizeEvent(event: QResizeEvent*)
+}
+class ChatBubble {
+  ChatBubble(isOwnMessage: bool)
+  #paintEvent(event: QPaintEvent*)
 }
 ChatView *-- ChatMessageRow : creates one per message
 ChatMessageRow ..> ChatMessage : renders
+ChatMessageRow *-- ChatBubble : owns (own messages: green\ngradient, right-aligned;\nothers: neutral, left-aligned)
 
 package "devicehub::chat_message_grouping" <<Rectangle>> {
   class ChatMessageGrouping << (N,orchid) namespace >> {
@@ -184,7 +191,7 @@ ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteReques
 CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
-MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog() >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
@@ -221,6 +228,18 @@ note right of MainWindow
   баннер поверх ChatView с авто-скрытием,
   вместо легко пропускаемой строки внизу
   окна.
+
+  ChatMessageRow/ChatBubble: размеры
+  (аватар, отступы, радиус скругления)
+  считаются от QFontMetricsF(font())
+  .height(), а не заданы фиксированными
+  px — em-подобно. Максимальная ширина
+  bubble — доля (70%) от текущей ширины
+  строки, пересчитывается в resizeEvent().
+  Свои сообщения — bubble справа, зелёный
+  градиент; чужие — слева, нейтральный
+  цвет с аватаром у первого сообщения
+  группы.
 end note
 
 @enduml

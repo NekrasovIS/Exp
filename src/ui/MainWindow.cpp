@@ -71,6 +71,7 @@ MainWindow::MainWindow(QWidget* parent)
         footerBar_->setProfileText(valid ? subject : tr("Not signed in"));
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
+        chatView_->setCurrentUserLogin(currentUserLogin_);
         if (valid) {
             refreshCommunities();
         }

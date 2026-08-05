@@ -115,9 +115,14 @@ void ChatView::showChannel(const QString& channelName) {
     stack_->setCurrentIndex(kChannelPageIndex);
 }
 
+void ChatView::setCurrentUserLogin(const QString& login) {
+    currentUserLogin_ = login;
+}
+
 void ChatView::appendMessage(const ChatMessage& message) {
     const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
-    auto* row = new ChatMessageRow(message, showHeader, messagesContainer_);
+    const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
+    auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     lastMessage_ = message;
     hasLastMessage_ = true;

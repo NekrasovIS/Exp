@@ -71,6 +71,8 @@ add_library(devicehub_core
     src/ui/ChatMessageRow.cpp
     src/ui/ChatMessageGrouping.h
     src/ui/ChatMessageGrouping.cpp
+    src/ui/ChatBubble.h
+    src/ui/ChatBubble.cpp
     src/ui/AccountMenu.h
     src/ui/AccountMenu.cpp
     src/ui/SettingsDialog.h

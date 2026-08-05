@@ -35,6 +35,10 @@ public:
     /// Switches to the chat page and sets its header to @p channelName.
     void showChannel(const QString& channelName);
 
+    /// Needed to decide whether an appended message is "own" (bubble
+    /// right-aligned, accent-colored, no avatar) or someone else's.
+    void setCurrentUserLogin(const QString& login);
+
     /// Appends a real chat message — grouped under the previous one
     /// (no repeated avatar/name/time) if they're from the same author
     /// within a few minutes of each other.
@@ -68,6 +72,7 @@ private:
     QPushButton* sendButton_ = nullptr;
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
+    QString currentUserLogin_;
 };
 
 }  // namespace devicehub
