@@ -42,6 +42,21 @@ else()
     )
 endif()
 
+# WebRTC's own build disables RTTI, so classes it exports (e.g.
+# AdaptedVideoTrackSource, used by CallVideoTrackSource, issue #72) have a
+# vtable but no typeinfo in libwebrtc.a. Any RTTI-enabled code that defines
+# a derived class's out-of-line virtuals — or instantiates
+# webrtc::RefCountedObject<T> for one via make_ref_counted<T>() — needs to
+# emit typeinfo referencing the base's, which doesn't exist, so the linker
+# fails. Nothing in this codebase uses dynamic_cast/typeid, so disabling
+# RTTI project-wide sidesteps this cleanly instead of chasing it file by
+# file as more WebRTC-derived classes are added.
+if(MSVC)
+    add_compile_options(/GR-)
+else()
+    add_compile_options(-fno-rtti)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network WebSockets)
 find_package(unofficial-webrtc CONFIG REQUIRED)
 
@@ -58,6 +73,8 @@ add_library(devicehub_core
     src/devices/ScreenCaptureDevice.cpp
     src/devices/CallAudioDeviceModule.h
     src/devices/CallAudioDeviceModule.cpp
+    src/devices/CallVideoTrackSource.h
+    src/devices/CallVideoTrackSource.cpp
     src/auth/AuthClient.h
     src/auth/AuthClient.cpp
     src/chat/ChatClient.h
@@ -144,6 +161,7 @@ add_executable(devicehub_tests
     test/ChatClientIntegrationTest.cpp
     test/CallAudioDeviceModuleTest.cpp
     test/CallManagerIntegrationTest.cpp
+    test/CallVideoTrackSourceTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core
