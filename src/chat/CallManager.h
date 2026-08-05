@@ -1,12 +1,16 @@
 #pragma once
 
 #include "chat/ChatClient.h"
+#include "devices/AudioInputDevice.h"
+#include "devices/AudioOutputDevice.h"
 #include "devices/CallAudioDeviceModule.h"
 
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
 #include <rtc_base/thread.h>
 
+#include <QAudioDevice>
+#include <QByteArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -14,6 +18,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+class QAudioFormat;
 
 namespace devicehub {
 
@@ -43,23 +49,29 @@ namespace devicehub {
  * touching `peers_` or calling into ChatClient, so all of this class's
  * own state is only ever touched from the GUI thread it lives on.
  *
- * First-pass scope: mesh signaling only. The CallAudioDeviceModule's
- * capture side is never fed real microphone PCM here (pushCapturedAudio()
- * is not called), and its playout sink is left unset — wiring real
- * AudioInputDevice/AudioOutputDevice audio through is deferred to a
- * follow-up (issue #46 Phase 4 UI or a dedicated task), so peers connect
- * and negotiate correctly but carry silence until that lands.
+ * Real microphone/speaker audio (issue #70): AudioInputDevice's
+ * pcmDataAvailable() is forwarded into the ADM's pushCapturedAudio(),
+ * and the ADM's playout sink writes into AudioOutputDevice's streaming
+ * path — both set up in joinCall(), torn down in leaveCall(). Both
+ * devices are single-owner-at-a-time (see their own doc comments): a
+ * call and the Settings dialog's mic-test/test-tone controls share the
+ * same AudioInputDevice/AudioOutputDevice instances, so starting one
+ * while the other is active silently takes over the underlying
+ * QAudioSource/QAudioSink. Accepted first-pass tradeoff, not solved
+ * here — matches the existing settings-dialog device semantics.
  */
 class CallManager : public QObject {
     Q_OBJECT
 
 public:
-    explicit CallManager(ChatClient& chatClient, QObject* parent = nullptr);
+    CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, AudioOutputDevice& audioOutput,
+                QObject* parent = nullptr);
     ~CallManager() override;
 
-    /// Sends call_join and starts offering to whoever's already in the
-    /// call, once the roster reply arrives.
-    void joinCall();
+    /// Sends call_join, starts capturing from @p inputDevice and
+    /// streaming remote audio to @p outputDevice, and starts offering
+    /// to whoever's already in the call once the roster reply arrives.
+    void joinCall(const QAudioDevice& inputDevice, const QAudioDevice& outputDevice);
 
     /// Sends call_leave and tears down every peer connection.
     void leaveCall();
@@ -110,7 +122,13 @@ private:
     void handleRemoteDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
     void handleLocalIceCandidate(const QString& peerLogin, const QJsonObject& payload);
 
+    /// Forwards a captured buffer from audioInput_ into the ADM, while a
+    /// call is active.
+    void onCapturedPcm(const QByteArray& data, const QAudioFormat& format);
+
     ChatClient& chatClient_;
+    AudioInputDevice& audioInput_;
+    AudioOutputDevice& audioOutput_;
 
     std::unique_ptr<webrtc::Thread> networkThread_;
     std::unique_ptr<webrtc::Thread> workerThread_;

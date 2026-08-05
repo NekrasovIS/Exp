@@ -32,12 +32,25 @@ DeviceEnumerator ..> QScreen : lists
 
 class AudioOutputDevice {
   +playTestTone(device: QAudioDevice, frequencyHz: double = 440.0)
+  +startStreaming(device: QAudioDevice, format: QAudioFormat) : bool
+  +writeAudio(pcm: QByteArray)
   +stop()
   +isPlaying() : bool
   .. signals ..
   +finished()
+  +errorOccurred(message: QString)
   -generateSineWave(format: QAudioFormat, frequencyHz: double, durationSeconds: double) : QByteArray
 }
+note right of AudioOutputDevice
+  One QAudioSink at a time — playTestTone()
+  and startStreaming() (issue #70, push-mode
+  for a live call's remote audio) share it,
+  starting either stops whatever was playing
+  before it. finished() isn't emitted for a
+  streaming session's idle-between-writes
+  state, only for playTestTone()'s buffer
+  actually draining.
+end note
 AudioOutputDevice --> "0..1" QAudioSink : owns (unique_ptr)
 AudioOutputDevice ..> QAudioDevice : uses
 
@@ -47,6 +60,7 @@ class AudioInputDevice {
   +isCapturing() : bool
   .. signals ..
   +levelChanged(level: float)
+  +pcmDataAvailable(data: QByteArray, format: QAudioFormat)
   +errorOccurred(message: QString)
   -startCapture(device: QAudioDevice)
   -readAvailableData()
@@ -57,6 +71,11 @@ note right of AudioInputDevice
   requestPermission() (QMicrophonePermission) before
   startCapture() — Qt never shows the macOS prompt on
   its own for an Undetermined status.
+
+  pcmDataAvailable() (issue #70) carries the same
+  raw buffer levelChanged() computes from — lets
+  CallManager forward real microphone audio into a
+  call without this class knowing about calls at all.
 end note
 AudioInputDevice --> "0..1" QAudioSource : owns (unique_ptr)
 AudioInputDevice ..> QAudioDevice : uses
@@ -109,6 +128,7 @@ class CallAudioDeviceModule {
   +StartRecording() : int32_t
   +StopRecording() : int32_t
   +Recording() : bool
+  +setPlayoutFormat(sampleRateHz: int, channels: size_t)
   -playoutLoop()
   -transport() : AudioTransport*
 }
@@ -120,12 +140,18 @@ note right of CallAudioDeviceModule
   "push samples into an AudioSource" API,
   only this device-module interface (issue #46).
 
-  Capture is push-style: whoever owns real
-  microphone PCM (future CallAudioSource,
-  issue #46 Phase 3) calls pushCapturedAudio()
-  whenever a buffer is ready; forwarded to
+  Capture is push-style: CallManager (issue #70)
+  forwards AudioInputDevice::pcmDataAvailable()
+  straight into pushCapturedAudio() whenever a
+  buffer is ready; forwarded to
   AudioTransport::RecordedDataIsAvailable()
-  while StartRecording() is active.
+  while StartRecording() is active. nBytesPerSample
+  in that call (and NeedMorePlayData() below) means
+  bytes per interleaved FRAME across all channels
+  (sizeof(int16_t) * nChannels), not per scalar
+  sample — WebRTC's own AudioTransportImpl asserts
+  this and aborts (fatal CHECK) if it's wrong; this
+  was a real bug here until issue #70 caught it live.
 
   Playout is pull-style but WebRTC does not
   drive the timing itself: this class runs its
@@ -133,12 +159,15 @@ note right of CallAudioDeviceModule
   AudioTransport::NeedMorePlayData() and
   forwards decoded PCM to a caller-supplied
   PlayoutSink callback — invoked on that
-  thread, NOT the Qt GUI thread. First-pass
-  simplification, not yet tuned for glitch-free
-  playback under real load; a caller touching
-  Qt objects from the sink must marshal back
+  thread, NOT the Qt GUI thread. setPlayoutFormat()
+  (issue #70) overrides the default 48kHz-mono
+  request to match whatever real output device
+  CallManager wired up, via AudioOutputDevice's
+  streaming path; must be called before
+  StartPlayout(). A caller touching Qt objects
+  from the PlayoutSink callback must marshal back
   itself (e.g. QMetaObject::invokeMethod with
-  Qt::QueuedConnection).
+  Qt::QueuedConnection) — CallManager does.
 end note
 
 @enduml

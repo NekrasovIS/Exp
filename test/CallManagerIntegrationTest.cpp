@@ -2,9 +2,13 @@
 #include "chat/CallManager.h"
 #include "chat/ChatClient.h"
 #include "chat/ChatRestClient.h"
+#include "devices/AudioInputDevice.h"
+#include "devices/AudioOutputDevice.h"
+#include "devices/DeviceEnumerator.h"
 
 #include <gtest/gtest.h>
 
+#include <QAudioDevice>
 #include <QDateTime>
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -143,8 +147,27 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         ASSERT_TRUE(subscribed);
     }
 
-    CallManager callManagerA(chatClientA);
-    CallManager callManagerB(chatClientB);
+    // Real enumerated devices, not a default-constructed QAudioDevice —
+    // CallManager::joinCall() treats a null device as "none selected"
+    // and skips it with a callError() rather than crashing, which would
+    // make this test pass for the wrong reason (never actually
+    // exercising the real device wiring this test is meant to cover).
+    DeviceEnumerator enumerator;
+    const QList<QAudioDevice> outputs = enumerator.audioOutputs();
+    const QList<QAudioDevice> inputs = enumerator.audioInputs();
+    if (outputs.isEmpty() || inputs.isEmpty()) {
+        GTEST_SKIP() << "No audio input/output device available on this machine.";
+    }
+    const QAudioDevice outputDevice = outputs.first();
+    const QAudioDevice inputDevice = inputs.first();
+
+    AudioInputDevice audioInputA;
+    AudioOutputDevice audioOutputA;
+    AudioInputDevice audioInputB;
+    AudioOutputDevice audioOutputB;
+
+    CallManager callManagerA(chatClientA, audioInputA, audioOutputA);
+    CallManager callManagerB(chatClientB, audioInputB, audioOutputB);
 
     QStringList errorsA;
     QStringList errorsB;
@@ -158,7 +181,7 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         }
     });
 
-    callManagerA.joinCall();
+    callManagerA.joinCall(inputDevice, outputDevice);
 
     {
         // A joined alone (empty roster) — nothing to negotiate yet, just
@@ -168,7 +191,7 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         loop.exec();
     }
 
-    callManagerB.joinCall();
+    callManagerB.joinCall(inputDevice, outputDevice);
 
     {
         // Wait for the offer/answer/signaling exchange (relayed through

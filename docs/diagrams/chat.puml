@@ -13,6 +13,8 @@ package "libwebrtc" {
 
 package "src/devices" {
   class CallAudioDeviceModule
+  class AudioInputDevice
+  class AudioOutputDevice
 }
 
 class ChatItem {
@@ -41,7 +43,7 @@ ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebS
 ChatClient ..> "chat-service" : call_join/call_leave/call_signal\n(issue #46 signaling relay)
 
 class CallManager {
-  +joinCall()
+  +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)
   +leaveCall()
   +inCall() : bool
   +setMuted(muted: bool)
@@ -54,8 +56,11 @@ class CallManager {
   -ensurePeerConnection(peerLogin: QString) : PeerConnectionEntry*
   -closePeerConnection(peerLogin: QString)
   -negotiateLocal(peerLogin: QString)
+  -onCapturedPcm(data: QByteArray, format: QAudioFormat)
 }
 CallManager --> ChatClient : uses (&), listens to call_* signals
+CallManager --> AudioInputDevice : uses (&), pcmDataAvailable()\n-> pushCapturedAudio() (issue #70)
+CallManager --> AudioOutputDevice : uses (&), PlayoutSink\n-> writeAudio() (issue #70)
 CallManager *-- WebrtcPeerConnectionFactory : owns (built lazily on joinCall())
 CallManager "1" *-- "0..*" WebrtcPeerConnection : owns, one per\nremote participant (mesh)
 CallManager *-- CallAudioDeviceModule : owns (issue #64), registered\nas the factory's ADM
@@ -74,13 +79,19 @@ note right of CallManager
   own (GUI) thread via QMetaObject::invokeMethod
   before touching any shared state.
 
-  First-pass scope: mesh signaling only — the
-  audio bridge's capture side is never fed real
-  microphone PCM here, and its playout sink is
-  left unset. Peers connect and negotiate
-  correctly but carry silence until real
-  AudioInputDevice/AudioOutputDevice wiring
-  lands in a follow-up.
+  Real microphone/speaker audio (issue #70):
+  joinCall() wires AudioInputDevice::pcmDataAvailable()
+  into pushCapturedAudio(), and CallAudioDeviceModule's
+  PlayoutSink into AudioOutputDevice::writeAudio() —
+  both single-owner-at-a-time with the Settings
+  dialog's mic-test/test-tone controls, so a call and
+  those controls silently take over the same
+  QAudioSource/QAudioSink from each other (accepted
+  first-pass tradeoff). A null/unselected QAudioDevice
+  is handled with callError() rather than being passed
+  through — WebRTC's own AudioTransportImpl hard-aborts
+  (fatal CHECK) on a 0 channel count instead of failing
+  gracefully.
 end note
 
 class ChatRestClient {
