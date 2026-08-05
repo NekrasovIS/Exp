@@ -1,0 +1,205 @@
+#include "auth/AuthClient.h"
+#include "chat/CallManager.h"
+#include "chat/ChatClient.h"
+#include "chat/ChatRestClient.h"
+
+#include <gtest/gtest.h>
+
+#include <QDateTime>
+#include <QEventLoop>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QTimer>
+#include <QUrl>
+
+#include <cstdlib>
+
+// Requires the full live stack: auth-service, user-service, chat-service
+// (REST + WebSocket), and both Postgres instances (see docker-compose.yml),
+// plus real network access to gather ICE candidates. Skips itself rather
+// than failing when the stack isn't running — same convention as
+// ChatClientIntegrationTest.
+//
+// This exercises the real offer/answer/signaling round trip (SDP
+// generation, relay through live chat-service, parsing, auto-answer) via
+// CallManager::callError — it does NOT wait for full ICE/DTLS
+// connectivity, since that depends on STUN reachability and timing that
+// would make the test flaky in a sandboxed CI environment; the signaling
+// correctness it does verify is the part actually implemented in this
+// change.
+
+namespace devicehub {
+namespace {
+
+std::string envOrDefault(const char* name, const std::string& defaultValue) {
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::string(value) : defaultValue;
+}
+
+bool registerTestUser(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& login,
+                       const QString& password) {
+    QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/register"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QNetworkReply* reply =
+        manager.post(request, QJsonDocument(QJsonObject{{"login", login}, {"password", password}}).toJson());
+
+    bool succeeded = false;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, [&]() {
+        succeeded = (reply->error() == QNetworkReply::NoError);
+        reply->deleteLater();
+        loop.quit();
+    });
+    loop.exec();
+    return succeeded;
+}
+
+std::optional<QString> requestToken(AuthClient& authClient, const QString& login, const QString& password) {
+    QString token;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&authClient, &AuthClient::tokenReceived, &loop, [&](const QString& receivedToken) {
+        token = receivedToken;
+        loop.quit();
+    });
+    QObject::connect(&authClient, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+    authClient.requestToken(login, password);
+    loop.exec();
+    return token.isEmpty() ? std::nullopt : std::make_optional(token);
+}
+
+}  // namespace
+
+TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const qint64 suffix = QDateTime::currentMSecsSinceEpoch();
+    const QString loginA = QStringLiteral("call-test-a-%1").arg(suffix);
+    const QString loginB = QStringLiteral("call-test-b-%1").arg(suffix);
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) ||
+        !registerTestUser(manager, userUrl, loginB, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    AuthClient authClientB(authUrl);
+    const std::optional<QString> tokenA = requestToken(authClientA, loginA, password);
+    const std::optional<QString> tokenB = requestToken(authClientB, loginB, password);
+    if (!tokenA.has_value() || !tokenB.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(*tokenA, QStringLiteral("call-integration-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(*tokenA, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    ChatClient chatClientA(chatWsUrl);
+    ChatClient chatClientB(chatWsUrl);
+    for (auto* client : {&chatClientA, &chatClientB}) {
+        bool subscribed = false;
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(client, &ChatClient::subscribed, &loop, [&](qint64) {
+            subscribed = true;
+            loop.quit();
+        });
+        client->connectToChannel(client == &chatClientA ? *tokenA : *tokenB, channelId);
+        loop.exec();
+        ASSERT_TRUE(subscribed);
+    }
+
+    CallManager callManagerA(chatClientA);
+    CallManager callManagerB(chatClientB);
+
+    QStringList errorsA;
+    QStringList errorsB;
+    QObject::connect(&callManagerA, &CallManager::callError, [&](const QString& message) { errorsA << message; });
+    QObject::connect(&callManagerB, &CallManager::callError, [&](const QString& message) { errorsB << message; });
+
+    bool aSawBJoin = false;
+    QObject::connect(&callManagerA, &CallManager::participantJoined, [&](const QString& login) {
+        if (login == loginB) {
+            aSawBJoin = true;
+        }
+    });
+
+    callManagerA.joinCall();
+
+    {
+        // A joined alone (empty roster) — nothing to negotiate yet, just
+        // give the join frame time to round-trip before B joins.
+        QEventLoop loop;
+        QTimer::singleShot(500, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+
+    callManagerB.joinCall();
+
+    {
+        // Wait for the offer/answer/signaling exchange (relayed through
+        // live chat-service) to settle.
+        QEventLoop loop;
+        QTimer::singleShot(4000, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+
+    EXPECT_TRUE(aSawBJoin);
+    EXPECT_TRUE(errorsA.isEmpty()) << errorsA.join(QStringLiteral("; ")).toStdString();
+    EXPECT_TRUE(errorsB.isEmpty()) << errorsB.join(QStringLiteral("; ")).toStdString();
+
+    bool aSawBLeave = false;
+    QObject::connect(&callManagerA, &CallManager::participantLeft, [&](const QString& login) {
+        if (login == loginB) {
+            aSawBLeave = true;
+        }
+    });
+
+    callManagerB.leaveCall();
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(2000, &loop, &QEventLoop::quit);
+        QObject::connect(&callManagerA, &CallManager::participantLeft, &loop, [&](const QString&) { loop.quit(); });
+        loop.exec();
+    }
+    EXPECT_TRUE(aSawBLeave);
+
+    callManagerA.leaveCall();
+}
+
+}  // namespace devicehub
