@@ -232,11 +232,12 @@ void MainWindow::buildUi() {
     sidebar->setObjectName(QStringLiteral("sidebar"));
     sidebar->setAttribute(Qt::WA_StyledBackground, true);
     sidebar->setFixedWidth(280);
-    auto* sidebarLayout = new QVBoxLayout(sidebar);
+    auto* sidebarLayout = new QHBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
+    sidebarLayout->setSpacing(0);
     communitiesPanel_ = new CommunitiesPanel(sidebar);
     channelsPanel_ = new ChannelsPanel(sidebar);
-    sidebarLayout->addWidget(communitiesPanel_, /*stretch=*/1);
+    sidebarLayout->addWidget(communitiesPanel_);
     sidebarLayout->addWidget(channelsPanel_, /*stretch=*/1);
 
     chatView_ = new ChatView(central);

@@ -167,15 +167,16 @@ TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
 TEST(MainWindowUiTest, EmptyStatesOfferAnActionButton) {
     const MainWindow window;
 
-    auto* communityEmptyStateButton = window.findChild<QPushButton*>("emptyStateCreateCommunityButton");
+    // CommunitiesPanel is now a narrow icon rail (#50) with no room for
+    // descriptive empty-state text — its ever-present "+" button is the
+    // rail's own call to action, so only ChannelsPanel and ChatView's
+    // placeholder still have a dedicated empty-state button.
     auto* channelEmptyStateButton = window.findChild<QPushButton*>("emptyStateCreateChannelButton");
     auto* placeholderCreateButton = window.findChild<QPushButton*>("placeholderCreateChannelButton");
 
-    ASSERT_NE(communityEmptyStateButton, nullptr);
     ASSERT_NE(channelEmptyStateButton, nullptr);
     ASSERT_NE(placeholderCreateButton, nullptr);
 
-    EXPECT_EQ(communityEmptyStateButton->text(), QStringLiteral("Create community"));
     EXPECT_EQ(channelEmptyStateButton->text(), QStringLiteral("Create channel"));
     EXPECT_EQ(placeholderCreateButton->text(), QStringLiteral("Create channel"));
 }

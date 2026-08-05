@@ -39,7 +39,12 @@ QString discordDarkStyleSheet() {
             border-top: 1px solid #2a2d31;
         }
 
-        devicehub--CommunitiesPanel, devicehub--ChannelsPanel, devicehub--ChatView, devicehub--AccountMenu {
+        devicehub--CommunitiesPanel {
+            background-color: #17191c;
+            border-right: 1px solid #2a2d31;
+        }
+
+        devicehub--ChannelsPanel, devicehub--ChatView, devicehub--AccountMenu {
             background-color: transparent;
         }
 
