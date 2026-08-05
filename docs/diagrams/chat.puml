@@ -44,6 +44,8 @@ class CallManager {
   +joinCall()
   +leaveCall()
   +inCall() : bool
+  +setMuted(muted: bool)
+  +isMuted() : bool
   .. signals ..
   +participantJoined(login: QString)
   +participantLeft(login: QString)

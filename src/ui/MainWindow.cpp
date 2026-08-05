@@ -97,6 +97,21 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
 
+    connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
+    connect(chatView_, &ChatView::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
+    connect(&callManager_, &CallManager::participantJoined, this, [this](const QString& login) {
+        if (!callParticipants_.contains(login)) {
+            callParticipants_.append(login);
+        }
+        chatView_->setCallParticipants(callParticipants_);
+    });
+    connect(&callManager_, &CallManager::participantLeft, this, [this](const QString& login) {
+        callParticipants_.removeAll(login);
+        chatView_->setCallParticipants(callParticipants_);
+    });
+    connect(&callManager_, &CallManager::callError, this,
+            [this](const QString& message) { showToast(message, ToastBanner::Variant::kError); });
+
     connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
         if (lastToken_.isEmpty()) {
             showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
@@ -350,6 +365,22 @@ void MainWindow::onSendChatMessageClicked() {
     chatView_->messageEdit()->clear();
 }
 
+void MainWindow::onCallToggleClicked() {
+    if (callManager_.inCall()) {
+        callManager_.leaveCall();
+        callParticipants_.clear();
+        chatView_->setCallParticipants(callParticipants_);
+    } else {
+        callManager_.joinCall();
+    }
+    chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
+}
+
+void MainWindow::onMuteToggleClicked() {
+    callManager_.setMuted(!callManager_.isMuted());
+    chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
+}
+
 void MainWindow::refreshCommunities() {
     if (lastToken_.isEmpty()) {
         showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
@@ -367,6 +398,15 @@ void MainWindow::refreshChannelsForSelectedCommunity() {
 }
 
 void MainWindow::openChannel(qint64 id, const QString& name) {
+    // A call is scoped to whichever channel we're subscribed to — leave
+    // it before switching, rather than stranding PeerConnections tied
+    // to a channel we're no longer even connected to.
+    if (callManager_.inCall()) {
+        callManager_.leaveCall();
+        callParticipants_.clear();
+        chatView_->setCallParticipants(callParticipants_);
+        chatView_->setCallState(false, callManager_.isMuted());
+    }
     selectedChannelId_ = id;
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
@@ -375,6 +415,12 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
 }
 
 void MainWindow::closeChatView() {
+    if (callManager_.inCall()) {
+        callManager_.leaveCall();
+        callParticipants_.clear();
+        chatView_->setCallParticipants(callParticipants_);
+        chatView_->setCallState(false, callManager_.isMuted());
+    }
     if (selectedChannelId_ >= 0) {
         chatClient_.disconnectFromChannel();
     }

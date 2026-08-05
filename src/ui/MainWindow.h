@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "auth/AuthClient.h"
+#include "chat/CallManager.h"
 #include "chat/ChatClient.h"
 #include "chat/ChatRestClient.h"
 #include "devices/AudioInputDevice.h"
@@ -52,6 +53,8 @@ private:
     void onRequestTokenClicked();
     void onRegisterClicked();
     void onSendChatMessageClicked();
+    void onCallToggleClicked();
+    void onMuteToggleClicked();
 
     /// Re-lists communities from chat-service (no-op, with a status bar
     /// message, if not signed in yet).
@@ -75,12 +78,14 @@ private:
     ScreenCaptureDevice screenCapture_;
     AuthClient authClient_;
     ChatClient chatClient_;
+    CallManager callManager_{chatClient_};
     ChatRestClient chatRestClient_;
     QString lastToken_;
     QString currentUserLogin_;
     QList<QScreen*> screens_;
     QList<ChatItem> communities_;
     QList<ChatItem> channels_;
+    QStringList callParticipants_;
     qint64 selectedCommunityId_ = -1;
     qint64 selectedChannelId_ = -1;
     qint64 pendingCommunitySelection_ = -1;

@@ -66,6 +66,14 @@ public:
 
     [[nodiscard]] bool inCall() const { return inCall_; }
 
+    /// Mutes/unmutes the local audio track for every peer at once — a
+    /// real per-track mute (webrtc::AudioTrackInterface::set_enabled),
+    /// not a UI-only toggle. Safe to call whether or not a call is
+    /// active; applied to localAudioTrack_ if/when it exists.
+    void setMuted(bool muted);
+
+    [[nodiscard]] bool isMuted() const { return muted_; }
+
 signals:
     void participantJoined(const QString& login);
     void participantLeft(const QString& login);
@@ -113,6 +121,7 @@ private:
 
     std::unordered_map<std::string, PeerConnectionEntry> peers_;
     bool inCall_ = false;
+    bool muted_ = false;
 };
 
 }  // namespace devicehub
