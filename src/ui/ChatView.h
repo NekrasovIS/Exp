@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QStringList>
 #include <QWidget>
 
 #include "ui/ChatMessageRow.h"
@@ -52,15 +53,33 @@ public:
     /// Clears the message list and resets grouping state.
     void clearLog();
 
+    /// Updates the Call/Leave and Mute/Unmute buttons — MainWindow calls
+    /// this after every CallManager state change (join, leave, mute
+    /// toggle), rather than this widget tracking call state itself.
+    void setCallState(bool inCall, bool muted);
+
+    /// Updates the small "who's in the call" label.
+    void setCallParticipants(const QStringList& participants);
+
     [[nodiscard]] QWidget* messagesContainer() const { return messagesContainer_; }
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
+    [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
+    [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
+    [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
 
 signals:
     /// Emitted when the placeholder's "Create channel" button is
     /// clicked — MainWindow wires this to the same handling as
     /// ChannelsPanel's own "+" button.
     void createChannelRequested();
+
+    /// Call button clicked — MainWindow decides join vs. leave based on
+    /// CallManager::inCall() and calls back into setCallState().
+    void callToggleRequested();
+
+    /// Mute button clicked — same pattern as callToggleRequested().
+    void muteToggleRequested();
 
 private:
     QStackedWidget* stack_ = nullptr;
@@ -70,6 +89,9 @@ private:
     QVBoxLayout* messagesLayout_ = nullptr;
     QLineEdit* messageEdit_ = nullptr;
     QPushButton* sendButton_ = nullptr;
+    QPushButton* callToggleButton_ = nullptr;
+    QPushButton* muteToggleButton_ = nullptr;
+    QLabel* callParticipantsLabel_ = nullptr;
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;

@@ -142,6 +142,23 @@ TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
 }
 
+TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
+    // #68: Call/Mute buttons live in ChatView's channel header — see
+    // ChatView::setCallState() for how MainWindow keeps their
+    // label/enabled state in sync with CallManager.
+    const MainWindow window;
+
+    auto* callToggleButton = window.findChild<QPushButton*>("callToggleButton");
+    auto* muteToggleButton = window.findChild<QPushButton*>("muteToggleButton");
+
+    ASSERT_NE(callToggleButton, nullptr);
+    ASSERT_NE(muteToggleButton, nullptr);
+
+    EXPECT_EQ(callToggleButton->text(), QStringLiteral("Call"));
+    EXPECT_EQ(muteToggleButton->text(), QStringLiteral("Mute"));
+    EXPECT_FALSE(muteToggleButton->isEnabled());
+}
+
 TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
     const MainWindow window;
 

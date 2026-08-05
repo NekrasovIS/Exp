@@ -58,11 +58,18 @@ class ChatView {
   +appendMessage(message: ChatMessage)
   +appendSystemLine(text: QString)
   +clearLog()
+  +setCallState(inCall: bool, muted: bool)
+  +setCallParticipants(participants: QStringList)
   +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
+  +callToggleButton() : QPushButton*
+  +muteToggleButton() : QPushButton*
+  +callParticipantsLabel() : QLabel*
   .. signals ..
   +createChannelRequested()
+  +callToggleRequested()
+  +muteToggleRequested()
 }
 
 struct ChatMessage {
@@ -160,6 +167,7 @@ package "src/auth" {
 package "src/chat" {
   class ChatClient
   class ChatRestClient
+  class CallManager
 }
 
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
@@ -177,6 +185,7 @@ MainWindow *-- CameraDevice : owns
 MainWindow *-- ScreenCaptureDevice : owns
 MainWindow *-- AuthClient : owns
 MainWindow *-- ChatClient : owns
+MainWindow *-- CallManager : owns (uses ChatClient& — issue #46 Phase 3)
 MainWindow *-- ChatRestClient : owns
 
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
@@ -184,6 +193,7 @@ MainWindow ..> AuthClient : errorOccurred() >
 MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
+MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> ToastBanner : showMessage() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
@@ -191,8 +201,9 @@ ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteReques
 CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
-MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin() >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
+ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -228,6 +239,20 @@ note right of MainWindow
   баннер поверх ChatView с авто-скрытием,
   вместо легко пропускаемой строки внизу
   окна.
+
+  Call/Mute-кнопки в ChatView (issue #46
+  Phase 4) — чистые UI-сигналы, как и
+  остальные панели: сами не знают про
+  CallManager, только шлют
+  callToggleRequested()/muteToggleRequested(),
+  MainWindow решает join/leave по
+  CallManager::inCall() и зовёт назад
+  setCallState(). Mute — реальный per-track
+  mute (webrtc::AudioTrackInterface::
+  set_enabled), не UI-заглушка.
+  openChannel()/closeChatView() сначала
+  выходят из активного звонка — он
+  привязан к подписанному каналу.
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

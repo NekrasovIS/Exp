@@ -61,6 +61,26 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     channelTitleLabel_->setObjectName(QStringLiteral("chatChannelTitle"));
     channelTitleLabel_->setProperty("sectionTitle", true);
 
+    callToggleButton_ = new QPushButton(tr("Call"), channelPage);
+    callToggleButton_->setObjectName(QStringLiteral("callToggleButton"));
+    connect(callToggleButton_, &QPushButton::clicked, this, &ChatView::callToggleRequested);
+
+    muteToggleButton_ = new QPushButton(tr("Mute"), channelPage);
+    muteToggleButton_->setObjectName(QStringLiteral("muteToggleButton"));
+    muteToggleButton_->setEnabled(false);
+    connect(muteToggleButton_, &QPushButton::clicked, this, &ChatView::muteToggleRequested);
+
+    auto* headerRow = new QHBoxLayout;
+    headerRow->setSpacing(ui_theme::kSpacingSm);
+    headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
+    headerRow->addWidget(callToggleButton_);
+    headerRow->addWidget(muteToggleButton_);
+
+    callParticipantsLabel_ = new QLabel(channelPage);
+    callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    callParticipantsLabel_->setWordWrap(true);
+    callParticipantsLabel_->setVisible(false);
+
     scrollArea_ = new QScrollArea(channelPage);
     scrollArea_->setObjectName(QStringLiteral("chatMessagesScrollArea"));
     scrollArea_->setWidgetResizable(true);
@@ -95,7 +115,8 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     sendRow->addWidget(messageEdit_, /*stretch=*/1);
     sendRow->addWidget(sendButton_);
 
-    channelLayout->addWidget(channelTitleLabel_);
+    channelLayout->addLayout(headerRow);
+    channelLayout->addWidget(callParticipantsLabel_);
     channelLayout->addWidget(scrollArea_, /*stretch=*/1);
     channelLayout->addLayout(sendRow);
 
@@ -135,6 +156,24 @@ void ChatView::appendSystemLine(const QString& text) {
     label->setWordWrap(true);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, label);
     hasLastMessage_ = false;
+}
+
+void ChatView::setCallState(bool inCall, bool muted) {
+    callToggleButton_->setText(inCall ? tr("Leave call") : tr("Call"));
+    muteToggleButton_->setEnabled(inCall);
+    muteToggleButton_->setText(muted ? tr("Unmute") : tr("Mute"));
+    if (!inCall) {
+        callParticipantsLabel_->setVisible(false);
+    }
+}
+
+void ChatView::setCallParticipants(const QStringList& participants) {
+    if (participants.isEmpty()) {
+        callParticipantsLabel_->setVisible(false);
+        return;
+    }
+    callParticipantsLabel_->setText(tr("In call: %1").arg(participants.join(QStringLiteral(", "))));
+    callParticipantsLabel_->setVisible(true);
 }
 
 void ChatView::clearLog() {

@@ -126,6 +126,13 @@ void CallManager::leaveCall() {
     peers_.clear();
 }
 
+void CallManager::setMuted(bool muted) {
+    muted_ = muted;
+    if (localAudioTrack_) {
+        localAudioTrack_->set_enabled(!muted_);
+    }
+}
+
 void CallManager::ensureFactory() {
     if (peerConnectionFactory_) {
         return;
@@ -152,6 +159,7 @@ void CallManager::ensureFactory() {
     const webrtc::scoped_refptr<webrtc::AudioSourceInterface> audioSource =
         peerConnectionFactory_->CreateAudioSource(webrtc::AudioOptions());
     localAudioTrack_ = peerConnectionFactory_->CreateAudioTrack("call-audio0", audioSource.get());
+    localAudioTrack_->set_enabled(!muted_);
 }
 
 CallManager::PeerConnectionEntry* CallManager::ensurePeerConnection(const QString& peerLogin) {
