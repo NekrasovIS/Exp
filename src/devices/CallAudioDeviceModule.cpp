@@ -132,7 +132,16 @@ void CallAudioDeviceModule::playoutLoop() {
     const size_t framesPerBuffer = static_cast<size_t>(sampleRateHz) * kPlayoutIntervalMs / 1000;
 
     std::vector<int16_t> buffer(framesPerBuffer * channels);
+    // sleep_until against a fixed-cadence anchor rather than
+    // sleep_for(10ms) after each iteration — sleep_for lets whatever
+    // this iteration's work (plus the OS's own wake-up latency) cost
+    // get added on top of the next 10ms wait every single time, which
+    // drifts the loop below real-time under any sustained system load
+    // and starves the playout sink over time (audible as crackling),
+    // not just the occasional jitter a bigger sink buffer can absorb.
+    auto nextTick = std::chrono::steady_clock::now();
     while (!stopPlayoutThread_.load()) {
+        nextTick += std::chrono::milliseconds(kPlayoutIntervalMs);
         webrtc::AudioTransport* callback = transport();
         if (callback != nullptr) {
             size_t samplesOut = 0;
@@ -147,7 +156,7 @@ void CallAudioDeviceModule::playoutLoop() {
                 playoutSink_(buffer.data(), samplesOut, sampleRateHz, channels);
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(kPlayoutIntervalMs));
+        std::this_thread::sleep_until(nextTick);
     }
 }
 

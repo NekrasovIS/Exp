@@ -191,8 +191,20 @@ void CallManager::ensureFactory() {
         /*video_encoder_factory=*/nullptr, /*video_decoder_factory=*/nullptr, /*audio_mixer=*/nullptr,
         /*audio_processing=*/nullptr);
 
+    // WebRTC's default echo canceller/AGC/noise suppression expect an
+    // accurate render-signal delay estimate from the platform's audio
+    // device module, which this first-pass hand-rolled
+    // CallAudioDeviceModule doesn't report — running them against that
+    // mismatch is a known source of audible artifacts (garbling,
+    // pumping), not an improvement. Disabled for now; revisit once
+    // capture/playout timing is on firmer footing.
+    webrtc::AudioOptions audioOptions;
+    audioOptions.echo_cancellation = false;
+    audioOptions.auto_gain_control = false;
+    audioOptions.noise_suppression = false;
+    audioOptions.highpass_filter = false;
     const webrtc::scoped_refptr<webrtc::AudioSourceInterface> audioSource =
-        peerConnectionFactory_->CreateAudioSource(webrtc::AudioOptions());
+        peerConnectionFactory_->CreateAudioSource(audioOptions);
     localAudioTrack_ = peerConnectionFactory_->CreateAudioTrack("call-audio0", audioSource.get());
     localAudioTrack_->set_enabled(!muted_);
 }
