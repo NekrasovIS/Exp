@@ -176,6 +176,41 @@ QString discordDarkStyleSheet() {
             border: 1px solid #2a2d31;
             border-radius: 12px;
         }
+
+        QWidget#toastBanner {
+            border-radius: 8px;
+        }
+
+        QWidget#toastBanner QLabel {
+            font-weight: 600;
+        }
+
+        QWidget#toastBanner[variant="success"] {
+            background-color: #0d3b28;
+            border: 1px solid #059669;
+        }
+
+        QWidget#toastBanner[variant="success"] QLabel {
+            color: #6ee7b7;
+        }
+
+        QWidget#toastBanner[variant="error"] {
+            background-color: #3f1616;
+            border: 1px solid #a32d2d;
+        }
+
+        QWidget#toastBanner[variant="error"] QLabel {
+            color: #f09595;
+        }
+
+        QWidget#toastBanner[variant="info"] {
+            background-color: #202327;
+            border: 1px solid #383c41;
+        }
+
+        QWidget#toastBanner[variant="info"] QLabel {
+            color: #e3e6e8;
+        }
     )")
         .arg(kSpacingSm)
         .arg(kSpacingMd)

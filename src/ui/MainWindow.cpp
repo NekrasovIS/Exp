@@ -8,7 +8,6 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
-#include <QStatusBar>
 #include <QVBoxLayout>
 #include <QVideoWidget>
 #include <QWidget>
@@ -30,7 +29,7 @@ namespace {
 constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
 constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
-constexpr int kStatusMessageTimeoutMs = 4000;
+constexpr int kToastTimeoutMs = 4000;
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -98,7 +97,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
         if (lastToken_.isEmpty()) {
-            statusBar()->showMessage(tr("Sign in first (Account menu, top right)"), kStatusMessageTimeoutMs);
+            showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
             return;
         }
         chatRestClient_.createCommunity(lastToken_, name);
@@ -117,7 +116,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name) {
         if (selectedCommunityId_ < 0) {
-            statusBar()->showMessage(tr("Pick a community first"), kStatusMessageTimeoutMs);
+            showToast(tr("Pick a community first"), ToastBanner::Variant::kInfo);
             return;
         }
         chatRestClient_.createChannel(lastToken_, selectedCommunityId_, name);
@@ -132,7 +131,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::createChannelRequested, channelsPanel_->addButton(), &QPushButton::click);
 
     connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
-        statusBar()->showMessage(tr("Community '%1' created").arg(name), kStatusMessageTimeoutMs);
+        showToast(tr("Community '%1' created").arg(name), ToastBanner::Variant::kSuccess);
         pendingCommunitySelection_ = id;
         refreshCommunities();
     });
@@ -147,11 +146,11 @@ MainWindow::MainWindow(QWidget* parent)
         pendingCommunitySelection_ = -1;
     });
     connect(&chatRestClient_, &ChatRestClient::communityRenamed, this, [this](qint64, const QString& newName) {
-        statusBar()->showMessage(tr("Community renamed to '%1'").arg(newName), kStatusMessageTimeoutMs);
+        showToast(tr("Community renamed to '%1'").arg(newName), ToastBanner::Variant::kSuccess);
         refreshCommunities();
     });
     connect(&chatRestClient_, &ChatRestClient::communityDeleted, this, [this](qint64 id) {
-        statusBar()->showMessage(tr("Community deleted"), kStatusMessageTimeoutMs);
+        showToast(tr("Community deleted"), ToastBanner::Variant::kSuccess);
         if (id == selectedCommunityId_) {
             selectedCommunityId_ = -1;
             channelsPanel_->setChannels({});
@@ -160,10 +159,10 @@ MainWindow::MainWindow(QWidget* parent)
         refreshCommunities();
     });
     connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64) {
-        statusBar()->showMessage(tr("Joined community"), kStatusMessageTimeoutMs);
+        showToast(tr("Joined community"), ToastBanner::Variant::kSuccess);
     });
     connect(&chatRestClient_, &ChatRestClient::channelCreated, this, [this](qint64 id, const QString& name) {
-        statusBar()->showMessage(tr("Channel '%1' created").arg(name), kStatusMessageTimeoutMs);
+        showToast(tr("Channel '%1' created").arg(name), ToastBanner::Variant::kSuccess);
         pendingChannelSelection_ = id;
         refreshChannelsForSelectedCommunity();
     });
@@ -181,21 +180,21 @@ MainWindow::MainWindow(QWidget* parent)
         pendingChannelSelection_ = -1;
     });
     connect(&chatRestClient_, &ChatRestClient::channelRenamed, this, [this](qint64 id, const QString& newName) {
-        statusBar()->showMessage(tr("Channel renamed to '%1'").arg(newName), kStatusMessageTimeoutMs);
+        showToast(tr("Channel renamed to '%1'").arg(newName), ToastBanner::Variant::kSuccess);
         if (id == selectedChannelId_) {
             chatView_->showChannel(newName);
         }
         refreshChannelsForSelectedCommunity();
     });
     connect(&chatRestClient_, &ChatRestClient::channelDeleted, this, [this](qint64 id) {
-        statusBar()->showMessage(tr("Channel deleted"), kStatusMessageTimeoutMs);
+        showToast(tr("Channel deleted"), ToastBanner::Variant::kSuccess);
         if (id == selectedChannelId_) {
             closeChatView();
         }
         refreshChannelsForSelectedCommunity();
     });
     connect(&chatRestClient_, &ChatRestClient::errorOccurred, this, [this](const QString& message) {
-        statusBar()->showMessage(tr("Error: %1").arg(message), kStatusMessageTimeoutMs);
+        showToast(tr("Error: %1").arg(message), ToastBanner::Variant::kError);
     });
 
     connect(footerBar_->settingsButton(), &QPushButton::clicked, this, [this]() {
@@ -241,6 +240,7 @@ void MainWindow::buildUi() {
     sidebarLayout->addWidget(channelsPanel_, /*stretch=*/1);
 
     chatView_ = new ChatView(central);
+    toastBanner_ = new ToastBanner(chatView_);
 
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
@@ -349,7 +349,7 @@ void MainWindow::onSendChatMessageClicked() {
 
 void MainWindow::refreshCommunities() {
     if (lastToken_.isEmpty()) {
-        statusBar()->showMessage(tr("Sign in first (Account menu, top right)"), kStatusMessageTimeoutMs);
+        showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
         return;
     }
     chatRestClient_.listCommunities(lastToken_);
@@ -377,6 +377,10 @@ void MainWindow::closeChatView() {
     }
     selectedChannelId_ = -1;
     chatView_->showPlaceholder();
+}
+
+void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {
+    toastBanner_->showMessage(text, variant, kToastTimeoutMs);
 }
 
 }  // namespace devicehub

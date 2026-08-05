@@ -15,6 +15,7 @@ class MainWindow {
   -refreshChannelsForSelectedCommunity()
   -openChannel(id: int64, name: QString)
   -closeChatView()
+  -showToast(text: QString, variant: ToastVariant)
 }
 
 class CommunitiesPanel {
@@ -94,6 +95,19 @@ class FooterBar {
   +settingsButton() : QPushButton*
 }
 
+enum ToastVariant {
+  kSuccess
+  kError
+  kInfo
+}
+
+class ToastBanner {
+  +showMessage(text: QString, variant: ToastVariant, timeoutMs: int)
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
+  -reposition()
+}
+ToastBanner *-- ToastVariant
+
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
@@ -124,6 +138,7 @@ MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- FooterBar : owns (bottom)
+MainWindow *-- ToastBanner : owns (floats over ChatView)
 
 MainWindow *-- DeviceEnumerator : owns
 MainWindow *-- AudioOutputDevice : owns
@@ -139,6 +154,7 @@ MainWindow ..> AuthClient : errorOccurred() >
 MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
+MainWindow ..> ToastBanner : showMessage() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
@@ -173,6 +189,14 @@ note right of MainWindow
   в контекстном меню Rename/Delete —
   сервер всё равно проверяет права
   повторно (403 для не-владельца).
+
+  CRUD-фидбек (создание/переименование/
+  удаление/join, ошибки) идёт через
+  showToast() -> ToastBanner, а не
+  statusBar() — заметный, не блокирующий
+  баннер поверх ChatView с авто-скрытием,
+  вместо легко пропускаемой строки внизу
+  окна.
 end note
 
 @enduml
