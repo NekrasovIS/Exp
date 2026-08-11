@@ -9,6 +9,8 @@ package "Qt Multimedia" {
   class QCamera
   class QScreenCapture
   class QMediaCaptureSession
+  class QVideoSink
+  class QVideoFrame
 }
 
 package "Qt GUI" {
@@ -18,6 +20,7 @@ package "Qt GUI" {
 package "libwebrtc" {
   class "webrtc::AudioDeviceModule" as WebrtcAudioDeviceModule
   class "webrtc::AudioTransport" as WebrtcAudioTransport
+  class "webrtc::AdaptedVideoTrackSource" as WebrtcAdaptedVideoTrackSource
 }
 
 class DeviceEnumerator {
@@ -87,16 +90,28 @@ class CameraDevice {
   +isActive() : bool
   +captureSession() : QMediaCaptureSession&
   .. signals ..
+  +frameAvailable(frame: QVideoFrame)
   +errorOccurred(message: QString)
 }
 CameraDevice --> "0..1" QCamera : owns (unique_ptr)
 CameraDevice *-- QMediaCaptureSession : owns
+CameraDevice *-- QVideoSink : owns
 CameraDevice ..> QCameraDevice : uses
 note right of CameraDevice
   start() calls QCoreApplication::checkPermission()/
   requestPermission() (QCameraPermission) before
   camera_->start() — same requestPermission() gap as
   AudioInputDevice.
+
+  QMediaCaptureSession only supports one video sink at
+  a time — CameraDevice owns that one sink itself and
+  re-emits every frame via frameAvailable() (issue #72)
+  instead of exposing the session for a widget to attach
+  directly. Lets both the settings preview widget (fed
+  manually via videoSink()->setVideoFrame()) and a call's
+  outgoing video (CallVideoTrackSource::pushFrame())
+  share the one camera capture — same single-owner
+  pattern as AudioInputDevice/AudioOutputDevice.
 end note
 
 class ScreenCaptureDevice {
@@ -168,6 +183,40 @@ note right of CallAudioDeviceModule
   from the PlayoutSink callback must marshal back
   itself (e.g. QMetaObject::invokeMethod with
   Qt::QueuedConnection) — CallManager does.
+end note
+
+class CallVideoTrackSource {
+  +CallVideoTrackSource(isScreencast: bool = false)
+  +pushFrame(frame: QVideoFrame)
+  +is_screencast() : bool
+  +needs_denoising() : optional<bool>
+  +state() : SourceState
+  +remote() : bool
+}
+CallVideoTrackSource --|> WebrtcAdaptedVideoTrackSource
+CallVideoTrackSource ..> QVideoFrame : converts (via QImage, libyuv::ARGBToI420)
+note right of CallVideoTrackSource
+  Video-side counterpart to CallAudioDeviceModule
+  (issue #72) — Qt Multimedia has no built-in way to
+  push frames into a webrtc::VideoTrackSourceInterface.
+  pushFrame() converts each QVideoFrame to I420 via
+  QImage as an intermediate step (simpler and more
+  robust than hand-parsing every native camera pixel
+  format, at the cost of an extra conversion pass),
+  then calls the inherited OnFrame() — AdaptedVideoTrackSource
+  handles per-sink resolution adaptation (AdaptFrame())
+  and all sink registration.
+
+  WebRTC's own build disables RTTI, so its exported
+  classes (like AdaptedVideoTrackSource) have a vtable
+  but no typeinfo in libwebrtc.a — any RTTI-enabled code
+  defining a derived class's out-of-line virtuals, or
+  instantiating webrtc::RefCountedObject<T> for one via
+  make_ref_counted<T>(), needs typeinfo referencing the
+  base's, which doesn't exist. Root CMakeLists.txt
+  disables RTTI project-wide (nothing here uses
+  dynamic_cast/typeid) rather than chasing this file by
+  file as more WebRTC-derived classes are added.
 end note
 
 @enduml
