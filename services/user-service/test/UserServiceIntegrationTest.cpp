@@ -47,5 +47,30 @@ TEST(UserServiceIntegrationTest, RegisterThenVerifyCredentialsRoundTrip) {
     EXPECT_FALSE(service.verifyCredentials("no-such-user", password));
 }
 
+TEST(UserServiceIntegrationTest, RegisterUserRejectsDuplicateLogin) {
+    const std::string connectionString = envOrDefault(
+        "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5433/user_service");
+
+    UserRepository repository(connectionString);
+    UserService service(repository);
+
+    const std::string login =
+        "user-service-dup-test-" +
+        std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    const std::string password = "integration-test-password";
+
+    bool firstRegistered = false;
+    try {
+        firstRegistered = service.registerUser(login, password);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    ASSERT_TRUE(firstRegistered);
+    EXPECT_FALSE(service.registerUser(login, "a-different-password"));
+}
+
 }  // namespace
 }  // namespace user_service
