@@ -78,5 +78,31 @@ TEST(UserServiceClientIntegrationTest, RegisterUserSucceedsOnceThenRejectsDuplic
     EXPECT_FALSE(client.registerUser(login, password));
 }
 
+TEST(UserServiceClientIntegrationTest, VerifyCredentialsRejectsNonexistentLogin) {
+    const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+
+    httplib::Client probeClient(host, port);
+    const nlohmann::json probeBody{{"login", "auth-service-nonexistent-probe"}, {"password", "irrelevant"}};
+    const httplib::Result probeResult = probeClient.Post("/users/register", probeBody.dump(), "application/json");
+    if (!probeResult) {
+        GTEST_SKIP() << "user-service not reachable at " << host << ":" << port
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+
+    const UserServiceClient client(host, port);
+    EXPECT_FALSE(client.verifyCredentials("no-such-login-ever-registered", "any-password"));
+}
+
+TEST(UserServiceClientIntegrationTest, FailsClosedWhenUserServiceIsUnreachable) {
+    // No skip logic here on purpose — this deliberately targets an
+    // unused loopback port so it's meaningful whether or not a real
+    // user-service happens to be running elsewhere.
+    const UserServiceClient client("127.0.0.1", 1);
+
+    EXPECT_FALSE(client.verifyCredentials("alice", "password"));
+    EXPECT_FALSE(client.registerUser("alice", "password"));
+}
+
 }  // namespace
 }  // namespace auth_service
