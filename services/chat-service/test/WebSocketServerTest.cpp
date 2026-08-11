@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -206,6 +207,248 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
 
     // B leaves — A is notified.
     clientB.send(nlohmann::json{{"call_leave", true}});
+    const std::optional<nlohmann::json> peerLeft =
+        clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_left"); });
+    ASSERT_TRUE(peerLeft.has_value());
+    EXPECT_EQ((*peerLeft)["call_peer_left"].get<std::string>(), loginB);
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, HelloWithMissingFieldsIsRejectedWithError) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18084"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+
+    // Reachability probe, same pattern as CallJoinRosterSignalAndLeave.
+    try {
+        static_cast<void>(service.createCommunity("ws-hello-test-probe-" + suffix, "ws-hello-test-owner-" + suffix));
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+
+    // Missing "channel_id".
+    client.send(nlohmann::json{{"token", "irrelevant"}});
+    const std::optional<nlohmann::json> error =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(error.has_value());
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, HelloWithInvalidTokenIsRejectedWithError) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18085"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-badtoken-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-badtoken-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+
+    client.send(nlohmann::json{{"token", "not-a-real-token"}, {"channel_id", *channelId}});
+    const std::optional<nlohmann::json> error =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(error.has_value());
+    EXPECT_EQ((*error)["error"].get<std::string>(), "invalid token");
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, ChatMessageIsBroadcastToAllSubscribersIncludingSender) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18086"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-chatmsg-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-chatmsg-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string loginA = "ws-chatmsg-a-" + suffix;
+    const std::string loginB = "ws-chatmsg-b-" + suffix;
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    if (!tokenA.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    ASSERT_TRUE(tokenB.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient clientA(wsUrl);
+    WsTestClient clientB(wsUrl);
+    ASSERT_TRUE(clientA.waitConnected());
+    ASSERT_TRUE(clientB.waitConnected());
+
+    clientA.send(nlohmann::json{{"token", *tokenA}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    clientB.send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    clientA.send(nlohmann::json{{"body", "hello from A"}});
+
+    const std::optional<nlohmann::json> onA =
+        clientA.waitFor([](const nlohmann::json& m) { return m.contains("body"); });
+    ASSERT_TRUE(onA.has_value());
+    EXPECT_EQ((*onA)["author"].get<std::string>(), loginA);
+    EXPECT_EQ((*onA)["body"].get<std::string>(), "hello from A");
+
+    const std::optional<nlohmann::json> onB =
+        clientB.waitFor([](const nlohmann::json& m) { return m.contains("body"); });
+    ASSERT_TRUE(onB.has_value());
+    EXPECT_EQ((*onB)["author"].get<std::string>(), loginA);
+    EXPECT_EQ((*onB)["body"].get<std::string>(), "hello from A");
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, ChatMessageWithMissingBodyReturnsError) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18087"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-badbody-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-badbody-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, owner);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json::object());
+    EXPECT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("error"); }).has_value());
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, DisconnectWithoutLeaveNotifiesRemainingCallParticipants) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18088"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-disconnect-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-disconnect-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string loginA = "ws-disconnect-a-" + suffix;
+    const std::string loginB = "ws-disconnect-b-" + suffix;
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    if (!tokenA.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    ASSERT_TRUE(tokenB.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient clientA(wsUrl);
+    auto clientB = std::make_unique<WsTestClient>(wsUrl);
+    ASSERT_TRUE(clientA.waitConnected());
+    ASSERT_TRUE(clientB->waitConnected());
+
+    clientA.send(nlohmann::json{{"token", *tokenA}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    clientB->send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientB->waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    clientA.send(nlohmann::json{{"call_join", true}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
+    clientB->send(nlohmann::json{{"call_join", true}});
+    ASSERT_TRUE(clientB->waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_joined"); }).has_value());
+
+    // B disconnects without ever sending call_leave — A should still be
+    // notified via the Close/Error cleanup path in handleMessage().
+    clientB.reset();
     const std::optional<nlohmann::json> peerLeft =
         clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_left"); });
     ASSERT_TRUE(peerLeft.has_value());

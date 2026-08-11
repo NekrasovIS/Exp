@@ -122,5 +122,106 @@ TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     EXPECT_EQ(service.renameChannel(*secondChannelId, "anything", owner), MutationResult::kNotFound);
 }
 
+TEST(ChatServiceIntegrationTest, ListCommunitiesIncludesCreatedCommunity) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    Community created{};
+    try {
+        created = service.createCommunity("integration-test-listed-" + suffix, "integration-test-owner-" + suffix);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::vector<Community> communities = service.listCommunities();
+
+    EXPECT_TRUE(std::any_of(communities.begin(), communities.end(),
+                             [&](const Community& community) { return community.id == created.id; }));
+}
+
+TEST(ChatServiceIntegrationTest, CreateChannelRejectsNonexistentCommunity) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    std::optional<std::int64_t> channelId;
+    try {
+        channelId = service.createChannel(-1, "nowhere", "integration-test-owner-" + uniqueSuffix());
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_FALSE(channelId.has_value());
+}
+
+TEST(ChatServiceIntegrationTest, ListChannelsOfNonexistentCommunityIsEmpty) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    std::vector<Channel> channels;
+    try {
+        channels = service.listChannels(-1);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_TRUE(channels.empty());
+}
+
+TEST(ChatServiceIntegrationTest, RecentMessagesRespectsLimitAndOrdersOldestFirst) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-limit-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "first").has_value());
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "second").has_value());
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "third").has_value());
+
+    const std::vector<Message> limited = service.recentMessages(*channelId, 2);
+
+    ASSERT_EQ(limited.size(), 2U);
+    EXPECT_EQ(limited[0].body, "second");
+    EXPECT_EQ(limited[1].body, "third");
+}
+
+TEST(ChatServiceIntegrationTest, RecentMessagesOfNonexistentChannelIsEmpty) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    std::vector<Message> messages;
+    try {
+        messages = service.recentMessages(-1, 10);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_TRUE(messages.empty());
+}
+
 }  // namespace
 }  // namespace chat_service

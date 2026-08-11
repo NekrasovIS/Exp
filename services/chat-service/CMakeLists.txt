@@ -72,6 +72,8 @@ find_package(GTest CONFIG REQUIRED)
 add_executable(chat_service_tests
     test/ChatServiceIntegrationTest.cpp
     test/WebSocketServerTest.cpp
+    test/HttpServerTest.cpp
+    test/AuthServiceClientTest.cpp
 )
 target_link_libraries(chat_service_tests PRIVATE
     chat_service_core
