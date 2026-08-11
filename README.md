@@ -64,6 +64,39 @@ cmake --build build --parallel
 open build/DeviceHub.app   # macOS
 ```
 
+### macOS: разрешения камеры/микрофона переживают пересборку
+
+По умолчанию `DeviceHub.app` подписывается ad-hoc (`codesign` без
+identity) — подпись пересчитывается из содержимого бинарника при
+каждой пересборке. macOS привязывает выданные разрешения Camera/
+Microphone именно к подписи, так что после пересборки уже выданное
+разрешение перестаёт действовать (хотя в System Settings может всё ещё
+показываться как включённое).
+
+Чтобы разрешения сохранялись между пересборками — один раз на машине
+создать локальный сертификат для подписи кода:
+
+1. **Keychain Access → Certificate Assistant → Create a Certificate…**
+2. Имя, например, `DeviceHub Local Dev`; Identity Type — **Self Signed
+   Root**; Certificate Type — **Code Signing**.
+3. После создания — двойной клик по сертификату, раздел **Trust**,
+   пункт **Code Signing** → **Always Trust** (самоподписанный
+   сертификат по умолчанию не доверенный, без этого шага `codesign` не
+   увидит его как рабочую identity — `security find-identity -v -p
+   codesigning` покажет 0).
+
+Затем один раз указать этот сертификат при конфигурации:
+
+```bash
+cmake -S . -B build -DDEVICEHUB_CODESIGN_IDENTITY="DeviceHub Local Dev"
+cmake --build build --parallel
+```
+
+CMake запомнит это в кэше `build/`, повторять при каждой сборке не
+нужно. Без `-DDEVICEHUB_CODESIGN_IDENTITY` сборка остаётся ad-hoc, как
+раньше — специально не захардкожено машинно-специфичное имя
+сертификата в `CMakeLists.txt` (см. CLAUDE.md, «Кроссплатформенность»).
+
 ## Тесты
 
 ```bash
