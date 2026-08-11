@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <QEventLoop>
+#include <QLabel>
 #include <QTimer>
 #include <QWidget>
 
@@ -25,6 +26,34 @@ TEST(ToastBannerTest, ShowMessageMakesItVisibleThenAutoHides) {
 
     banner.showMessage(QStringLiteral("Done"), ToastBanner::Variant::kSuccess, /*timeoutMs=*/30);
     EXPECT_FALSE(banner.isHidden());
+
+    waitMs(150);
+    EXPECT_TRUE(banner.isHidden());
+}
+
+TEST(ToastBannerTest, ErrorVariantSetsTheVariantProperty) {
+    QWidget parent;
+    ToastBanner banner(&parent);
+
+    banner.showMessage(QStringLiteral("Something broke"), ToastBanner::Variant::kError, /*timeoutMs=*/5000);
+
+    EXPECT_EQ(banner.property("variant").toString(), QStringLiteral("error"));
+    EXPECT_EQ(banner.findChild<QLabel*>()->text(), QStringLiteral("Something broke"));
+}
+
+TEST(ToastBannerTest, CallingAgainWhileVisibleRestartsTimeoutWithNewTextAndVariant) {
+    QWidget parent;
+    ToastBanner banner(&parent);
+
+    banner.showMessage(QStringLiteral("First"), ToastBanner::Variant::kInfo, /*timeoutMs=*/5000);
+    ASSERT_FALSE(banner.isHidden());
+
+    // Second call arrives well before the first's 5s timeout would
+    // fire — its own, much shorter timeout is what should govern.
+    banner.showMessage(QStringLiteral("Second"), ToastBanner::Variant::kError, /*timeoutMs=*/30);
+
+    EXPECT_EQ(banner.findChild<QLabel*>()->text(), QStringLiteral("Second"));
+    EXPECT_EQ(banner.property("variant").toString(), QStringLiteral("error"));
 
     waitMs(150);
     EXPECT_TRUE(banner.isHidden());

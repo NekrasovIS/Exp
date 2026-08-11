@@ -175,6 +175,12 @@ add_executable(devicehub_tests
     test/DeviceEnumeratorTest.cpp
     test/MainWindowUiTest.cpp
     test/ToastBannerTest.cpp
+    test/ChatMessageRowTest.cpp
+    test/ChatBubbleTest.cpp
+    test/FooterBarTest.cpp
+    test/AccountMenuTest.cpp
+    test/IconFactoryTest.cpp
+    test/ThemeTest.cpp
     test/ChatMessageGroupingTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
@@ -188,4 +194,4 @@ target_link_libraries(devicehub_tests PRIVATE
     GTest::gtest_main
 )
 include(GoogleTest)
-gtest_discover_tests(devicehub_tests)
+gtest_discover_tests(devicehub_tests DISCOVERY_TIMEOUT 60)
