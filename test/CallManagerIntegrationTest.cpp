@@ -2,9 +2,15 @@
 #include "chat/CallManager.h"
 #include "chat/ChatClient.h"
 #include "chat/ChatRestClient.h"
+#include "devices/AudioInputDevice.h"
+#include "devices/AudioOutputDevice.h"
+#include "devices/CameraDevice.h"
+#include "devices/DeviceEnumerator.h"
 
 #include <gtest/gtest.h>
 
+#include <QAudioDevice>
+#include <QCameraDevice>
 #include <QDateTime>
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -143,8 +149,29 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         ASSERT_TRUE(subscribed);
     }
 
-    CallManager callManagerA(chatClientA);
-    CallManager callManagerB(chatClientB);
+    // Real enumerated devices, not a default-constructed QAudioDevice —
+    // CallManager::joinCall() treats a null device as "none selected"
+    // and skips it with a callError() rather than crashing, which would
+    // make this test pass for the wrong reason (never actually
+    // exercising the real device wiring this test is meant to cover).
+    DeviceEnumerator enumerator;
+    const QList<QAudioDevice> outputs = enumerator.audioOutputs();
+    const QList<QAudioDevice> inputs = enumerator.audioInputs();
+    if (outputs.isEmpty() || inputs.isEmpty()) {
+        GTEST_SKIP() << "No audio input/output device available on this machine.";
+    }
+    const QAudioDevice outputDevice = outputs.first();
+    const QAudioDevice inputDevice = inputs.first();
+
+    AudioInputDevice audioInputA;
+    AudioOutputDevice audioOutputA;
+    AudioInputDevice audioInputB;
+    AudioOutputDevice audioOutputB;
+    CameraDevice cameraA;
+    CameraDevice cameraB;
+
+    CallManager callManagerA(chatClientA, audioInputA, audioOutputA, cameraA);
+    CallManager callManagerB(chatClientB, audioInputB, audioOutputB, cameraB);
 
     QStringList errorsA;
     QStringList errorsB;
@@ -158,7 +185,7 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         }
     });
 
-    callManagerA.joinCall();
+    callManagerA.joinCall(inputDevice, outputDevice);
 
     {
         // A joined alone (empty roster) — nothing to negotiate yet, just
@@ -168,7 +195,7 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         loop.exec();
     }
 
-    callManagerB.joinCall();
+    callManagerB.joinCall(inputDevice, outputDevice);
 
     {
         // Wait for the offer/answer/signaling exchange (relayed through
@@ -181,6 +208,34 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
     EXPECT_TRUE(aSawBJoin);
     EXPECT_TRUE(errorsA.isEmpty()) << errorsA.join(QStringLiteral("; ")).toStdString();
     EXPECT_TRUE(errorsB.isEmpty()) << errorsB.join(QStringLiteral("; ")).toStdString();
+
+    const QList<QCameraDevice> cameras = enumerator.cameras();
+    if (cameras.isEmpty()) {
+        GTEST_LOG_(INFO) << "No camera available — skipping the video-renegotiation part of this test.";
+    } else {
+        // Adding a video track to an already-negotiated connection
+        // (issue #72) triggers OnRenegotiationNeeded() -> negotiateLocal()
+        // -> a fresh offer/answer round trip through the same live
+        // chat-service relay — verifies that path works end to end, not
+        // just the initial join negotiation covered above.
+        callManagerA.enableVideo(cameras.first());
+        {
+            QEventLoop loop;
+            QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+            loop.exec();
+        }
+        EXPECT_TRUE(callManagerA.videoEnabled());
+        EXPECT_TRUE(errorsA.isEmpty()) << errorsA.join(QStringLiteral("; ")).toStdString();
+        EXPECT_TRUE(errorsB.isEmpty()) << errorsB.join(QStringLiteral("; ")).toStdString();
+
+        callManagerA.disableVideo();
+        {
+            QEventLoop loop;
+            QTimer::singleShot(1000, &loop, &QEventLoop::quit);
+            loop.exec();
+        }
+        EXPECT_FALSE(callManagerA.videoEnabled());
+    }
 
     bool aSawBLeave = false;
     QObject::connect(&callManagerA, &CallManager::participantLeft, [&](const QString& login) {

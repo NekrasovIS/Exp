@@ -1,6 +1,7 @@
 #include "devices/AudioOutputDevice.h"
 
 #include <QAudioSink>
+#include <QIODevice>
 #include <QtMath>
 
 #include <cstdint>
@@ -53,11 +54,37 @@ void AudioOutputDevice::playTestTone(const QAudioDevice& device, double frequenc
 
     sink_ = std::make_unique<QAudioSink>(device, format);
     connect(sink_.get(), &QAudioSink::stateChanged, this, [this](QAudio::State state) {
-        if (state == QAudio::IdleState || state == QAudio::StoppedState) {
+        if (!streaming_ && (state == QAudio::IdleState || state == QAudio::StoppedState)) {
             emit finished();
         }
     });
     sink_->start(&toneBuffer_);
+}
+
+bool AudioOutputDevice::startStreaming(const QAudioDevice& device, const QAudioFormat& format) {
+    stop();
+
+    if (!device.isFormatSupported(format)) {
+        emit errorOccurred(tr("Output device doesn't support the requested format"));
+        return false;
+    }
+
+    streaming_ = true;
+    sink_ = std::make_unique<QAudioSink>(device, format);
+    sink_->setBufferSize(format.bytesForDuration(qint64{streamingBufferDurationMs()} * 1000));
+    connect(sink_.get(), &QAudioSink::stateChanged, this, [this](QAudio::State state) {
+        if (!streaming_ && (state == QAudio::IdleState || state == QAudio::StoppedState)) {
+            emit finished();
+        }
+    });
+    pushStream_ = sink_->start();
+    return pushStream_ != nullptr;
+}
+
+void AudioOutputDevice::writeAudio(const QByteArray& pcm) {
+    if (pushStream_ != nullptr) {
+        pushStream_->write(pcm);
+    }
 }
 
 void AudioOutputDevice::stop() {
@@ -65,6 +92,8 @@ void AudioOutputDevice::stop() {
         sink_->stop();
         sink_.reset();
     }
+    pushStream_ = nullptr;
+    streaming_ = false;
     toneBuffer_.close();
 }
 

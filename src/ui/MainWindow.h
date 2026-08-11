@@ -78,7 +78,7 @@ private:
     ScreenCaptureDevice screenCapture_;
     AuthClient authClient_;
     ChatClient chatClient_;
-    CallManager callManager_{chatClient_};
+    CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_};
     ChatRestClient chatRestClient_;
     QString lastToken_;
     QString currentUserLogin_;

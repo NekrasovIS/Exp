@@ -6,7 +6,10 @@
 
 namespace devicehub {
 
-CameraDevice::CameraDevice(QObject* parent) : QObject(parent) {}
+CameraDevice::CameraDevice(QObject* parent) : QObject(parent) {
+    captureSession_.setVideoSink(&videoSink_);
+    connect(&videoSink_, &QVideoSink::videoFrameChanged, this, &CameraDevice::frameAvailable);
+}
 
 CameraDevice::~CameraDevice() = default;
 

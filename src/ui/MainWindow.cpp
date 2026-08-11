@@ -220,7 +220,13 @@ MainWindow::MainWindow(QWidget* parent)
         settingsDialog_->activateWindow();
     });
 
-    camera_.captureSession().setVideoOutput(settingsDialog_->videoPreview());
+    // CameraDevice owns the one video sink QMediaCaptureSession allows
+    // (see its doc comment) — the preview widget gets frames pushed
+    // manually instead of being attached as the session's output
+    // directly, so the same frames are also available for a call's
+    // outgoing video (issue #72).
+    connect(&camera_, &CameraDevice::frameAvailable, this,
+            [this](const QVideoFrame& frame) { settingsDialog_->videoPreview()->videoSink()->setVideoFrame(frame); });
     screenCapture_.captureSession().setVideoOutput(settingsDialog_->screenPreview());
 }
 
@@ -371,7 +377,9 @@ void MainWindow::onCallToggleClicked() {
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);
     } else {
-        callManager_.joinCall();
+        const QAudioDevice inputDevice = settingsDialog_->inputCombo()->currentData().value<QAudioDevice>();
+        const QAudioDevice outputDevice = settingsDialog_->outputCombo()->currentData().value<QAudioDevice>();
+        callManager_.joinCall(inputDevice, outputDevice);
     }
     chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
 }
