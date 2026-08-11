@@ -15,6 +15,8 @@ package "src/devices" {
   class CallAudioDeviceModule
   class AudioInputDevice
   class AudioOutputDevice
+  class CallVideoTrackSource
+  class CameraDevice
 }
 
 class ChatItem {
@@ -48,6 +50,9 @@ class CallManager {
   +inCall() : bool
   +setMuted(muted: bool)
   +isMuted() : bool
+  +enableVideo(device: QCameraDevice)
+  +disableVideo()
+  +videoEnabled() : bool
   .. signals ..
   +participantJoined(login: QString)
   +participantLeft(login: QString)
@@ -57,13 +62,17 @@ class CallManager {
   -closePeerConnection(peerLogin: QString)
   -negotiateLocal(peerLogin: QString)
   -onCapturedPcm(data: QByteArray, format: QAudioFormat)
+  -onCameraFrame(frame: QVideoFrame)
+  -attachVideoTrack(entry: PeerConnectionEntry&)
 }
 CallManager --> ChatClient : uses (&), listens to call_* signals
 CallManager --> AudioInputDevice : uses (&), pcmDataAvailable()\n-> pushCapturedAudio() (issue #70)
 CallManager --> AudioOutputDevice : uses (&), PlayoutSink\n-> writeAudio() (issue #70)
+CallManager --> CameraDevice : uses (&), frameAvailable()\n-> pushFrame() (issue #72)
 CallManager *-- WebrtcPeerConnectionFactory : owns (built lazily on joinCall())
 CallManager "1" *-- "0..*" WebrtcPeerConnection : owns, one per\nremote participant (mesh)
 CallManager *-- CallAudioDeviceModule : owns (issue #64), registered\nas the factory's ADM
+CallManager *-- CallVideoTrackSource : owns (issue #72), created lazily\non first enableVideo()
 note right of CallManager
   Mesh initiation rule (issue #46): the newly
   joining peer always offers to everyone
@@ -92,6 +101,34 @@ note right of CallManager
   through — WebRTC's own AudioTransportImpl hard-aborts
   (fatal CHECK) on a 0 channel count instead of failing
   gracefully.
+
+  Camera video (issue #72): the shared video track is
+  created once, on the first enableVideo() call, and
+  attached to every existing PeerConnection right there
+  — negotiateLocal() is called explicitly for each one,
+  the same way ensurePeerConnection()/
+  onCallRosterReceived() already negotiate the initial
+  audio track, rather than reacting to WebRTC's own
+  OnRenegotiationNeeded() notification (deliberately left
+  as its inherited no-op). Relying on both an explicit
+  call AND that notification for the same track change
+  raced them against each other during live testing —
+  the queued OnRenegotiationNeeded callback fired again
+  after the explicit call had already completed the
+  negotiation, stacking a second unwanted offer on top
+  and corrupting the exchange ("Called in wrong state:
+  stable"). A PeerConnection created after video is
+  already on picks the track up as part of its own
+  initial offer/answer instead (attachVideoTrack(), also
+  called from ensurePeerConnection()). Once attached, the
+  track is never removed again — enableVideo()/
+  disableVideo() only toggle
+  VideoTrackInterface::set_enabled(), the same mechanism
+  setMuted() uses for audio — because RemoveTrackOrError()
+  hit a real fatal assertion inside WebRTC's own
+  codec-list handling during live testing
+  (media/base/codec_list.cc, "Check failed: present_codec
+  == codec").
 end note
 
 class ChatRestClient {
