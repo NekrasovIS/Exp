@@ -178,6 +178,7 @@ add_executable(devicehub_tests
     test/ChatMessageGroupingTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
+    test/ChatRestClientTest.cpp
     test/CallAudioDeviceModuleTest.cpp
     test/CallManagerIntegrationTest.cpp
     test/CallVideoTrackSourceTest.cpp
