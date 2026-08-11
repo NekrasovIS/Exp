@@ -14,7 +14,11 @@ namespace devicehub {
  * @brief Captures audio from a microphone and reports its input level.
  *
  * Wraps QAudioSource; reads raw PCM as it arrives and emits levelChanged()
- * with a normalized [0, 1] amplitude so the UI can drive a level meter.
+ * with a normalized [0, 1] amplitude so the UI can drive a level meter,
+ * plus pcmDataAvailable() with the raw buffer for consumers that need
+ * actual samples (e.g. CallManager). One QAudioSource at a time — a
+ * second start() (from either the settings mic test or a call) stops
+ * whatever was capturing before it.
  */
 class AudioInputDevice : public QObject {
     Q_OBJECT
@@ -35,6 +39,11 @@ public:
 signals:
     /// Emitted as new audio arrives, level normalized to [0, 1].
     void levelChanged(float level);
+
+    /// Emitted alongside levelChanged(), same raw buffer — for
+    /// consumers that need actual samples (e.g. CallManager forwarding
+    /// captured audio into a call), not just a level meter.
+    void pcmDataAvailable(const QByteArray& data, const QAudioFormat& format);
 
     /// Emitted when capture can't start (including permission denial).
     void errorOccurred(const QString& message);

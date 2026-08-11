@@ -75,6 +75,7 @@ void AudioInputDevice::readAvailableData() {
         return;
     }
     emit levelChanged(computeLevel(pcmData, format_));
+    emit pcmDataAvailable(pcmData, format_);
 }
 
 float AudioInputDevice::computeLevel(const QByteArray& pcmData, const QAudioFormat& format) {

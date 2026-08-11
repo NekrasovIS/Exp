@@ -44,6 +44,23 @@ public:
     explicit CallAudioDeviceModule(PlayoutSink playoutSink);
     ~CallAudioDeviceModule() override;
 
+    /// Overrides the format requested from WebRTC on the playout side
+    /// (default 48000 Hz mono) — set this to match whatever real output
+    /// device the playout sink actually writes to. Must be called
+    /// before StartPlayout(); has no effect once the playout thread is
+    /// already running.
+    void setPlayoutFormat(int sampleRateHz, size_t channels);
+
+    /// Overrides the total capture+render delay reported to WebRTC
+    /// alongside every pushCapturedAudio() call (default 0). WebRTC's
+    /// echo canceller uses this to time-align what it's currently
+    /// rendering against what the microphone just captured — reporting
+    /// 0 when there's real playout buffering (there is, see
+    /// AudioOutputDevice::streamingBufferDurationMs()) makes the echo
+    /// canceller worse than useless, not neutral. Safe to call from any
+    /// thread; takes effect on the next pushCapturedAudio() call.
+    void setTotalDelayMs(int delayMs);
+
     /// Pushes locally captured PCM into WebRTC. Safe to call from any
     /// thread; a no-op until recording has actually been started
     /// (StartRecording(), called by WebRTC once a send stream exists).
@@ -80,6 +97,10 @@ private:
 
     std::thread playoutThread_;
     std::atomic<bool> stopPlayoutThread_{false};
+
+    int playoutSampleRateHz_ = 48000;
+    size_t playoutChannels_ = 1;
+    std::atomic<int> totalDelayMs_{0};
 };
 
 }  // namespace devicehub

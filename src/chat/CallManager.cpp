@@ -10,6 +10,7 @@
 #include <api/set_local_description_observer_interface.h>
 #include <api/set_remote_description_observer_interface.h>
 
+#include <QAudioFormat>
 #include <QJsonValue>
 #include <QMetaObject>
 
@@ -92,22 +93,48 @@ private:
     QString peerLogin_;
 };
 
-CallManager::CallManager(ChatClient& chatClient, QObject* parent) : QObject(parent), chatClient_(chatClient) {
+CallManager::CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, AudioOutputDevice& audioOutput,
+                          QObject* parent)
+    : QObject(parent), chatClient_(chatClient), audioInput_(audioInput), audioOutput_(audioOutput) {
     connect(&chatClient_, &ChatClient::callRosterReceived, this, &CallManager::onCallRosterReceived);
     connect(&chatClient_, &ChatClient::callPeerJoined, this, &CallManager::onCallPeerJoined);
     connect(&chatClient_, &ChatClient::callPeerLeft, this, &CallManager::onCallPeerLeft);
     connect(&chatClient_, &ChatClient::callSignalReceived, this, &CallManager::onCallSignalReceived);
+    connect(&audioInput_, &AudioInputDevice::pcmDataAvailable, this, &CallManager::onCapturedPcm);
 }
 
 CallManager::~CallManager() {
     leaveCall();
 }
 
-void CallManager::joinCall() {
+void CallManager::joinCall(const QAudioDevice& inputDevice, const QAudioDevice& outputDevice) {
     if (inCall_) {
         return;
     }
     ensureFactory();
+
+    // A null device (e.g. nothing selected/enumerated) has an all-zero
+    // preferredFormat() — feeding a 0 channel count into WebRTC's audio
+    // pipeline is a hard crash there (fatal CHECK), not a graceful
+    // failure, so this has to be caught here first. The call still
+    // proceeds without local audio playout — mesh signaling doesn't
+    // depend on it.
+    if (outputDevice.isNull()) {
+        emit callError(tr("No audio output device selected — call will be silent"));
+    } else {
+        QAudioFormat outputFormat = outputDevice.preferredFormat();
+        outputFormat.setSampleFormat(QAudioFormat::Int16);
+        audioDeviceModule_->setPlayoutFormat(outputFormat.sampleRate(),
+                                              static_cast<size_t>(outputFormat.channelCount()));
+        audioOutput_.startStreaming(outputDevice, outputFormat);
+    }
+
+    if (inputDevice.isNull()) {
+        emit callError(tr("No microphone selected — nothing will be sent"));
+    } else {
+        audioInput_.start(inputDevice);
+    }
+
     inCall_ = true;
     chatClient_.joinCall();
 }
@@ -118,6 +145,8 @@ void CallManager::leaveCall() {
     }
     inCall_ = false;
     chatClient_.leaveCall();
+    audioInput_.stop();
+    audioOutput_.stop();
     for (auto& [login, entry] : peers_) {
         if (entry.connection) {
             entry.connection->Close();
@@ -145,16 +174,30 @@ void CallManager::ensureFactory() {
     signalingThread_ = webrtc::Thread::Create();
     signalingThread_->Start();
 
-    // Playout sink left unset and pushCapturedAudio() is never called —
-    // real AudioInputDevice/AudioOutputDevice wiring is deferred (see
-    // class doc comment); peers negotiate correctly but carry silence.
-    audioDeviceModule_ = webrtc::make_ref_counted<CallAudioDeviceModule>(CallAudioDeviceModule::PlayoutSink{});
+    // Fires on the ADM's own playout thread (never the Qt GUI thread) —
+    // hop back via invokeMethod before touching audioOutput_, same
+    // pattern as the PeerConnection observer callbacks below.
+    audioDeviceModule_ = webrtc::make_ref_counted<CallAudioDeviceModule>(
+        [this](const int16_t* samples, size_t frameCount, int /*sampleRateHz*/, size_t channels) {
+            QByteArray pcm(reinterpret_cast<const char*>(samples),
+                           static_cast<qsizetype>(frameCount * channels * sizeof(int16_t)));
+            QMetaObject::invokeMethod(
+                this, [this, pcm] { audioOutput_.writeAudio(pcm); }, Qt::QueuedConnection);
+        });
 
     peerConnectionFactory_ = webrtc::CreatePeerConnectionFactory(
         networkThread_.get(), workerThread_.get(), signalingThread_.get(), audioDeviceModule_,
         webrtc::CreateBuiltinAudioEncoderFactory(), webrtc::CreateBuiltinAudioDecoderFactory(),
         /*video_encoder_factory=*/nullptr, /*video_decoder_factory=*/nullptr, /*audio_mixer=*/nullptr,
         /*audio_processing=*/nullptr);
+
+    // WebRTC's echo canceller needs an accurate render-signal delay
+    // estimate to time-align what it's currently playing out against
+    // what the mic just captured — feeding it 0 (this class used to)
+    // is worse than disabling it outright when there's real playout
+    // buffering, which there is (AudioOutputDevice's streaming path).
+    // Left at APM defaults (enabled) now that the delay is reported.
+    audioDeviceModule_->setTotalDelayMs(AudioOutputDevice::streamingBufferDurationMs());
 
     const webrtc::scoped_refptr<webrtc::AudioSourceInterface> audioSource =
         peerConnectionFactory_->CreateAudioSource(webrtc::AudioOptions());
@@ -263,6 +306,19 @@ void CallManager::handleRemoteDescriptionSet(const QString& peerLogin, bool ok, 
 
 void CallManager::handleLocalIceCandidate(const QString& peerLogin, const QJsonObject& payload) {
     chatClient_.sendCallSignal(peerLogin, payload);
+}
+
+void CallManager::onCapturedPcm(const QByteArray& data, const QAudioFormat& format) {
+    if (!audioDeviceModule_ || !inCall_) {
+        return;
+    }
+    const auto channels = static_cast<size_t>(format.channelCount());
+    if (channels == 0) {
+        return;
+    }
+    const auto* samples = reinterpret_cast<const int16_t*>(data.constData());
+    const size_t frameCount = static_cast<size_t>(data.size()) / sizeof(int16_t) / channels;
+    audioDeviceModule_->pushCapturedAudio(samples, frameCount, format.sampleRate(), channels);
 }
 
 void CallManager::onCallRosterReceived(const QStringList& participants) {

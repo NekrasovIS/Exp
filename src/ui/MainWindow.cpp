@@ -371,7 +371,9 @@ void MainWindow::onCallToggleClicked() {
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);
     } else {
-        callManager_.joinCall();
+        const QAudioDevice inputDevice = settingsDialog_->inputCombo()->currentData().value<QAudioDevice>();
+        const QAudioDevice outputDevice = settingsDialog_->outputCombo()->currentData().value<QAudioDevice>();
+        callManager_.joinCall(inputDevice, outputDevice);
     }
     chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
 }
