@@ -8,8 +8,11 @@ namespace {
 constexpr const char* kJsonContentType = "application/json";
 }  // namespace
 
-HttpServer::HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient)
-    : tokenService_(tokenService), userServiceClient_(userServiceClient) {
+HttpServer::HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
+                        int rateLimitMaxRequests, std::chrono::milliseconds rateLimitWindow)
+    : tokenService_(tokenService),
+      userServiceClient_(userServiceClient),
+      rateLimiter_(rateLimitMaxRequests, rateLimitWindow) {
     registerRoutes();
 }
 
@@ -26,6 +29,13 @@ void HttpServer::registerRoutes() {
 }
 
 void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Response& response) {
+    if (!rateLimiter_.allow(request.remote_addr)) {
+        response.status = 429;
+        response.set_content(nlohmann::json{{"error", "too many requests, try again later"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("login") || !body.contains("password") ||
         !body["login"].is_string() || !body["password"].is_string()) {
@@ -64,6 +74,13 @@ void HttpServer::handleVerifyToken(const httplib::Request& request, httplib::Res
 }
 
 void HttpServer::handleRegister(const httplib::Request& request, httplib::Response& response) {
+    if (!rateLimiter_.allow(request.remote_addr)) {
+        response.status = 429;
+        response.set_content(nlohmann::json{{"error", "too many requests, try again later"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("login") || !body.contains("password") ||
         !body["login"].is_string() || !body["password"].is_string()) {
