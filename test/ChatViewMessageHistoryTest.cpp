@@ -4,7 +4,6 @@
 
 #include <QLayout>
 #include <QPushButton>
-#include <QSignalSpy>
 
 namespace devicehub {
 namespace {
@@ -32,9 +31,10 @@ TEST(ChatViewMessageHistoryTest, ClickingLoadOlderEmitsSignal) {
     ChatView view;
     view.showChannel(QStringLiteral("general"));
 
-    QSignalSpy spy(&view, &ChatView::loadOlderMessagesRequested);
+    int emitCount = 0;
+    QObject::connect(&view, &ChatView::loadOlderMessagesRequested, [&]() { ++emitCount; });
     view.loadOlderButton()->click();
-    EXPECT_EQ(spy.count(), 1);
+    EXPECT_EQ(emitCount, 1);
 }
 
 TEST(ChatViewMessageHistoryTest, PrependMessagesInsertsAboveExistingContent) {
