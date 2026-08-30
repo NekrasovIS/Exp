@@ -402,6 +402,30 @@ UI (issue #91) добавляет кнопку «Enable Video»/«Disable Video�
 - `ChatServiceIntegrationTest` (chat-service) — сообщества/каналы/
   сообщения напрямую в Postgres.
 
+## Диаграммы
+
+PlantUML-диаграммы классов и sequence-диаграммы для нетривиальных
+потоков — исходники `.puml` в [docs/diagrams/](docs/diagrams/), рядом
+с ними PNG-рендер того же имени; PNG перерендеривается в том же
+коммите, что и любая правка `.puml` (`java -jar plantuml.jar -tpng
+docs/diagrams/*.puml`).
+
+- [devices.puml](docs/diagrams/devices.puml) — `src/devices`
+  ([devices.png](docs/diagrams/devices.png))
+- [auth.puml](docs/diagrams/auth.puml) — `src/auth`
+  ([auth.png](docs/diagrams/auth.png))
+- [chat.puml](docs/diagrams/chat.puml) — `src/chat`, включая
+  `CallManager` и mesh-звонки
+  ([chat.png](docs/diagrams/chat.png))
+- [ui.puml](docs/diagrams/ui.puml) — `src/ui`
+  ([ui.png](docs/diagrams/ui.png))
+- [mic-capture-sequence.puml](docs/diagrams/mic-capture-sequence.puml) —
+  запуск захвата с микрофона
+  ([mic-capture-sequence.png](docs/diagrams/mic-capture-sequence.png))
+- [call-video-receive-sequence.puml](docs/diagrams/call-video-receive-sequence.puml) —
+  приём видео от участника звонка (issue #91)
+  ([call-video-receive-sequence.png](docs/diagrams/call-video-receive-sequence.png))
+
 ## Правила разработки
 
 Стиль кода, структура проекта, конвенции по задачам/веткам/коммитам,
