@@ -9,10 +9,15 @@
 #include <api/media_stream_interface.h>
 #include <api/set_local_description_observer_interface.h>
 #include <api/set_remote_description_observer_interface.h>
+#include <api/video/video_frame.h>
+#include <api/video/video_frame_buffer.h>
+#include <api/video/video_sink_interface.h>
 #include <api/video_codecs/builtin_video_decoder_factory.h>
 #include <api/video_codecs/builtin_video_encoder_factory.h>
+#include <libyuv/convert_argb.h>
 
 #include <QAudioFormat>
+#include <QImage>
 #include <QJsonValue>
 #include <QMetaObject>
 
@@ -55,6 +60,45 @@ public:
         const QString peerLogin = peerLogin_;
         QMetaObject::invokeMethod(
             manager, [manager, peerLogin, payload] { manager->handleLocalIceCandidate(peerLogin, payload); },
+            Qt::QueuedConnection);
+    }
+
+    // Fires when a remote track (audio or video) is added to this
+    // connection — issue #91 only cares about video, handleRemoteTrack()
+    // filters for it. Same GUI-thread hop as every other callback here.
+    void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override {
+        CallManager* manager = &manager_;
+        const QString peerLogin = peerLogin_;
+        QMetaObject::invokeMethod(
+            manager, [manager, peerLogin, transceiver] { manager->handleRemoteTrack(peerLogin, transceiver); },
+            Qt::QueuedConnection);
+    }
+
+private:
+    CallManager& manager_;
+    QString peerLogin_;
+};
+
+/// webrtc::VideoSinkInterface adapter for a remote peer's incoming video
+/// track (issue #91) — the receive-side counterpart to
+/// CallVideoTrackSource's send-side ARGBToI420 conversion. OnFrame()
+/// fires on a WebRTC decode/render thread, not the GUI thread, so —
+/// same as PeerObserver above — it hops back via
+/// QMetaObject::invokeMethod before touching CallManager.
+class CallManager::RemoteVideoSink : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+public:
+    RemoteVideoSink(CallManager& manager, QString peerLogin) : manager_(manager), peerLogin_(std::move(peerLogin)) {}
+
+    void OnFrame(const webrtc::VideoFrame& frame) override {
+        const webrtc::scoped_refptr<webrtc::I420BufferInterface> i420 = frame.video_frame_buffer()->ToI420();
+        QImage image(i420->width(), i420->height(), QImage::Format_ARGB32);
+        libyuv::I420ToARGB(i420->DataY(), i420->StrideY(), i420->DataU(), i420->StrideU(), i420->DataV(),
+                            i420->StrideV(), image.bits(), static_cast<int>(image.bytesPerLine()), i420->width(),
+                            i420->height());
+        CallManager* manager = &manager_;
+        const QString peerLogin = peerLogin_;
+        QMetaObject::invokeMethod(
+            manager, [manager, peerLogin, image] { manager->handleRemoteVideoFrame(peerLogin, image); },
             Qt::QueuedConnection);
     }
 
@@ -391,6 +435,25 @@ void CallManager::handleLocalIceCandidate(const QString& peerLogin, const QJsonO
     chatClient_.sendCallSignal(peerLogin, payload);
 }
 
+void CallManager::handleRemoteTrack(const QString& peerLogin,
+                                     webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
+    const auto it = peers_.find(peerLogin.toStdString());
+    if (it == peers_.end() || !transceiver || !transceiver->receiver() || it->second.remoteVideoSink) {
+        return;
+    }
+    const webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track = transceiver->receiver()->track();
+    if (!track || track->kind() != webrtc::MediaStreamTrackInterface::kVideoKind) {
+        return;
+    }
+    it->second.remoteVideoSink = std::make_unique<RemoteVideoSink>(*this, peerLogin);
+    static_cast<webrtc::VideoTrackInterface*>(track.get())
+        ->AddOrUpdateSink(it->second.remoteVideoSink.get(), webrtc::VideoSinkWants());
+}
+
+void CallManager::handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame) {
+    emit remoteVideoFrameReceived(peerLogin, frame);
+}
+
 void CallManager::onCapturedPcm(const QByteArray& data, const QAudioFormat& format) {
     if (!audioDeviceModule_ || !inCall_) {
         return;
@@ -444,6 +507,7 @@ void CallManager::onCallPeerJoined(const QString& login) {
 void CallManager::onCallPeerLeft(const QString& login) {
     closePeerConnection(login);
     emit participantLeft(login);
+    emit remoteVideoTrackRemoved(login);
 }
 
 void CallManager::onCallSignalReceived(const QString& from, const QJsonObject& payload) {

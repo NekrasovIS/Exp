@@ -13,6 +13,7 @@
 #include <QCameraDevice>
 #include <QDateTime>
 #include <QEventLoop>
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -218,6 +219,19 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         // -> a fresh offer/answer round trip through the same live
         // chat-service relay — verifies that path works end to end, not
         // just the initial join negotiation covered above.
+        //
+        // issue #91: negotiation succeeding isn't proof B actually
+        // decodes A's video — PeerObserver::OnTrack() /
+        // RemoteVideoSink::OnFrame() need to be exercised for real, so
+        // this also waits for at least one decoded frame on B's side.
+        QImage receivedFrame;
+        QObject::connect(&callManagerB, &CallManager::remoteVideoFrameReceived,
+                          [&](const QString& login, const QImage& frame) {
+                              if (login == loginA) {
+                                  receivedFrame = frame;
+                              }
+                          });
+
         callManagerA.enableVideo(cameras.first());
         {
             QEventLoop loop;
@@ -227,6 +241,11 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         EXPECT_TRUE(callManagerA.videoEnabled());
         EXPECT_TRUE(errorsA.isEmpty()) << errorsA.join(QStringLiteral("; ")).toStdString();
         EXPECT_TRUE(errorsB.isEmpty()) << errorsB.join(QStringLiteral("; ")).toStdString();
+        EXPECT_FALSE(receivedFrame.isNull()) << "B never decoded a video frame from A";
+        if (!receivedFrame.isNull()) {
+            EXPECT_GT(receivedFrame.width(), 0);
+            EXPECT_GT(receivedFrame.height(), 0);
+        }
 
         callManagerA.disableVideo();
         {

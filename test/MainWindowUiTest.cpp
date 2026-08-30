@@ -159,6 +159,19 @@ TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
     EXPECT_FALSE(muteToggleButton->isEnabled());
 }
 
+TEST(MainWindowUiTest, VideoToggleButtonExistsAndStartsDisabled) {
+    // #91: video toggle lives in ChatView's channel header next to
+    // Call/Mute — see ChatView::setVideoEnabled() for how MainWindow
+    // keeps its label/enabled state in sync with CallManager.
+    const MainWindow window;
+
+    auto* videoToggleButton = window.findChild<QPushButton*>("videoToggleButton");
+
+    ASSERT_NE(videoToggleButton, nullptr);
+    EXPECT_EQ(videoToggleButton->text(), QStringLiteral("Enable Video"));
+    EXPECT_FALSE(videoToggleButton->isEnabled());
+}
+
 TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
     const MainWindow window;
 

@@ -2,6 +2,7 @@
 
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -99,6 +100,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(chatView_, &ChatView::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
+    connect(chatView_, &ChatView::videoToggleRequested, this, &MainWindow::onVideoToggleClicked);
     connect(&callManager_, &CallManager::participantJoined, this, [this](const QString& login) {
         if (!callParticipants_.contains(login)) {
             callParticipants_.append(login);
@@ -111,6 +113,10 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&callManager_, &CallManager::callError, this,
             [this](const QString& message) { showToast(message, ToastBanner::Variant::kError); });
+    connect(&callManager_, &CallManager::remoteVideoFrameReceived, this,
+            [this](const QString& login, const QImage& frame) { chatView_->showRemoteVideoFrame(login, frame); });
+    connect(&callManager_, &CallManager::remoteVideoTrackRemoved, this,
+            [this](const QString& login) { chatView_->removeRemoteVideo(login); });
 
     connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
         if (lastToken_.isEmpty()) {
@@ -227,6 +233,12 @@ MainWindow::MainWindow(QWidget* parent)
     // outgoing video (issue #72).
     connect(&camera_, &CameraDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { settingsDialog_->videoPreview()->videoSink()->setVideoFrame(frame); });
+    // Same fan-out, third consumer: the call's own local-preview tile
+    // (issue #91). Frames only actually flow while the camera is
+    // running (Settings preview or CallManager::enableVideo()), so this
+    // is safe to leave connected unconditionally.
+    connect(&camera_, &CameraDevice::frameAvailable, this,
+            [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
     screenCapture_.captureSession().setVideoOutput(settingsDialog_->screenPreview());
 }
 
@@ -373,6 +385,9 @@ void MainWindow::onSendChatMessageClicked() {
 
 void MainWindow::onCallToggleClicked() {
     if (callManager_.inCall()) {
+        if (callManager_.videoEnabled()) {
+            callManager_.disableVideo();
+        }
         callManager_.leaveCall();
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);
@@ -387,6 +402,16 @@ void MainWindow::onCallToggleClicked() {
 void MainWindow::onMuteToggleClicked() {
     callManager_.setMuted(!callManager_.isMuted());
     chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
+}
+
+void MainWindow::onVideoToggleClicked() {
+    if (callManager_.videoEnabled()) {
+        callManager_.disableVideo();
+    } else {
+        const QCameraDevice cameraDevice = settingsDialog_->cameraCombo()->currentData().value<QCameraDevice>();
+        callManager_.enableVideo(cameraDevice);
+    }
+    chatView_->setVideoEnabled(callManager_.videoEnabled());
 }
 
 void MainWindow::refreshCommunities() {
@@ -410,6 +435,9 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     // it before switching, rather than stranding PeerConnections tied
     // to a channel we're no longer even connected to.
     if (callManager_.inCall()) {
+        if (callManager_.videoEnabled()) {
+            callManager_.disableVideo();
+        }
         callManager_.leaveCall();
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);
@@ -424,6 +452,9 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
 
 void MainWindow::closeChatView() {
     if (callManager_.inCall()) {
+        if (callManager_.videoEnabled()) {
+            callManager_.disableVideo();
+        }
         callManager_.leaveCall();
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);

@@ -1,0 +1,42 @@
+@startuml call_video_receive_sequence
+title Приём видео от участника звонка (issue #91)
+
+participant "WebRTC signaling\nthread" as Signaling
+participant "PeerObserver\n(remote peer)" as Observer
+participant CallManager
+participant "RemoteVideoSink\n(remote peer)" as Sink
+participant "WebRTC decode\nthread" as Decode
+participant MainWindow
+participant ChatView
+
+Signaling -> Observer : OnTrack(transceiver)
+Observer -> CallManager : invokeMethod(Qt::QueuedConnection)\n-> handleRemoteTrack(peerLogin, transceiver)
+
+group handleRemoteTrack (GUI thread)
+  CallManager -> CallManager : track = transceiver->receiver()->track()
+  alt track is video and no sink yet for this peer
+    CallManager -> Sink : new RemoteVideoSink(*this, peerLogin)
+    CallManager -> CallManager : entry.remoteVideoSink = sink
+    CallManager -> "VideoTrackInterface" as Track : AddOrUpdateSink(sink.get(), VideoSinkWants())
+  else already has a sink, or not video
+    CallManager -> CallManager : return (no-op)
+  end
+end
+
+loop while the peer is sending video
+  Decode -> Sink : OnFrame(webrtc::VideoFrame)
+  Sink -> Sink : I420 -> QImage\n(libyuv::I420ToARGB)
+  Sink -> CallManager : invokeMethod(Qt::QueuedConnection)\n-> handleRemoteVideoFrame(peerLogin, image)
+  CallManager -> MainWindow : emit remoteVideoFrameReceived(peerLogin, image)
+  MainWindow -> ChatView : showRemoteVideoFrame(peerLogin, image)
+  ChatView -> ChatView : tile (QLabel) = remoteVideoTiles_[peerLogin]\n(created lazily on first frame)
+  ChatView -> ChatView : tile->setPixmap(QPixmap::fromImage(image))
+end
+
+... peer leaves the call ...
+CallManager -> CallManager : closePeerConnection(peerLogin)\n(entry, and its RemoteVideoSink, destroyed)
+CallManager -> MainWindow : emit remoteVideoTrackRemoved(peerLogin)
+MainWindow -> ChatView : removeRemoteVideo(peerLogin)
+ChatView -> ChatView : delete tile, drop from remoteVideoTiles_
+
+@enduml
