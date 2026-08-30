@@ -51,7 +51,18 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bubbleLayout->setSpacing(bubbleInnerSpacing);
 
     auto* bodyLabel = new QLabel(message.body, bubble_);
+    bodyLabel->setObjectName(QStringLiteral("chatMessageBody"));
     bodyLabel->setWordWrap(true);
+    // Issue #94: render **bold**/*italic*/`code`/links/lists via Qt's
+    // own markdown-to-richtext conversion rather than a hand-rolled
+    // parser. QLabel doesn't wire up network image loading for rich
+    // text on its own, so a message body isn't a vector for fetching
+    // attacker-controlled URLs (e.g. a tracking-pixel image) — links
+    // only ever open on an explicit click (setOpenExternalLinks()),
+    // never automatically.
+    bodyLabel->setTextFormat(Qt::MarkdownText);
+    bodyLabel->setOpenExternalLinks(true);
+    bodyLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
     if (isOwnMessage) {
         bodyLabel->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
     }
