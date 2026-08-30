@@ -144,6 +144,19 @@ class ToastBanner {
 }
 ToastBanner *-- ToastVariant
 
+class DesktopNotifier {
+  DesktopNotifier(mainWindow: QWidget*)
+  +notifyMessage(author: QString, body: QString, currentUserLogin: QString)
+}
+DesktopNotifier *-- "QSystemTrayIcon" : owns (issue #92, no-op if\nno system tray available)
+
+package "devicehub::notification_policy" <<Rectangle>> {
+  class NotificationPolicy << (N,orchid) namespace >> {
+    +shouldNotify(windowActive: bool, messageAuthor: QString, currentUserLogin: QString) : bool
+  }
+}
+DesktopNotifier ..> NotificationPolicy : shouldNotify() >
+
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
@@ -177,6 +190,7 @@ MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- FooterBar : owns (bottom)
 MainWindow *-- ToastBanner : owns (floats over ChatView)
+MainWindow *-- DesktopNotifier : owns (issue #92)
 
 MainWindow *-- DeviceEnumerator : owns
 MainWindow *-- AudioOutputDevice : owns
@@ -191,6 +205,7 @@ MainWindow *-- ChatRestClient : owns
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
 MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
+MainWindow ..> DesktopNotifier : notifyMessage() (from\nmessageReceived() handler) >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
 MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
@@ -253,6 +268,19 @@ note right of MainWindow
   openChannel()/closeChatView() сначала
   выходят из активного звонка — он
   привязан к подписанному каналу.
+
+  DesktopNotifier (issue #92) shows a native
+  QSystemTrayIcon notification for
+  messageReceived() when the main window
+  isn't active — never for the user's own
+  messages. The actual show-or-not decision
+  is notification_policy::shouldNotify(),
+  factored out so it's unit-testable without
+  a real system tray; DesktopNotifier itself
+  is a no-op (no tray icon, notifyMessage()
+  returns immediately) when
+  QSystemTrayIcon::isSystemTrayAvailable()
+  is false, e.g. headless CI.
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

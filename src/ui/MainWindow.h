@@ -23,6 +23,7 @@ class AccountMenu;
 class ChannelsPanel;
 class ChatView;
 class CommunitiesPanel;
+class DesktopNotifier;
 class FooterBar;
 class SettingsDialog;
 
@@ -98,6 +99,7 @@ private:
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
+    DesktopNotifier* desktopNotifier_ = nullptr;
 };
 
 }  // namespace devicehub

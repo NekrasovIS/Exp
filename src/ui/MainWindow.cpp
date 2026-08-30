@@ -20,6 +20,7 @@
 #include "ui/ChatMessageRow.h"
 #include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
+#include "ui/DesktopNotifier.h"
 #include "ui/FooterBar.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
@@ -93,6 +94,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](const QString& author, const QString& body, const QString& sentAt) {
                 chatView_->appendMessage(ChatMessage{author, body, sentAt});
+                desktopNotifier_->notifyMessage(author, body, currentUserLogin_);
             });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
@@ -265,6 +267,7 @@ void MainWindow::buildUi() {
 
     chatView_ = new ChatView(central);
     toastBanner_ = new ToastBanner(chatView_);
+    desktopNotifier_ = new DesktopNotifier(this, this);
 
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
