@@ -45,7 +45,7 @@ class ChatRepository {
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
   +insertMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
-  +listRecentMessages(channelId: int64, limit: int) : vector<Message>
+  +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
@@ -64,7 +64,7 @@ class ChatService {
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
   +postMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
-  +recentMessages(channelId: int64, limit: int) : vector<Message>
+  +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
 }
 ChatService --> ChatRepository : delegates to (&)
 

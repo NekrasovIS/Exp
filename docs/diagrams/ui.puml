@@ -56,6 +56,8 @@ class ChatView {
   +showChannel(channelName: QString)
   +setCurrentUserLogin(login: QString)
   +appendMessage(message: ChatMessage)
+  +prependMessages(messages: QList<ChatMessage>)
+  +setLoadOlderVisible(visible: bool)
   +appendSystemLine(text: QString)
   +clearLog()
   +setCallState(inCall: bool, muted: bool)
@@ -66,10 +68,12 @@ class ChatView {
   +callToggleButton() : QPushButton*
   +muteToggleButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
+  +loadOlderButton() : QPushButton*
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
   +muteToggleRequested()
+  +loadOlderMessagesRequested()
 }
 
 struct ChatMessage {
@@ -202,8 +206,11 @@ CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
+MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
+MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested() >
+ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -253,6 +260,20 @@ note right of MainWindow
   openChannel()/closeChatView() сначала
   выходят из активного звонка — он
   привязан к подписанному каналу.
+
+  История сообщений (issue #100): открытие
+  канала запрашивает первую страницу через
+  ChatRestClient::listMessages() (REST,
+  отдельно от live-потока WebSocket).
+  «Load older messages» подгружает страницу
+  раньше oldestMessageId_ (MainWindow) и
+  вставляет её в начало списка через
+  ChatView::prependMessages() — в отличие
+  от appendMessage(), не прыгает к низу
+  списка. Автоскролл к низу теперь липкий
+  (stickToBottom_): держит низ, пока
+  пользователь сам не проскроллил вверх, а
+  не безусловно на каждое новое сообщение.
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

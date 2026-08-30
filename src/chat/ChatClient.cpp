@@ -52,8 +52,8 @@ void ChatClient::onTextMessageReceived(const QString& message) {
         const QJsonObject signal = object.value("call_signal").toObject();
         emit callSignalReceived(signal.value("from").toString(), signal.value("payload").toObject());
     } else if (object.contains("author") && object.contains("body")) {
-        emit messageReceived(object.value("author").toString(), object.value("body").toString(),
-                              object.value("sent_at").toString());
+        emit messageReceived(object.value("id").toVariant().toLongLong(), object.value("author").toString(),
+                              object.value("body").toString(), object.value("sent_at").toString());
     }
 }
 

@@ -23,26 +23,26 @@ TEST(ChatMessageGroupingTest, RejectsGarbage) {
 }
 
 TEST(ChatMessageGroupingTest, GroupsSameAuthorWithinFiveMinutes) {
-    const ChatMessage previous{QStringLiteral("maria"), QStringLiteral("hi"), QStringLiteral("2026-08-05 09:00:00")};
-    const ChatMessage current{QStringLiteral("maria"), QStringLiteral("there"), QStringLiteral("2026-08-05 09:04:59")};
+    const ChatMessage previous{.author = QStringLiteral("maria"), .body = QStringLiteral("hi"), .sentAt = QStringLiteral("2026-08-05 09:00:00")};
+    const ChatMessage current{.author = QStringLiteral("maria"), .body = QStringLiteral("there"), .sentAt = QStringLiteral("2026-08-05 09:04:59")};
     EXPECT_TRUE(chat_message_grouping::shouldGroupWithPrevious(previous, current));
 }
 
 TEST(ChatMessageGroupingTest, DoesNotGroupDifferentAuthors) {
-    const ChatMessage previous{QStringLiteral("maria"), QStringLiteral("hi"), QStringLiteral("2026-08-05 09:00:00")};
-    const ChatMessage current{QStringLiteral("ilya"), QStringLiteral("hey"), QStringLiteral("2026-08-05 09:00:01")};
+    const ChatMessage previous{.author = QStringLiteral("maria"), .body = QStringLiteral("hi"), .sentAt = QStringLiteral("2026-08-05 09:00:00")};
+    const ChatMessage current{.author = QStringLiteral("ilya"), .body = QStringLiteral("hey"), .sentAt = QStringLiteral("2026-08-05 09:00:01")};
     EXPECT_FALSE(chat_message_grouping::shouldGroupWithPrevious(previous, current));
 }
 
 TEST(ChatMessageGroupingTest, DoesNotGroupAcrossALongGap) {
-    const ChatMessage previous{QStringLiteral("maria"), QStringLiteral("hi"), QStringLiteral("2026-08-05 09:00:00")};
-    const ChatMessage current{QStringLiteral("maria"), QStringLiteral("still there?"), QStringLiteral("2026-08-05 09:06:01")};
+    const ChatMessage previous{.author = QStringLiteral("maria"), .body = QStringLiteral("hi"), .sentAt = QStringLiteral("2026-08-05 09:00:00")};
+    const ChatMessage current{.author = QStringLiteral("maria"), .body = QStringLiteral("still there?"), .sentAt = QStringLiteral("2026-08-05 09:06:01")};
     EXPECT_FALSE(chat_message_grouping::shouldGroupWithPrevious(previous, current));
 }
 
 TEST(ChatMessageGroupingTest, DoesNotGroupWhenATimestampFailsToParse) {
-    const ChatMessage previous{QStringLiteral("maria"), QStringLiteral("hi"), QStringLiteral("garbage")};
-    const ChatMessage current{QStringLiteral("maria"), QStringLiteral("there"), QStringLiteral("2026-08-05 09:00:01")};
+    const ChatMessage previous{.author = QStringLiteral("maria"), .body = QStringLiteral("hi"), .sentAt = QStringLiteral("garbage")};
+    const ChatMessage current{.author = QStringLiteral("maria"), .body = QStringLiteral("there"), .sentAt = QStringLiteral("2026-08-05 09:00:01")};
     EXPECT_FALSE(chat_message_grouping::shouldGroupWithPrevious(previous, current));
 }
 

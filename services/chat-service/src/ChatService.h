@@ -32,7 +32,8 @@ public:
 
     [[nodiscard]] std::optional<Message> postMessage(std::int64_t channelId, const std::string& authorLogin,
                                                        const std::string& body);
-    [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit);
+    [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit,
+                                                        std::optional<std::int64_t> beforeId = std::nullopt);
 
 private:
     ChatRepository& repository_;

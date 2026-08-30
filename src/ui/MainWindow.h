@@ -90,6 +90,10 @@ private:
     qint64 selectedChannelId_ = -1;
     qint64 pendingCommunitySelection_ = -1;
     qint64 pendingChannelSelection_ = -1;
+    /// Id of the oldest message ChatView currently has for the open
+    /// channel, or -1 if none loaded yet — the beforeId cursor for the
+    /// next "Load older messages" fetch. Reset on every channel switch.
+    qint64 oldestMessageId_ = -1;
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;

@@ -71,6 +71,47 @@ TEST(ChatServiceIntegrationTest, CommunityChannelMembershipAndMessageRoundTrip) 
     EXPECT_EQ(messages[0].body, "hello, chat-service");
 }
 
+TEST(ChatServiceIntegrationTest, RecentMessagesWithBeforeIdPagesBackwardThroughHistory) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "pagination-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("pagination-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    // Three messages, oldest to newest: "one", "two", "three".
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "one").has_value());
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "two").has_value());
+    const std::optional<Message> three = service.postMessage(*channelId, owner, "three");
+    ASSERT_TRUE(three.has_value());
+
+    // Newest page, limit 1: just "three".
+    const std::vector<Message> newestPage = service.recentMessages(*channelId, 1);
+    ASSERT_EQ(newestPage.size(), 1U);
+    EXPECT_EQ(newestPage[0].body, "three");
+
+    // Page before "three", limit 1: "two" — beforeId pages backward.
+    const std::vector<Message> olderPage = service.recentMessages(*channelId, 1, three->id);
+    ASSERT_EQ(olderPage.size(), 1U);
+    EXPECT_EQ(olderPage[0].body, "two");
+
+    // Page before the oldest message: nothing left.
+    const std::vector<Message> oneMessagePage = service.recentMessages(*channelId, 10, newestPage[0].id);
+    ASSERT_EQ(oneMessagePage.size(), 2U);
+    const std::vector<Message> beforeOldest = service.recentMessages(*channelId, 10, oneMessagePage[0].id);
+    EXPECT_TRUE(beforeOldest.empty());
+}
+
 TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");

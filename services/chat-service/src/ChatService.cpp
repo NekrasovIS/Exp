@@ -48,8 +48,8 @@ std::optional<Message> ChatService::postMessage(std::int64_t channelId, const st
     return repository_.insertMessage(channelId, authorLogin, body);
 }
 
-std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int limit) {
-    return repository_.listRecentMessages(channelId, limit);
+std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int limit, std::optional<std::int64_t> beforeId) {
+    return repository_.listRecentMessages(channelId, limit, beforeId);
 }
 
 }  // namespace chat_service

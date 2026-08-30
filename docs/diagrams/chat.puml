@@ -33,7 +33,7 @@ class ChatClient {
   +sendCallSignal(to: QString, payload: QJsonObject)
   .. signals ..
   +subscribed(channelId: qint64)
-  +messageReceived(author: QString, body: QString, sentAt: QString)
+  +messageReceived(id: qint64, author: QString, body: QString, sentAt: QString)
   +errorOccurred(message: QString)
   +callRosterReceived(participants: QStringList)
   +callPeerJoined(login: QString)
@@ -137,16 +137,19 @@ class ChatRestClient {
   +joinCommunity(token: QString, communityId: qint64)
   +createChannel(token: QString, communityId: qint64, name: QString)
   +listChannels(token: QString, communityId: qint64)
+  +listMessages(token: QString, channelId: qint64, limit: int, beforeId: qint64)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
   +communityJoined(communityId: qint64)
   +channelCreated(id: qint64, name: QString)
   +channelsListed(channels: QList<ChatItem>)
+  +messagesListed(channelId: qint64, messages: QList<ChatMessageInfo>)
   +errorOccurred(message: QString)
 }
 ChatRestClient *-- QNetworkAccessManager : owns
 ChatRestClient ..> ChatItem : emits lists of
+ChatRestClient ..> ChatMessageInfo : emits pages of (issue #100)
 ChatRestClient ..> "chat-service" : REST (Authorization: Bearer <token>)
 
 note right of ChatClient

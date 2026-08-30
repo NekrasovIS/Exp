@@ -132,7 +132,7 @@ TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
         QEventLoop loop;
         QTimer::singleShot(3000, &loop, &QEventLoop::quit);
         QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
-                          [&](const QString& author, const QString& body, const QString&) {
+                          [&](qint64, const QString& author, const QString& body, const QString&) {
                               receivedAuthor = author;
                               receivedBody = body;
                               loop.quit();

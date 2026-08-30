@@ -31,6 +31,7 @@ constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
 constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
 constexpr int kToastTimeoutMs = 4000;
+constexpr int kMessagePageSize = 50;
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -91,8 +92,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatClient_, &ChatClient::subscribed, this,
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
-            [this](const QString& author, const QString& body, const QString& sentAt) {
-                chatView_->appendMessage(ChatMessage{author, body, sentAt});
+            [this](qint64 id, const QString& author, const QString& body, const QString& sentAt) {
+                chatView_->appendMessage(ChatMessage{.id = id, .author = author, .body = body, .sentAt = sentAt});
             });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
@@ -209,6 +210,37 @@ MainWindow::MainWindow(QWidget* parent)
             closeChatView();
         }
         refreshChannelsForSelectedCommunity();
+    });
+    connect(&chatRestClient_, &ChatRestClient::messagesListed, this,
+            [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
+                if (channelId != selectedChannelId_) {
+                    return;  // Stale reply for a channel we've since left.
+                }
+                QList<ChatMessage> converted;
+                converted.reserve(messages.size());
+                for (const ChatMessageInfo& info : messages) {
+                    converted.append(
+                        ChatMessage{.id = info.id, .author = info.author, .body = info.body, .sentAt = info.sentAt});
+                }
+                if (oldestMessageId_ < 0) {
+                    // Initial history load for this channel — list was
+                    // empty, so appending in chronological order (as
+                    // returned) reads the same as prepending would.
+                    for (const ChatMessage& message : converted) {
+                        chatView_->appendMessage(message);
+                    }
+                } else {
+                    chatView_->prependMessages(converted);
+                }
+                if (!converted.isEmpty()) {
+                    oldestMessageId_ = converted.first().id;
+                }
+                chatView_->setLoadOlderVisible(messages.size() == kMessagePageSize);
+            });
+    connect(chatView_, &ChatView::loadOlderMessagesRequested, this, [this]() {
+        if (selectedChannelId_ >= 0) {
+            chatRestClient_.listMessages(lastToken_, selectedChannelId_, kMessagePageSize, oldestMessageId_);
+        }
     });
     connect(&chatRestClient_, &ChatRestClient::errorOccurred, this, [this](const QString& message) {
         showToast(tr("Error: %1").arg(message), ToastBanner::Variant::kError);
@@ -416,10 +448,12 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
         chatView_->setCallState(false, callManager_.isMuted());
     }
     selectedChannelId_ = id;
+    oldestMessageId_ = -1;
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
     chatView_->clearLog();
     chatClient_.connectToChannel(lastToken_, id);
+    chatRestClient_.listMessages(lastToken_, id, kMessagePageSize);
 }
 
 void MainWindow::closeChatView() {
@@ -433,6 +467,7 @@ void MainWindow::closeChatView() {
         chatClient_.disconnectFromChannel();
     }
     selectedChannelId_ = -1;
+    oldestMessageId_ = -1;
     chatView_->showPlaceholder();
 }
 
