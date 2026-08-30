@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <QString>
+
 namespace devicehub {
 namespace {
 
