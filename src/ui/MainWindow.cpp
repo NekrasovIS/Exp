@@ -91,14 +91,22 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatClient_, &ChatClient::subscribed, this,
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
-            [this](const QString& author, const QString& body, const QString& sentAt) {
-                chatView_->appendMessage(ChatMessage{author, body, sentAt});
+            [this](qint64 id, const QString& author, const QString& body, const QString& sentAt) {
+                chatView_->appendMessage(ChatMessage{.id = id, .author = author, .body = body, .sentAt = sentAt});
             });
+    connect(&chatClient_, &ChatClient::messageEdited, this,
+            [this](qint64 id, const QString& newBody, const QString& /*editedAt*/) {
+                chatView_->updateMessageBody(id, newBody);
+            });
+    connect(&chatClient_, &ChatClient::messageDeleted, this,
+            [this](qint64 id) { chatView_->removeMessage(id); });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(chatView_, &ChatView::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
+    connect(chatView_, &ChatView::deleteMessageRequested, this,
+            [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
     connect(&callManager_, &CallManager::participantJoined, this, [this](const QString& login) {
         if (!callParticipants_.contains(login)) {
             callParticipants_.append(login);
@@ -367,8 +375,14 @@ void MainWindow::onSendChatMessageClicked() {
     if (selectedChannelId_ < 0) {
         return;
     }
-    chatClient_.sendMessage(chatView_->messageEdit()->text());
-    chatView_->messageEdit()->clear();
+    const QString text = chatView_->messageEdit()->text();
+    if (chatView_->editingMessageId() >= 0) {
+        chatClient_.sendEditMessage(chatView_->editingMessageId(), text);
+        chatView_->cancelEditingMessage();
+    } else {
+        chatClient_.sendMessage(text);
+        chatView_->messageEdit()->clear();
+    }
 }
 
 void MainWindow::onCallToggleClicked() {

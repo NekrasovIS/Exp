@@ -193,21 +193,63 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
 
     // Newest-first LIMIT, then reversed below, so the result is
     // chronological (oldest to newest) like a normal message log.
-    const pqxx::result rows =
-        transaction.exec("SELECT id, author_login, body, sent_at FROM messages WHERE channel_id = $1 "
-                          "ORDER BY sent_at DESC LIMIT $2",
-                          pqxx::params{channelId, limit});
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, author_login, body, sent_at, edited_at FROM messages WHERE channel_id = $1 "
+        "ORDER BY sent_at DESC LIMIT $2",
+        pqxx::params{channelId, limit});
 
     std::vector<Message> messages;
     messages.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
-        messages.push_back(Message{.id = row[0].as<std::int64_t>(),
-                                    .authorLogin = row[1].as<std::string>(),
-                                    .body = row[2].as<std::string>(),
-                                    .sentAt = row[3].as<std::string>()});
+        messages.push_back(
+            Message{.id = row[0].as<std::int64_t>(),
+                    .authorLogin = row[1].as<std::string>(),
+                    .body = row[2].as<std::string>(),
+                    .sentAt = row[3].as<std::string>(),
+                    .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>())});
     }
     std::reverse(messages.begin(), messages.end());
     return messages;
+}
+
+EditMessageResult ChatRepository::editMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin, const std::string& newBody) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result authorRows = transaction.exec(
+        "SELECT author_login FROM messages WHERE id = $1 AND channel_id = $2", pqxx::params{messageId, channelId});
+    if (authorRows.empty()) {
+        return EditMessageResult{.result = MutationResult::kNotFound};
+    }
+    if (authorRows[0][0].as<std::string>() != requesterLogin) {
+        return EditMessageResult{.result = MutationResult::kForbidden};
+    }
+
+    const pqxx::result updated =
+        transaction.exec("UPDATE messages SET body = $1, edited_at = now() WHERE id = $2 RETURNING edited_at",
+                          pqxx::params{newBody, messageId});
+    transaction.commit();
+    return EditMessageResult{.result = MutationResult::kSuccess, .editedAt = updated[0][0].as<std::string>()};
+}
+
+MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_t channelId,
+                                              const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result authorRows = transaction.exec(
+        "SELECT author_login FROM messages WHERE id = $1 AND channel_id = $2", pqxx::params{messageId, channelId});
+    if (authorRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (authorRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    transaction.exec("DELETE FROM messages WHERE id = $1", pqxx::params{messageId});
+    transaction.commit();
+    return MutationResult::kSuccess;
 }
 
 }  // namespace chat_service

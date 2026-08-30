@@ -122,5 +122,54 @@ TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     EXPECT_EQ(service.renameChannel(*secondChannelId, "anything", owner), MutationResult::kNotFound);
 }
 
+TEST(ChatServiceIntegrationTest, EditAndDeleteMessageAreRestrictedToTheAuthor) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string author = "edit-test-author-" + suffix;
+    const std::string intruder = "edit-test-intruder-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("edit-test-community-" + suffix, author);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", author);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> posted = service.postMessage(*channelId, author, "original body");
+    ASSERT_TRUE(posted.has_value());
+    EXPECT_FALSE(posted->editedAt.has_value());
+
+    // Even the channel's own owner (author here too, but the point is
+    // the rule is authorship, not ownership) can't edit/delete on
+    // someone else's behalf — simulate that with a different login.
+    EXPECT_EQ(service.editMessage(posted->id, *channelId, intruder, "hijacked").result, MutationResult::kForbidden);
+    EXPECT_EQ(service.deleteMessage(posted->id, *channelId, intruder), MutationResult::kForbidden);
+
+    // Nonexistent id, and a real id but wrong channel, are both "not found".
+    EXPECT_EQ(service.editMessage(-1, *channelId, author, "nowhere").result, MutationResult::kNotFound);
+    EXPECT_EQ(service.editMessage(posted->id, -1, author, "wrong channel").result, MutationResult::kNotFound);
+
+    // The author can actually edit.
+    const EditMessageResult edited = service.editMessage(posted->id, *channelId, author, "edited body");
+    EXPECT_EQ(edited.result, MutationResult::kSuccess);
+    EXPECT_FALSE(edited.editedAt.empty());
+
+    const std::vector<Message> messagesAfterEdit = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(messagesAfterEdit.size(), 1U);
+    EXPECT_EQ(messagesAfterEdit[0].body, "edited body");
+    ASSERT_TRUE(messagesAfterEdit[0].editedAt.has_value());
+
+    // The author can actually delete.
+    EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kSuccess);
+    EXPECT_TRUE(service.recentMessages(*channelId, 10).empty());
+    EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kNotFound);  // already gone
+}
+
 }  // namespace
 }  // namespace chat_service

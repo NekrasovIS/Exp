@@ -31,9 +31,13 @@ class ChatClient {
   +joinCall()
   +leaveCall()
   +sendCallSignal(to: QString, payload: QJsonObject)
+  +sendEditMessage(id: qint64, newBody: QString)
+  +sendDeleteMessage(id: qint64)
   .. signals ..
   +subscribed(channelId: qint64)
-  +messageReceived(author: QString, body: QString, sentAt: QString)
+  +messageReceived(id: qint64, author: QString, body: QString, sentAt: QString)
+  +messageEdited(id: qint64, newBody: QString, editedAt: QString)
+  +messageDeleted(id: qint64)
   +errorOccurred(message: QString)
   +callRosterReceived(participants: QStringList)
   +callPeerJoined(login: QString)
@@ -43,6 +47,7 @@ class ChatClient {
 ChatClient *-- QWebSocket : owns
 ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebSocket
 ChatClient ..> "chat-service" : call_join/call_leave/call_signal\n(issue #46 signaling relay)
+ChatClient ..> "chat-service" : edit_message/delete_message\n(issue #107, author-only)
 
 class CallManager {
   +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)

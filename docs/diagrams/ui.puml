@@ -56,6 +56,10 @@ class ChatView {
   +showChannel(channelName: QString)
   +setCurrentUserLogin(login: QString)
   +appendMessage(message: ChatMessage)
+  +updateMessageBody(id: qint64, newBody: QString)
+  +removeMessage(id: qint64)
+  +editingMessageId() : qint64
+  +cancelEditingMessage()
   +appendSystemLine(text: QString)
   +clearLog()
   +setCallState(inCall: bool, muted: bool)
@@ -66,10 +70,12 @@ class ChatView {
   +callToggleButton() : QPushButton*
   +muteToggleButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
+  -connectMessageRow(row: ChatMessageRow*)
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
   +muteToggleRequested()
+  +deleteMessageRequested(id: qint64)
 }
 
 struct ChatMessage {
@@ -80,7 +86,12 @@ struct ChatMessage {
 
 class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
+  +messageId() : qint64
+  +updateBody(newBody: QString)
   #resizeEvent(event: QResizeEvent*)
+  .. signals ..
+  +editRequested(id: qint64, currentBody: QString)
+  +deleteRequested(id: qint64)
 }
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
@@ -202,8 +213,11 @@ CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
+MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested() >
+ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
+ChatMessageRow ..> ChatView : editRequested()/deleteRequested() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -253,6 +267,23 @@ note right of MainWindow
   openChannel()/closeChatView() сначала
   выходят из активного звонка — он
   привязан к подписанному каналу.
+
+  Редактирование/удаление своих сообщений
+  (issue #107): каждая own-message строка
+  (не только с заголовком — сгруппированные
+  тоже) несёт кнопки Edit/Delete. Edit не
+  подменяет саму строку виджетом ввода —
+  переиспользует общее поле ввода снизу
+  (ChatView::editingMessageId_), кнопка
+  Send превращается в Update, пока идёт
+  редактирование; отправка отдельного
+  edit_message вместо body — решает
+  MainWindow::onSendChatMessageClicked() по
+  ChatView::editingMessageId(). Подтверждение
+  редактирования/удаления от сервера (после
+  реального round-trip, не оптимистично)
+  обновляет/удаляет строку через
+  ChatView::updateMessageBody()/removeMessage().
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

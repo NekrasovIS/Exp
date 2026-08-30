@@ -40,7 +40,19 @@ namespace chat_service {
  *     `{"call_signal": {"from": "<login>", "payload": {...}}}` — this
  *     class never inspects `payload`. Replies `{"error": "peer not in
  *     call"}` to the sender if `to` isn't a current call participant.
+ *   - `{"edit_message": {"id": N, "body": "..."}}` (issue #107) —
+ *     broadcasts `{"message_edited": {"id", "body", "edited_at"}}` to
+ *     every *chat* subscriber (including the editor). Only the
+ *     message's own author may edit it — not the channel/community
+ *     owner, unlike rename/delete for channels and communities
+ *     themselves; that owner-level moderation power over other
+ *     people's messages is deliberately out of scope here, left for a
+ *     future roles/moderation feature. Replies `{"error": ...}` to the
+ *     sender (not broadcast) on 404/403.
+ *   - `{"delete_message": {"id": N}}` — same authorship rule, broadcasts
+ *     `{"message_deleted": {"id"}}` on success.
  *
+
  * REST (HttpServer) stays the source of truth for history/CRUD; this
  * class only pushes what's posted while a client is connected, and
  * only relays call signaling — it never decodes SDP/ICE content.
@@ -67,6 +79,8 @@ private:
     void handleHello(ix::WebSocket& webSocket, const std::string& payload);
     void handleSubscribedMessage(ix::WebSocket& webSocket, const std::string& payload);
     void handleChatMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    void handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    void handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);

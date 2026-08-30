@@ -18,6 +18,21 @@ namespace devicehub {
 namespace {
 constexpr int kPlaceholderPageIndex = 0;
 constexpr int kChannelPageIndex = 1;
+
+/// Linear scan for the ChatMessageRow showing @p id — not every widget
+/// in messagesLayout_ is one (appendSystemLine() adds plain QLabels
+/// too), hence the qobject_cast guard. Message lists are short enough
+/// (one page at a time) that this doesn't need to be anything fancier.
+ChatMessageRow* findMessageRow(QVBoxLayout* layout, qint64 id) {
+    for (int i = 0; i < layout->count(); ++i) {
+        if (auto* row = qobject_cast<ChatMessageRow*>(layout->itemAt(i)->widget()); row != nullptr) {
+            if (row->messageId() == id) {
+                return row;
+            }
+        }
+    }
+    return nullptr;
+}
 }  // namespace
 
 ChatView::ChatView(QWidget* parent) : QWidget(parent) {
@@ -144,9 +159,42 @@ void ChatView::appendMessage(const ChatMessage& message) {
     const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
     auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
+    connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     lastMessage_ = message;
     hasLastMessage_ = true;
+}
+
+void ChatView::connectMessageRow(ChatMessageRow* row) {
+    connect(row, &ChatMessageRow::editRequested, this, [this](qint64 id, const QString& currentBody) {
+        editingMessageId_ = id;
+        messageEdit_->setText(currentBody);
+        messageEdit_->setFocus();
+        sendButton_->setText(tr("Update"));
+    });
+    connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
+}
+
+void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->updateBody(newBody);
+    }
+}
+
+void ChatView::removeMessage(qint64 id) {
+    if (id == editingMessageId_) {
+        // The message being edited just got deleted out from under the
+        // send box — leave edit mode rather than letting "Update" send
+        // an edit_message for an id that no longer exists.
+        cancelEditingMessage();
+    }
+    delete findMessageRow(messagesLayout_, id);
+}
+
+void ChatView::cancelEditingMessage() {
+    editingMessageId_ = -1;
+    messageEdit_->clear();
+    sendButton_->setText(tr("Send"));
 }
 
 void ChatView::appendSystemLine(const QString& text) {
@@ -183,6 +231,10 @@ void ChatView::clearLog() {
         delete item;
     }
     hasLastMessage_ = false;
+    // Whatever was being edited belonged to the channel that just got
+    // cleared — an id from it would be meaningless (or, worse, collide
+    // with some other channel's id) once a new channel's messages load.
+    cancelEditingMessage();
 }
 
 }  // namespace devicehub

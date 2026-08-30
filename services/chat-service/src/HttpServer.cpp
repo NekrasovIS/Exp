@@ -23,8 +23,12 @@ nlohmann::json toJson(const Channel& channel) {
 }
 
 nlohmann::json toJson(const Message& message) {
-    return nlohmann::json{
-        {"id", message.id}, {"author", message.authorLogin}, {"body", message.body}, {"sent_at", message.sentAt}};
+    return nlohmann::json{{"id", message.id},
+                           {"author", message.authorLogin},
+                           {"body", message.body},
+                           {"sent_at", message.sentAt},
+                           {"edited_at", message.editedAt.has_value() ? nlohmann::json(*message.editedAt)
+                                                                       : nlohmann::json(nullptr)}};
 }
 }  // namespace
 

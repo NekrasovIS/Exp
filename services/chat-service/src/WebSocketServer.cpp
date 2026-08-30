@@ -8,8 +8,12 @@ namespace chat_service {
 
 namespace {
 nlohmann::json toJson(const Message& message) {
-    return nlohmann::json{
-        {"id", message.id}, {"author", message.authorLogin}, {"body", message.body}, {"sent_at", message.sentAt}};
+    return nlohmann::json{{"id", message.id},
+                           {"author", message.authorLogin},
+                           {"body", message.body},
+                           {"sent_at", message.sentAt},
+                           {"edited_at", message.editedAt.has_value() ? nlohmann::json(*message.editedAt)
+                                                                       : nlohmann::json(nullptr)}};
 }
 }  // namespace
 
@@ -112,6 +116,10 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleCallLeave(webSocket, subscription);
     } else if (body.contains("call_signal")) {
         handleCallSignal(webSocket, subscription, body["call_signal"]);
+    } else if (body.contains("edit_message")) {
+        handleEditMessage(webSocket, subscription, body["edit_message"]);
+    } else if (body.contains("delete_message")) {
+        handleDeleteMessage(webSocket, subscription, body["delete_message"]);
     } else {
         handleChatMessage(webSocket, subscription, body);
     }
@@ -132,6 +140,66 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
     }
 
     broadcastToChannel(subscription.channelId, toJson(*stored).dump());
+}
+
+namespace {
+/// Shared by handleEditMessage()/handleDeleteMessage(): kNotFound and
+/// kForbidden both go back to the sender only, never broadcast — a
+/// failed edit/delete attempt isn't something other subscribers need
+/// to know about.
+bool respondIfMutationFailed(ix::WebSocket& webSocket, MutationResult result) {
+    switch (result) {
+        case MutationResult::kNotFound:
+            webSocket.send(nlohmann::json{{"error", "no such message"}}.dump());
+            return true;
+        case MutationResult::kForbidden:
+            webSocket.send(nlohmann::json{{"error", "only the message's author may do that"}}.dump());
+            return true;
+        case MutationResult::kConflict:
+        case MutationResult::kSuccess:
+            return false;
+    }
+    return false;
+}
+}  // namespace
+
+void WebSocketServer::handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                         const nlohmann::json& body) {
+    if (!body.contains("id") || !body["id"].is_number_integer() || !body.contains("body") ||
+        !body["body"].is_string()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"id\", \"body\"}"}}.dump());
+        return;
+    }
+
+    const auto messageId = body["id"].get<std::int64_t>();
+    const EditMessageResult result = chatService_.editMessage(messageId, subscription.channelId, subscription.login,
+                                                                body["body"].get<std::string>());
+    if (respondIfMutationFailed(webSocket, result.result)) {
+        return;
+    }
+
+    broadcastToChannel(subscription.channelId,
+                        nlohmann::json{{"message_edited",
+                                        {{"id", messageId},
+                                         {"body", body["body"].get<std::string>()},
+                                         {"edited_at", result.editedAt}}}}
+                            .dump());
+}
+
+void WebSocketServer::handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                           const nlohmann::json& body) {
+    if (!body.contains("id") || !body["id"].is_number_integer()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"id\"}"}}.dump());
+        return;
+    }
+
+    const auto messageId = body["id"].get<std::int64_t>();
+    const MutationResult result = chatService_.deleteMessage(messageId, subscription.channelId, subscription.login);
+    if (respondIfMutationFailed(webSocket, result)) {
+        return;
+    }
+
+    broadcastToChannel(subscription.channelId, nlohmann::json{{"message_deleted", {{"id", messageId}}}}.dump());
 }
 
 void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription) {

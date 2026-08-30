@@ -52,4 +52,14 @@ std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int lim
     return repository_.listRecentMessages(channelId, limit);
 }
 
+EditMessageResult ChatService::editMessage(std::int64_t messageId, std::int64_t channelId,
+                                            const std::string& requesterLogin, const std::string& newBody) {
+    return repository_.editMessage(messageId, channelId, requesterLogin, newBody);
+}
+
+MutationResult ChatService::deleteMessage(std::int64_t messageId, std::int64_t channelId,
+                                           const std::string& requesterLogin) {
+    return repository_.deleteMessage(messageId, channelId, requesterLogin);
+}
+
 }  // namespace chat_service
