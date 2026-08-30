@@ -9,14 +9,15 @@ class AuthClient {
   +requestToken(login: QString, password: QString)
   +verifyToken(token: QString)
   +registerUser(login: QString, password: QString)
+  +refreshAccessToken(refreshToken: QString)
   .. signals ..
-  +tokenReceived(token: QString)
+  +tokenReceived(token: QString, refreshToken: QString, expiresAt: qint64)
   +tokenVerified(valid: bool, subject: QString)
   +registrationCompleted(registered: bool)
   +errorOccurred(message: QString)
 }
 AuthClient *-- QNetworkAccessManager : owns
-AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register
+AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register,\nPOST /auth/refresh
 
 note left of AuthClient
   registerUser() success also emits
@@ -24,6 +25,19 @@ note left of AuthClient
   auto-issues a token right after
   registering, so callers don't need
   a second requestToken() round trip.
+
+  Refresh tokens (issue #105):
+  requestToken()/registerUser() also
+  hand back a long-lived refresh
+  token via tokenReceived(). Callers
+  (MainWindow) schedule
+  refreshAccessToken() shortly
+  before the access token's
+  expiresAt, which re-emits
+  tokenReceived() with a fresh
+  access token and the same
+  refresh token (refresh tokens
+  don't rotate on this service).
 end note
 
 note right of AuthClient

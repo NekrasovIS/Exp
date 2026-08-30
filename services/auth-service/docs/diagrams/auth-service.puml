@@ -25,6 +25,10 @@ class Token {
 class TokenService {
   +issueToken(subject: string) : Token
   +verifyToken(token: string) : optional<string>
+  +issueRefreshToken(subject: string) : Token
+  +verifyRefreshToken(token: string) : optional<string>
+  -issueTokenInternal(subject: string, ttl: seconds, isRefresh: bool) : Token
+  -verifyTokenInternal(token: string, expectRefresh: bool) : optional<string>
 }
 TokenService ..> Token : creates
 TokenService ..> Hmac : signs/verifies with
@@ -43,6 +47,7 @@ class HttpServer {
   -handleIssueToken(request, response)
   -handleVerifyToken(request, response)
   -handleRegister(request, response)
+  -handleRefresh(request, response)
 }
 HttpServer --> TokenService : delegates to (const&)
 HttpServer --> UserServiceClient : checks credentials via (const&)
@@ -58,6 +63,22 @@ note right of HttpServer
                          (forwards to user-service, then
                          issues a token immediately on
                          success — auto-login)
+  POST /auth/refresh  -> handleRefresh (issue #105)
+                         exchanges a still-valid
+                         refresh_token for a fresh
+                         access token, no credentials
+                         needed again
+
+  /auth/token and /auth/register now also
+  return a long-lived refresh_token
+  alongside the access token
+  (TokenService::issueRefreshToken()).
+  Refresh tokens carry "typ": "refresh"
+  in their payload so they can never be
+  used as an access token (or vice
+  versa) even though both share the
+  same signing secret — see
+  TokenService's doc comment.
 end note
 
 @enduml

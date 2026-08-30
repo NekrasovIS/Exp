@@ -31,7 +31,9 @@ void AuthClient::requestToken(const QString& login, const QString& password) {
             return;
         }
 
-        emit tokenReceived(response.object().value("token").toString());
+        const QJsonObject object = response.object();
+        emit tokenReceived(object.value("token").toString(), object.value("refresh_token").toString(),
+                            object.value("expires_at").toVariant().toLongLong());
     });
 }
 
@@ -80,13 +82,45 @@ void AuthClient::registerUser(const QString& login, const QString& password) {
             const bool registered = object.value("registered").toBool();
             emit registrationCompleted(registered);
             if (registered && object.contains("token")) {
-                emit tokenReceived(object.value("token").toString());
+                emit tokenReceived(object.value("token").toString(), object.value("refresh_token").toString(),
+                                    object.value("expires_at").toVariant().toLongLong());
             }
             return;
         }
 
         emit errorOccurred(reply->error() != QNetworkReply::NoError ? reply->errorString()
                                                                       : tr("Malformed response from auth-service"));
+    });
+}
+
+void AuthClient::refreshAccessToken(const QString& refreshToken) {
+    QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/refresh"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    const QJsonObject body{{"refresh_token", refreshToken}};
+    QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, refreshToken]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
+            const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
+            emit errorOccurred(detail.isEmpty() ? reply->errorString() : detail);
+            return;
+        }
+
+        const QJsonDocument response = QJsonDocument::fromJson(reply->readAll());
+        if (!response.isObject() || !response.object().contains("token")) {
+            emit errorOccurred(QStringLiteral("Malformed response from auth-service"));
+            return;
+        }
+
+        // /auth/refresh doesn't mint a new refresh token (they don't
+        // rotate — see TokenService's doc comment), so the one that was
+        // just successfully redeemed is still the current one.
+        const QJsonObject object = response.object();
+        emit tokenReceived(object.value("token").toString(), refreshToken,
+                            object.value("expires_at").toVariant().toLongLong());
     });
 }
 

@@ -68,14 +68,17 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     AuthClient client(authBaseUrl);
 
     QString receivedToken;
+    QString receivedRefreshToken;
     QString errorMessage;
     {
         QEventLoop loop;
         QTimer::singleShot(3000, &loop, &QEventLoop::quit);
-        QObject::connect(&client, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
-            receivedToken = token;
-            loop.quit();
-        });
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString& refreshToken, qint64 /*expiresAt*/) {
+                              receivedToken = token;
+                              receivedRefreshToken = refreshToken;
+                              loop.quit();
+                          });
         QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
             errorMessage = message;
             loop.quit();
@@ -105,6 +108,40 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
 
     EXPECT_TRUE(verified);
     EXPECT_EQ(subject, login);
+    ASSERT_FALSE(receivedRefreshToken.isEmpty());
+
+    // issue #105: the refresh token from that same login exchanges for
+    // a brand new (but still verifiable) access token, no credentials
+    // needed a second time.
+    QString refreshedToken;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString&, qint64 /*expiresAt*/) {
+                              refreshedToken = token;
+                              loop.quit();
+                          });
+        client.refreshAccessToken(receivedRefreshToken);
+        loop.exec();
+    }
+    ASSERT_FALSE(refreshedToken.isEmpty());
+
+    bool refreshedVerified = false;
+    QString refreshedSubject;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenVerified, &loop, [&](bool valid, const QString& verifiedSubject) {
+            refreshedVerified = valid;
+            refreshedSubject = verifiedSubject;
+            loop.quit();
+        });
+        client.verifyToken(refreshedToken);
+        loop.exec();
+    }
+    EXPECT_TRUE(refreshedVerified);
+    EXPECT_EQ(refreshedSubject, login);
 }
 
 TEST(AuthClientIntegrationTest, RegisterUserAutoIssuesAVerifiableToken) {
@@ -128,10 +165,11 @@ TEST(AuthClientIntegrationTest, RegisterUserAutoIssuesAVerifiableToken) {
             registrationCompletedFired = true;
             registrationResult = registered;
         });
-        QObject::connect(&client, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
-            receivedToken = token;
-            loop.quit();
-        });
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString& /*refreshToken*/, qint64 /*expiresAt*/) {
+                              receivedToken = token;
+                              loop.quit();
+                          });
         QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
             errorMessage = message;
             loop.quit();

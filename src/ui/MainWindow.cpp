@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include <QComboBox>
+#include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -8,6 +9,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QVideoWidget>
 #include <QWidget>
@@ -31,6 +33,11 @@ constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
 constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
 constexpr int kToastTimeoutMs = 4000;
+/// Redeem the refresh token this long before the access token actually
+/// expires (issue #105) — a little slack so a refresh in flight has
+/// time to land before anything using lastToken_ would start getting
+/// 401s.
+constexpr qint64 kRefreshBufferSeconds = 60;
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -40,6 +47,14 @@ MainWindow::MainWindow(QWidget* parent)
       chatRestClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_URL", kDefaultChatServiceUrl))) {
     buildUi();
     populateDevices();
+
+    refreshTimer_ = new QTimer(this);
+    refreshTimer_->setSingleShot(true);
+    connect(refreshTimer_, &QTimer::timeout, this, [this]() {
+        if (!refreshToken_.isEmpty()) {
+            authClient_.refreshAccessToken(refreshToken_);
+        }
+    });
 
     connect(settingsDialog_->playToneButton(), &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
     connect(settingsDialog_->toggleMicButton(), &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
@@ -60,11 +75,22 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&screenCapture_, &ScreenCaptureDevice::errorOccurred, this, [this](const QString& message) {
         settingsDialog_->screenStatusLabel()->setText(tr("Error: %1").arg(message));
     });
-    connect(&authClient_, &AuthClient::tokenReceived, this, [this](const QString& token) {
-        lastToken_ = token;
-        accountMenu_->statusLabel()->setText(tr("Token received, verifying..."));
-        authClient_.verifyToken(token);
-    });
+    connect(&authClient_, &AuthClient::tokenReceived, this,
+            [this](const QString& token, const QString& refreshToken, qint64 expiresAt) {
+                lastToken_ = token;
+                refreshToken_ = refreshToken;
+                accountMenu_->statusLabel()->setText(tr("Token received, verifying..."));
+                authClient_.verifyToken(token);
+
+                // Silently redeem the refresh token shortly before this
+                // access token expires, rather than waiting for a 401
+                // and forcing the user to log in again mid-session.
+                if (!refreshToken_.isEmpty()) {
+                    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+                    const qint64 delaySecs = std::max<qint64>(1, expiresAt - nowSecs - kRefreshBufferSeconds);
+                    refreshTimer_->start(static_cast<int>(std::min<qint64>(delaySecs, 24 * 3600)) * 1000);
+                }
+            });
     connect(&authClient_, &AuthClient::tokenVerified, this, [this](bool valid, const QString& subject) {
         accountMenu_->statusLabel()->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
         currentUserLogin_ = valid ? subject : QString();

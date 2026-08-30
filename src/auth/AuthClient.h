@@ -12,6 +12,15 @@ namespace devicehub {
  *
  * Async via signals, like the classes in devices/ — never blocks the GUI
  * thread on a network round trip.
+ *
+ * Login/register/refresh (issue #105) all report their access token the
+ * same way, via tokenReceived(token, refreshToken, expiresAt) — a
+ * uniform signal means MainWindow doesn't need separate handling for
+ * "freshly logged in" vs. "silently refreshed". refreshAccessToken()
+ * doesn't get back (or need) a new refresh token — refresh tokens don't
+ * rotate on this service, see TokenService's doc comment — so it
+ * re-emits whatever refresh token was passed in unchanged, alongside
+ * the freshly issued access token/expiry.
  */
 class AuthClient : public QObject {
     Q_OBJECT
@@ -32,9 +41,18 @@ public:
     /// token immediately (auto-login), reported via tokenReceived().
     void registerUser(const QString& login, const QString& password);
 
+    /// Exchanges @p refreshToken for a fresh access token via
+    /// POST {baseUrl}/auth/refresh — lets the caller stay signed in
+    /// past the access token's short TTL without re-entering
+    /// credentials. Reports the result via tokenReceived(), same as
+    /// requestToken()/registerUser().
+    void refreshAccessToken(const QString& refreshToken);
+
 signals:
-    /// Emitted when a new token was issued successfully.
-    void tokenReceived(const QString& token);
+    /// Emitted when a new access token was issued successfully — by
+    /// requestToken(), registerUser() (auto-login), or
+    /// refreshAccessToken(). @p expiresAt is Unix seconds (UTC).
+    void tokenReceived(const QString& token, const QString& refreshToken, qint64 expiresAt);
 
     /// Emitted with the result of a verifyToken() call.
     void tokenVerified(bool valid, const QString& subject);
