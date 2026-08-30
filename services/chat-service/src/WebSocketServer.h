@@ -40,6 +40,11 @@ namespace chat_service {
  *     `{"call_signal": {"from": "<login>", "payload": {...}}}` — this
  *     class never inspects `payload`. Replies `{"error": "peer not in
  *     call"}` to the sender if `to` isn't a current call participant.
+ *   - `{"typing": true}` — issue #96: broadcasts
+ *     `{"user_typing": "<login>"}` to every other subscriber of the
+ *     same channel (never back to the sender). Ephemeral, like call
+ *     presence — nothing persisted, no explicit "stopped typing"
+ *     message; the client side times the indicator out on its own.
  *
  * REST (HttpServer) stays the source of truth for history/CRUD; this
  * class only pushes what's posted while a client is connected, and
@@ -70,8 +75,14 @@ private:
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    void handleTyping(ix::WebSocket& webSocket, const Subscription& subscription);
     void removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket);
-    void broadcastToChannel(std::int64_t channelId, const std::string& json);
+    /// Sends @p json to every socket subscribed to @p channelId's chat,
+    /// except @p excludeSocket (nullptr — the default — excludes none,
+    /// which is what a normal chat message broadcast wants; typing
+    /// notifications pass the sender here so they don't see their own
+    /// "typing" echoed back).
+    void broadcastToChannel(std::int64_t channelId, const std::string& json, const ix::WebSocket* excludeSocket = nullptr);
     /// Unlike broadcastToChannel (all channel *chat* subscribers), this
     /// only reaches sockets actually in callParticipants_[channelId] —
     /// someone subscribed to the channel's text chat but not in the

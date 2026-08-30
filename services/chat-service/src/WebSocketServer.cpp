@@ -112,6 +112,8 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleCallLeave(webSocket, subscription);
     } else if (body.contains("call_signal")) {
         handleCallSignal(webSocket, subscription, body["call_signal"]);
+    } else if (body.contains("typing")) {
+        handleTyping(webSocket, subscription);
     } else {
         handleChatMessage(webSocket, subscription, body);
     }
@@ -182,6 +184,11 @@ void WebSocketServer::handleCallSignal(ix::WebSocket& webSocket, const Subscript
         nlohmann::json{{"call_signal", {{"from", subscription.login}, {"payload", body["payload"]}}}}.dump());
 }
 
+void WebSocketServer::handleTyping(ix::WebSocket& webSocket, const Subscription& subscription) {
+    broadcastToChannel(subscription.channelId, nlohmann::json{{"user_typing", subscription.login}}.dump(),
+                        &webSocket);
+}
+
 void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket) {
     bool wasParticipant = false;
     {
@@ -202,9 +209,13 @@ void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix
     }
 }
 
-void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::string& json) {
+void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::string& json,
+                                          const ix::WebSocket* excludeSocket) {
     const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
     for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+        if (client.get() == excludeSocket) {
+            continue;
+        }
         const auto it = subscriptions_.find(client.get());
         if (it != subscriptions_.end() && it->second.channelId == channelId) {
             client->send(json);

@@ -176,6 +176,7 @@ add_executable(devicehub_tests
     test/MainWindowUiTest.cpp
     test/ToastBannerTest.cpp
     test/ChatMessageGroupingTest.cpp
+    test/ChatViewTypingIndicatorTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
     test/CallAudioDeviceModuleTest.cpp

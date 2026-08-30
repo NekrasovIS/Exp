@@ -103,8 +103,9 @@ class WebSocketServer {
   -handleCallJoin(webSocket, subscription)
   -handleCallLeave(webSocket, subscription)
   -handleCallSignal(webSocket, subscription, body)
+  -handleTyping(webSocket, subscription)
   -removeCallParticipant(subscription, socket)
-  -broadcastToChannel(channelId: int64, json: string)
+  -broadcastToChannel(channelId: int64, json: string, excludeSocket)
   -broadcastToCallParticipants(channelId: int64, json: string, excludeSocket)
 }
 WebSocketServer --> ChatService : delegates to (&)
@@ -152,6 +153,11 @@ note right of WebSocketServer
          participant's socket, or
          {"error": "peer not in
          call"} to the sender
+    {"typing": true}
+      -> {"user_typing": "<login>"}
+         to every other *chat*
+         subscriber (issue #96,
+         never echoed back to sender)
     {"body"} (fallback)
       -> broadcast to every *chat*
          subscriber of that channel

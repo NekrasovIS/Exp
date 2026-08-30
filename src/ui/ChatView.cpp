@@ -8,6 +8,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "ui/ChatMessageGrouping.h"
@@ -18,6 +19,8 @@ namespace devicehub {
 namespace {
 constexpr int kPlaceholderPageIndex = 0;
 constexpr int kChannelPageIndex = 1;
+constexpr int kTypingIndicatorHideMs = 3000;
+constexpr int kTypingThrottleMs = 2000;
 }  // namespace
 
 ChatView::ChatView(QWidget* parent) : QWidget(parent) {
@@ -102,11 +105,35 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     connect(scrollArea_->verticalScrollBar(), &QScrollBar::rangeChanged, this,
             [this](int /*min*/, int max) { scrollArea_->verticalScrollBar()->setValue(max); });
 
+    typingIndicatorLabel_ = new QLabel(channelPage);
+    typingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    typingIndicatorLabel_->setVisible(false);
+
+    typingIndicatorHideTimer_ = new QTimer(this);
+    typingIndicatorHideTimer_->setSingleShot(true);
+    typingIndicatorHideTimer_->setInterval(kTypingIndicatorHideMs);
+    connect(typingIndicatorHideTimer_, &QTimer::timeout, this,
+            [this]() { typingIndicatorLabel_->setVisible(false); });
+
+    // Throttles typingRequested() to at most once per kTypingThrottleMs
+    // while the user keeps typing, rather than emitting (and sending a
+    // WebSocket frame) on every single keystroke.
+    typingThrottleTimer_ = new QTimer(this);
+    typingThrottleTimer_->setSingleShot(true);
+    typingThrottleTimer_->setInterval(kTypingThrottleMs);
+
     auto* sendRow = new QHBoxLayout;
     sendRow->setSpacing(ui_theme::kSpacingSm);
     messageEdit_ = new QLineEdit(channelPage);
     messageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
     messageEdit_->setPlaceholderText(tr("Message"));
+    connect(messageEdit_, &QLineEdit::textEdited, this, [this]() {
+        if (typingThrottleTimer_->isActive()) {
+            return;
+        }
+        typingThrottleTimer_->start();
+        emit typingRequested();
+    });
 
     sendButton_ = new QPushButton(tr("Send"), channelPage);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
@@ -118,6 +145,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     channelLayout->addLayout(headerRow);
     channelLayout->addWidget(callParticipantsLabel_);
     channelLayout->addWidget(scrollArea_, /*stretch=*/1);
+    channelLayout->addWidget(typingIndicatorLabel_);
     channelLayout->addLayout(sendRow);
 
     stack_->insertWidget(kPlaceholderPageIndex, placeholderPage);
@@ -134,6 +162,9 @@ void ChatView::showPlaceholder() {
 void ChatView::showChannel(const QString& channelName) {
     channelTitleLabel_->setText(channelName);
     stack_->setCurrentIndex(kChannelPageIndex);
+    // A typing indicator from the previous channel doesn't apply here.
+    typingIndicatorHideTimer_->stop();
+    typingIndicatorLabel_->setVisible(false);
 }
 
 void ChatView::setCurrentUserLogin(const QString& login) {
@@ -174,6 +205,12 @@ void ChatView::setCallParticipants(const QStringList& participants) {
     }
     callParticipantsLabel_->setText(tr("In call: %1").arg(participants.join(QStringLiteral(", "))));
     callParticipantsLabel_->setVisible(true);
+}
+
+void ChatView::showTypingUser(const QString& login) {
+    typingIndicatorLabel_->setText(tr("%1 is typing…").arg(login));
+    typingIndicatorLabel_->setVisible(true);
+    typingIndicatorHideTimer_->start();
 }
 
 void ChatView::clearLog() {

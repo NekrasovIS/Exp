@@ -10,6 +10,7 @@ class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QStackedWidget;
+class QTimer;
 class QVBoxLayout;
 
 namespace devicehub {
@@ -61,12 +62,21 @@ public:
     /// Updates the small "who's in the call" label.
     void setCallParticipants(const QStringList& participants);
 
+    /// Shows "<login> is typing…" for a few seconds, then auto-hides —
+    /// MainWindow calls this from ChatClient::userTyping(). Issue #96:
+    /// only the most recently reported typer is shown at a time
+    /// (accepted first-version simplification — chat-service has no
+    /// "stopped typing" message, so there's no clean way to track a set
+    /// of simultaneous typers without one).
+    void showTypingUser(const QString& login);
+
     [[nodiscard]] QWidget* messagesContainer() const { return messagesContainer_; }
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
+    [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
 
 signals:
     /// Emitted when the placeholder's "Create channel" button is
@@ -81,6 +91,11 @@ signals:
     /// Mute button clicked — same pattern as callToggleRequested().
     void muteToggleRequested();
 
+    /// The user is typing in the message box — throttled (at most once
+    /// per cooldown window) rather than once per keystroke, so
+    /// MainWindow's ChatClient::sendTyping() doesn't spam the network.
+    void typingRequested();
+
 private:
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
@@ -92,6 +107,9 @@ private:
     QPushButton* callToggleButton_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
+    QLabel* typingIndicatorLabel_ = nullptr;
+    QTimer* typingIndicatorHideTimer_ = nullptr;
+    QTimer* typingThrottleTimer_ = nullptr;
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;

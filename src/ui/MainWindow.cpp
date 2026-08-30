@@ -96,6 +96,9 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
+    connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
+    connect(&chatClient_, &ChatClient::userTyping, this,
+            [this](const QString& login) { chatView_->showTypingUser(login); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(chatView_, &ChatView::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
