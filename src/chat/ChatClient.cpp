@@ -83,4 +83,9 @@ void ChatClient::sendCallSignal(const QString& to, const QJsonObject& payload) {
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
+void ChatClient::sendTyping() {
+    const QJsonObject message{{"typing", true}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
 }  // namespace devicehub
