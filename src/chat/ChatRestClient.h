@@ -14,6 +14,17 @@ struct ChatItem {
     QString ownerLogin;
 };
 
+/// A chat message as returned by chat-service's REST history endpoint —
+/// same shape as ChatClient's live messageReceived() fields, plus the
+/// id needed to page further back in history (see listMessages()'s
+/// beforeId).
+struct ChatMessageInfo {
+    qint64 id = 0;
+    QString author;
+    QString body;
+    QString sentAt;
+};
+
 /**
  * @brief REST client for chat-service's community/channel management:
  *        create/list communities, join, create/list channels.
@@ -39,6 +50,11 @@ public:
     void renameChannel(const QString& token, qint64 channelId, const QString& newName);
     void deleteChannel(const QString& token, qint64 channelId);
 
+    /// Fetches a chronological page of up to @p limit messages, ending
+    /// just before @p beforeId (or at the newest message if @p beforeId
+    /// is negative — the default, for the initial history load).
+    void listMessages(const QString& token, qint64 channelId, int limit, qint64 beforeId = -1);
+
 signals:
     void communityCreated(qint64 id, const QString& name);
     void communitiesListed(const QList<ChatItem>& communities);
@@ -49,6 +65,9 @@ signals:
     void channelsListed(const QList<ChatItem>& channels);
     void channelRenamed(qint64 id, const QString& newName);
     void channelDeleted(qint64 id);
+    /// Reply to listMessages() — @p messages is chronological (oldest
+    /// to newest), possibly empty if there's no more history.
+    void messagesListed(qint64 channelId, const QList<ChatMessageInfo>& messages);
     void errorOccurred(const QString& message);
 
 private:

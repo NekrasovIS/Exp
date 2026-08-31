@@ -187,16 +187,22 @@ std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, con
     }
 }
 
-std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, int limit) {
+std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, int limit,
+                                                          std::optional<std::int64_t> beforeId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
     // Newest-first LIMIT, then reversed below, so the result is
     // chronological (oldest to newest) like a normal message log.
-    const pqxx::result rows =
-        transaction.exec("SELECT id, author_login, body, sent_at FROM messages WHERE channel_id = $1 "
-                          "ORDER BY sent_at DESC LIMIT $2",
-                          pqxx::params{channelId, limit});
+    // beforeId unset binds SQL NULL, matched by the IS NULL branch
+    // (page ends at the newest message); set, it pages backward
+    // through history (only messages older than that id). id DESC as
+    // a secondary sort key makes the cursor unambiguous even if two
+    // messages share the same sent_at.
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, author_login, body, sent_at FROM messages WHERE channel_id = $1 "
+        "AND ($3::bigint IS NULL OR id < $3) ORDER BY sent_at DESC, id DESC LIMIT $2",
+        pqxx::params{channelId, limit, beforeId});
 
     std::vector<Message> messages;
     messages.reserve(static_cast<std::size_t>(rows.size()));

@@ -66,7 +66,7 @@ signals:
     void subscribed(qint64 channelId);
 
     /// Emitted for every message broadcast on the subscribed channel.
-    void messageReceived(const QString& author, const QString& body, const QString& sentAt);
+    void messageReceived(qint64 id, const QString& author, const QString& body, const QString& sentAt);
 
     void errorOccurred(const QString& message);
 

@@ -56,6 +56,8 @@ class ChatView {
   +showChannel(channelName: QString)
   +setCurrentUserLogin(login: QString)
   +appendMessage(message: ChatMessage)
+  +prependMessages(messages: QList<ChatMessage>)
+  +setLoadOlderVisible(visible: bool)
   +appendSystemLine(text: QString)
   +clearLog()
   +setCallState(inCall: bool, muted: bool)
@@ -71,11 +73,16 @@ class ChatView {
   +videoToggleButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
   +localVideoWidget() : QVideoWidget*
+  +typingIndicatorLabel() : QLabel*
+  +loadOlderButton() : QPushButton*
+  +showTypingUser(login: QString)
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
   +muteToggleRequested()
   +videoToggleRequested()
+  +typingRequested()
+  +loadOlderMessagesRequested()
 }
 
 struct ChatMessage {
@@ -225,8 +232,11 @@ ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
 MainWindow ..> ChatView : setVideoEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
+MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
+MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested() >
+ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -306,6 +316,31 @@ note right of MainWindow
   returns immediately) when
   QSystemTrayIcon::isSystemTrayAvailable()
   is false, e.g. headless CI.
+
+  Индикатор «печатает…» (issue #96):
+  ChatView::typingRequested() throttled на
+  keystroke -> ChatClient::sendTyping() ->
+  chat-service рассылает "user_typing" всем
+  остальным подписчикам канала ->
+  ChatClient::userTyping() -> ChatView::
+  showTypingUser() — авто-скрывается через
+  таймер, показывает только последнего
+  сообщившего печать (см. doc-комментарий у
+  showTypingUser()).
+
+  История сообщений (issue #100): открытие
+  канала запрашивает первую страницу через
+  ChatRestClient::listMessages() (REST,
+  отдельно от live-потока WebSocket).
+  «Load older messages» подгружает страницу
+  раньше oldestMessageId_ (MainWindow) и
+  вставляет её в начало списка через
+  ChatView::prependMessages() — в отличие
+  от appendMessage(), не прыгает к низу
+  списка. Автоскролл к низу теперь липкий
+  (stickToBottom_): держит низ, пока
+  пользователь сам не проскроллил вверх, а
+  не безусловно на каждое новое сообщение.
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

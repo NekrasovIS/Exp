@@ -73,7 +73,13 @@ public:
     ///         std::nullopt if @p channelId doesn't exist.
     [[nodiscard]] std::optional<Message> insertMessage(std::int64_t channelId, const std::string& authorLogin,
                                                         const std::string& body);
-    [[nodiscard]] std::vector<Message> listRecentMessages(std::int64_t channelId, int limit);
+    /// Chronological (oldest to newest) page of up to @p limit messages.
+    /// With @p beforeId unset, the page ends at the newest message in
+    /// the channel; with it set, the page ends just before that
+    /// message's id — lets a caller page backwards through history by
+    /// passing the id of the oldest message it already has.
+    [[nodiscard]] std::vector<Message> listRecentMessages(std::int64_t channelId, int limit,
+                                                            std::optional<std::int64_t> beforeId = std::nullopt);
 
 private:
     std::string connectionString_;

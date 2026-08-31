@@ -255,9 +255,12 @@ void HttpServer::handleListMessages(const httplib::Request& request, httplib::Re
 
     const auto channelId = std::stoll(request.matches[1].str());
     const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultMessageLimit;
+    const std::optional<std::int64_t> beforeId =
+        request.has_param("before_id") ? std::make_optional(std::stoll(request.get_param_value("before_id")))
+                                        : std::nullopt;
 
     nlohmann::json messages = nlohmann::json::array();
-    for (const Message& message : chatService_.recentMessages(channelId, limit)) {
+    for (const Message& message : chatService_.recentMessages(channelId, limit, beforeId)) {
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);

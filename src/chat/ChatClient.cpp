@@ -54,8 +54,8 @@ void ChatClient::onTextMessageReceived(const QString& message) {
     } else if (object.contains("user_typing")) {
         emit userTyping(object.value("user_typing").toString());
     } else if (object.contains("author") && object.contains("body")) {
-        emit messageReceived(object.value("author").toString(), object.value("body").toString(),
-                              object.value("sent_at").toString());
+        emit messageReceived(object.value("id").toVariant().toLongLong(), object.value("author").toString(),
+                              object.value("body").toString(), object.value("sent_at").toString());
     }
 }
 

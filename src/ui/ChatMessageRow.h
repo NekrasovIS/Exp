@@ -13,6 +13,7 @@ class ChatBubble;
 /// sentAt is the raw server timestamp string (Postgres-serialized,
 /// e.g. "2026-08-05 09:14:23.123456").
 struct ChatMessage {
+    qint64 id = 0;
     QString author;
     QString body;
     QString sentAt;

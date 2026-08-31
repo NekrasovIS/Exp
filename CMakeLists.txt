@@ -183,6 +183,7 @@ add_executable(devicehub_tests
     test/ChatMessageGroupingTest.cpp
     test/ChatMessageRowMarkdownTest.cpp
     test/ChatViewTypingIndicatorTest.cpp
+    test/ChatViewMessageHistoryTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
     test/CallAudioDeviceModuleTest.cpp

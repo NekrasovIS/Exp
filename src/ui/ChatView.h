@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QStringList>
 #include <QWidget>
 
@@ -50,6 +51,20 @@ public:
     /// within a few minutes of each other.
     void appendMessage(const ChatMessage& message);
 
+    /// Inserts @p messages (chronological, oldest to newest) at the top
+    /// of the list, above whatever's already shown — issue #100's
+    /// "Load older messages". Grouping between them is computed only
+    /// within this batch (compared to whatever was the previously
+    /// oldest message shown is deliberately skipped — see class doc
+    /// comment). Preserves the user's current scroll position rather
+    /// than jumping to the bottom, unlike appendMessage().
+    void prependMessages(const QList<ChatMessage>& messages);
+
+    /// Shows/hides the "Load older messages" button above the message
+    /// list — MainWindow calls this with whether the last history page
+    /// it fetched looked like there might be more (came back full).
+    void setLoadOlderVisible(bool visible);
+
     /// Appends a muted, centered system/status line (subscribed,
     /// errors, ...) — always breaks any pending message grouping, so
     /// the next real message gets its own header regardless of author.
@@ -98,6 +113,7 @@ public:
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
+    [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
 
 signals:
     /// Emitted when the placeholder's "Create channel" button is
@@ -123,12 +139,17 @@ signals:
     /// MainWindow's ChatClient::sendTyping() doesn't spam the network.
     void typingRequested();
 
+    /// "Load older messages" clicked — MainWindow fetches the next page
+    /// before the oldest message ChatView currently has.
+    void loadOlderMessagesRequested();
+
 private:
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
     QScrollArea* scrollArea_ = nullptr;
     QWidget* messagesContainer_ = nullptr;
     QVBoxLayout* messagesLayout_ = nullptr;
+    QPushButton* loadOlderButton_ = nullptr;
     QLineEdit* messageEdit_ = nullptr;
     QPushButton* sendButton_ = nullptr;
     QPushButton* callToggleButton_ = nullptr;
@@ -145,6 +166,12 @@ private:
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;
+    /// True while the scrollbar is at (or very near) the bottom — new
+    /// messages keep it pinned there, matching a normal chat's
+    /// behavior, but stop doing so once the user scrolls up to read
+    /// history, and updated as they scroll further. See the
+    /// rangeChanged/valueChanged wiring in the constructor.
+    bool stickToBottom_ = true;
 };
 
 }  // namespace devicehub

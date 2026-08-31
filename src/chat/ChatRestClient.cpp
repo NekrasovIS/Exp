@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrlQuery>
 
 namespace devicehub {
 
@@ -151,6 +152,37 @@ void ChatRestClient::renameChannel(const QString& token, qint64 channelId, const
             return;
         }
         emit channelRenamed(channelId, newName);
+    });
+}
+
+void ChatRestClient::listMessages(const QString& token, qint64 channelId, int limit, qint64 beforeId) {
+    QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/messages").arg(channelId)));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    if (beforeId >= 0) {
+        query.addQueryItem(QStringLiteral("before_id"), QString::number(beforeId));
+    }
+    url.setQuery(query);
+
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<ChatMessageInfo> messages;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                messages.push_back(ChatMessageInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                     .author = object.value("author").toString(),
+                                                     .body = object.value("body").toString(),
+                                                     .sentAt = object.value("sent_at").toString()});
+            }
+        }
+        emit messagesListed(channelId, messages);
     });
 }
 
