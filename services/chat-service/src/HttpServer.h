@@ -12,9 +12,9 @@ namespace chat_service {
 
 /**
  * @brief REST front-end for ChatService: communities, channels, joining,
- *        and message history. Every route requires a valid
- *        `Authorization: Bearer <token>` header, checked against
- *        auth-service via AuthServiceClient.
+ *        message history, and attachment upload/download (issue #116).
+ *        Every route requires a valid `Authorization: Bearer <token>`
+ *        header, checked against auth-service via AuthServiceClient.
  *
  * Real-time message delivery is WebSocketServer's job, not this class's
  * — this is history/CRUD only.
@@ -43,6 +43,8 @@ private:
     void handleRenameChannel(const httplib::Request& request, httplib::Response& response);
     void handleDeleteChannel(const httplib::Request& request, httplib::Response& response);
     void handleListMessages(const httplib::Request& request, httplib::Response& response);
+    void handleUploadAttachment(const httplib::Request& request, httplib::Response& response);
+    void handleDownloadAttachment(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;

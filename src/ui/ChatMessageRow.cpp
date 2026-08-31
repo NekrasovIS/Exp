@@ -91,6 +91,20 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
     bubbleLayout->addWidget(bodyLabel_);
 
+    if (message.attachmentId >= 0) {
+        auto* downloadButton = new QPushButton(tr("Download: %1").arg(message.attachmentFilename), bubble_);
+        downloadButton->setObjectName(QStringLiteral("downloadAttachmentButton"));
+        if (isOwnMessage) {
+            downloadButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        }
+        const qint64 attachmentId = message.attachmentId;
+        const QString attachmentFilename = message.attachmentFilename;
+        connect(downloadButton, &QPushButton::clicked, this, [this, attachmentId, attachmentFilename]() {
+            emit downloadRequested(attachmentId, attachmentFilename);
+        });
+        bubbleLayout->addWidget(downloadButton);
+    }
+
     if (isOwnMessage) {
         // Available on every own-message row regardless of showHeader —
         // grouped (consecutive) messages don't repeat their header, but

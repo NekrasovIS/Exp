@@ -4,12 +4,33 @@
 
 #include <string_view>
 
+#include "base64.h"
+
 namespace chat_service {
 
 namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
 constexpr int kDefaultMessageLimit = 50;
+/// Enforced on the *decoded* byte count, not the base64 wire payload
+/// (issue #116) — see ChatRepository's class doc comment for why
+/// attachments are stored as base64 TEXT rather than BYTEA/on-disk.
+constexpr std::size_t kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
+
+// Attachment filenames come from an untrusted client (issue #116) and
+// get embedded verbatim into a Content-Disposition response header —
+// strips CR/LF (header/response-splitting injection) and '"' (would
+// otherwise break out of the quoted filename value) before that happens.
+std::string sanitizeForHeaderValue(const std::string& value) {
+    std::string sanitized;
+    sanitized.reserve(value.size());
+    for (const char c : value) {
+        if (c != '\r' && c != '\n' && c != '"') {
+            sanitized += c;
+        }
+    }
+    return sanitized;
+}
 
 nlohmann::json toJson(const Community& community) {
     return nlohmann::json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
@@ -23,12 +44,16 @@ nlohmann::json toJson(const Channel& channel) {
 }
 
 nlohmann::json toJson(const Message& message) {
-    return nlohmann::json{{"id", message.id},
-                           {"author", message.authorLogin},
-                           {"body", message.body},
-                           {"sent_at", message.sentAt},
-                           {"edited_at", message.editedAt.has_value() ? nlohmann::json(*message.editedAt)
-                                                                       : nlohmann::json(nullptr)}};
+    return nlohmann::json{
+        {"id", message.id},
+        {"author", message.authorLogin},
+        {"body", message.body},
+        {"sent_at", message.sentAt},
+        {"edited_at", message.editedAt.has_value() ? nlohmann::json(*message.editedAt) : nlohmann::json(nullptr)},
+        {"attachment_id",
+         message.attachmentId.has_value() ? nlohmann::json(*message.attachmentId) : nlohmann::json(nullptr)},
+        {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
+                                                                        : nlohmann::json(nullptr)}};
 }
 }  // namespace
 
@@ -80,6 +105,13 @@ void HttpServer::registerRoutes() {
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMessages(request, response);
                  });
+    server_.Post(R"(/channels/(\d+)/attachments)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleUploadAttachment(request, response);
+                  });
+    server_.Get(R"(/attachments/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleDownloadAttachment(request, response);
+    });
 }
 
 void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib::Response& response) {
@@ -268,6 +300,87 @@ void HttpServer::handleListMessages(const httplib::Request& request, httplib::Re
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);
+}
+
+void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("filename") || !body["filename"].is_string() ||
+        !body.contains("content_type") || !body["content_type"].is_string() || !body.contains("data_base64") ||
+        !body["data_base64"].is_string()) {
+        response.status = 400;
+        response.set_content(
+            nlohmann::json{{"error", "expected 'filename', 'content_type', 'data_base64' strings"}}.dump(),
+            kJsonContentType);
+        return;
+    }
+
+    const std::string dataBase64 = body["data_base64"].get<std::string>();
+    const std::optional<std::string> decoded = base64::decode(dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'data_base64' is not valid base64"}}.dump(), kJsonContentType);
+        return;
+    }
+    if (decoded->size() > kMaxAttachmentSizeBytes) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "attachment exceeds the 5 MB size limit"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    const std::optional<AttachmentMetadata> attachment =
+        chatService_.createAttachment(channelId, *login, body["filename"].get<std::string>(),
+                                       body["content_type"].get<std::string>(), dataBase64,
+                                       static_cast<std::int64_t>(decoded->size()));
+    if (!attachment.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such channel"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    response.status = 201;
+    response.set_content(nlohmann::json{{"id", attachment->id},
+                                         {"filename", attachment->filename},
+                                         {"content_type", attachment->contentType},
+                                         {"size_bytes", attachment->sizeBytes}}
+                              .dump(),
+                          kJsonContentType);
+}
+
+void HttpServer::handleDownloadAttachment(const httplib::Request& request, httplib::Response& response) {
+    if (!authenticate(request).has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto attachmentId = std::stoll(request.matches[1].str());
+    const std::optional<AttachmentData> attachment = chatService_.findAttachmentData(attachmentId);
+    if (!attachment.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such attachment"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    // Decoded here rather than stored raw (see ChatRepository's doc
+    // comment) — response.set_content() is binary-safe (tracks length
+    // explicitly, not null-terminated), so the decoded bytes reach the
+    // client exactly as uploaded regardless of content.
+    const std::optional<std::string> decoded = base64::decode(attachment->data);
+    if (!decoded.has_value()) {
+        response.status = 500;
+        response.set_content(nlohmann::json{{"error", "stored attachment data is corrupt"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_header("Content-Disposition",
+                         "attachment; filename=\"" + sanitizeForHeaderValue(attachment->filename) + "\"");
+    response.set_content(*decoded, attachment->contentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

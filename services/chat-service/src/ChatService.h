@@ -31,13 +31,22 @@ public:
     [[nodiscard]] bool joinCommunity(std::int64_t communityId, const std::string& login);
 
     [[nodiscard]] std::optional<Message> postMessage(std::int64_t channelId, const std::string& authorLogin,
-                                                       const std::string& body);
+                                                       const std::string& body,
+                                                       std::optional<std::int64_t> attachmentId = std::nullopt);
     [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit,
                                                         std::optional<std::int64_t> beforeId = std::nullopt);
     [[nodiscard]] EditMessageResult editMessage(std::int64_t messageId, std::int64_t channelId,
                                                  const std::string& requesterLogin, const std::string& newBody);
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
+
+    [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
+                                                                       const std::string& uploaderLogin,
+                                                                       const std::string& filename,
+                                                                       const std::string& contentType,
+                                                                       const std::string& dataBase64,
+                                                                       std::int64_t sizeBytes);
+    [[nodiscard]] std::optional<AttachmentData> findAttachmentData(std::int64_t attachmentId);
 
 private:
     ChatRepository& repository_;

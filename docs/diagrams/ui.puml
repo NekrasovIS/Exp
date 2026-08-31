@@ -72,6 +72,7 @@ class ChatView {
   +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
+  +attachButton() : QPushButton*
   +callToggleButton() : QPushButton*
   +muteToggleButton() : QPushButton*
   +videoToggleButton() : QPushButton*
@@ -89,12 +90,16 @@ class ChatView {
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
+  +attachFileRequested()
+  +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
 }
 
 struct ChatMessage {
   +author: QString
   +body: QString
   +sentAt: QString
+  +attachmentId: qint64 = -1
+  +attachmentFilename: QString
 }
 
 class ChatMessageRow {
@@ -105,6 +110,7 @@ class ChatMessageRow {
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
   +deleteRequested(id: qint64)
+  +downloadRequested(attachmentId: qint64, filename: QString)
 }
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
@@ -250,7 +256,10 @@ ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested() >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
-ChatMessageRow ..> ChatView : editRequested()/deleteRequested() >
+ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested() >
+ChatView ..> MainWindow : attachFileRequested()\ndownloadAttachmentRequested() (issue #116) >
+MainWindow ..> ChatRestClient : uploadAttachment()/downloadAttachment()\n(issue #116) >
+ChatRestClient ..> MainWindow : attachmentUploaded() -> ChatClient::sendMessage()\nattachmentDownloaded() -> QFileDialog save (issue #116) >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >

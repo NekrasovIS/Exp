@@ -394,6 +394,55 @@ TEST(WebSocketServerTest, ChatMessageWithMissingBodyReturnsError) {
     server.stop();
 }
 
+TEST(WebSocketServerTest, ChatMessageWithAttachmentIdBroadcastsAttachmentFields) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18089"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-attachment-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-attachment-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<AttachmentMetadata> attachment =
+        service.createAttachment(*channelId, owner, "photo.png", "image/png", "SGVsbG8=", 5);
+    ASSERT_TRUE(attachment.has_value());
+
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, owner);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"body", "check this out"}, {"attachment_id", attachment->id}});
+    const std::optional<nlohmann::json> received =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("body"); });
+    ASSERT_TRUE(received.has_value());
+    EXPECT_EQ((*received)["attachment_id"].get<std::int64_t>(), attachment->id);
+    EXPECT_EQ((*received)["attachment_filename"].get<std::string>(), "photo.png");
+
+    server.stop();
+}
+
 TEST(WebSocketServerTest, DisconnectWithoutLeaveNotifiesRemainingCallParticipants) {
     ix::initNetSystem();
 

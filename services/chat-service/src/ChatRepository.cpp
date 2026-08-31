@@ -168,21 +168,35 @@ bool ChatRepository::joinCommunity(std::int64_t communityId, const std::string& 
 }
 
 std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, const std::string& authorLogin,
-                                                       const std::string& body) {
+                                                       const std::string& body,
+                                                       std::optional<std::int64_t> attachmentId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
     try {
         const pqxx::result rows = transaction.exec(
-            "INSERT INTO messages (channel_id, author_login, body) VALUES ($1, $2, $3) "
+            "INSERT INTO messages (channel_id, author_login, body, attachment_id) VALUES ($1, $2, $3, $4) "
             "RETURNING id, sent_at",
-            pqxx::params{channelId, authorLogin, body});
+            pqxx::params{channelId, authorLogin, body, attachmentId});
+
+        std::optional<std::string> attachmentFilename;
+        if (attachmentId.has_value()) {
+            const pqxx::result attachmentRows =
+                transaction.exec("SELECT filename FROM attachments WHERE id = $1", pqxx::params{*attachmentId});
+            if (!attachmentRows.empty()) {
+                attachmentFilename = attachmentRows[0][0].as<std::string>();
+            }
+        }
+
         transaction.commit();
         return Message{.id = rows[0][0].as<std::int64_t>(),
                         .authorLogin = authorLogin,
                         .body = body,
-                        .sentAt = rows[0][1].as<std::string>()};
+                        .sentAt = rows[0][1].as<std::string>(),
+                        .attachmentId = attachmentId,
+                        .attachmentFilename = attachmentFilename};
     } catch (const pqxx::foreign_key_violation&) {
+        // Either channelId or attachmentId (if set) doesn't exist.
         return std::nullopt;
     }
 }
@@ -200,8 +214,10 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
     // a secondary sort key makes the cursor unambiguous even if two
     // messages share the same sent_at.
     const pqxx::result rows = transaction.exec(
-        "SELECT id, author_login, body, sent_at, edited_at FROM messages WHERE channel_id = $1 "
-        "AND ($3::bigint IS NULL OR id < $3) ORDER BY sent_at DESC, id DESC LIMIT $2",
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
+        "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
+        "WHERE m.channel_id = $1 AND ($3::bigint IS NULL OR m.id < $3) "
+        "ORDER BY m.sent_at DESC, m.id DESC LIMIT $2",
         pqxx::params{channelId, limit, beforeId});
 
     std::vector<Message> messages;
@@ -212,7 +228,10 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
                     .authorLogin = row[1].as<std::string>(),
                     .body = row[2].as<std::string>(),
                     .sentAt = row[3].as<std::string>(),
-                    .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>())});
+                    .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
+                    .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
+                    .attachmentFilename =
+                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
     }
     std::reverse(messages.begin(), messages.end());
     return messages;
@@ -256,6 +275,45 @@ MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_
     transaction.exec("DELETE FROM messages WHERE id = $1", pqxx::params{messageId});
     transaction.commit();
     return MutationResult::kSuccess;
+}
+
+std::optional<AttachmentMetadata> ChatRepository::createAttachment(std::int64_t channelId,
+                                                                     const std::string& uploaderLogin,
+                                                                     const std::string& filename,
+                                                                     const std::string& contentType,
+                                                                     const std::string& dataBase64,
+                                                                     std::int64_t sizeBytes) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    try {
+        const pqxx::result rows = transaction.exec(
+            "INSERT INTO attachments (channel_id, uploader_login, filename, content_type, data_base64, size_bytes) "
+            "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            pqxx::params{channelId, uploaderLogin, filename, contentType, dataBase64, sizeBytes});
+        transaction.commit();
+        return AttachmentMetadata{.id = rows[0][0].as<std::int64_t>(),
+                                   .filename = filename,
+                                   .contentType = contentType,
+                                   .sizeBytes = sizeBytes};
+    } catch (const pqxx::foreign_key_violation&) {
+        return std::nullopt;
+    }
+}
+
+std::optional<AttachmentData> ChatRepository::findAttachmentData(std::int64_t attachmentId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT filename, content_type, data_base64 FROM attachments WHERE id = $1", pqxx::params{attachmentId});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    return AttachmentData{.filename = rows[0][0].as<std::string>(),
+                           .contentType = rows[0][1].as<std::string>(),
+                           .data = rows[0][2].as<std::string>()};
 }
 
 }  // namespace chat_service

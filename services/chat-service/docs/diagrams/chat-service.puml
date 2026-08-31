@@ -26,12 +26,31 @@ class Message {
   +authorLogin : string
   +body : string
   +sentAt : string
+  +attachmentId : optional<int64>
+  +attachmentFilename : optional<string>
 }
 enum MutationResult {
   kSuccess
   kNotFound
   kForbidden
   kConflict
+}
+class AttachmentMetadata {
+  +id : int64
+  +filename : string
+  +contentType : string
+  +sizeBytes : int64
+}
+class AttachmentData {
+  +filename : string
+  +contentType : string
+  +data : string
+}
+
+package "chat_service::base64" <<Rectangle>> {
+  class Base64 << (N,orchid) namespace >> {
+    +decode(text: string) : optional<string>
+  }
 }
 
 class ChatRepository {
@@ -44,7 +63,9 @@ class ChatRepository {
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
-  +insertMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
+  +insertMessage(channelId: int64, authorLogin: string, body: string,\n    attachmentId: optional<int64> = nullopt) : optional<Message>
+  +createAttachment(channelId: int64, uploaderLogin: string, filename: string,\n    contentType: string, dataBase64: string, sizeBytes: int64) : optional<AttachmentMetadata>
+  +findAttachmentData(attachmentId: int64) : optional<AttachmentData>
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
@@ -52,6 +73,8 @@ class ChatRepository {
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
+ChatRepository ..> AttachmentMetadata : creates
+ChatRepository ..> AttachmentData : reads
 ChatRepository ..> MutationResult : returns
 ChatRepository ..> PqxxConnection : opens per call
 
@@ -65,7 +88,9 @@ class ChatService {
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
-  +postMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
+  +postMessage(channelId: int64, authorLogin: string, body: string,\n    attachmentId: optional<int64> = nullopt) : optional<Message>
+  +createAttachment(channelId: int64, uploaderLogin: string, filename: string,\n    contentType: string, dataBase64: string, sizeBytes: int64) : optional<AttachmentMetadata>
+  +findAttachmentData(attachmentId: int64) : optional<AttachmentData>
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
@@ -91,10 +116,14 @@ class HttpServer {
   -handleRenameChannel(request, response)
   -handleDeleteChannel(request, response)
   -handleListMessages(request, response)
+  -handleUploadAttachment(request, response)
+  -handleDownloadAttachment(request, response)
   -writeMutationResult(result: MutationResult, response)
+  -sanitizeForHeaderValue(value: string) : string
 }
 HttpServer --> ChatService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
+HttpServer ..> Base64 : decode() (validates\nupload/download payloads)
 HttpServer *-- HttplibServer : owns
 
 class WebSocketServer {
@@ -131,11 +160,26 @@ note right of HttpServer
   PATCH  /channels/{id}      (owner only)
   DELETE /channels/{id}      (owner only)
   GET    /channels/{id}/messages
+  POST   /channels/{id}/attachments
+  GET    /attachments/{id}
 
   Owner-only routes answer 403 for
   non-owners, 404 for a nonexistent
   id — MutationResult keeps those
   two cases distinct end-to-end.
+
+  Attachments (issue #116, up to
+  kMaxAttachmentSizeBytes = 5 MB):
+  upload body is {"filename",
+  "content_type", "data_base64"} —
+  400 on missing fields, invalid
+  base64, or oversized payload,
+  else 201 with the new id. Download
+  decodes the stored base64 and
+  writes raw bytes, filename in a
+  sanitized Content-Disposition
+  header (CR/LF/'"' stripped —
+  header-injection guard).
 end note
 
 note right of WebSocketServer
@@ -177,9 +221,17 @@ note right of WebSocketServer
       -> same authorship rule,
          {"message_deleted": {"id"}}
          broadcast on success
-    {"body"} (fallback)
-      -> broadcast to every *chat*
-         subscriber of that channel
+    {"body", "attachment_id"?} (fallback)
+      -> (issue #116) attachment_id
+         optionally references an
+         attachment already uploaded
+         via POST /channels/{id}/
+         attachments; broadcast to
+         every *chat* subscriber of
+         that channel with
+         attachment_id/
+         attachment_filename fields
+         (null when there's none)
 
   Call participants (callParticipants_)
   are a separate, per-channel presence

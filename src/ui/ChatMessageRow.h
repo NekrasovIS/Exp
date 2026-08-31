@@ -16,13 +16,17 @@ class ChatBubble;
 /// sentAt is the raw server timestamp string (Postgres-serialized,
 /// e.g. "2026-08-05 09:14:23.123456"). id and editedAt (issue #107)
 /// are needed to target/label a specific message for editing/deleting;
-/// editedAt is unset for a message that's never been edited.
+/// editedAt is unset for a message that's never been edited. attachmentId
+/// is -1 and attachmentFilename empty when the message has no attachment
+/// (issue #116).
 struct ChatMessage {
     qint64 id = 0;
     QString author;
     QString body;
     QString sentAt;
     std::optional<QString> editedAt;
+    qint64 attachmentId = -1;
+    QString attachmentFilename;
 };
 
 /**
@@ -66,6 +70,10 @@ signals:
 
     /// "Delete" clicked (own messages only).
     void deleteRequested(qint64 id);
+
+    /// "Download" clicked on a message with an attachment (issue #116,
+    /// any message, not just own).
+    void downloadRequested(qint64 attachmentId, const QString& filename);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

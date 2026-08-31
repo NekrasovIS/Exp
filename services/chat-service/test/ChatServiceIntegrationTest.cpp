@@ -313,5 +313,63 @@ TEST(ChatServiceIntegrationTest, EditAndDeleteMessageAreRestrictedToTheAuthor) {
     EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kNotFound);  // already gone
 }
 
+TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "attachment-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("attachment-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    // "Hello" base64-encoded — no need for a real decoder here, this
+    // level never decodes, only stores/retrieves verbatim.
+    const std::optional<AttachmentMetadata> attachment =
+        service.createAttachment(*channelId, owner, "greeting.txt", "text/plain", "SGVsbG8=", 5);
+    ASSERT_TRUE(attachment.has_value());
+    EXPECT_GT(attachment->id, 0);
+    EXPECT_EQ(attachment->filename, "greeting.txt");
+    EXPECT_EQ(attachment->contentType, "text/plain");
+    EXPECT_EQ(attachment->sizeBytes, 5);
+
+    const std::optional<AttachmentData> fetched = service.findAttachmentData(attachment->id);
+    ASSERT_TRUE(fetched.has_value());
+    EXPECT_EQ(fetched->filename, "greeting.txt");
+    EXPECT_EQ(fetched->contentType, "text/plain");
+    EXPECT_EQ(fetched->data, "SGVsbG8=");
+
+    EXPECT_FALSE(service.findAttachmentData(-1).has_value());
+    EXPECT_FALSE(service.createAttachment(-1, owner, "nowhere.txt", "text/plain", "SGVsbG8=", 5).has_value());
+
+    const std::optional<Message> posted =
+        service.postMessage(*channelId, owner, "check out this file", attachment->id);
+    ASSERT_TRUE(posted.has_value());
+    ASSERT_TRUE(posted->attachmentId.has_value());
+    EXPECT_EQ(*posted->attachmentId, attachment->id);
+    ASSERT_TRUE(posted->attachmentFilename.has_value());
+    EXPECT_EQ(*posted->attachmentFilename, "greeting.txt");
+
+    // A nonexistent attachment id is rejected the same way a nonexistent
+    // channel id already is (foreign_key_violation -> nullopt).
+    EXPECT_FALSE(service.postMessage(*channelId, owner, "broken reference", 999999999).has_value());
+
+    // recentMessages() (LEFT JOIN) surfaces the same attachment fields.
+    const std::vector<Message> messages = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(messages.size(), 1U);
+    ASSERT_TRUE(messages[0].attachmentId.has_value());
+    EXPECT_EQ(*messages[0].attachmentId, attachment->id);
+    ASSERT_TRUE(messages[0].attachmentFilename.has_value());
+    EXPECT_EQ(*messages[0].attachmentFilename, "greeting.txt");
+}
+
 }  // namespace
 }  // namespace chat_service

@@ -26,7 +26,7 @@ class ChatItem {
 
 class ChatClient {
   +connectToChannel(token: QString, channelId: qint64)
-  +sendMessage(body: QString)
+  +sendMessage(body: QString, attachmentId: qint64 = -1)
   +disconnectFromChannel()
   +joinCall()
   +leaveCall()
@@ -36,7 +36,7 @@ class ChatClient {
   +sendDeleteMessage(id: qint64)
   .. signals ..
   +subscribed(channelId: qint64)
-  +messageReceived(id: qint64, author: QString, body: QString, sentAt: QString)
+  +messageReceived(id: qint64, author: QString, body: QString, sentAt: QString,\n    attachmentId: qint64, attachmentFilename: QString)
   +messageEdited(id: qint64, newBody: QString, editedAt: QString)
   +messageDeleted(id: qint64)
   +errorOccurred(message: QString)
@@ -51,6 +51,7 @@ ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebS
 ChatClient ..> "chat-service" : call_join/call_leave/call_signal\n(issue #46 signaling relay)
 ChatClient ..> "chat-service" : {"typing": true} ->\n{"user_typing": login} (issue #96)
 ChatClient ..> "chat-service" : edit_message/delete_message\n(issue #107, author-only)
+ChatClient ..> "chat-service" : {"body", "attachment_id"?} (issue #116,\nattachment_id references an upload\nalready done via ChatRestClient)
 
 class CallManager {
   +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)
@@ -162,6 +163,8 @@ class ChatRestClient {
   +createChannel(token: QString, communityId: qint64, name: QString)
   +listChannels(token: QString, communityId: qint64)
   +listMessages(token: QString, channelId: qint64, limit: int, beforeId: qint64)
+  +uploadAttachment(token: QString, channelId: qint64, filename: QString,\n    contentType: QString, data: QByteArray)
+  +downloadAttachment(token: QString, attachmentId: qint64)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
@@ -169,6 +172,8 @@ class ChatRestClient {
   +channelCreated(id: qint64, name: QString)
   +channelsListed(channels: QList<ChatItem>)
   +messagesListed(channelId: qint64, messages: QList<ChatMessageInfo>)
+  +attachmentUploaded(id: qint64, filename: QString)
+  +attachmentDownloaded(attachmentId: qint64, data: QByteArray)
   +errorOccurred(message: QString)
 }
 ChatRestClient *-- QNetworkAccessManager : owns

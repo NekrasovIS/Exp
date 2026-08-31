@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QByteArray>
 #include <QDateTime>
 #include <QEventLoop>
 #include <QTimer>
@@ -429,6 +430,72 @@ TEST(ChatRestClientTest, DeleteChannelEmitsChannelDeleted) {
     loop.exec();
 
     EXPECT_EQ(deletedId, channelId);
+}
+
+TEST(ChatRestClientTest, UploadThenDownloadAttachmentRoundTrips) {
+    const QString token = registerAndGetToken(QStringLiteral("chat-rest-attachment"));
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
+    }
+
+    ChatRestClient client(chatRestUrl());
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        client.createCommunity(token, QStringLiteral("chat-rest-attachment-parent"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        client.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    const QByteArray fileData = QByteArrayLiteral("hello attachment bytes \x00 \xff");
+    qint64 attachmentId = -1;
+    QString uploadedFilename;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::attachmentUploaded, &loop, [&](qint64 id, const QString& filename) {
+            attachmentId = id;
+            uploadedFilename = filename;
+            loop.quit();
+        });
+        client.uploadAttachment(token, channelId, QStringLiteral("notes.txt"), QStringLiteral("text/plain"), fileData);
+        loop.exec();
+    }
+    ASSERT_GE(attachmentId, 0);
+    EXPECT_EQ(uploadedFilename, QStringLiteral("notes.txt"));
+
+    QByteArray downloadedData;
+    qint64 downloadedId = -1;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&client, &ChatRestClient::attachmentDownloaded, &loop, [&](qint64 id, const QByteArray& data) {
+        downloadedId = id;
+        downloadedData = data;
+        loop.quit();
+    });
+    client.downloadAttachment(token, attachmentId);
+    loop.exec();
+
+    EXPECT_EQ(downloadedId, attachmentId);
+    EXPECT_EQ(downloadedData, fileData);
 }
 
 TEST(ChatRestClientTest, CreateChannelInNonexistentCommunityEmitsError) {

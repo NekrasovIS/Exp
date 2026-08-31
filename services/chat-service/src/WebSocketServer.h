@@ -22,10 +22,13 @@ namespace chat_service {
  * `{"token": "...", "channel_id": N}` — verified against auth-service
  * (AuthServiceClient) before the connection is subscribed to that
  * channel. Every message after that is one of:
- *   - `{"body": "..."}` — chat message: persisted via ChatService, then
- *     broadcast as JSON to every connection subscribed to the same
- *     channel (including the sender, so all clients render off the
- *     same real-time stream rather than optimistically local-echoing).
+ *   - `{"body": "...", "attachment_id": N}` — chat message, optionally
+ *     referencing a file already uploaded via HttpServer's
+ *     POST /channels/{id}/attachments (issue #116) — attachment_id is
+ *     optional; persisted via ChatService, then broadcast as JSON to
+ *     every connection subscribed to the same channel (including the
+ *     sender, so all clients render off the same real-time stream
+ *     rather than optimistically local-echoing).
  *   - `{"call_join": true}` — join the voice call for the subscribed
  *     channel; replies with `{"call_roster": [...]}` (existing call
  *     participants, not persisted, ephemeral to this process) and

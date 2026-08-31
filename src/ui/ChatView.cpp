@@ -196,11 +196,16 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
         emit typingRequested();
     });
 
+    attachButton_ = new QPushButton(tr("Attach"), channelPage);
+    attachButton_->setObjectName(QStringLiteral("attachFileButton"));
+    connect(attachButton_, &QPushButton::clicked, this, &ChatView::attachFileRequested);
+
     sendButton_ = new QPushButton(tr("Send"), channelPage);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
     sendButton_->setProperty("accent", true);
 
     sendRow->addWidget(messageEdit_, /*stretch=*/1);
+    sendRow->addWidget(attachButton_);
     sendRow->addWidget(sendButton_);
 
     channelLayout->addLayout(headerRow);
@@ -302,6 +307,7 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
         sendButton_->setText(tr("Update"));
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
+    connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
 }
 
 void ChatView::updateMessageBody(qint64 id, const QString& newBody) {

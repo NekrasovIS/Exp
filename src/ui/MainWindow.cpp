@@ -2,10 +2,14 @@
 
 #include <QComboBox>
 #include <QDateTime>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMimeDatabase>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -41,6 +45,10 @@ constexpr int kToastTimeoutMs = 4000;
 /// 401s.
 constexpr qint64 kRefreshBufferSeconds = 60;
 constexpr int kMessagePageSize = 50;
+/// Mirrors chat-service's kMaxAttachmentSizeBytes (issue #116) — checked
+/// client-side too so an oversized file is rejected with an immediate
+/// toast instead of a round trip to the server just to get the same 400.
+constexpr qint64 kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -120,8 +128,14 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatClient_, &ChatClient::subscribed, this,
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
-            [this](qint64 id, const QString& author, const QString& body, const QString& sentAt) {
-                chatView_->appendMessage(ChatMessage{.id = id, .author = author, .body = body, .sentAt = sentAt});
+            [this](qint64 id, const QString& author, const QString& body, const QString& sentAt,
+                   qint64 attachmentId, const QString& attachmentFilename) {
+                chatView_->appendMessage(ChatMessage{.id = id,
+                                                      .author = author,
+                                                      .body = body,
+                                                      .sentAt = sentAt,
+                                                      .attachmentId = attachmentId,
+                                                      .attachmentFilename = attachmentFilename});
                 desktopNotifier_->notifyMessage(author, body, currentUserLogin_);
             });
     connect(&chatClient_, &ChatClient::messageEdited, this,
@@ -141,6 +155,31 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::videoToggleRequested, this, &MainWindow::onVideoToggleClicked);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
+    connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
+    connect(chatView_, &ChatView::downloadAttachmentRequested, this,
+            [this](qint64 attachmentId, const QString& filename) {
+                pendingDownloadFilenames_.insert(attachmentId, filename);
+                chatRestClient_.downloadAttachment(lastToken_, attachmentId);
+            });
+    connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
+            [this](qint64 id, const QString& /*filename*/) {
+                chatClient_.sendMessage(chatView_->messageEdit()->text(), id);
+                chatView_->messageEdit()->clear();
+            });
+    connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
+            [this](qint64 attachmentId, const QByteArray& data) {
+                const QString filename = pendingDownloadFilenames_.take(attachmentId);
+                const QString savePath =
+                    QFileDialog::getSaveFileName(this, tr("Save Attachment"), filename.isEmpty() ? QString() : filename);
+                if (savePath.isEmpty()) {
+                    return;
+                }
+                QFile file(savePath);
+                if (!file.open(QIODevice::WriteOnly) || file.write(data) < 0) {
+                    showToast(tr("Failed to save attachment"), ToastBanner::Variant::kError);
+                    return;
+                }
+            });
     connect(&callManager_, &CallManager::participantJoined, this, [this](const QString& login) {
         if (!callParticipants_.contains(login)) {
             callParticipants_.append(login);
@@ -264,8 +303,12 @@ MainWindow::MainWindow(QWidget* parent)
                 QList<ChatMessage> converted;
                 converted.reserve(messages.size());
                 for (const ChatMessageInfo& info : messages) {
-                    converted.append(
-                        ChatMessage{.id = info.id, .author = info.author, .body = info.body, .sentAt = info.sentAt});
+                    converted.append(ChatMessage{.id = info.id,
+                                                  .author = info.author,
+                                                  .body = info.body,
+                                                  .sentAt = info.sentAt,
+                                                  .attachmentId = info.attachmentId,
+                                                  .attachmentFilename = info.attachmentFilename});
                 }
                 if (oldestMessageId_ < 0) {
                     // Initial history load for this channel — list was
@@ -459,6 +502,31 @@ void MainWindow::onSendChatMessageClicked() {
         chatClient_.sendMessage(text);
         chatView_->messageEdit()->clear();
     }
+}
+
+void MainWindow::onAttachFileClicked() {
+    if (selectedChannelId_ < 0) {
+        return;
+    }
+    const QString path = QFileDialog::getOpenFileName(this, tr("Attach File"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QFile file(path);
+    if (file.size() > kMaxAttachmentSizeBytes) {
+        showToast(tr("Attachment exceeds the 5 MB size limit"), ToastBanner::Variant::kError);
+        return;
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        showToast(tr("Failed to read file"), ToastBanner::Variant::kError);
+        return;
+    }
+    const QByteArray data = file.readAll();
+    const QString contentType = QMimeDatabase().mimeTypeForFile(path).name();
+    // Uploads immediately, then attachmentUploaded() auto-sends it as a
+    // message (issue #116) — a deliberate simplification over a
+    // two-step "attach, review, then click Send" flow.
+    chatRestClient_.uploadAttachment(lastToken_, selectedChannelId_, QFileInfo(path).fileName(), contentType, data);
 }
 
 void MainWindow::onCallToggleClicked() {

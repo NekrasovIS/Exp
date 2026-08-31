@@ -3,12 +3,22 @@
 #include <gtest/gtest.h>
 
 #include <QLabel>
+#include <QPushButton>
+#include <QSignalSpy>
 
 namespace devicehub {
 namespace {
 
 ChatMessage sampleMessage() {
     return ChatMessage{.author = "alice", .body = "hello", .sentAt = "2026-08-05 09:00:00"};
+}
+
+ChatMessage sampleMessageWithAttachment() {
+    return ChatMessage{.author = "alice",
+                        .body = "see attached",
+                        .sentAt = "2026-08-05 09:00:00",
+                        .attachmentId = 42,
+                        .attachmentFilename = "report.pdf"};
 }
 
 TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
@@ -42,6 +52,26 @@ TEST(ChatMessageRowTest, GroupedMessageWithoutHeaderHasOnlyBodyLabel) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/false, /*isOwnMessage=*/false);
 
     EXPECT_EQ(row.findChildren<QLabel*>().size(), 1);
+}
+
+TEST(ChatMessageRowTest, MessageWithoutAttachmentHasNoDownloadButton) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_EQ(row.findChild<QPushButton*>("downloadAttachmentButton"), nullptr);
+}
+
+TEST(ChatMessageRowTest, MessageWithAttachmentShowsDownloadButtonAndEmitsOnClick) {
+    ChatMessageRow row(sampleMessageWithAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* downloadButton = row.findChild<QPushButton*>("downloadAttachmentButton");
+    ASSERT_NE(downloadButton, nullptr);
+    EXPECT_TRUE(downloadButton->text().contains("report.pdf"));
+
+    QSignalSpy spy(&row, &ChatMessageRow::downloadRequested);
+    downloadButton->click();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 42);
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("report.pdf"));
 }
 
 }  // namespace
