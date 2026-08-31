@@ -170,4 +170,80 @@ TEST(CallAudioDeviceModuleTest, PushCapturedAudioForwardsOnlyWhileRecording) {
     EXPECT_EQ(transport.recordedCallCount(), 1);
 }
 
+TEST(CallAudioDeviceModuleTest, InitSucceeds) {
+    auto adm = webrtc::make_ref_counted<CallAudioDeviceModule>(CallAudioDeviceModule::PlayoutSink{});
+
+    EXPECT_EQ(adm->Init(), 0);
+}
+
+TEST(CallAudioDeviceModuleTest, SetPlayoutFormatChangesRateAndChannelsReportedToSink) {
+    std::atomic<int> sinkSampleRateHz{0};
+    std::atomic<size_t> sinkChannels{0};
+    std::atomic<int> sinkCallCount{0};
+
+    auto adm = webrtc::make_ref_counted<CallAudioDeviceModule>(
+        [&](const int16_t* /*samples*/, size_t /*frameCount*/, int sampleRateHz, size_t channels) {
+            sinkSampleRateHz.store(sampleRateHz);
+            sinkChannels.store(channels);
+            ++sinkCallCount;
+        });
+
+    adm->setPlayoutFormat(44100, 2);
+
+    FakeAudioTransport transport;
+    ASSERT_EQ(adm->RegisterAudioCallback(&transport), 0);
+    ASSERT_EQ(adm->InitPlayout(), 0);
+    ASSERT_EQ(adm->StartPlayout(), 0);
+
+    EXPECT_TRUE(transport.waitForPlayoutCalls(3));
+    ASSERT_EQ(adm->StopPlayout(), 0);
+
+    ASSERT_GT(sinkCallCount.load(), 0);
+    EXPECT_EQ(sinkSampleRateHz.load(), 44100);
+    EXPECT_EQ(sinkChannels.load(), 2U);
+}
+
+TEST(CallAudioDeviceModuleTest, SetTotalDelayMsIsForwardedToRecordedDataIsAvailable) {
+    auto adm = webrtc::make_ref_counted<CallAudioDeviceModule>(CallAudioDeviceModule::PlayoutSink{});
+
+    // FakeAudioTransport ignores totalDelayMS entirely (see its
+    // RecordedDataIsAvailable override), so this test uses a small
+    // dedicated double that actually captures the parameter — the
+    // shared fake wasn't built to assert on it.
+    class DelayCapturingTransport : public webrtc::AudioTransport {
+    public:
+        int32_t RecordedDataIsAvailable(const void* /*audioSamples*/, size_t /*nSamples*/, size_t /*nBytesPerSample*/,
+                                         size_t /*nChannels*/, uint32_t /*samplesPerSec*/, uint32_t totalDelayMS,
+                                         int32_t /*clockDrift*/, uint32_t /*currentMicLevel*/, bool /*keyPressed*/,
+                                         uint32_t& /*newMicLevel*/) override {
+            lastDelayMs = static_cast<int>(totalDelayMS);
+            return 0;
+        }
+        int32_t NeedMorePlayData(size_t /*nSamples*/, size_t /*nBytesPerSample*/, size_t /*nChannels*/,
+                                  uint32_t /*samplesPerSec*/, void* /*audioSamples*/, size_t& nSamplesOut,
+                                  int64_t* elapsed_time_ms, int64_t* ntp_time_ms) override {
+            nSamplesOut = 0;
+            *elapsed_time_ms = 0;
+            *ntp_time_ms = 0;
+            return 0;
+        }
+        void PullRenderData(int /*bits_per_sample*/, int /*sample_rate*/, size_t /*number_of_channels*/,
+                             size_t /*number_of_frames*/, void* /*audio_data*/, int64_t* /*elapsed_time_ms*/,
+                             int64_t* /*ntp_time_ms*/) override {}
+
+        int lastDelayMs = -1;
+    };
+
+    DelayCapturingTransport transport;
+    ASSERT_EQ(adm->RegisterAudioCallback(&transport), 0);
+    adm->setTotalDelayMs(123);
+    ASSERT_EQ(adm->InitRecording(), 0);
+    ASSERT_EQ(adm->StartRecording(), 0);
+
+    const std::vector<int16_t> samples{1, 2, 3, 4};
+    adm->pushCapturedAudio(samples.data(), samples.size(), 16000, 1);
+
+    EXPECT_EQ(transport.lastDelayMs, 123);
+}
+
 }  // namespace devicehub

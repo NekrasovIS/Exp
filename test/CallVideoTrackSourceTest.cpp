@@ -71,4 +71,49 @@ TEST(CallVideoTrackSourceTest, IsScreencastReflectsConstructorArgument) {
     EXPECT_TRUE(screenSource->is_screencast());
 }
 
+TEST(CallVideoTrackSourceTest, PushFrameDropsInvalidFrame) {
+    const webrtc::scoped_refptr<CallVideoTrackSource> source = webrtc::make_ref_counted<CallVideoTrackSource>();
+    webrtc::VideoTrackSourceInterface& sourceInterface = *source;
+
+    FakeVideoSink sink;
+    sourceInterface.AddOrUpdateSink(&sink, webrtc::VideoSinkWants{});
+
+    source->pushFrame(QVideoFrame());  // default-constructed: !isValid()
+
+    EXPECT_EQ(sink.frameCount(), 0);
+    sourceInterface.RemoveSink(&sink);
+}
+
+TEST(CallVideoTrackSourceTest, PushFrameWithNoInterestedSinksIsDropped) {
+    const webrtc::scoped_refptr<CallVideoTrackSource> source = webrtc::make_ref_counted<CallVideoTrackSource>();
+
+    QImage image(16, 12, QImage::Format_ARGB32);
+    image.fill(QColor(0, 255, 0));
+
+    // No AddOrUpdateSink() call at all — AdaptFrame() should report no
+    // interested sinks and pushFrame() should drop the frame instead of
+    // converting it for no one.
+    source->pushFrame(QVideoFrame(image));
+
+    // Nothing to assert on directly (no sink to have received a frame);
+    // this test's value is that pushFrame() doesn't crash or throw when
+    // AdaptFrame() returns false for this reason.
+    SUCCEED();
+}
+
+TEST(CallVideoTrackSourceTest, NeedsDenoisingReturnsNullopt) {
+    const webrtc::scoped_refptr<CallVideoTrackSource> source = webrtc::make_ref_counted<CallVideoTrackSource>();
+    EXPECT_FALSE(source->needs_denoising().has_value());
+}
+
+TEST(CallVideoTrackSourceTest, StateIsLive) {
+    const webrtc::scoped_refptr<CallVideoTrackSource> source = webrtc::make_ref_counted<CallVideoTrackSource>();
+    EXPECT_EQ(source->state(), webrtc::MediaSourceInterface::kLive);
+}
+
+TEST(CallVideoTrackSourceTest, RemoteIsFalse) {
+    const webrtc::scoped_refptr<CallVideoTrackSource> source = webrtc::make_ref_counted<CallVideoTrackSource>();
+    EXPECT_FALSE(source->remote());
+}
+
 }  // namespace devicehub
