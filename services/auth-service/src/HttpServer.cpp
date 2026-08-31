@@ -1,5 +1,7 @@
 #include "HttpServer.h"
 
+#include "JsonGuard.h"
+
 #include <nlohmann/json.hpp>
 
 namespace auth_service {
@@ -39,6 +41,11 @@ void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Resp
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("login") || !body.contains("password") ||
         !body["login"].is_string() || !body["password"].is_string()) {
@@ -63,6 +70,11 @@ void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Resp
 }
 
 void HttpServer::handleVerifyToken(const httplib::Request& request, httplib::Response& response) {
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("token") || !body["token"].is_string()) {
         response.status = 400;
@@ -86,6 +98,11 @@ void HttpServer::handleRegister(const httplib::Request& request, httplib::Respon
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("login") || !body.contains("password") ||
         !body["login"].is_string() || !body["password"].is_string()) {
@@ -114,6 +131,11 @@ void HttpServer::handleRegister(const httplib::Request& request, httplib::Respon
 }
 
 void HttpServer::handleRefresh(const httplib::Request& request, httplib::Response& response) {
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("refresh_token") || !body["refresh_token"].is_string()) {
         response.status = 400;

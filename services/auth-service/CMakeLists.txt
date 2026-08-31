@@ -45,6 +45,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(auth_service_core
     src/base64_utils.h
     src/base64_utils.cpp
+    src/JsonGuard.h
+    src/JsonGuard.cpp
     src/TokenService.h
     src/TokenService.cpp
     src/RateLimiter.h
@@ -73,6 +75,7 @@ add_executable(auth_service_tests
     test/UserServiceClientIntegrationTest.cpp
     test/base64_utilsTest.cpp
     test/HttpServerTest.cpp
+    test/JsonGuardTest.cpp
 )
 target_link_libraries(auth_service_tests PRIVATE
     auth_service_core

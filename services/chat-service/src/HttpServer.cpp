@@ -4,6 +4,7 @@
 
 #include <string_view>
 
+#include "JsonGuard.h"
 #include "base64.h"
 
 namespace chat_service {
@@ -138,6 +139,11 @@ void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib:
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
         response.status = 400;
@@ -191,6 +197,11 @@ void HttpServer::handleRenameCommunity(const httplib::Request& request, httplib:
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
         response.status = 400;
@@ -236,6 +247,11 @@ void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::R
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
         response.status = 400;
@@ -278,6 +294,11 @@ void HttpServer::handleRenameChannel(const httplib::Request& request, httplib::R
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
         response.status = 400;
@@ -326,6 +347,11 @@ void HttpServer::handlePromoteModerator(const httplib::Request& request, httplib
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("login") || !body["login"].is_string()) {
         response.status = 400;
@@ -370,6 +396,11 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("filename") || !body["filename"].is_string() ||
         !body.contains("content_type") || !body["content_type"].is_string() || !body.contains("data_base64") ||

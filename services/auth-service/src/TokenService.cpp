@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "JsonGuard.h"
 #include "base64_utils.h"
 
 namespace auth_service {
@@ -64,6 +65,10 @@ std::optional<std::string> TokenService::verifyTokenInternal(const std::string& 
     }
 
     const std::vector<uint8_t> payloadBytes = base64_utils::decodeUrl(payloadB64);
+    const std::string_view payloadView(reinterpret_cast<const char*>(payloadBytes.data()), payloadBytes.size());
+    if (json_guard::exceedsMaxNestingDepth(payloadView, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
     const nlohmann::json payload =
         nlohmann::json::parse(payloadBytes.begin(), payloadBytes.end(), nullptr, /*allow_exceptions=*/false);
     if (payload.is_discarded() || !payload.contains("sub") || !payload.contains("exp")) {
