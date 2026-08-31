@@ -44,6 +44,9 @@ class ChatRepository {
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
+  +promoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
+  +demoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
+  +listModerators(communityId: int64) : vector<string>
   +insertMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
@@ -65,6 +68,9 @@ class ChatService {
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
+  +promoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
+  +demoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
+  +listModerators(communityId: int64) : vector<string>
   +postMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
@@ -86,6 +92,9 @@ class HttpServer {
   -handleRenameCommunity(request, response)
   -handleDeleteCommunity(request, response)
   -handleJoinCommunity(request, response)
+  -handlePromoteModerator(request, response)
+  -handleDemoteModerator(request, response)
+  -handleListModerators(request, response)
   -handleCreateChannel(request, response)
   -handleListChannels(request, response)
   -handleRenameChannel(request, response)
@@ -123,13 +132,17 @@ note right of HttpServer
   Authorization: Bearer <token>):
   POST   /communities
   GET    /communities
-  PATCH  /communities/{id}   (owner only)
-  DELETE /communities/{id}   (owner only)
+  PATCH  /communities/{id}              (owner only)
+  DELETE /communities/{id}              (owner only)
   POST   /communities/{id}/join
+  POST   /communities/{id}/moderators   (owner only, issue #114)
+  DELETE /communities/{id}/moderators/{login} (owner only)
+  GET    /communities/{id}/moderators
   POST   /communities/{id}/channels
   GET    /communities/{id}/channels
-  PATCH  /channels/{id}      (owner only)
-  DELETE /channels/{id}      (owner only)
+  PATCH  /channels/{id}      (channel owner, community
+                              owner, or community moderator)
+  DELETE /channels/{id}      (same authority as PATCH)
   GET    /channels/{id}/messages
 
   Owner-only routes answer 403 for
@@ -174,9 +187,12 @@ note right of WebSocketServer
          broadcast to every *chat*
          subscriber
     {"delete_message": {"id"}}
-      -> same authorship rule,
-         {"message_deleted": {"id"}}
-         broadcast on success
+      -> wider than edit_message
+         (issue #114): the author,
+         channel/community owner, or
+         a community moderator may
+         delete — {"message_deleted":
+         {"id"}} broadcast on success
     {"body"} (fallback)
       -> broadcast to every *chat*
          subscriber of that channel

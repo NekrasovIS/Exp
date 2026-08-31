@@ -30,6 +30,12 @@ public:
 
     [[nodiscard]] bool joinCommunity(std::int64_t communityId, const std::string& login);
 
+    [[nodiscard]] MutationResult promoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                                   const std::string& requesterLogin);
+    [[nodiscard]] MutationResult demoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                                  const std::string& requesterLogin);
+    [[nodiscard]] std::vector<std::string> listModerators(std::int64_t communityId);
+
     [[nodiscard]] std::optional<Message> postMessage(std::int64_t channelId, const std::string& authorLogin,
                                                        const std::string& body);
     [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit,

@@ -33,6 +33,7 @@ class CommunitiesPanel {
   +deleteRequested(id: int64)
   +joinRequested(id: int64)
   +communitySelected(id: int64)
+  +manageModeratorsRequested(id: int64, name: QString)
 }
 
 class ChannelsPanel {
@@ -167,6 +168,20 @@ class SettingsDialog {
   +screenStatusLabel() : QLabel*
 }
 
+class ModeratorsDialog {
+  +setCommunity(id: int64, name: QString)
+  +communityId() : int64
+  +setModerators(logins: QStringList)
+  +moderatorsList() : QListWidget*
+  +loginEdit() : QLineEdit*
+  +promoteButton() : QPushButton*
+  +demoteButton() : QPushButton*
+  +statusLabel() : QLabel*
+  .. signals ..
+  +promoteRequested(communityId: int64, login: QString)
+  +demoteRequested(communityId: int64, login: QString)
+}
+
 class FooterBar {
   +setProfileText(text: QString)
   +settingsButton() : QPushButton*
@@ -235,6 +250,7 @@ MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- ProfileDialog : owns (opened from\nAccountMenu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
+MainWindow *-- ModeratorsDialog : owns (opened from\nCommunitiesPanel, issue #114)
 MainWindow *-- FooterBar : owns (bottom)
 MainWindow *-- ToastBanner : owns (floats over ChatView)
 MainWindow *-- DesktopNotifier : owns (issue #92)
@@ -266,6 +282,9 @@ AccountMenu ..> MainWindow : editProfileButton().clicked() >
 ProfileDialog ..> MainWindow : saveRequested() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
+CommunitiesPanel ..> MainWindow : manageModeratorsRequested() (issue #114) >
+ModeratorsDialog ..> MainWindow : promoteRequested()/demoteRequested() >
+MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestClient signals) >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
 CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
@@ -453,6 +472,21 @@ note right of MainWindow
   ввод. avatar_url пока только хранится и
   показывается текстом — реальная загрузка/
   рендер картинки за рамками первой версии.
+
+  Модераторы (issue #114): «Manage
+  Moderators…» — пункт контекстного меню
+  CommunitiesPanel, виден только владельцу
+  сообщества (та же проверка на клиенте,
+  что уже была у Rename/Delete — чисто UX,
+  сервер всё равно перепроверяет). Открывает
+  ModeratorsDialog, который держится
+  «глупым» виджетом (тот же паттерн, что
+  SettingsDialog): MainWindow подгружает
+  список через ChatRestClient::
+  listModerators() при каждом открытии и
+  при каждом promote/demote — сам диалог
+  не хранит состояние членства, только
+  показывает то, что ему передали.
 end note
 
 @enduml

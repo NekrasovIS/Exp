@@ -80,6 +80,18 @@ void HttpServer::registerRoutes() {
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMessages(request, response);
                  });
+    server_.Post(R"(/communities/(\d+)/moderators)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handlePromoteModerator(request, response);
+                  });
+    server_.Delete(R"(/communities/(\d+)/moderators/([^/]+))",
+                    [this](const httplib::Request& request, httplib::Response& response) {
+                        handleDemoteModerator(request, response);
+                    });
+    server_.Get(R"(/communities/(\d+)/moderators)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleListModerators(request, response);
+                 });
 }
 
 void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib::Response& response) {
@@ -268,6 +280,50 @@ void HttpServer::handleListMessages(const httplib::Request& request, httplib::Re
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);
+}
+
+void HttpServer::handlePromoteModerator(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("login") || !body["login"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'login' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.promoteModerator(communityId, body["login"].get<std::string>(), *login),
+                         response);
+}
+
+void HttpServer::handleDemoteModerator(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.demoteModerator(communityId, request.matches[2].str(), *login), response);
+}
+
+void HttpServer::handleListModerators(const httplib::Request& request, httplib::Response& response) {
+    if (!authenticate(request).has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    nlohmann::json moderators = nlohmann::json::array();
+    for (const std::string& login : chatService_.listModerators(communityId)) {
+        moderators.push_back(login);
+    }
+    response.set_content(moderators.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

@@ -25,6 +25,7 @@
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
 #include "ui/FooterBar.h"
+#include "ui/ModeratorsDialog.h"
 #include "ui/ProfileDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
@@ -201,6 +202,18 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
     });
+    connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
+            [this](qint64 id, const QString& name) {
+                moderatorsDialog_->setCommunity(id, name);
+                moderatorsDialog_->show();
+                moderatorsDialog_->raise();
+                moderatorsDialog_->activateWindow();
+                chatRestClient_.listModerators(lastToken_, id);
+            });
+    connect(moderatorsDialog_, &ModeratorsDialog::promoteRequested, this,
+            [this](qint64 id, const QString& login) { chatRestClient_.promoteModerator(lastToken_, id, login); });
+    connect(moderatorsDialog_, &ModeratorsDialog::demoteRequested, this,
+            [this](qint64 id, const QString& login) { chatRestClient_.demoteModerator(lastToken_, id, login); });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name) {
         if (selectedCommunityId_ < 0) {
@@ -246,6 +259,20 @@ MainWindow::MainWindow(QWidget* parent)
         }
         refreshCommunities();
     });
+    connect(&chatRestClient_, &ChatRestClient::moderatorPromoted, this, [this](qint64 id, const QString& login) {
+        moderatorsDialog_->statusLabel()->setText(tr("Promoted '%1'").arg(login));
+        chatRestClient_.listModerators(lastToken_, id);
+    });
+    connect(&chatRestClient_, &ChatRestClient::moderatorDemoted, this, [this](qint64 id, const QString& login) {
+        moderatorsDialog_->statusLabel()->setText(tr("Demoted '%1'").arg(login));
+        chatRestClient_.listModerators(lastToken_, id);
+    });
+    connect(&chatRestClient_, &ChatRestClient::moderatorsListed, this,
+            [this](qint64 id, const QStringList& logins) {
+                if (id == moderatorsDialog_->communityId()) {
+                    moderatorsDialog_->setModerators(logins);
+                }
+            });
     connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64) {
         showToast(tr("Joined community"), ToastBanner::Variant::kSuccess);
     });
@@ -397,6 +424,7 @@ void MainWindow::buildUi() {
 
     settingsDialog_ = new SettingsDialog(this);
     profileDialog_ = new ProfileDialog(this);
+    moderatorsDialog_ = new ModeratorsDialog(this);
 }
 
 void MainWindow::populateDevices() {

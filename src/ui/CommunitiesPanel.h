@@ -50,6 +50,9 @@ signals:
     void renameRequested(qint64 id, const QString& newName);
     void deleteRequested(qint64 id);
     void joinRequested(qint64 id);
+    /// "Manage Moderators…" clicked (owner-only, issue #114) — @p name
+    /// lets MainWindow title the dialog without a separate lookup.
+    void manageModeratorsRequested(qint64 id, const QString& name);
     void communitySelected(qint64 id);
 
 private:

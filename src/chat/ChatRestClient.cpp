@@ -199,4 +199,57 @@ void ChatRestClient::deleteChannel(const QString& token, qint64 channelId) {
     });
 }
 
+void ChatRestClient::promoteModerator(const QString& token, qint64 communityId, const QString& targetLogin) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/moderators").arg(communityId)));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token), QJsonDocument(QJsonObject{{"login", targetLogin}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId, targetLogin]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit moderatorPromoted(communityId, targetLogin);
+    });
+}
+
+void ChatRestClient::demoteModerator(const QString& token, qint64 communityId, const QString& targetLogin) {
+    // Percent-encode the login into its own path segment — logins aren't
+    // charset-restricted server-side, and this is the first place one
+    // gets embedded directly in a URL path rather than a query param or
+    // JSON body.
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/moderators/%2")
+                                                 .arg(communityId)
+                                                 .arg(QString::fromUtf8(QUrl::toPercentEncoding(targetLogin)))));
+    QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId, targetLogin]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit moderatorDemoted(communityId, targetLogin);
+    });
+}
+
+void ChatRestClient::listModerators(const QString& token, qint64 communityId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/moderators").arg(communityId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QStringList logins;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                logins.push_back(value.toString());
+            }
+        }
+        emit moderatorsListed(communityId, logins);
+    });
+}
+
 }  // namespace devicehub

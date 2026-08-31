@@ -126,6 +126,7 @@ void CommunitiesPanel::showContextMenu(const QPoint& pos) {
     QAction* joinAction = menu.addAction(tr("Join"));
     QAction* renameAction = isOwner ? menu.addAction(tr("Rename…")) : nullptr;
     QAction* deleteAction = isOwner ? menu.addAction(tr("Delete")) : nullptr;
+    QAction* manageModeratorsAction = isOwner ? menu.addAction(tr("Manage Moderators…")) : nullptr;
 
     QAction* chosen = menu.exec(listWidget_->mapToGlobal(pos));
     if (chosen == nullptr) {
@@ -147,6 +148,8 @@ void CommunitiesPanel::showContextMenu(const QPoint& pos) {
             QMessageBox::Yes) {
             emit deleteRequested(id);
         }
+    } else if (chosen == manageModeratorsAction) {
+        emit manageModeratorsRequested(id, name);
     }
 }
 

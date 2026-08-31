@@ -103,6 +103,8 @@ add_library(devicehub_core
     src/ui/SettingsDialog.cpp
     src/ui/ProfileDialog.h
     src/ui/ProfileDialog.cpp
+    src/ui/ModeratorsDialog.h
+    src/ui/ModeratorsDialog.cpp
     src/ui/FooterBar.h
     src/ui/FooterBar.cpp
     src/ui/Theme.h
@@ -193,6 +195,7 @@ add_executable(devicehub_tests
     test/AccountMenuTest.cpp
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
+    test/ModeratorsDialogTest.cpp
     test/IconFactoryTest.cpp
     test/ThemeTest.cpp
     test/ChatMessageGroupingTest.cpp

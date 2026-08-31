@@ -12,9 +12,13 @@ namespace chat_service {
 
 /**
  * @brief REST front-end for ChatService: communities, channels, joining,
- *        and message history. Every route requires a valid
- *        `Authorization: Bearer <token>` header, checked against
- *        auth-service via AuthServiceClient.
+ *        moderator management (issue #114), and message history. Every
+ *        route requires a valid `Authorization: Bearer <token>` header,
+ *        checked against auth-service via AuthServiceClient.
+ *
+ * Promoting/demoting a moderator is owner-only — writeMutationResult()'s
+ * kForbidden ("only the owner can do that") already covers it, same as
+ * rename/delete community.
  *
  * Real-time message delivery is WebSocketServer's job, not this class's
  * — this is history/CRUD only.
@@ -38,6 +42,9 @@ private:
     void handleRenameCommunity(const httplib::Request& request, httplib::Response& response);
     void handleDeleteCommunity(const httplib::Request& request, httplib::Response& response);
     void handleJoinCommunity(const httplib::Request& request, httplib::Response& response);
+    void handlePromoteModerator(const httplib::Request& request, httplib::Response& response);
+    void handleDemoteModerator(const httplib::Request& request, httplib::Response& response);
+    void handleListModerators(const httplib::Request& request, httplib::Response& response);
     void handleCreateChannel(const httplib::Request& request, httplib::Response& response);
     void handleListChannels(const httplib::Request& request, httplib::Response& response);
     void handleRenameChannel(const httplib::Request& request, httplib::Response& response);

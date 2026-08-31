@@ -3,6 +3,7 @@
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QStringList>
 #include <QUrl>
 
 namespace devicehub {
@@ -50,6 +51,13 @@ public:
     void renameChannel(const QString& token, qint64 channelId, const QString& newName);
     void deleteChannel(const QString& token, qint64 channelId);
 
+    /// Owner-only server-side (issue #114) — @p targetLogin doesn't need
+    /// to already be a member, promoting joins them implicitly.
+    void promoteModerator(const QString& token, qint64 communityId, const QString& targetLogin);
+    /// Owner-only. Idempotent — demoting a non-moderator succeeds too.
+    void demoteModerator(const QString& token, qint64 communityId, const QString& targetLogin);
+    void listModerators(const QString& token, qint64 communityId);
+
     /// Fetches a chronological page of up to @p limit messages, ending
     /// just before @p beforeId (or at the newest message if @p beforeId
     /// is negative — the default, for the initial history load).
@@ -65,6 +73,9 @@ signals:
     void channelsListed(const QList<ChatItem>& channels);
     void channelRenamed(qint64 id, const QString& newName);
     void channelDeleted(qint64 id);
+    void moderatorPromoted(qint64 communityId, const QString& login);
+    void moderatorDemoted(qint64 communityId, const QString& login);
+    void moderatorsListed(qint64 communityId, const QStringList& logins);
     /// Reply to listMessages() — @p messages is chronological (oldest
     /// to newest), possibly empty if there's no more history.
     void messagesListed(qint64 channelId, const QList<ChatMessageInfo>& messages);

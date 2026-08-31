@@ -6,6 +6,21 @@
 
 namespace chat_service {
 
+namespace {
+
+/// @return True if @p login is a moderator of @p communityId, within an
+/// already-open @p transaction — shared by deleteMessage()/
+/// renameChannel()/deleteChannel(), each of which needs this same
+/// check alongside their own owner check.
+bool isModerator(pqxx::work& transaction, std::int64_t communityId, const std::string& login) {
+    const pqxx::result rows =
+        transaction.exec("SELECT is_moderator FROM memberships WHERE community_id = $1 AND member_login = $2",
+                          pqxx::params{communityId, login});
+    return !rows.empty() && rows[0][0].as<bool>();
+}
+
+}  // namespace
+
 ChatRepository::ChatRepository(std::string connectionString) : connectionString_(std::move(connectionString)) {}
 
 Community ChatRepository::createCommunity(const std::string& name, const std::string& ownerLogin) {
@@ -117,11 +132,18 @@ MutationResult ChatRepository::renameChannel(std::int64_t id, const std::string&
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result ownerRows = transaction.exec("SELECT owner_login FROM channels WHERE id = $1", pqxx::params{id});
-    if (ownerRows.empty()) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM channels ch "
+        "JOIN communities co ON co.id = ch.community_id WHERE ch.id = $1",
+        pqxx::params{id});
+    if (rows.empty()) {
         return MutationResult::kNotFound;
     }
-    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner &&
+        !isModerator(transaction, communityId, requesterLogin)) {
         return MutationResult::kForbidden;
     }
 
@@ -138,11 +160,18 @@ MutationResult ChatRepository::deleteChannel(std::int64_t id, const std::string&
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result ownerRows = transaction.exec("SELECT owner_login FROM channels WHERE id = $1", pqxx::params{id});
-    if (ownerRows.empty()) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM channels ch "
+        "JOIN communities co ON co.id = ch.community_id WHERE ch.id = $1",
+        pqxx::params{id});
+    if (rows.empty()) {
         return MutationResult::kNotFound;
     }
-    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner &&
+        !isModerator(transaction, communityId, requesterLogin)) {
         return MutationResult::kForbidden;
     }
 
@@ -165,6 +194,66 @@ bool ChatRepository::joinCommunity(std::int64_t communityId, const std::string& 
     } catch (const pqxx::foreign_key_violation&) {
         return false;
     }
+}
+
+MutationResult ChatRepository::promoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                                 const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{communityId});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    transaction.exec(
+        "INSERT INTO memberships (community_id, member_login, is_moderator) VALUES ($1, $2, TRUE) "
+        "ON CONFLICT (community_id, member_login) DO UPDATE SET is_moderator = TRUE",
+        pqxx::params{communityId, targetLogin});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+MutationResult ChatRepository::demoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                                const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{communityId});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return MutationResult::kForbidden;
+    }
+
+    // A no-op UPDATE (targetLogin was never a member/moderator) is still
+    // kSuccess — see this method's doc comment.
+    transaction.exec("UPDATE memberships SET is_moderator = FALSE WHERE community_id = $1 AND member_login = $2",
+                      pqxx::params{communityId, targetLogin});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::vector<std::string> ChatRepository::listModerators(std::int64_t communityId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT member_login FROM memberships WHERE community_id = $1 AND is_moderator ORDER BY member_login",
+                          pqxx::params{communityId});
+
+    std::vector<std::string> moderators;
+    moderators.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        moderators.push_back(row[0].as<std::string>());
+    }
+    return moderators;
 }
 
 std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, const std::string& authorLogin,
@@ -244,12 +333,20 @@ MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result authorRows = transaction.exec(
-        "SELECT author_login FROM messages WHERE id = $1 AND channel_id = $2", pqxx::params{messageId, channelId});
-    if (authorRows.empty()) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT m.author_login, ch.owner_login, ch.community_id, co.owner_login FROM messages m "
+        "JOIN channels ch ON ch.id = m.channel_id JOIN communities co ON co.id = ch.community_id "
+        "WHERE m.id = $1 AND m.channel_id = $2",
+        pqxx::params{messageId, channelId});
+    if (rows.empty()) {
         return MutationResult::kNotFound;
     }
-    if (authorRows[0][0].as<std::string>() != requesterLogin) {
+    const std::string authorLogin = rows[0][0].as<std::string>();
+    const std::string channelOwner = rows[0][1].as<std::string>();
+    const auto communityId = rows[0][2].as<std::int64_t>();
+    const std::string communityOwner = rows[0][3].as<std::string>();
+    if (requesterLogin != authorLogin && requesterLogin != channelOwner && requesterLogin != communityOwner &&
+        !isModerator(transaction, communityId, requesterLogin)) {
         return MutationResult::kForbidden;
     }
 
