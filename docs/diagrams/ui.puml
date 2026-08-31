@@ -58,6 +58,10 @@ class ChatView {
   +appendMessage(message: ChatMessage)
   +prependMessages(messages: QList<ChatMessage>)
   +setLoadOlderVisible(visible: bool)
+  +updateMessageBody(id: qint64, newBody: QString)
+  +removeMessage(id: qint64)
+  +editingMessageId() : qint64
+  +cancelEditingMessage()
   +appendSystemLine(text: QString)
   +clearLog()
   +setCallState(inCall: bool, muted: bool)
@@ -76,6 +80,7 @@ class ChatView {
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
   +showTypingUser(login: QString)
+  -connectMessageRow(row: ChatMessageRow*)
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -83,6 +88,7 @@ class ChatView {
   +videoToggleRequested()
   +typingRequested()
   +loadOlderMessagesRequested()
+  +deleteMessageRequested(id: qint64)
 }
 
 struct ChatMessage {
@@ -93,7 +99,12 @@ struct ChatMessage {
 
 class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
+  +messageId() : qint64
+  +updateBody(newBody: QString)
   #resizeEvent(event: QResizeEvent*)
+  .. signals ..
+  +editRequested(id: qint64, currentBody: QString)
+  +deleteRequested(id: qint64)
 }
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
@@ -234,9 +245,12 @@ MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appen
 MainWindow ..> ChatView : setVideoEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
+MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested() >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
+ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
+ChatMessageRow ..> ChatView : editRequested()/deleteRequested() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -341,6 +355,23 @@ note right of MainWindow
   (stickToBottom_): держит низ, пока
   пользователь сам не проскроллил вверх, а
   не безусловно на каждое новое сообщение.
+
+  Редактирование/удаление своих сообщений
+  (issue #107): каждая own-message строка
+  (не только с заголовком — сгруппированные
+  тоже) несёт кнопки Edit/Delete. Edit не
+  подменяет саму строку виджетом ввода —
+  переиспользует общее поле ввода снизу
+  (ChatView::editingMessageId_), кнопка
+  Send превращается в Update, пока идёт
+  редактирование; отправка отдельного
+  edit_message вместо body — решает
+  MainWindow::onSendChatMessageClicked() по
+  ChatView::editingMessageId(). Подтверждение
+  редактирования/удаления от сервера (после
+  реального round-trip, не оптимистично)
+  обновляет/удаляет строку через
+  ChatView::updateMessageBody()/removeMessage().
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

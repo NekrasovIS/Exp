@@ -31,6 +31,16 @@ namespace devicehub {
  * subscriber (chat-service never echoes this back to its sender).
  * Ephemeral like call presence — no "stopped typing" message exists,
  * ChatView times its own indicator out instead.
+ *
+ * sendEditMessage()/sendDeleteMessage() (issue #107) send
+ * `{"edit_message": {"id", "body"}}`/`{"delete_message": {"id"}}` —
+ * chat-service only allows a message's own author to edit/delete it
+ * (never the channel/community owner acting on someone else's
+ * message), reported back as an errorOccurred() if rejected. On
+ * success every subscriber (including the editor/deleter) gets
+ * messageEdited()/messageDeleted(), the same "broadcast to everyone,
+ * don't locally optimistic-update" pattern messageReceived() already
+ * uses for new messages.
  */
 class ChatClient : public QObject {
     Q_OBJECT
@@ -61,12 +71,26 @@ public:
     /// channel — triggers userTyping() on every other subscriber.
     void sendTyping();
 
+    /// Requests editing message @p id (must be this user's own) to
+    /// @p newBody.
+    void sendEditMessage(qint64 id, const QString& newBody);
+
+    /// Requests deleting message @p id (must be this user's own).
+    void sendDeleteMessage(qint64 id);
+
 signals:
     /// Emitted once chat-service confirms the subscription.
     void subscribed(qint64 channelId);
 
     /// Emitted for every message broadcast on the subscribed channel.
     void messageReceived(qint64 id, const QString& author, const QString& body, const QString& sentAt);
+
+    /// A message was edited — @p editedAt is the new edit timestamp
+    /// (Postgres-serialized, same shape as sentAt).
+    void messageEdited(qint64 id, const QString& newBody, const QString& editedAt);
+
+    /// A message was deleted.
+    void messageDeleted(qint64 id);
 
     void errorOccurred(const QString& message);
 

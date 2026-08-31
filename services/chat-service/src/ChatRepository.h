@@ -35,7 +35,16 @@ struct Message {
     std::int64_t id = 0;
     std::string authorLogin;
     std::string body;
-    std::string sentAt;  // ISO 8601, as returned by Postgres
+    std::string sentAt;                   // ISO 8601, as returned by Postgres
+    std::optional<std::string> editedAt;  // unset if never edited (issue #107)
+};
+
+/// Outcome of editMessage() — MutationResult alone doesn't carry the
+/// new edited_at Postgres assigned, which WebSocketServer needs for
+/// the broadcast payload.
+struct EditMessageResult {
+    MutationResult result = MutationResult::kNotFound;
+    std::string editedAt;  // only meaningful when result == kSuccess
 };
 
 /**
@@ -80,6 +89,17 @@ public:
     /// passing the id of the oldest message it already has.
     [[nodiscard]] std::vector<Message> listRecentMessages(std::int64_t channelId, int limit,
                                                             std::optional<std::int64_t> beforeId = std::nullopt);
+
+    /// Only @p requesterLogin being the message's own author may edit
+    /// it (kForbidden otherwise) — not the channel/community owner;
+    /// see WebSocketServer's class doc comment for the moderation-vs-
+    /// authorship distinction this deliberately doesn't blur.
+    [[nodiscard]] EditMessageResult editMessage(std::int64_t messageId, std::int64_t channelId,
+                                                 const std::string& requesterLogin, const std::string& newBody);
+
+    /// Same authorship rule as editMessage().
+    [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
+                                                const std::string& requesterLogin);
 
 private:
     std::string connectionString_;

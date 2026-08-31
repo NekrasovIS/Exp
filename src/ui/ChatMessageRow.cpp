@@ -3,6 +3,7 @@
 #include <QFontMetricsF>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
 
@@ -32,7 +33,7 @@ QString formatTime(const QString& rawSentAt) {
 }  // namespace
 
 ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, QWidget* parent)
-    : QWidget(parent) {
+    : QWidget(parent), messageId_(message.id) {
     const qreal em = QFontMetricsF(font()).height();
     const int avatarSize = qRound(em * kAvatarEm);
     const int spacing = qRound(em * kSpacingEm);
@@ -50,9 +51,9 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
 
-    auto* bodyLabel = new QLabel(message.body, bubble_);
-    bodyLabel->setObjectName(QStringLiteral("chatMessageBody"));
-    bodyLabel->setWordWrap(true);
+    bodyLabel_ = new QLabel(message.body, bubble_);
+    bodyLabel_->setObjectName(QStringLiteral("chatMessageBody"));
+    bodyLabel_->setWordWrap(true);
     // Issue #94: render **bold**/*italic*/`code`/links/lists via Qt's
     // own markdown-to-richtext conversion rather than a hand-rolled
     // parser. QLabel doesn't wire up network image loading for rich
@@ -60,13 +61,14 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     // attacker-controlled URLs (e.g. a tracking-pixel image) — links
     // only ever open on an explicit click (setOpenExternalLinks()),
     // never automatically.
-    bodyLabel->setTextFormat(Qt::MarkdownText);
-    bodyLabel->setOpenExternalLinks(true);
-    bodyLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    bodyLabel_->setTextFormat(Qt::MarkdownText);
+    bodyLabel_->setOpenExternalLinks(true);
+    bodyLabel_->setTextInteractionFlags(Qt::TextBrowserInteraction);
     if (isOwnMessage) {
-        bodyLabel->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        bodyLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
     }
 
+    formattedSentAt_ = formatTime(message.sentAt);
     if (showHeader) {
         auto* headerRow = new QHBoxLayout;
         headerRow->setSpacing(spacing);
@@ -75,19 +77,41 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
             authorLabel->setProperty("chatAuthor", true);
             headerRow->addWidget(authorLabel);
         }
-        auto* timeLabel = new QLabel(formatTime(message.sentAt), bubble_);
-        timeLabel->setObjectName(QStringLiteral("mutedDescription"));
+        const QString timeText =
+            message.editedAt.has_value() ? formattedSentAt_ + QStringLiteral(" (edited)") : formattedSentAt_;
+        timeLabel_ = new QLabel(timeText, bubble_);
+        timeLabel_->setObjectName(QStringLiteral("mutedDescription"));
         if (isOwnMessage) {
-            timeLabel->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+            timeLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
         } else {
             headerRow->addStretch();
         }
-        headerRow->addWidget(timeLabel);
+        headerRow->addWidget(timeLabel_);
         bubbleLayout->addLayout(headerRow);
     }
-    bubbleLayout->addWidget(bodyLabel);
+    bubbleLayout->addWidget(bodyLabel_);
 
     if (isOwnMessage) {
+        // Available on every own-message row regardless of showHeader —
+        // grouped (consecutive) messages don't repeat their header, but
+        // each individual message still needs its own way to target it
+        // for editing/deleting (issue #107).
+        auto* controlsRow = new QHBoxLayout;
+        controlsRow->setSpacing(spacing);
+        controlsRow->addStretch(1);
+        auto* editButton = new QPushButton(tr("Edit"), bubble_);
+        editButton->setObjectName(QStringLiteral("editMessageButton"));
+        editButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        connect(editButton, &QPushButton::clicked, this,
+                [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+        auto* deleteButton = new QPushButton(tr("Delete"), bubble_);
+        deleteButton->setObjectName(QStringLiteral("deleteMessageButton"));
+        deleteButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        connect(deleteButton, &QPushButton::clicked, this, [this]() { emit deleteRequested(messageId_); });
+        controlsRow->addWidget(editButton);
+        controlsRow->addWidget(deleteButton);
+        bubbleLayout->addLayout(controlsRow);
+
         rootLayout->addStretch(1);
         rootLayout->addWidget(bubble_);
     } else {
@@ -102,6 +126,13 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         }
         rootLayout->addWidget(bubble_);
         rootLayout->addStretch(1);
+    }
+}
+
+void ChatMessageRow::updateBody(const QString& newBody) {
+    bodyLabel_->setText(newBody);
+    if (timeLabel_ != nullptr) {
+        timeLabel_->setText(formattedSentAt_ + QStringLiteral(" (edited)"));
     }
 }
 

@@ -31,7 +31,16 @@ CREATE TABLE IF NOT EXISTS messages (
     channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     author_login TEXT NOT NULL,
     body TEXT NOT NULL,
-    sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- NULL until edited (issue #107) — lets clients show an "(edited)"
+    -- marker without a separate history/audit table for a first pass.
+    edited_at TIMESTAMPTZ
 );
+
+-- ADD COLUMN IF NOT EXISTS rather than relying solely on the CREATE
+-- TABLE above: this script only runs on a container's first startup
+-- (postgres docker-entrypoint-initdb.d), so an already-initialized
+-- database needs this to actually pick up the new column.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS messages_channel_id_sent_at_idx ON messages (channel_id, sent_at);

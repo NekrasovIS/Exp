@@ -53,6 +53,12 @@ void ChatClient::onTextMessageReceived(const QString& message) {
         emit callSignalReceived(signal.value("from").toString(), signal.value("payload").toObject());
     } else if (object.contains("user_typing")) {
         emit userTyping(object.value("user_typing").toString());
+    } else if (object.contains("message_edited")) {
+        const QJsonObject edited = object.value("message_edited").toObject();
+        emit messageEdited(edited.value("id").toVariant().toLongLong(), edited.value("body").toString(),
+                            edited.value("edited_at").toString());
+    } else if (object.contains("message_deleted")) {
+        emit messageDeleted(object.value("message_deleted").toObject().value("id").toVariant().toLongLong());
     } else if (object.contains("author") && object.contains("body")) {
         emit messageReceived(object.value("id").toVariant().toLongLong(), object.value("author").toString(),
                               object.value("body").toString(), object.value("sent_at").toString());
@@ -85,6 +91,16 @@ void ChatClient::sendCallSignal(const QString& to, const QJsonObject& payload) {
 
 void ChatClient::sendTyping() {
     const QJsonObject message{{"typing", true}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendEditMessage(qint64 id, const QString& newBody) {
+    const QJsonObject message{{"edit_message", QJsonObject{{"id", id}, {"body", newBody}}}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendDeleteMessage(qint64 id) {
+    const QJsonObject message{{"delete_message", QJsonObject{{"id", id}}}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 

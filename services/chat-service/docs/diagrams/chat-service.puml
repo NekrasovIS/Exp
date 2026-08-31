@@ -46,6 +46,8 @@ class ChatRepository {
   +joinCommunity(communityId: int64, login: string) : bool
   +insertMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
+  +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
+  +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
@@ -65,6 +67,8 @@ class ChatService {
   +joinCommunity(communityId: int64, login: string) : bool
   +postMessage(channelId: int64, authorLogin: string, body: string) : optional<Message>
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
+  +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
+  +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
 }
 ChatService --> ChatRepository : delegates to (&)
 
@@ -100,6 +104,8 @@ class WebSocketServer {
   -handleHello(webSocket, payload)
   -handleSubscribedMessage(webSocket, payload)
   -handleChatMessage(webSocket, subscription, body)
+  -handleEditMessage(webSocket, subscription, body)
+  -handleDeleteMessage(webSocket, subscription, body)
   -handleCallJoin(webSocket, subscription)
   -handleCallLeave(webSocket, subscription)
   -handleCallSignal(webSocket, subscription, body)
@@ -158,6 +164,19 @@ note right of WebSocketServer
          to every other *chat*
          subscriber (issue #96,
          never echoed back to sender)
+    {"edit_message": {"id","body"}}
+      -> (issue #107) only the
+         message's own author may
+         edit it — {"error": ...}
+         to the sender on 404/403,
+         else {"message_edited":
+         {"id","body","edited_at"}}
+         broadcast to every *chat*
+         subscriber
+    {"delete_message": {"id"}}
+      -> same authorship rule,
+         {"message_deleted": {"id"}}
+         broadcast on success
     {"body"} (fallback)
       -> broadcast to every *chat*
          subscriber of that channel

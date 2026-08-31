@@ -128,11 +128,13 @@ TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
 
     QString receivedAuthor;
     QString receivedBody;
+    qint64 receivedId = 0;
     {
         QEventLoop loop;
         QTimer::singleShot(3000, &loop, &QEventLoop::quit);
         QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
-                          [&](qint64, const QString& author, const QString& body, const QString&) {
+                          [&](qint64 id, const QString& author, const QString& body, const QString&) {
+                              receivedId = id;
                               receivedAuthor = author;
                               receivedBody = body;
                               loop.quit();
@@ -143,6 +145,42 @@ TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
 
     EXPECT_EQ(receivedAuthor, login);
     EXPECT_EQ(receivedBody, QStringLiteral("hello from ChatClientIntegrationTest"));
+    ASSERT_GT(receivedId, 0);
+
+    // issue #107: editing and deleting that same message round-trips
+    // through the live server too.
+    QString editedBody;
+    QString editedAt;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageEdited, &loop,
+                          [&](qint64, const QString& newBody, const QString& newEditedAt) {
+                              editedBody = newBody;
+                              editedAt = newEditedAt;
+                              loop.quit();
+                          });
+        chatClient.sendEditMessage(receivedId, QStringLiteral("edited from ChatClientIntegrationTest"));
+        loop.exec();
+    }
+    EXPECT_EQ(editedBody, QStringLiteral("edited from ChatClientIntegrationTest"));
+    EXPECT_FALSE(editedAt.isEmpty());
+
+    bool deleted = false;
+    qint64 deletedId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageDeleted, &loop, [&](qint64 id) {
+            deleted = true;
+            deletedId = id;
+            loop.quit();
+        });
+        chatClient.sendDeleteMessage(receivedId);
+        loop.exec();
+    }
+    EXPECT_TRUE(deleted);
+    EXPECT_EQ(deletedId, receivedId);
 }
 
 }  // namespace

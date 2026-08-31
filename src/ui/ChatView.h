@@ -65,6 +65,24 @@ public:
     /// it fetched looked like there might be more (came back full).
     void setLoadOlderVisible(bool visible);
 
+    /// Updates @p id's displayed body in place (issue #107) — a no-op
+    /// if that message isn't currently shown (e.g. scrolled out of a
+    /// history page that's since been replaced).
+    void updateMessageBody(qint64 id, const QString& newBody);
+
+    /// Removes @p id's row entirely, if currently shown.
+    void removeMessage(qint64 id);
+
+    /// True while the send box is editing an existing message rather
+    /// than composing a new one — set by clicking a message's own
+    /// "Edit" button, cleared by cancelEditingMessage() or (MainWindow)
+    /// once the edit is actually submitted. -1 when not editing.
+    [[nodiscard]] qint64 editingMessageId() const { return editingMessageId_; }
+
+    /// Leaves edit mode: clears editingMessageId_, restores the send
+    /// button's normal text, and clears the message box.
+    void cancelEditingMessage();
+
     /// Appends a muted, centered system/status line (subscribed,
     /// errors, ...) — always breaks any pending message grouping, so
     /// the next real message gets its own header regardless of author.
@@ -143,7 +161,17 @@ signals:
     /// before the oldest message ChatView currently has.
     void loadOlderMessagesRequested();
 
+    /// "Delete" clicked on one of the user's own messages.
+    void deleteMessageRequested(qint64 id);
+
 private:
+    /// Wires a freshly created row's editRequested()/deleteRequested()
+    /// to this view's own edit-mode state / deleteMessageRequested() —
+    /// shared by appendMessage() (the only place rows are created,
+    /// for now).
+    void connectMessageRow(ChatMessageRow* row);
+
+
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
     QScrollArea* scrollArea_ = nullptr;
@@ -172,6 +200,7 @@ private:
     /// history, and updated as they scroll further. See the
     /// rangeChanged/valueChanged wiring in the constructor.
     bool stickToBottom_ = true;
+    qint64 editingMessageId_ = -1;
 };
 
 }  // namespace devicehub

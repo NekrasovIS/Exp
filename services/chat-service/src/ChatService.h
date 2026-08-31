@@ -34,6 +34,10 @@ public:
                                                        const std::string& body);
     [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit,
                                                         std::optional<std::int64_t> beforeId = std::nullopt);
+    [[nodiscard]] EditMessageResult editMessage(std::int64_t messageId, std::int64_t channelId,
+                                                 const std::string& requesterLogin, const std::string& newBody);
+    [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
+                                                const std::string& requesterLogin);
 
 private:
     ChatRepository& repository_;
