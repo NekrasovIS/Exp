@@ -104,12 +104,18 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     videoToggleButton_->setEnabled(false);
     connect(videoToggleButton_, &QPushButton::clicked, this, &ChatView::videoToggleRequested);
 
+    screenShareToggleButton_ = new QPushButton(tr("Share Screen"), channelPage);
+    screenShareToggleButton_->setObjectName(QStringLiteral("screenShareToggleButton"));
+    screenShareToggleButton_->setEnabled(false);
+    connect(screenShareToggleButton_, &QPushButton::clicked, this, &ChatView::screenShareToggleRequested);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
     headerRow->addWidget(callToggleButton_);
     headerRow->addWidget(muteToggleButton_);
     headerRow->addWidget(videoToggleButton_);
+    headerRow->addWidget(screenShareToggleButton_);
 
     callParticipantsLabel_ = new QLabel(channelPage);
     callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));
@@ -340,12 +346,15 @@ void ChatView::setCallState(bool inCall, bool muted) {
     muteToggleButton_->setEnabled(inCall);
     muteToggleButton_->setText(muted ? tr("Unmute") : tr("Mute"));
     videoToggleButton_->setEnabled(inCall);
+    screenShareToggleButton_->setEnabled(inCall);
     if (!inCall) {
         callParticipantsLabel_->setVisible(false);
-        // Video can't outlive the call it belongs to — reset it here so
-        // every existing leave/channel-switch call site gets this for
-        // free instead of needing its own cleanup call.
+        // Video/screen share can't outlive the call they belong to —
+        // reset both here so every existing leave/channel-switch call
+        // site gets this for free instead of needing its own cleanup
+        // call.
         setVideoEnabled(false);
+        setScreenShareEnabled(false);
         for (QLabel* tile : std::as_const(remoteVideoTiles_)) {
             delete tile;
         }
@@ -364,8 +373,26 @@ void ChatView::setCallParticipants(const QStringList& participants) {
 
 void ChatView::setVideoEnabled(bool enabled) {
     videoToggleButton_->setText(enabled ? tr("Disable Video") : tr("Enable Video"));
-    localVideoWidget_->setVisible(enabled);
-    videoStrip_->setVisible(enabled || !remoteVideoTiles_.isEmpty());
+    videoActive_ = enabled;
+    updateLocalVideoVisibility();
+}
+
+void ChatView::setScreenShareEnabled(bool enabled) {
+    screenShareToggleButton_->setText(enabled ? tr("Stop Sharing") : tr("Share Screen"));
+    screenShareActive_ = enabled;
+    updateLocalVideoVisibility();
+}
+
+void ChatView::updateLocalVideoVisibility() {
+    // Camera and screen share are mutually exclusive in CallManager, but
+    // MainWindow calls both setVideoEnabled()/setScreenShareEnabled()
+    // after every toggle (whichever one flips true, the other flips
+    // false) — tracking both flags here rather than trusting whichever
+    // setter ran last keeps the local preview's visibility correct
+    // regardless of call order.
+    const bool anyActive = videoActive_ || screenShareActive_;
+    localVideoWidget_->setVisible(anyActive);
+    videoStrip_->setVisible(anyActive || !remoteVideoTiles_.isEmpty());
 }
 
 void ChatView::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame) {

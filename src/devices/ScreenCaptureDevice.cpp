@@ -4,7 +4,10 @@
 
 namespace devicehub {
 
-ScreenCaptureDevice::ScreenCaptureDevice(QObject* parent) : QObject(parent) {}
+ScreenCaptureDevice::ScreenCaptureDevice(QObject* parent) : QObject(parent) {
+    captureSession_.setVideoSink(&videoSink_);
+    connect(&videoSink_, &QVideoSink::videoFrameChanged, this, &ScreenCaptureDevice::frameAvailable);
+}
 
 ScreenCaptureDevice::~ScreenCaptureDevice() = default;
 

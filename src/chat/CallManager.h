@@ -6,6 +6,7 @@
 #include "devices/CallAudioDeviceModule.h"
 #include "devices/CallVideoTrackSource.h"
 #include "devices/CameraDevice.h"
+#include "devices/ScreenCaptureDevice.h"
 
 #include <api/peer_connection_interface.h>
 #include <api/rtp_transceiver_interface.h>
@@ -26,6 +27,7 @@
 #include <unordered_map>
 
 class QAudioFormat;
+class QScreen;
 
 namespace devicehub {
 
@@ -89,6 +91,18 @@ namespace devicehub {
  * == codec"), so this class avoids that path entirely rather than
  * relying on an internal WebRTC bug being fixed.
  *
+ * Screen share (issue #112) reuses camera video's exact track/track-
+ * source/attach machinery — ensureLocalVideoTrack() factors out the
+ * "create once, attach to every peer" block enableVideo() used to do
+ * inline — rather than creating a second video track: enableVideo()
+ * and enableScreenShare() are mutually exclusive (enabling one disables
+ * the other first) and just point the one shared CallVideoTrackSource
+ * at a different frame source (camera_ vs screenCapture_), flipping its
+ * is_screencast() hint via setIsScreencast() to match. Simpler than a
+ * second track (no extra renegotiation/attach bookkeeping per peer) at
+ * the cost of not being able to send both at once — an accepted
+ * first-pass scope limit, not a WebRTC constraint.
+ *
  * Receiving remote video (issue #91) is the mirror image of sending it:
  * PeerObserver::OnTrack() fires once a peer's video transceiver appears,
  * handleRemoteTrack() attaches a RemoteVideoSink to that track (guarded
@@ -104,7 +118,7 @@ class CallManager : public QObject {
 
 public:
     CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, AudioOutputDevice& audioOutput,
-                CameraDevice& camera, QObject* parent = nullptr);
+                CameraDevice& camera, ScreenCaptureDevice& screenCapture, QObject* parent = nullptr);
     ~CallManager() override;
 
     /// Sends call_join, starts capturing from @p inputDevice and
@@ -136,6 +150,19 @@ public:
     void disableVideo();
 
     [[nodiscard]] bool videoEnabled() const { return videoEnabled_; }
+
+    /// Starts capturing @p screen and sending it as the local video
+    /// track (issue #112) — shares the exact same track/track source
+    /// enableVideo() uses rather than a second one, so it's mutually
+    /// exclusive with camera video: enabling one disables the other.
+    /// Safe to call whether or not a call is active.
+    void enableScreenShare(QScreen* screen);
+
+    /// Stops screen capture and disables the shared video track (unless
+    /// camera video is what's actually active — see enableVideo()).
+    void disableScreenShare();
+
+    [[nodiscard]] bool screenShareEnabled() const { return screenShareEnabled_; }
 
 signals:
     void participantJoined(const QString& login);
@@ -207,6 +234,17 @@ private:
     /// while video is enabled.
     void onCameraFrame(const QVideoFrame& frame);
 
+    /// Forwards a captured frame from screenCapture_ into
+    /// videoTrackSource_, while screen share is enabled.
+    void onScreenShareFrame(const QVideoFrame& frame);
+
+    /// Creates videoTrackSource_/localVideoTrack_ and attaches them to
+    /// every existing peer if this is the first time either enableVideo()
+    /// or enableScreenShare() has ever been called — a no-op otherwise
+    /// (see enableVideo()'s doc comment for why the track, once created,
+    /// is shared and never removed again).
+    void ensureLocalVideoTrack();
+
     /// Adds localVideoTrack_ to `entry`'s connection if it exists and
     /// isn't already attached — independent of whether video is
     /// currently enabled (see enableVideo()'s doc comment for why the
@@ -218,6 +256,7 @@ private:
     AudioInputDevice& audioInput_;
     AudioOutputDevice& audioOutput_;
     CameraDevice& camera_;
+    ScreenCaptureDevice& screenCapture_;
 
     std::unique_ptr<webrtc::Thread> networkThread_;
     std::unique_ptr<webrtc::Thread> workerThread_;
@@ -232,6 +271,7 @@ private:
     bool inCall_ = false;
     bool muted_ = false;
     bool videoEnabled_ = false;
+    bool screenShareEnabled_ = false;
 };
 
 }  // namespace devicehub

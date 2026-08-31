@@ -71,6 +71,20 @@ TEST(CallVideoTrackSourceTest, IsScreencastReflectsConstructorArgument) {
     EXPECT_TRUE(screenSource->is_screencast());
 }
 
+TEST(CallVideoTrackSourceTest, SetIsScreencastFlipsTheHintAfterConstruction) {
+    // Issue #112: CallManager shares one source between camera video and
+    // screen share, flipping this hint when it switches which one is active.
+    const webrtc::scoped_refptr<CallVideoTrackSource> source =
+        webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
+    ASSERT_FALSE(source->is_screencast());
+
+    source->setIsScreencast(true);
+    EXPECT_TRUE(source->is_screencast());
+
+    source->setIsScreencast(false);
+    EXPECT_FALSE(source->is_screencast());
+}
+
 TEST(CallVideoTrackSourceTest, PushFrameDropsInvalidFrame) {
     const webrtc::scoped_refptr<CallVideoTrackSource> source = webrtc::make_ref_counted<CallVideoTrackSource>();
     webrtc::VideoTrackSourceInterface& sourceInterface = *source;

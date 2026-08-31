@@ -61,6 +61,7 @@ private:
     void onMuteToggleClicked();
     void onVideoToggleClicked();
     void onEditProfileClicked();
+    void onScreenShareToggleClicked();
 
     /// Re-lists communities from chat-service (no-op, with a status bar
     /// message, if not signed in yet).
@@ -84,7 +85,7 @@ private:
     ScreenCaptureDevice screenCapture_;
     AuthClient authClient_;
     ChatClient chatClient_;
-    CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_};
+    CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_, screenCapture_};
     ChatRestClient chatRestClient_;
     UserProfileClient userProfileClient_;
     QString lastToken_;

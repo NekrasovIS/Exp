@@ -4,6 +4,7 @@
 
 #include <QVideoFrame>
 
+#include <atomic>
 #include <optional>
 
 namespace devicehub {
@@ -39,13 +40,22 @@ public:
     /// invalid or there are no interested sinks.
     void pushFrame(const QVideoFrame& frame);
 
+    /// Flips the screencast hint on an already-created source — CallManager
+    /// (issue #112) shares this one track/source between camera video and
+    /// screen share rather than creating a second track, so switching
+    /// which one is active needs the hint to change after construction
+    /// too. Thread-safe like the rest of this class's public surface —
+    /// is_screencast() can be queried from a WebRTC thread while this is
+    /// called from the GUI thread.
+    void setIsScreencast(bool isScreencast);
+
     bool is_screencast() const override;
     std::optional<bool> needs_denoising() const override;
     SourceState state() const override;
     bool remote() const override;
 
 private:
-    bool isScreencast_;
+    std::atomic<bool> isScreencast_;
 };
 
 }  // namespace devicehub
