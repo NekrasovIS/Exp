@@ -1,5 +1,7 @@
 #include "WebSocketServer.h"
 
+#include "JsonGuard.h"
+
 #include <nlohmann/json.hpp>
 
 #include <optional>
@@ -74,6 +76,11 @@ void WebSocketServer::handleMessage(const std::shared_ptr<ix::ConnectionState>& 
 }
 
 void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& payload) {
+    if (json_guard::exceedsMaxNestingDepth(payload, json_guard::kMaxNestingDepth)) {
+        webSocket.send(nlohmann::json{{"error", "payload too deeply nested"}}.dump());
+        webSocket.close();
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(payload, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.contains("token") || !body["token"].is_string() ||
         !body.contains("channel_id") || !body["channel_id"].is_number_integer()) {
@@ -104,6 +111,10 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         subscription = subscriptions_.at(&webSocket);
     }
 
+    if (json_guard::exceedsMaxNestingDepth(payload, json_guard::kMaxNestingDepth)) {
+        webSocket.send(nlohmann::json{{"error", "payload too deeply nested"}}.dump());
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(payload, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded()) {
         webSocket.send(nlohmann::json{{"error", "malformed JSON"}}.dump());

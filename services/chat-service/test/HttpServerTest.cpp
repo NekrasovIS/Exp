@@ -195,6 +195,30 @@ TEST(HttpServerTest, CreateCommunityRejectsMissingNameWith400) {
     EXPECT_EQ(result->status, 400);
 }
 
+// Interim stand-in for real coverage-guided fuzzing (issue #121): a
+// deeply nested JSON body used to stack-overflow the whole process inside
+// nlohmann::json::parse()'s recursive descent (crashed WebSocketServer's
+// equivalent parse call, discovered via WebSocketServerTest — see
+// JsonGuard.h). This is the REST-endpoint half of the same vulnerability
+// class; it should now be rejected with a clean 400, not a crash.
+TEST(HttpServerTest, CreateCommunityRejectsDeeplyNestedBodyWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-create-community-nested-400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const ScopedServer server(chatService, fixture.authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const std::string deeplyNestedBody(500, '[');
+    const httplib::Result result = client.Post("/communities", headers, deeplyNestedBody, "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
 TEST(HttpServerTest, CreateCommunitySucceedsWith201) {
     auto fixtureOpt = TestFixture::create("http-server-create-community-201");
     if (!fixtureOpt.has_value()) {

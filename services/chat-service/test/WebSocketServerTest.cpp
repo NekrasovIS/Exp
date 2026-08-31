@@ -19,6 +19,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Requires a live Postgres (see docker-compose.yml, chat-service-postgres)
 // AND a live auth-service (to mint real tokens for the hello handshake).
@@ -92,6 +93,12 @@ public:
     }
 
     void send(const nlohmann::json& frame) { socket_.sendText(frame.dump()); }
+
+    /// Sends a raw text frame without going through nlohmann::json::dump()
+    /// — a real attacker's client isn't necessarily built on nlohmann, so
+    /// this is what actually simulates hostile-but-valid-JSON-syntax bytes
+    /// arriving at the server's own nlohmann::json::parse() unmodified.
+    void sendRaw(const std::string& text) { socket_.sendText(text); }
 
     /// Waits up to @p timeoutMs for a queued message matching @p predicate,
     /// consuming and returning it; std::nullopt on timeout.
@@ -285,6 +292,105 @@ TEST(WebSocketServerTest, HelloWithInvalidTokenIsRejectedWithError) {
         client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
     ASSERT_TRUE(error.has_value());
     EXPECT_EQ((*error)["error"].get<std::string>(), "invalid token");
+
+    server.stop();
+}
+
+// Interim stand-in for real coverage-guided fuzzing (issue #121 — libFuzzer
+// needs clang-cl, unavailable in this environment's MSVC toolchain): a
+// battery of adversarial-but-syntactically-parseable frames — wrong field
+// types, an int64_t overflow, nested/non-object payloads, empty strings —
+// aimed at the client-controlled dispatch in handleSubscribedMessage()
+// (issue #46 and later). The property under test is that the *process*
+// stays alive and responsive: an uncaught nlohmann::json exception
+// escaping the ix::WebSocket message callback would std::terminate the
+// whole chat-service, taking down every other connected client with it,
+// so surviving all of them and still answering the final well-formed
+// frame is what "pass" means here — each individual frame isn't expected
+// to succeed.
+TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18090"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-adversarial-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-adversarial-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string login = "ws-adversarial-" + suffix;
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, login);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    const std::vector<nlohmann::json> adversarialFrames = {
+        nlohmann::json(42),
+        nlohmann::json("just a string, not an object"),
+        nlohmann::json::array({1, 2, 3}),
+        nlohmann::json{{"call_signal", 12345}},
+        nlohmann::json{{"call_signal", "not an object"}},
+        nlohmann::json{{"call_signal", nlohmann::json::array()}},
+        nlohmann::json{{"call_signal", {{"to", 999}, {"payload", "x"}}}},
+        nlohmann::json{{"call_signal", {{"to", ""}, {"payload", nullptr}}}},
+        nlohmann::json{{"edit_message", "not an object"}},
+        nlohmann::json{{"edit_message", {{"id", "not-a-number"}, {"body", "x"}}}},
+        // int64_t::max() + 1 — is_number_integer() is true (parsed as
+        // number_unsigned), but get<int64_t>() can throw on overflow.
+        nlohmann::json{{"edit_message", {{"id", 9223372036854775808ULL}, {"body", "x"}}}},
+        nlohmann::json{{"delete_message", nlohmann::json::array()}},
+        nlohmann::json{{"delete_message", {{"id", -9223372036854775807LL - 1}}}},
+        nlohmann::json{{"body", nullptr}},
+        nlohmann::json{{"body", 12345}},
+        nlohmann::json{{"body", ""}},
+        nlohmann::json{{"body", "x"}, {"attachment_id", "not-a-number"}},
+        nlohmann::json{{"body", "x"}, {"attachment_id", nlohmann::json::array()}},
+        nlohmann::json{{"typing", nlohmann::json::object()}},
+        nlohmann::json{{"typing", nullptr}},
+    };
+    for (const nlohmann::json& frame : adversarialFrames) {
+        client.send(frame);
+    }
+
+    // Deeply nested raw payload — guards against nlohmann::json::parse()'s
+    // recursive descent blowing the stack on attacker-controlled nesting
+    // depth. Built as a raw string (not via nlohmann::json::dump(), which
+    // recurses just as deeply on the *sending* side) since a real attacker
+    // isn't necessarily sending bytes produced by nlohmann at all.
+    std::string deeplyNestedFrame(500, '[');
+    deeplyNestedFrame.append(500, ']');
+    client.sendRaw(deeplyNestedFrame);
+
+    // Positive liveness check: if the process survived all of the above,
+    // a well-formed chat message sent afterward still gets broadcast back
+    // (same round trip as ChatMessageIsBroadcastToAllSubscribersIncludingSender).
+    client.send(nlohmann::json{{"body", "still alive after the adversarial batch"}});
+    const std::optional<nlohmann::json> echo = client.waitFor([](const nlohmann::json& m) {
+        return m.contains("body") && m["body"] == "still alive after the adversarial batch";
+    });
+    ASSERT_TRUE(echo.has_value());
 
     server.stop();
 }

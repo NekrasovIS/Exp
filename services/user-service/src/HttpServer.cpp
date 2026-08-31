@@ -1,5 +1,7 @@
 #include "HttpServer.h"
 
+#include "JsonGuard.h"
+
 #include <nlohmann/json.hpp>
 
 #include <optional>
@@ -18,6 +20,9 @@ struct Credentials {
 };
 
 std::optional<Credentials> parseCredentials(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
     const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
     if (json.is_discarded() || !json.contains("login") || !json.contains("password") ||
         !json["login"].is_string() || !json["password"].is_string()) {
@@ -112,6 +117,11 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
         return;
     }
 
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
     const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded()) {
         response.status = 400;
