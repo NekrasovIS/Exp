@@ -76,6 +76,11 @@ public:
     /// attachmentDownloaded().
     void downloadAttachment(const QString& token, qint64 attachmentId);
 
+    /// Searches @p channelId's message bodies for a case-insensitive
+    /// substring match on @p query (issue #118), newest match first, up
+    /// to @p limit results.
+    void searchMessages(const QString& token, qint64 channelId, const QString& query, int limit = 20);
+
 signals:
     void communityCreated(qint64 id, const QString& name);
     void communitiesListed(const QList<ChatItem>& communities);
@@ -99,6 +104,10 @@ signals:
     /// Reply to downloadAttachment() — @p data is the raw (decoded)
     /// attachment bytes.
     void attachmentDownloaded(qint64 attachmentId, const QByteArray& data);
+
+    /// Reply to searchMessages() — @p matches is newest-first, possibly
+    /// empty.
+    void messagesFound(qint64 channelId, const QString& query, const QList<ChatMessageInfo>& matches);
 
     void errorOccurred(const QString& message);
 

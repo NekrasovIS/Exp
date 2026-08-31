@@ -72,6 +72,7 @@ class ChatRepository {
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
@@ -100,6 +101,7 @@ class ChatService {
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
 }
 ChatService --> ChatRepository : delegates to (&)
 
@@ -127,6 +129,7 @@ class HttpServer {
   -handleListMessages(request, response)
   -handleUploadAttachment(request, response)
   -handleDownloadAttachment(request, response)
+  -handleSearchMessages(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }
@@ -175,6 +178,8 @@ note right of HttpServer
   GET    /channels/{id}/messages
   POST   /channels/{id}/attachments
   GET    /attachments/{id}
+  GET    /channels/{id}/messages/search
+                             (?q=, limit=20)
 
   Owner-only routes answer 403 for
   non-owners, 404 for a nonexistent
@@ -193,6 +198,14 @@ note right of HttpServer
   sanitized Content-Disposition
   header (CR/LF/'"' stripped —
   header-injection guard).
+
+  Search (issue #118): plain
+  case-insensitive substring test
+  (position(lower(q) in lower(body))
+  > 0), not full-text search — no
+  ranking/stemming, a first-version
+  simplification. Missing/empty
+  'q' is 400. Newest match first.
 end note
 
 note right of WebSocketServer

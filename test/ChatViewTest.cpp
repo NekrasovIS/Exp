@@ -138,5 +138,22 @@ TEST(ChatViewTest, ClickingMuteToggleButtonEmitsMuteToggleRequested) {
     EXPECT_EQ(spy.count(), 1);
 }
 
+TEST(ChatViewTest, ClickingSearchButtonEmitsOpenSearchRequested) {
+    ChatView view;
+    QSignalSpy spy(&view, &ChatView::openSearchRequested);
+
+    emit view.searchButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ChatViewTest, ScrollToMessageReturnsTrueForALoadedMessageAndFalseOtherwise) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 5, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+
+    EXPECT_TRUE(view.scrollToMessage(5));
+    EXPECT_FALSE(view.scrollToMessage(999));
+}
+
 }  // namespace
 }  // namespace devicehub

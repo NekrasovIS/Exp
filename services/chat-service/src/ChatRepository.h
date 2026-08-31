@@ -198,6 +198,13 @@ public:
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
 
+    /// Case-insensitive substring search over @p channelId's message
+    /// bodies (issue #118), newest match first, capped at @p limit —
+    /// simple `ILIKE '%query%'`, not full-text search (no ranking/
+    /// stemming), a deliberate first-version simplification. Empty
+    /// results for a nonexistent channel, same as listRecentMessages().
+    [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
+
 private:
     std::string connectionString_;
 };

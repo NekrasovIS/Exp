@@ -12,10 +12,11 @@ namespace chat_service {
 
 /**
  * @brief REST front-end for ChatService: communities, channels, joining,
- *        moderator management (issue #114), message history, and
- *        attachment upload/download (issue #116). Every route requires
- *        a valid `Authorization: Bearer <token>` header, checked against
- *        auth-service via AuthServiceClient.
+ *        moderator management (issue #114), message history,
+ *        attachment upload/download (issue #116), and message search
+ *        (issue #118). Every route requires a valid `Authorization:
+ *        Bearer <token>` header, checked against auth-service via
+ *        AuthServiceClient.
  *
  * Promoting/demoting a moderator is owner-only — writeMutationResult()'s
  * kForbidden ("only the owner can do that") already covers it, same as
@@ -53,6 +54,7 @@ private:
     void handleListMessages(const httplib::Request& request, httplib::Response& response);
     void handleUploadAttachment(const httplib::Request& request, httplib::Response& response);
     void handleDownloadAttachment(const httplib::Request& request, httplib::Response& response);
+    void handleSearchMessages(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;

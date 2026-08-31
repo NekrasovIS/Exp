@@ -30,6 +30,7 @@ class DesktopNotifier;
 class FooterBar;
 class ModeratorsDialog;
 class ProfileDialog;
+class SearchDialog;
 class SettingsDialog;
 
 /**
@@ -127,6 +128,7 @@ private:
     SettingsDialog* settingsDialog_ = nullptr;
     ModeratorsDialog* moderatorsDialog_ = nullptr;
     ProfileDialog* profileDialog_ = nullptr;
+    SearchDialog* searchDialog_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;
 };

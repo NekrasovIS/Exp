@@ -413,4 +413,34 @@ std::optional<AttachmentData> ChatRepository::findAttachmentData(std::int64_t at
                            .data = rows[0][2].as<std::string>()};
 }
 
+std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, const std::string& query, int limit) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // position(...) > 0 rather than ILIKE — a plain case-insensitive
+    // substring test, so characters like '%'/'_' in the query are
+    // matched literally instead of being treated as SQL wildcards.
+    const pqxx::result rows = transaction.exec(
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
+        "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
+        "WHERE m.channel_id = $1 AND position(lower($2) in lower(m.body)) > 0 "
+        "ORDER BY m.sent_at DESC, m.id DESC LIMIT $3",
+        pqxx::params{channelId, query, limit});
+
+    std::vector<Message> messages;
+    messages.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        messages.push_back(
+            Message{.id = row[0].as<std::int64_t>(),
+                    .authorLogin = row[1].as<std::string>(),
+                    .body = row[2].as<std::string>(),
+                    .sentAt = row[3].as<std::string>(),
+                    .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
+                    .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
+                    .attachmentFilename =
+                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
+    }
+    return messages;
+}
+
 }  // namespace chat_service

@@ -189,6 +189,7 @@ class ChatRestClient {
   +listModerators(token: QString, communityId: qint64)
   +uploadAttachment(token: QString, channelId: qint64, filename: QString,\n    contentType: QString, data: QByteArray)
   +downloadAttachment(token: QString, attachmentId: qint64)
+  +searchMessages(token: QString, channelId: qint64, query: QString, limit: int = 20)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
@@ -201,11 +202,12 @@ class ChatRestClient {
   +moderatorsListed(communityId: qint64, logins: QStringList)
   +attachmentUploaded(id: qint64, filename: QString)
   +attachmentDownloaded(attachmentId: qint64, data: QByteArray)
+  +messagesFound(channelId: qint64, query: QString, matches: QList<ChatMessageInfo>)
   +errorOccurred(message: QString)
 }
 ChatRestClient *-- QNetworkAccessManager : owns
 ChatRestClient ..> ChatItem : emits lists of
-ChatRestClient ..> ChatMessageInfo : emits pages of (issue #100)
+ChatRestClient ..> ChatMessageInfo : emits pages of (issue #100)\nand search matches of (issue #118)
 ChatRestClient ..> "chat-service" : REST (Authorization: Bearer <token>)
 
 note right of ChatClient

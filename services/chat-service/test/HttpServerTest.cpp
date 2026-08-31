@@ -826,5 +826,54 @@ TEST(HttpServerTest, DownloadAttachmentRejectsNonexistentIdWith404) {
     EXPECT_EQ(result->status, 404);
 }
 
+TEST(HttpServerTest, SearchMessagesReturnsOnlyMatchingBodiesNewestFirst) {
+    auto fixtureOpt = TestFixture::create("http-server-search-messages");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-search-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(chatService.postMessage(*channelId, fixture.ownerLogin, "the quick brown fox").has_value());
+    ASSERT_TRUE(chatService.postMessage(*channelId, fixture.ownerLogin, "nothing relevant here").has_value());
+    ASSERT_TRUE(chatService.postMessage(*channelId, fixture.ownerLogin, "another Quick message").has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Get("/channels/" + std::to_string(*channelId) + "/messages/search?q=quick", headers);
+
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body);
+    ASSERT_EQ(body.size(), 2U);
+    // Case-insensitive, newest match first.
+    EXPECT_EQ(body[0]["body"].get<std::string>(), "another Quick message");
+    EXPECT_EQ(body[1]["body"].get<std::string>(), "the quick brown fox");
+}
+
+TEST(HttpServerTest, SearchMessagesRejectsMissingQueryParamWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-search-missing-q");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-search-400-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/channels/" + std::to_string(*channelId) + "/messages/search", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
 }  // namespace
 }  // namespace chat_service

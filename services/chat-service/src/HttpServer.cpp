@@ -16,6 +16,7 @@ constexpr int kDefaultMessageLimit = 50;
 /// (issue #116) — see ChatRepository's class doc comment for why
 /// attachments are stored as base64 TEXT rather than BYTEA/on-disk.
 constexpr std::size_t kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
+constexpr int kDefaultSearchLimit = 20;
 
 // Attachment filenames come from an untrusted client (issue #116) and
 // get embedded verbatim into a Content-Disposition response header —
@@ -124,6 +125,10 @@ void HttpServer::registerRoutes() {
     server_.Get(R"(/attachments/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
         handleDownloadAttachment(request, response);
     });
+    server_.Get(R"(/channels/(\d+)/messages/search)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleSearchMessages(request, response);
+                 });
 }
 
 void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib::Response& response) {
@@ -437,6 +442,30 @@ void HttpServer::handleDownloadAttachment(const httplib::Request& request, httpl
     response.set_header("Content-Disposition",
                          "attachment; filename=\"" + sanitizeForHeaderValue(attachment->filename) + "\"");
     response.set_content(*decoded, attachment->contentType);
+}
+
+void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::Response& response) {
+    if (!authenticate(request).has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (!request.has_param("q") || request.get_param_value("q").empty()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected non-empty 'q' query parameter"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    const std::string query = request.get_param_value("q");
+    const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultSearchLimit;
+
+    nlohmann::json messages = nlohmann::json::array();
+    for (const Message& message : chatService_.searchMessages(channelId, query, limit)) {
+        messages.push_back(toJson(message));
+    }
+    response.set_content(messages.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

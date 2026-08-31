@@ -109,6 +109,10 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     screenShareToggleButton_->setEnabled(false);
     connect(screenShareToggleButton_, &QPushButton::clicked, this, &ChatView::screenShareToggleRequested);
 
+    searchButton_ = new QPushButton(tr("Search"), channelPage);
+    searchButton_->setObjectName(QStringLiteral("searchButton"));
+    connect(searchButton_, &QPushButton::clicked, this, &ChatView::openSearchRequested);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
@@ -116,6 +120,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     headerRow->addWidget(muteToggleButton_);
     headerRow->addWidget(videoToggleButton_);
     headerRow->addWidget(screenShareToggleButton_);
+    headerRow->addWidget(searchButton_);
 
     callParticipantsLabel_ = new QLabel(channelPage);
     callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));
@@ -320,6 +325,15 @@ void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
     if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
         row->updateBody(newBody);
     }
+}
+
+bool ChatView::scrollToMessage(qint64 id) {
+    ChatMessageRow* row = findMessageRow(messagesLayout_, id);
+    if (row == nullptr) {
+        return false;
+    }
+    scrollArea_->ensureWidgetVisible(row);
+    return true;
 }
 
 void ChatView::removeMessage(qint64 id) {

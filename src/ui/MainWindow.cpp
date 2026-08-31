@@ -31,6 +31,7 @@
 #include "ui/FooterBar.h"
 #include "ui/ModeratorsDialog.h"
 #include "ui/ProfileDialog.h"
+#include "ui/SearchDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
 
@@ -206,6 +207,29 @@ MainWindow::MainWindow(QWidget* parent)
                     return;
                 }
             });
+    connect(chatView_, &ChatView::openSearchRequested, this, [this]() {
+        searchDialog_->show();
+        searchDialog_->raise();
+        searchDialog_->activateWindow();
+    });
+    connect(searchDialog_, &SearchDialog::searchRequested, this, [this](const QString& query) {
+        if (selectedChannelId_ < 0 || query.trimmed().isEmpty()) {
+            return;
+        }
+        chatRestClient_.searchMessages(lastToken_, selectedChannelId_, query);
+    });
+    connect(&chatRestClient_, &ChatRestClient::messagesFound, this,
+            [this](qint64 channelId, const QString&, const QList<ChatMessageInfo>& matches) {
+                if (channelId == selectedChannelId_) {
+                    searchDialog_->setResults(matches);
+                }
+            });
+    connect(searchDialog_, &SearchDialog::resultActivated, this, [this](qint64 messageId) {
+        if (!chatView_->scrollToMessage(messageId)) {
+            showToast(tr("That message isn't loaded — try \"Load older messages\" first"),
+                       ToastBanner::Variant::kInfo);
+        }
+    });
     connect(&callManager_, &CallManager::participantJoined, this, [this](const QString& login) {
         if (!callParticipants_.contains(login)) {
             callParticipants_.append(login);
@@ -468,6 +492,7 @@ void MainWindow::buildUi() {
     settingsDialog_ = new SettingsDialog(this);
     profileDialog_ = new ProfileDialog(this);
     moderatorsDialog_ = new ModeratorsDialog(this);
+    searchDialog_ = new SearchDialog(this);
 }
 
 void MainWindow::populateDevices() {
@@ -685,6 +710,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
     chatView_->clearLog();
+    searchDialog_->clearResults();
     chatClient_.connectToChannel(lastToken_, id);
     chatRestClient_.listMessages(lastToken_, id, kMessagePageSize);
 }
@@ -708,6 +734,7 @@ void MainWindow::closeChatView() {
     selectedChannelId_ = -1;
     oldestMessageId_ = -1;
     chatView_->showPlaceholder();
+    searchDialog_->clearResults();
 }
 
 void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {

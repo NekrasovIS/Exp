@@ -89,4 +89,8 @@ std::optional<AttachmentData> ChatService::findAttachmentData(std::int64_t attac
     return repository_.findAttachmentData(attachmentId);
 }
 
+std::vector<Message> ChatService::searchMessages(std::int64_t channelId, const std::string& query, int limit) {
+    return repository_.searchMessages(channelId, query, limit);
+}
+
 }  // namespace chat_service

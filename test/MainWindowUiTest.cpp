@@ -195,6 +195,17 @@ TEST(MainWindowUiTest, ScreenShareToggleButtonExistsAndStartsDisabled) {
     EXPECT_FALSE(screenShareToggleButton->isEnabled());
 }
 
+TEST(MainWindowUiTest, SearchButtonExists) {
+    // #118: "Search" lives in ChatView's channel header — see
+    // MainWindow's SearchDialog wiring for the query/results flow.
+    const MainWindow window;
+
+    auto* searchButton = window.findChild<QPushButton*>("searchButton");
+
+    ASSERT_NE(searchButton, nullptr);
+    EXPECT_EQ(searchButton->text(), QStringLiteral("Search"));
+}
+
 TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
     const MainWindow window;
 

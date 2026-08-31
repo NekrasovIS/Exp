@@ -287,6 +287,115 @@ TEST(ChatClientIntegrationTest, MessageWithAttachmentIdRoundTripsAttachmentField
     EXPECT_EQ(receivedAttachmentFilename, QStringLiteral("photo.png"));
 }
 
+TEST(ChatClientIntegrationTest, SearchMessagesFindsPostedMessageAgainstLiveStack) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const QString login = QStringLiteral("chat-search-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClient(authUrl);
+    QString token;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClient, &AuthClient::tokenReceived, &loop, [&](const QString& receivedToken) {
+            token = receivedToken;
+            loop.quit();
+        });
+        QObject::connect(&authClient, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        authClient.requestToken(login, password);
+        loop.exec();
+    }
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(token, QStringLiteral("search-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    ChatClient chatClient(chatWsUrl);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        chatClient.connectToChannel(token, channelId);
+        loop.exec();
+    }
+
+    // Post two messages, only one of which contains the search term.
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
+                          [&](qint64, const QString&, const QString&, const QString&, qint64, const QString&) {
+                              loop.quit();
+                          });
+        chatClient.sendMessage(QStringLiteral("the needle is here"));
+        loop.exec();
+    }
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
+                          [&](qint64, const QString&, const QString&, const QString&, qint64, const QString&) {
+                              loop.quit();
+                          });
+        chatClient.sendMessage(QStringLiteral("nothing relevant"));
+        loop.exec();
+    }
+
+    QList<ChatMessageInfo> matches;
+    QString foundQuery;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::messagesFound, &loop,
+                          [&](qint64, const QString& query, const QList<ChatMessageInfo>& found) {
+                              foundQuery = query;
+                              matches = found;
+                              loop.quit();
+                          });
+        chatRestClient.searchMessages(token, channelId, QStringLiteral("needle"));
+        loop.exec();
+    }
+
+    EXPECT_EQ(foundQuery, QStringLiteral("needle"));
+    ASSERT_EQ(matches.size(), 1);
+    EXPECT_EQ(matches.at(0).body, QStringLiteral("the needle is here"));
+}
+
 TEST(ChatClientIntegrationTest, DisconnectFromChannelStopsFurtherMessageDelivery) {
     const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
     const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
