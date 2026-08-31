@@ -70,6 +70,8 @@ find_package(GTest CONFIG REQUIRED)
 add_executable(user_service_tests
     test/PasswordHashTest.cpp
     test/UserServiceIntegrationTest.cpp
+    test/UserRepositoryTest.cpp
+    test/HttpServerTest.cpp
 )
 target_link_libraries(user_service_tests PRIVATE
     user_service_core
