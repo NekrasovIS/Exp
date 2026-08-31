@@ -43,6 +43,20 @@ bool ChatService::joinCommunity(std::int64_t communityId, const std::string& log
     return repository_.joinCommunity(communityId, login);
 }
 
+MutationResult ChatService::promoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                              const std::string& requesterLogin) {
+    return repository_.promoteModerator(communityId, targetLogin, requesterLogin);
+}
+
+MutationResult ChatService::demoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                             const std::string& requesterLogin) {
+    return repository_.demoteModerator(communityId, targetLogin, requesterLogin);
+}
+
+std::vector<std::string> ChatService::listModerators(std::int64_t communityId) {
+    return repository_.listModerators(communityId);
+}
+
 std::optional<Message> ChatService::postMessage(std::int64_t channelId, const std::string& authorLogin,
                                                   const std::string& body) {
     return repository_.insertMessage(channelId, authorLogin, body);

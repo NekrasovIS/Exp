@@ -313,5 +313,81 @@ TEST(ChatServiceIntegrationTest, EditAndDeleteMessageAreRestrictedToTheAuthor) {
     EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kNotFound);  // already gone
 }
 
+TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwner) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "moderation-test-owner-" + suffix;
+    const std::string intruder = "moderation-test-intruder-" + suffix;
+    const std::string target = "moderation-test-target-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("moderation-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_TRUE(service.listModerators(community.id).empty());
+    EXPECT_EQ(service.promoteModerator(community.id, target, intruder), MutationResult::kForbidden);
+    EXPECT_EQ(service.promoteModerator(-1, target, owner), MutationResult::kNotFound);
+
+    // The owner can promote — target doesn't need to already be a
+    // member (promoteModerator() joins them implicitly).
+    EXPECT_EQ(service.promoteModerator(community.id, target, owner), MutationResult::kSuccess);
+    EXPECT_EQ(service.listModerators(community.id), std::vector<std::string>{target});
+
+    EXPECT_EQ(service.demoteModerator(community.id, target, intruder), MutationResult::kForbidden);
+    EXPECT_EQ(service.demoteModerator(community.id, target, owner), MutationResult::kSuccess);
+    EXPECT_TRUE(service.listModerators(community.id).empty());
+
+    // Demoting someone who was never a moderator is a harmless no-op.
+    EXPECT_EQ(service.demoteModerator(community.id, "never-was-a-mod-" + suffix, owner), MutationResult::kSuccess);
+}
+
+TEST(ChatServiceIntegrationTest, ModeratorsCanDeleteMessagesAndManageChannelsButNotEditMessagesOrTheCommunity) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "moderation-test-owner2-" + suffix;
+    const std::string moderator = "moderation-test-mod-" + suffix;
+    const std::string author = "moderation-test-author-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("moderation-test-community2-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", author);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_EQ(service.promoteModerator(community.id, moderator, owner), MutationResult::kSuccess);
+
+    const std::optional<Message> posted = service.postMessage(*channelId, author, "original");
+    ASSERT_TRUE(posted.has_value());
+
+    // A moderator may not edit someone else's message — deletion only.
+    EXPECT_EQ(service.editMessage(posted->id, *channelId, moderator, "hijacked").result, MutationResult::kForbidden);
+
+    // A moderator may not rename/delete the community itself.
+    EXPECT_EQ(service.renameCommunity(community.id, "hijacked", moderator), MutationResult::kForbidden);
+    EXPECT_EQ(service.deleteCommunity(community.id, moderator), MutationResult::kForbidden);
+
+    // A moderator CAN rename/delete a channel they didn't create.
+    EXPECT_EQ(service.renameChannel(*channelId, "renamed-by-moderator", moderator), MutationResult::kSuccess);
+
+    // A moderator CAN delete a message they didn't author.
+    EXPECT_EQ(service.deleteMessage(posted->id, *channelId, moderator), MutationResult::kSuccess);
+    EXPECT_TRUE(service.recentMessages(*channelId, 10).empty());
+
+    EXPECT_EQ(service.deleteChannel(*channelId, moderator), MutationResult::kSuccess);
+}
+
 }  // namespace
 }  // namespace chat_service

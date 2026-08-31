@@ -451,5 +451,127 @@ TEST(ChatRestClientTest, CreateChannelInNonexistentCommunityEmitsError) {
     EXPECT_FALSE(errorMessage.isEmpty());
 }
 
+TEST(ChatRestClientTest, PromoteThenListThenDemoteModeratorRoundTrip) {
+    const QString token = registerAndGetToken(QStringLiteral("chat-rest-mod-owner"));
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
+    }
+
+    ChatRestClient client(chatRestUrl());
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        client.createCommunity(token, QStringLiteral("chat-rest-mod-community"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    // Doesn't need to be a real registered account — chat-service's
+    // memberships table has no foreign key into user-service's users.
+    const QString targetLogin = uniqueLogin(QStringLiteral("chat-rest-mod-target"));
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        qint64 promotedCommunityId = 0;
+        QString promotedLogin;
+        QObject::connect(&client, &ChatRestClient::moderatorPromoted, &loop,
+                          [&](qint64 id, const QString& login) {
+                              promotedCommunityId = id;
+                              promotedLogin = login;
+                              loop.quit();
+                          });
+        client.promoteModerator(token, communityId, targetLogin);
+        loop.exec();
+        EXPECT_EQ(promotedCommunityId, communityId);
+        EXPECT_EQ(promotedLogin, targetLogin);
+    }
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QStringList listedLogins;
+        QObject::connect(&client, &ChatRestClient::moderatorsListed, &loop,
+                          [&](qint64, const QStringList& logins) {
+                              listedLogins = logins;
+                              loop.quit();
+                          });
+        client.listModerators(token, communityId);
+        loop.exec();
+        EXPECT_EQ(listedLogins, QStringList{targetLogin});
+    }
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QString demotedLogin;
+        QObject::connect(&client, &ChatRestClient::moderatorDemoted, &loop,
+                          [&](qint64, const QString& login) {
+                              demotedLogin = login;
+                              loop.quit();
+                          });
+        client.demoteModerator(token, communityId, targetLogin);
+        loop.exec();
+        EXPECT_EQ(demotedLogin, targetLogin);
+    }
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QStringList listedAfterDemote;
+        bool receivedList = false;
+        QObject::connect(&client, &ChatRestClient::moderatorsListed, &loop,
+                          [&](qint64, const QStringList& logins) {
+                              listedAfterDemote = logins;
+                              receivedList = true;
+                              loop.quit();
+                          });
+        client.listModerators(token, communityId);
+        loop.exec();
+        ASSERT_TRUE(receivedList);
+        EXPECT_TRUE(listedAfterDemote.isEmpty());
+    }
+}
+
+TEST(ChatRestClientTest, PromoteModeratorByNonOwnerEmitsError) {
+    const QString ownerToken = registerAndGetToken(QStringLiteral("chat-rest-mod-403-owner"));
+    const QString intruderToken = registerAndGetToken(QStringLiteral("chat-rest-mod-403-intruder"));
+    if (ownerToken.isEmpty() || intruderToken.isEmpty()) {
+        GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
+    }
+
+    ChatRestClient ownerClient(chatRestUrl());
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&ownerClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        ownerClient.createCommunity(ownerToken, QStringLiteral("chat-rest-mod-403-community"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    ChatRestClient intruderClient(chatRestUrl());
+    QString errorMessage;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&intruderClient, &ChatRestClient::errorOccurred, &loop, [&](const QString& message) {
+        errorMessage = message;
+        loop.quit();
+    });
+    intruderClient.promoteModerator(intruderToken, communityId, uniqueLogin(QStringLiteral("anyone")));
+    loop.exec();
+
+    EXPECT_FALSE(errorMessage.isEmpty());
+}
+
 }  // namespace
 }  // namespace devicehub

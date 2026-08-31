@@ -394,6 +394,74 @@ TEST(WebSocketServerTest, ChatMessageWithMissingBodyReturnsError) {
     server.stop();
 }
 
+TEST(WebSocketServerTest, ModeratorCanDeleteAnotherSubscribersMessageButNotEditIt) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18089"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-mod-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-mod-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string authorLogin = "ws-mod-test-author-" + suffix;
+    const std::string moderatorLogin = "ws-mod-test-mod-" + suffix;
+    const std::optional<std::string> authorToken = registerAndGetToken(authHost, authPort, authorLogin);
+    if (!authorToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> moderatorToken = registerAndGetToken(authHost, authPort, moderatorLogin);
+    ASSERT_TRUE(moderatorToken.has_value());
+    ASSERT_EQ(service.promoteModerator(community.id, moderatorLogin, owner), MutationResult::kSuccess);
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    WebSocketServer server(service, authServiceClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient author(wsUrl);
+    WsTestClient moderator(wsUrl);
+    ASSERT_TRUE(author.waitConnected());
+    ASSERT_TRUE(moderator.waitConnected());
+    author.send(nlohmann::json{{"token", *authorToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(author.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    moderator.send(nlohmann::json{{"token", *moderatorToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(moderator.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    author.send(nlohmann::json{{"body", "author's message"}});
+    const std::optional<nlohmann::json> posted =
+        moderator.waitFor([](const nlohmann::json& m) { return m.contains("body"); });
+    ASSERT_TRUE(posted.has_value());
+    const auto messageId = (*posted)["id"].get<std::int64_t>();
+
+    // The moderator may not edit it — same authorship-only rule as
+    // before issue #114.
+    moderator.send(nlohmann::json{{"edit_message", {{"id", messageId}, {"body", "hijacked"}}}});
+    ASSERT_TRUE(moderator.waitFor([](const nlohmann::json& m) { return m.contains("error"); }).has_value());
+
+    // But the moderator CAN delete it — broadcast to every subscriber,
+    // including the original author.
+    moderator.send(nlohmann::json{{"delete_message", {{"id", messageId}}}});
+    const std::optional<nlohmann::json> deletedOnAuthor =
+        author.waitFor([](const nlohmann::json& m) { return m.contains("message_deleted"); });
+    ASSERT_TRUE(deletedOnAuthor.has_value());
+    EXPECT_EQ((*deletedOnAuthor)["message_deleted"]["id"].get<std::int64_t>(), messageId);
+
+    server.stop();
+}
+
 TEST(WebSocketServerTest, DisconnectWithoutLeaveNotifiesRemainingCallParticipants) {
     ix::initNetSystem();
 

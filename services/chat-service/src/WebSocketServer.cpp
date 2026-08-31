@@ -148,14 +148,16 @@ namespace {
 /// Shared by handleEditMessage()/handleDeleteMessage(): kNotFound and
 /// kForbidden both go back to the sender only, never broadcast — a
 /// failed edit/delete attempt isn't something other subscribers need
-/// to know about.
-bool respondIfMutationFailed(ix::WebSocket& webSocket, MutationResult result) {
+/// to know about. @p forbiddenMessage differs between the two callers
+/// (issue #114 widened who may delete, but not who may edit — see
+/// ChatRepository::editMessage()'s doc comment).
+bool respondIfMutationFailed(ix::WebSocket& webSocket, MutationResult result, const char* forbiddenMessage) {
     switch (result) {
         case MutationResult::kNotFound:
             webSocket.send(nlohmann::json{{"error", "no such message"}}.dump());
             return true;
         case MutationResult::kForbidden:
-            webSocket.send(nlohmann::json{{"error", "only the message's author may do that"}}.dump());
+            webSocket.send(nlohmann::json{{"error", forbiddenMessage}}.dump());
             return true;
         case MutationResult::kConflict:
         case MutationResult::kSuccess:
@@ -176,7 +178,7 @@ void WebSocketServer::handleEditMessage(ix::WebSocket& webSocket, const Subscrip
     const auto messageId = body["id"].get<std::int64_t>();
     const EditMessageResult result = chatService_.editMessage(messageId, subscription.channelId, subscription.login,
                                                                 body["body"].get<std::string>());
-    if (respondIfMutationFailed(webSocket, result.result)) {
+    if (respondIfMutationFailed(webSocket, result.result, "only the message's author may do that")) {
         return;
     }
 
@@ -197,7 +199,8 @@ void WebSocketServer::handleDeleteMessage(ix::WebSocket& webSocket, const Subscr
 
     const auto messageId = body["id"].get<std::int64_t>();
     const MutationResult result = chatService_.deleteMessage(messageId, subscription.channelId, subscription.login);
-    if (respondIfMutationFailed(webSocket, result)) {
+    if (respondIfMutationFailed(webSocket, result,
+                                 "only the message's author, the channel/community owner, or a moderator may do that")) {
         return;
     }
 

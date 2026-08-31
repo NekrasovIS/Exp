@@ -628,5 +628,66 @@ TEST(HttpServerTest, ListMessagesRespectsLimitQueryParam) {
     EXPECT_EQ(body.size(), 1U);
 }
 
+TEST(HttpServerTest, PromoteModeratorRejectsNonOwnerWith403) {
+    auto fixtureOpt = TestFixture::create("http-server-promote-403");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-mod-403-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::string> intruderToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-mod-intruder-" + uniqueSuffix());
+    ASSERT_TRUE(intruderToken.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*intruderToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/moderators", headers,
+                    nlohmann::json{{"login", "anyone"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 403);
+}
+
+TEST(HttpServerTest, PromoteThenListThenDemoteModeratorRoundTrip) {
+    auto fixtureOpt = TestFixture::create("http-server-promote-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-mod-200-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::string target = "http-server-mod-target-" + uniqueSuffix();
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    const httplib::Result promoteResult =
+        client.Post("/communities/" + std::to_string(community.id) + "/moderators", headers,
+                    nlohmann::json{{"login", target}}.dump(), "application/json");
+    ASSERT_TRUE(promoteResult);
+    EXPECT_EQ(promoteResult->status, 200);
+
+    const httplib::Result listResult = client.Get("/communities/" + std::to_string(community.id) + "/moderators", headers);
+    ASSERT_TRUE(listResult);
+    ASSERT_EQ(listResult->status, 200);
+    const nlohmann::json moderators = nlohmann::json::parse(listResult->body);
+    ASSERT_EQ(moderators.size(), 1U);
+    EXPECT_EQ(moderators[0].get<std::string>(), target);
+
+    const httplib::Result demoteResult =
+        client.Delete("/communities/" + std::to_string(community.id) + "/moderators/" + target, headers);
+    ASSERT_TRUE(demoteResult);
+    EXPECT_EQ(demoteResult->status, 200);
+
+    const httplib::Result listAfterDemoteResult =
+        client.Get("/communities/" + std::to_string(community.id) + "/moderators", headers);
+    ASSERT_TRUE(listAfterDemoteResult);
+    EXPECT_EQ(nlohmann::json::parse(listAfterDemoteResult->body).size(), 0U);
+}
+
 }  // namespace
 }  // namespace chat_service

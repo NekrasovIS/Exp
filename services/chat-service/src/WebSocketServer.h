@@ -48,13 +48,13 @@ namespace chat_service {
  *   - `{"edit_message": {"id": N, "body": "..."}}` (issue #107) —
  *     broadcasts `{"message_edited": {"id", "body", "edited_at"}}` to
  *     every *chat* subscriber (including the editor). Only the
- *     message's own author may edit it — not the channel/community
- *     owner, unlike rename/delete for channels and communities
- *     themselves; that owner-level moderation power over other
- *     people's messages is deliberately out of scope here, left for a
- *     future roles/moderation feature. Replies `{"error": ...}` to the
- *     sender (not broadcast) on 404/403.
- *   - `{"delete_message": {"id": N}}` — same authorship rule, broadcasts
+ *     message's own author may edit it, even after roles/moderation
+ *     (issue #114) — see ChatRepository::editMessage()'s doc comment
+ *     for why moderator power stops at deletion. Replies `{"error":
+ *     ...}` to the sender (not broadcast) on 404/403.
+ *   - `{"delete_message": {"id": N}}` — wider than edit_message's rule
+ *     (issue #114): the message's own author, the channel/community
+ *     owner, or a community moderator may all delete it. Broadcasts
  *     `{"message_deleted": {"id"}}` on success.
  *
 

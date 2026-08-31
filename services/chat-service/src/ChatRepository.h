@@ -54,6 +54,16 @@ struct EditMessageResult {
  * isn't thread-safe and HttpServer/WebSocketServer may dispatch from
  * multiple threads; see UserRepository in user-service for the same
  * tradeoff and its rationale.
+ *
+ * Roles (issue #114): every community has exactly one owner
+ * (communities.owner_login, set at creation, never transferable) plus
+ * any number of moderators (memberships.is_moderator) the owner
+ * promotes/demotes. A moderator can delete any message and
+ * rename/delete any channel within that one community — never touch
+ * the community itself (rename/delete community, promote/demote other
+ * moderators) and never edit someone else's message (see
+ * editMessage()'s doc comment). Moderator status doesn't cross
+ * communities: being a moderator of one grants nothing in another.
  */
 class ChatRepository {
 public:
@@ -70,13 +80,39 @@ public:
     [[nodiscard]] std::optional<std::int64_t> createChannel(std::int64_t communityId, const std::string& name,
                                                              const std::string& ownerLogin);
     [[nodiscard]] std::vector<Channel> listChannels(std::int64_t communityId);
+
+    /// Allowed for the channel's own owner, the parent community's
+    /// owner, or a moderator of the parent community (issue #114) — not
+    /// just whoever happens to have created this particular channel.
     [[nodiscard]] MutationResult renameChannel(std::int64_t id, const std::string& newName,
                                                 const std::string& requesterLogin);
+
+    /// Same authority rule as renameChannel().
     [[nodiscard]] MutationResult deleteChannel(std::int64_t id, const std::string& requesterLogin);
 
     /// Idempotent: joining a community you're already in succeeds.
     /// @return False if @p communityId doesn't exist.
     [[nodiscard]] bool joinCommunity(std::int64_t communityId, const std::string& login);
+
+    /// Promotes @p targetLogin to moderator of @p communityId — owner-only
+    /// (issue #114). Implicitly joins @p targetLogin to the community
+    /// first if they weren't already a member (same effect as
+    /// joinCommunity()) — a moderator who isn't even a member would be a
+    /// confusing state to end up in.
+    [[nodiscard]] MutationResult promoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                                   const std::string& requesterLogin);
+
+    /// Owner-only. Demoting someone who was never a moderator (or isn't
+    /// even a member) is a harmless no-op success, not an error — same
+    /// idempotent style as joinCommunity().
+    [[nodiscard]] MutationResult demoteModerator(std::int64_t communityId, const std::string& targetLogin,
+                                                  const std::string& requesterLogin);
+
+    /// Logins of every current moderator of @p communityId, in no
+    /// particular order — empty (not an error) for a nonexistent
+    /// community, same "just return nothing" style as
+    /// listChannels()/listCommunities().
+    [[nodiscard]] std::vector<std::string> listModerators(std::int64_t communityId);
 
     /// @return The stored message (with its assigned id/timestamp), or
     ///         std::nullopt if @p channelId doesn't exist.
@@ -91,13 +127,20 @@ public:
                                                             std::optional<std::int64_t> beforeId = std::nullopt);
 
     /// Only @p requesterLogin being the message's own author may edit
-    /// it (kForbidden otherwise) — not the channel/community owner;
-    /// see WebSocketServer's class doc comment for the moderation-vs-
-    /// authorship distinction this deliberately doesn't blur.
+    /// it (kForbidden otherwise) — not the channel/community owner, and
+    /// not a moderator either, even after issue #114: editing someone
+    /// else's message would let a moderator put words in their mouth,
+    /// which is a materially different (and worse) power than removing
+    /// content outright. See WebSocketServer's class doc comment for
+    /// the moderation-vs-authorship distinction this deliberately
+    /// doesn't blur.
     [[nodiscard]] EditMessageResult editMessage(std::int64_t messageId, std::int64_t channelId,
                                                  const std::string& requesterLogin, const std::string& newBody);
 
-    /// Same authorship rule as editMessage().
+    /// Unlike editMessage(), deletion IS available to the parent
+    /// channel/community's owner or a community moderator (issue #114)
+    /// — removing bad content is ordinary moderation; rewriting it
+    /// isn't.
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
 

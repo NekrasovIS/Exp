@@ -162,6 +162,9 @@ class ChatRestClient {
   +createChannel(token: QString, communityId: qint64, name: QString)
   +listChannels(token: QString, communityId: qint64)
   +listMessages(token: QString, channelId: qint64, limit: int, beforeId: qint64)
+  +promoteModerator(token: QString, communityId: qint64, targetLogin: QString)
+  +demoteModerator(token: QString, communityId: qint64, targetLogin: QString)
+  +listModerators(token: QString, communityId: qint64)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
@@ -169,6 +172,9 @@ class ChatRestClient {
   +channelCreated(id: qint64, name: QString)
   +channelsListed(channels: QList<ChatItem>)
   +messagesListed(channelId: qint64, messages: QList<ChatMessageInfo>)
+  +moderatorPromoted(communityId: qint64, login: QString)
+  +moderatorDemoted(communityId: qint64, login: QString)
+  +moderatorsListed(communityId: qint64, logins: QStringList)
   +errorOccurred(message: QString)
 }
 ChatRestClient *-- QNetworkAccessManager : owns

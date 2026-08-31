@@ -26,6 +26,7 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class FooterBar;
+class ModeratorsDialog;
 class SettingsDialog;
 
 /**
@@ -109,6 +110,7 @@ private:
     AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
+    ModeratorsDialog* moderatorsDialog_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;
 };

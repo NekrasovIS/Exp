@@ -23,8 +23,13 @@ CREATE TABLE IF NOT EXISTS memberships (
     community_id BIGINT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
     member_login TEXT NOT NULL,
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Community-scoped role (issue #114) — the owner is tracked
+    -- separately on communities.owner_login, never here.
+    is_moderator BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (community_id, member_login)
 );
+
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS is_moderator BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS messages (
     id BIGSERIAL PRIMARY KEY,
