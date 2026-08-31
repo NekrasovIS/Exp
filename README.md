@@ -27,6 +27,9 @@ Screen Capture) слева. Тёмная тема с зелёным градие
   отдельные сервисы `auth-service` + `user-service` (Postgres).
 - Чаты и сообщества: подключение к каналу по ID и обмен сообщениями в
   реальном времени через `chat-service` (Postgres, WebSocket).
+- Desktop-уведомление (нативное OS, `QSystemTrayIcon`) о новом сообщении
+  в открытом канале, пока окно DeviceHub не в фокусе — не показывается
+  для собственных сообщений (`src/ui/DesktopNotifier`).
 
 ## Сборка
 

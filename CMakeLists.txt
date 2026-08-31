@@ -109,6 +109,10 @@ add_library(devicehub_core
     src/ui/IconFactory.cpp
     src/ui/ToastBanner.h
     src/ui/ToastBanner.cpp
+    src/ui/NotificationPolicy.h
+    src/ui/NotificationPolicy.cpp
+    src/ui/DesktopNotifier.h
+    src/ui/DesktopNotifier.cpp
 )
 target_include_directories(devicehub_core PUBLIC src)
 target_link_libraries(devicehub_core PUBLIC
@@ -175,6 +179,7 @@ add_executable(devicehub_tests
     test/DeviceEnumeratorTest.cpp
     test/MainWindowUiTest.cpp
     test/ToastBannerTest.cpp
+    test/NotificationPolicyTest.cpp
     test/ChatMessageGroupingTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
