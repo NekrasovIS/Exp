@@ -368,9 +368,33 @@ RTTI, поэтому у экспортируемых классов вроде `
   renegotiation после удаления трека. Обойдено тем, что трек больше не
   удаляется вообще, только `set_enabled(false)`.
 
-UI (кнопка камеры, отображение локального превью и видео участников) —
-отдельная задача, по той же схеме поэтапной разработки, что и
-голосовые звонки.
+UI (issue #91) добавляет кнопку «Enable Video»/«Disable Video» в шапку
+канала (рядом с Call/Mute, тот же паттерн — обычная `QPushButton`,
+активна только во время звонка) и полоску видео над списком сообщений:
+локальное превью (`QVideoWidget`, тот же fan-out кадров камеры, что уже
+используется для превью в Settings — `CameraDevice::frameAvailable`
+рассчитан на нескольких подписчиков сразу) и по одному тайлу
+(`QLabel` с `QPixmap`) на каждого участника, чьё видео пришло. Полоска
+скрыта, когда показывать нечего, и полностью сбрасывается при выходе из
+звонка (`ChatView::setCallState(false, ...)`), а не отдельным вызовом на
+каждом месте выхода — так каждый из уже существующих путей завершения
+звонка получает сброс бесплатно.
+
+Приём удалённого видео потребовал нового бэкенд-пути, которого не было
+даже после #72/#74: `CallManager::PeerObserver` не переопределял
+`OnTrack()`, так что входящие видео-треки участников нигде не
+подхватывались. `handleRemoteTrack()` (вызывается из `OnTrack()` тем же
+способом, что и остальные колбэки `PeerConnectionObserver` — hop на GUI-
+поток через `QMetaObject::invokeMethod` до касания состояния) заводит
+для видео-трека приёмный `RemoteVideoSink` (реализация
+`webrtc::VideoSinkInterface<webrtc::VideoFrame>`, хранится в
+`PeerConnectionEntry` — по одному на пира, как и `videoSender` для
+исходящей стороны) и подписывает его через `AddOrUpdateSink()`.
+`RemoteVideoSink::OnFrame()` — зеркало `CallVideoTrackSource::pushFrame()`:
+там `QImage` → I420 через `libyuv::ARGBToI420`, здесь I420 → `QImage`
+через `libyuv::I420ToARGB`. Fires тоже не на GUI-потоке (на потоке
+декодирования WebRTC), так что перед `emit remoteVideoFrameReceived()`
+тот же hop через `invokeMethod`, что и везде в этом классе.
 
 Реальные end-to-end тесты требуют запущенных сервисов и Postgres и
 пропускают себя (`GTEST_SKIP`), если те недоступны — CI пока не
@@ -392,6 +416,30 @@ UI (кнопка камеры, отображение локального пр�
   учётных данных напрямую в Postgres.
 - `ChatServiceIntegrationTest` (chat-service) — сообщества/каналы/
   сообщения напрямую в Postgres.
+
+## Диаграммы
+
+PlantUML-диаграммы классов и sequence-диаграммы для нетривиальных
+потоков — исходники `.puml` в [docs/diagrams/](docs/diagrams/), рядом
+с ними PNG-рендер того же имени; PNG перерендеривается в том же
+коммите, что и любая правка `.puml` (`java -jar plantuml.jar -tpng
+docs/diagrams/*.puml`).
+
+- [devices.puml](docs/diagrams/devices.puml) — `src/devices`
+  ([devices.png](docs/diagrams/devices.png))
+- [auth.puml](docs/diagrams/auth.puml) — `src/auth`
+  ([auth.png](docs/diagrams/auth.png))
+- [chat.puml](docs/diagrams/chat.puml) — `src/chat`, включая
+  `CallManager` и mesh-звонки
+  ([chat.png](docs/diagrams/chat.png))
+- [ui.puml](docs/diagrams/ui.puml) — `src/ui`
+  ([ui.png](docs/diagrams/ui.png))
+- [mic-capture-sequence.puml](docs/diagrams/mic-capture-sequence.puml) —
+  запуск захвата с микрофона
+  ([mic-capture-sequence.png](docs/diagrams/mic-capture-sequence.png))
+- [call-video-receive-sequence.puml](docs/diagrams/call-video-receive-sequence.puml) —
+  приём видео от участника звонка (issue #91)
+  ([call-video-receive-sequence.png](docs/diagrams/call-video-receive-sequence.png))
 
 ## Правила разработки
 

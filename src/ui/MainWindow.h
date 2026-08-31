@@ -56,6 +56,7 @@ private:
     void onSendChatMessageClicked();
     void onCallToggleClicked();
     void onMuteToggleClicked();
+    void onVideoToggleClicked();
 
     /// Re-lists communities from chat-service (no-op, with a status bar
     /// message, if not signed in yet).

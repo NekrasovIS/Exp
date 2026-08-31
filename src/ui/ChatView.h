@@ -1,16 +1,20 @@
 #pragma once
 
+#include <QHash>
 #include <QStringList>
 #include <QWidget>
 
 #include "ui/ChatMessageRow.h"
 
+class QHBoxLayout;
+class QImage;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QStackedWidget;
 class QVBoxLayout;
+class QVideoWidget;
 
 namespace devicehub {
 
@@ -56,17 +60,34 @@ public:
     /// Updates the Call/Leave and Mute/Unmute buttons — MainWindow calls
     /// this after every CallManager state change (join, leave, mute
     /// toggle), rather than this widget tracking call state itself.
+    /// Leaving a call (inCall == false) also resets the video strip:
+    /// hides it and drops every remote tile, since video can't outlive
+    /// the call it belongs to.
     void setCallState(bool inCall, bool muted);
 
     /// Updates the small "who's in the call" label.
     void setCallParticipants(const QStringList& participants);
+
+    /// Updates the video toggle button and the local preview's
+    /// visibility — MainWindow calls this after every
+    /// CallManager::enableVideo()/disableVideo().
+    void setVideoEnabled(bool enabled);
+
+    /// Shows (creating its tile on first call) the latest decoded frame
+    /// from @p peerLogin's incoming video track.
+    void showRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
+
+    /// Drops @p peerLogin's video tile, if it has one.
+    void removeRemoteVideo(const QString& peerLogin);
 
     [[nodiscard]] QWidget* messagesContainer() const { return messagesContainer_; }
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
+    [[nodiscard]] QPushButton* videoToggleButton() const { return videoToggleButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
+    [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
 
 signals:
     /// Emitted when the placeholder's "Create channel" button is
@@ -81,6 +102,12 @@ signals:
     /// Mute button clicked — same pattern as callToggleRequested().
     void muteToggleRequested();
 
+    /// Video toggle button clicked — same pattern as
+    /// callToggleRequested(): MainWindow decides enable vs. disable
+    /// based on CallManager::videoEnabled() and calls back into
+    /// setVideoEnabled().
+    void videoToggleRequested();
+
 private:
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
@@ -91,7 +118,12 @@ private:
     QPushButton* sendButton_ = nullptr;
     QPushButton* callToggleButton_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
+    QPushButton* videoToggleButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
+    QWidget* videoStrip_ = nullptr;
+    QHBoxLayout* videoStripLayout_ = nullptr;
+    QVideoWidget* localVideoWidget_ = nullptr;
+    QHash<QString, QLabel*> remoteVideoTiles_;
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;

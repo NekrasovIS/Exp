@@ -60,16 +60,22 @@ class ChatView {
   +clearLog()
   +setCallState(inCall: bool, muted: bool)
   +setCallParticipants(participants: QStringList)
+  +setVideoEnabled(enabled: bool)
+  +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
+  +removeRemoteVideo(peerLogin: QString)
   +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
   +callToggleButton() : QPushButton*
   +muteToggleButton() : QPushButton*
+  +videoToggleButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
+  +localVideoWidget() : QVideoWidget*
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
   +muteToggleRequested()
+  +videoToggleRequested()
 }
 
 struct ChatMessage {
@@ -194,6 +200,7 @@ MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
 MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
+MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
@@ -202,8 +209,9 @@ CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
+MainWindow ..> ChatView : setVideoEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
-ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested() >
+ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested() >
 
 MainWindow ..> AudioInputDevice : levelChanged() >
 MainWindow ..> FooterBar : settingsButton().clicked() >
@@ -253,6 +261,23 @@ note right of MainWindow
   openChannel()/closeChatView() сначала
   выходят из активного звонка — он
   привязан к подписанному каналу.
+
+  Video-кнопка и полоска видео в ChatView
+  (issue #91) — тот же UI-сигнал/callback
+  паттерн: videoToggleRequested() ->
+  MainWindow решает enable/disable по
+  CallManager::videoEnabled(), зовёт назад
+  setVideoEnabled(). Локальное превью —
+  третий подписчик на CameraDevice::
+  frameAvailable() (рядом с превью в
+  SettingsDialog и CallManager::onCameraFrame()
+  — сигнал рассчитан на несколько
+  подписчиков сразу). Тайлы участников —
+  по QLabel/QPixmap на пира, создаются
+  лениво в showRemoteVideoFrame(). Выход
+  из звонка (setCallState(false, ...))
+  сбрасывает всю полоску разом — видео не
+  переживает звонок, которому принадлежит.
 
   ChatMessageRow/ChatBubble: размеры
   (аватар, отступы, радиус скругления)

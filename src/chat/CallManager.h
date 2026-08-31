@@ -8,12 +8,14 @@
 #include "devices/CameraDevice.h"
 
 #include <api/peer_connection_interface.h>
+#include <api/rtp_transceiver_interface.h>
 #include <api/scoped_refptr.h>
 #include <rtc_base/thread.h>
 
 #include <QAudioDevice>
 #include <QByteArray>
 #include <QCameraDevice>
+#include <QImage>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -86,6 +88,16 @@ namespace devicehub {
  * this class (media/base/codec_list.cc, "Check failed: present_codec
  * == codec"), so this class avoids that path entirely rather than
  * relying on an internal WebRTC bug being fixed.
+ *
+ * Receiving remote video (issue #91) is the mirror image of sending it:
+ * PeerObserver::OnTrack() fires once a peer's video transceiver appears,
+ * handleRemoteTrack() attaches a RemoteVideoSink to that track (guarded
+ * by PeerConnectionEntry::remoteVideoSink so it only happens once per
+ * peer), and RemoteVideoSink converts each incoming I420 frame back to a
+ * QImage (the reverse of CallVideoTrackSource's ARGBToI420) and emits
+ * remoteVideoFrameReceived() — hopping to the GUI thread first, since
+ * OnFrame() fires on a WebRTC decode thread, same as every other
+ * WebRTC-thread callback in this class.
  */
 class CallManager : public QObject {
     Q_OBJECT
@@ -130,11 +142,20 @@ signals:
     void participantLeft(const QString& login);
     void callError(const QString& message);
 
+    /// A decoded frame from a remote participant's incoming video track
+    /// (issue #91) — never emitted for a peer that hasn't sent video.
+    void remoteVideoFrameReceived(const QString& peerLogin, const QImage& frame);
+    /// The given peer's video track is gone (they left the call) — the
+    /// UI should drop that participant's video tile.
+    void remoteVideoTrackRemoved(const QString& peerLogin);
+
 private:
     class PeerObserver;
+    class RemoteVideoSink;
     class LocalDescriptionSetObserver;
     class RemoteDescriptionSetObserver;
     friend class PeerObserver;
+    friend class RemoteVideoSink;
     friend class LocalDescriptionSetObserver;
     friend class RemoteDescriptionSetObserver;
 
@@ -147,6 +168,10 @@ private:
         /// enableVideo()'s doc comment), so this never goes back to
         /// null.
         webrtc::scoped_refptr<webrtc::RtpSenderInterface> videoSender;
+        /// Non-null once a remote video track has been seen for this
+        /// peer (PeerObserver::OnTrack() -> handleRemoteTrack()) —
+        /// guards against attaching the receive-side sink twice.
+        std::unique_ptr<RemoteVideoSink> remoteVideoSink;
     };
 
     void onCallRosterReceived(const QStringList& participants);
@@ -166,6 +191,13 @@ private:
     void handleLocalDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
     void handleRemoteDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
     void handleLocalIceCandidate(const QString& peerLogin, const QJsonObject& payload);
+
+    /// A new (or renegotiated) transceiver appeared on `peerLogin`'s
+    /// connection — if it carries a video track and this peer doesn't
+    /// already have a receive-side sink, attaches one so frames start
+    /// flowing to remoteVideoFrameReceived().
+    void handleRemoteTrack(const QString& peerLogin, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
+    void handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
 
     /// Forwards a captured buffer from audioInput_ into the ADM, while a
     /// call is active.

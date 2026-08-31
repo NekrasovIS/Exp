@@ -57,6 +57,8 @@ class CallManager {
   +participantJoined(login: QString)
   +participantLeft(login: QString)
   +callError(message: QString)
+  +remoteVideoFrameReceived(peerLogin: QString, frame: QImage)
+  +remoteVideoTrackRemoved(peerLogin: QString)
   -ensureFactory()
   -ensurePeerConnection(peerLogin: QString) : PeerConnectionEntry*
   -closePeerConnection(peerLogin: QString)
@@ -64,6 +66,8 @@ class CallManager {
   -onCapturedPcm(data: QByteArray, format: QAudioFormat)
   -onCameraFrame(frame: QVideoFrame)
   -attachVideoTrack(entry: PeerConnectionEntry&)
+  -handleRemoteTrack(peerLogin: QString, transceiver: RtpTransceiverInterface*)
+  -handleRemoteVideoFrame(peerLogin: QString, frame: QImage)
 }
 CallManager --> ChatClient : uses (&), listens to call_* signals
 CallManager --> AudioInputDevice : uses (&), pcmDataAvailable()\n-> pushCapturedAudio() (issue #70)
@@ -129,6 +133,18 @@ note right of CallManager
   codec-list handling during live testing
   (media/base/codec_list.cc, "Check failed: present_codec
   == codec").
+
+  Receiving remote video (issue #91) mirrors the sending
+  side: PeerObserver::OnTrack() -> handleRemoteTrack()
+  attaches a RemoteVideoSink (webrtc::VideoSinkInterface)
+  to the peer's incoming video track, guarded by
+  PeerConnectionEntry::remoteVideoSink so it only happens
+  once. RemoteVideoSink::OnFrame() converts I420 back to
+  QImage via libyuv::I420ToARGB — the reverse of
+  CallVideoTrackSource's ARGBToI420 — and hops to the GUI
+  thread via QMetaObject::invokeMethod before emitting
+  remoteVideoFrameReceived(), since OnFrame() fires on a
+  WebRTC decode thread, not the GUI thread.
 end note
 
 class ChatRestClient {

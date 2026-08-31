@@ -2,13 +2,18 @@
 
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QStackedWidget>
 #include <QVBoxLayout>
+#include <QVideoWidget>
+
+#include <utility>
 
 #include "ui/ChatMessageGrouping.h"
 #include "ui/Theme.h"
@@ -18,6 +23,7 @@ namespace devicehub {
 namespace {
 constexpr int kPlaceholderPageIndex = 0;
 constexpr int kChannelPageIndex = 1;
+constexpr int kVideoTileSize = 160;
 }  // namespace
 
 ChatView::ChatView(QWidget* parent) : QWidget(parent) {
@@ -70,16 +76,38 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     muteToggleButton_->setEnabled(false);
     connect(muteToggleButton_, &QPushButton::clicked, this, &ChatView::muteToggleRequested);
 
+    videoToggleButton_ = new QPushButton(tr("Enable Video"), channelPage);
+    videoToggleButton_->setObjectName(QStringLiteral("videoToggleButton"));
+    videoToggleButton_->setEnabled(false);
+    connect(videoToggleButton_, &QPushButton::clicked, this, &ChatView::videoToggleRequested);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
     headerRow->addWidget(callToggleButton_);
     headerRow->addWidget(muteToggleButton_);
+    headerRow->addWidget(videoToggleButton_);
 
     callParticipantsLabel_ = new QLabel(channelPage);
     callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));
     callParticipantsLabel_->setWordWrap(true);
     callParticipantsLabel_->setVisible(false);
+
+    // Local preview + one tile per remote participant currently sending
+    // video (issue #91) — hidden whenever there's nothing to show (no
+    // active call, or video not yet enabled), same show/hide idiom as
+    // callParticipantsLabel_ above.
+    videoStrip_ = new QWidget(channelPage);
+    videoStripLayout_ = new QHBoxLayout(videoStrip_);
+    videoStripLayout_->setContentsMargins(0, 0, 0, 0);
+    videoStripLayout_->setSpacing(ui_theme::kSpacingSm);
+    videoStripLayout_->addStretch(1);
+
+    localVideoWidget_ = new QVideoWidget(videoStrip_);
+    localVideoWidget_->setObjectName(QStringLiteral("localVideoWidget"));
+    localVideoWidget_->setFixedSize(kVideoTileSize, kVideoTileSize);
+    videoStripLayout_->insertWidget(0, localVideoWidget_);
+    videoStrip_->setVisible(false);
 
     scrollArea_ = new QScrollArea(channelPage);
     scrollArea_->setObjectName(QStringLiteral("chatMessagesScrollArea"));
@@ -117,6 +145,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
 
     channelLayout->addLayout(headerRow);
     channelLayout->addWidget(callParticipantsLabel_);
+    channelLayout->addWidget(videoStrip_);
     channelLayout->addWidget(scrollArea_, /*stretch=*/1);
     channelLayout->addLayout(sendRow);
 
@@ -162,8 +191,17 @@ void ChatView::setCallState(bool inCall, bool muted) {
     callToggleButton_->setText(inCall ? tr("Leave call") : tr("Call"));
     muteToggleButton_->setEnabled(inCall);
     muteToggleButton_->setText(muted ? tr("Unmute") : tr("Mute"));
+    videoToggleButton_->setEnabled(inCall);
     if (!inCall) {
         callParticipantsLabel_->setVisible(false);
+        // Video can't outlive the call it belongs to — reset it here so
+        // every existing leave/channel-switch call site gets this for
+        // free instead of needing its own cleanup call.
+        setVideoEnabled(false);
+        for (QLabel* tile : std::as_const(remoteVideoTiles_)) {
+            delete tile;
+        }
+        remoteVideoTiles_.clear();
     }
 }
 
@@ -174,6 +212,37 @@ void ChatView::setCallParticipants(const QStringList& participants) {
     }
     callParticipantsLabel_->setText(tr("In call: %1").arg(participants.join(QStringLiteral(", "))));
     callParticipantsLabel_->setVisible(true);
+}
+
+void ChatView::setVideoEnabled(bool enabled) {
+    videoToggleButton_->setText(enabled ? tr("Disable Video") : tr("Enable Video"));
+    localVideoWidget_->setVisible(enabled);
+    videoStrip_->setVisible(enabled || !remoteVideoTiles_.isEmpty());
+}
+
+void ChatView::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame) {
+    QLabel* tile = remoteVideoTiles_.value(peerLogin, nullptr);
+    if (tile == nullptr) {
+        tile = new QLabel(videoStrip_);
+        tile->setObjectName(QStringLiteral("remoteVideoTile"));
+        tile->setFixedSize(kVideoTileSize, kVideoTileSize);
+        tile->setScaledContents(true);
+        videoStripLayout_->addWidget(tile);
+        remoteVideoTiles_.insert(peerLogin, tile);
+    }
+    tile->setPixmap(QPixmap::fromImage(frame));
+    videoStrip_->setVisible(true);
+}
+
+void ChatView::removeRemoteVideo(const QString& peerLogin) {
+    QLabel* tile = remoteVideoTiles_.take(peerLogin);
+    if (tile == nullptr) {
+        return;
+    }
+    delete tile;
+    if (remoteVideoTiles_.isEmpty() && !localVideoWidget_->isVisible()) {
+        videoStrip_->setVisible(false);
+    }
 }
 
 void ChatView::clearLog() {
