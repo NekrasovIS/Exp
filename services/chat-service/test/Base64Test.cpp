@@ -2,6 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <random>
+#include <string>
+
 namespace chat_service::base64 {
 namespace {
 
@@ -41,6 +45,32 @@ TEST(Base64Test, IgnoresWhitespaceAndNewlines) {
 
 TEST(Base64Test, RejectsInvalidAlphabetCharacter) {
     EXPECT_FALSE(decode("not!valid$$$base64").has_value());
+}
+
+// Interim stand-in for real coverage-guided fuzzing (issue #121 — libFuzzer
+// needs clang-cl, unavailable in this environment's MSVC toolchain): throws
+// thousands of random byte strings — attacker-controlled `data_base64` from
+// POST /channels/{id}/attachments is exactly this kind of untrusted input —
+// at decode() with a fixed seed for reproducibility. The only property
+// checked is that decode() never crashes/UB's on arbitrary bytes, including
+// embedded NUL and the full 0-255 range; a valid-or-nullopt return is
+// correct either way, so there's nothing else to assert against.
+TEST(Base64Test, DoesNotCrashOnRandomByteStrings) {
+    std::mt19937 rng(0xB4501234U);
+    std::uniform_int_distribution<int> lengthDist(0, 256);
+    std::uniform_int_distribution<int> byteDist(0, 255);
+
+    for (int iteration = 0; iteration < 5000; ++iteration) {
+        const int length = lengthDist(rng);
+        std::string input;
+        input.reserve(static_cast<std::size_t>(length));
+        for (int i = 0; i < length; ++i) {
+            input.push_back(static_cast<char>(static_cast<std::uint8_t>(byteDist(rng))));
+        }
+        // Not asserting on the result — decode() may accept or reject any
+        // given random string; surviving without crashing is the test.
+        static_cast<void>(decode(input));
+    }
 }
 
 }  // namespace
