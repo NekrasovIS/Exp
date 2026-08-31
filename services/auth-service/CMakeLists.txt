@@ -71,6 +71,8 @@ add_executable(auth_service_tests
     test/TokenServiceTest.cpp
     test/RateLimiterTest.cpp
     test/UserServiceClientIntegrationTest.cpp
+    test/base64_utilsTest.cpp
+    test/HttpServerTest.cpp
 )
 target_link_libraries(auth_service_tests PRIVATE
     auth_service_core
