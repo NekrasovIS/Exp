@@ -689,5 +689,142 @@ TEST(HttpServerTest, PromoteThenListThenDemoteModeratorRoundTrip) {
     EXPECT_EQ(nlohmann::json::parse(listAfterDemoteResult->body).size(), 0U);
 }
 
+TEST(HttpServerTest, UploadAttachmentRejectsMissingFieldsWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-upload-400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-upload-400-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post("/channels/" + std::to_string(*channelId) + "/attachments", headers,
+                                                 nlohmann::json{{"filename", "test.txt"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadAttachmentRejectsInvalidBase64With400) {
+    auto fixtureOpt = TestFixture::create("http-server-upload-badb64");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-upload-badb64-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", headers,
+        nlohmann::json{{"filename", "test.txt"}, {"content_type", "text/plain"}, {"data_base64", "not!valid$$$"}}
+            .dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadAttachmentRejectsOversizedPayloadWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-upload-oversized");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-upload-oversized-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    // 7,000,000 'A' characters decode cleanly (divisible by 4) to
+    // 5,250,000 zero bytes — over the 5 MB (5,242,880-byte) cap.
+    const std::string oversizedBase64(7000000, 'A');
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", headers,
+        nlohmann::json{{"filename", "big.bin"}, {"content_type", "application/octet-stream"},
+                       {"data_base64", oversizedBase64}}
+            .dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadThenDownloadAttachmentRoundTrip) {
+    auto fixtureOpt = TestFixture::create("http-server-upload-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-upload-200-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    // "Hello, attachment!" base64-encoded.
+    const httplib::Result uploadResult = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", headers,
+        nlohmann::json{{"filename", "greeting.txt"},
+                       {"content_type", "text/plain"},
+                       {"data_base64", "SGVsbG8sIGF0dGFjaG1lbnQh"}}
+            .dump(),
+        "application/json");
+    ASSERT_TRUE(uploadResult);
+    ASSERT_EQ(uploadResult->status, 201);
+    const nlohmann::json uploadBody = nlohmann::json::parse(uploadResult->body);
+    EXPECT_EQ(uploadBody["filename"].get<std::string>(), "greeting.txt");
+    EXPECT_EQ(uploadBody["content_type"].get<std::string>(), "text/plain");
+    EXPECT_EQ(uploadBody["size_bytes"].get<std::int64_t>(), 18);
+    const auto attachmentId = uploadBody["id"].get<std::int64_t>();
+    ASSERT_GT(attachmentId, 0);
+
+    const httplib::Result downloadResult = client.Get("/attachments/" + std::to_string(attachmentId), headers);
+    ASSERT_TRUE(downloadResult);
+    ASSERT_EQ(downloadResult->status, 200);
+    EXPECT_EQ(downloadResult->body, "Hello, attachment!");
+    EXPECT_EQ(downloadResult->get_header_value("Content-Type"), "text/plain");
+    EXPECT_NE(downloadResult->get_header_value("Content-Disposition").find("greeting.txt"), std::string::npos);
+}
+
+TEST(HttpServerTest, DownloadAttachmentRejectsNonexistentIdWith404) {
+    auto fixtureOpt = TestFixture::create("http-server-download-404");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/attachments/999999999", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
 }  // namespace
 }  // namespace chat_service

@@ -62,6 +62,8 @@ find_package(libpqxx CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(chat_service_core
+    src/base64.h
+    src/base64.cpp
     src/ChatRepository.h
     src/ChatRepository.cpp
     src/ChatService.h
@@ -98,6 +100,7 @@ enable_testing()
 find_package(GTest CONFIG REQUIRED)
 
 add_executable(chat_service_tests
+    test/Base64Test.cpp
     test/ChatServiceIntegrationTest.cpp
     test/WebSocketServerTest.cpp
     test/HttpServerTest.cpp

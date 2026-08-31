@@ -134,6 +134,7 @@ public:
     [[nodiscard]] QWidget* messagesContainer() const { return messagesContainer_; }
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
+    [[nodiscard]] QPushButton* attachButton() const { return attachButton_; }
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
     [[nodiscard]] QPushButton* videoToggleButton() const { return videoToggleButton_; }
@@ -178,6 +179,15 @@ signals:
     /// "Delete" clicked on one of the user's own messages.
     void deleteMessageRequested(qint64 id);
 
+    /// "Attach" clicked (issue #116) — MainWindow opens a file picker,
+    /// uploads the chosen file via ChatRestClient, then auto-sends it as
+    /// a message (see MainWindow::onAttachFileClicked()'s doc comment).
+    void attachFileRequested();
+
+    /// "Download" clicked on a message with an attachment — bubbled up
+    /// from whichever ChatMessageRow it came from.
+    void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
+
 private:
     /// Wires a freshly created row's editRequested()/deleteRequested()
     /// to this view's own edit-mode state / deleteMessageRequested() —
@@ -201,6 +211,7 @@ private:
     QPushButton* loadOlderButton_ = nullptr;
     QLineEdit* messageEdit_ = nullptr;
     QPushButton* sendButton_ = nullptr;
+    QPushButton* attachButton_ = nullptr;
     QPushButton* callToggleButton_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QPushButton* videoToggleButton_ = nullptr;

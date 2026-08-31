@@ -176,13 +176,48 @@ void ChatRestClient::listMessages(const QString& token, qint64 channelId, int li
         if (document.isArray()) {
             for (const QJsonValue& value : document.array()) {
                 const QJsonObject object = value.toObject();
-                messages.push_back(ChatMessageInfo{.id = object.value("id").toVariant().toLongLong(),
-                                                     .author = object.value("author").toString(),
-                                                     .body = object.value("body").toString(),
-                                                     .sentAt = object.value("sent_at").toString()});
+                const QJsonValue attachmentIdValue = object.value("attachment_id");
+                messages.push_back(ChatMessageInfo{
+                    .id = object.value("id").toVariant().toLongLong(),
+                    .author = object.value("author").toString(),
+                    .body = object.value("body").toString(),
+                    .sentAt = object.value("sent_at").toString(),
+                    .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
+                    .attachmentFilename = object.value("attachment_filename").toString()});
             }
         }
         emit messagesListed(channelId, messages);
+    });
+}
+
+void ChatRestClient::uploadAttachment(const QString& token, qint64 channelId, const QString& filename,
+                                       const QString& contentType, const QByteArray& data) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/attachments").arg(channelId)));
+    const QJsonObject body{
+        {"filename", filename}, {"content_type", contentType}, {"data_base64", QString::fromLatin1(data.toBase64())}};
+    QNetworkReply* reply =
+        networkManager_.post(buildRequest(url, token), QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit attachmentUploaded(object.value("id").toVariant().toLongLong(), object.value("filename").toString());
+    });
+}
+
+void ChatRestClient::downloadAttachment(const QString& token, qint64 attachmentId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/attachments/%1").arg(attachmentId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, attachmentId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit attachmentDownloaded(attachmentId, reply->readAll());
     });
 }
 

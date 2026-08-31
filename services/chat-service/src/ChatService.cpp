@@ -58,8 +58,8 @@ std::vector<std::string> ChatService::listModerators(std::int64_t communityId) {
 }
 
 std::optional<Message> ChatService::postMessage(std::int64_t channelId, const std::string& authorLogin,
-                                                  const std::string& body) {
-    return repository_.insertMessage(channelId, authorLogin, body);
+                                                  const std::string& body, std::optional<std::int64_t> attachmentId) {
+    return repository_.insertMessage(channelId, authorLogin, body, attachmentId);
 }
 
 std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int limit, std::optional<std::int64_t> beforeId) {
@@ -74,6 +74,19 @@ EditMessageResult ChatService::editMessage(std::int64_t messageId, std::int64_t 
 MutationResult ChatService::deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                            const std::string& requesterLogin) {
     return repository_.deleteMessage(messageId, channelId, requesterLogin);
+}
+
+std::optional<AttachmentMetadata> ChatService::createAttachment(std::int64_t channelId,
+                                                                   const std::string& uploaderLogin,
+                                                                   const std::string& filename,
+                                                                   const std::string& contentType,
+                                                                   const std::string& dataBase64,
+                                                                   std::int64_t sizeBytes) {
+    return repository_.createAttachment(channelId, uploaderLogin, filename, contentType, dataBase64, sizeBytes);
+}
+
+std::optional<AttachmentData> ChatService::findAttachmentData(std::int64_t attachmentId) {
+    return repository_.findAttachmentData(attachmentId);
 }
 
 }  // namespace chat_service

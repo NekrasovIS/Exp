@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QMainWindow>
 #include <memory>
@@ -58,6 +59,10 @@ private:
     void onRequestTokenClicked();
     void onRegisterClicked();
     void onSendChatMessageClicked();
+    /// "Attach" clicked (issue #116) — opens a file picker, then uploads
+    /// the chosen file; the actual send happens once
+    /// ChatRestClient::attachmentUploaded() fires (see MainWindow.cpp).
+    void onAttachFileClicked();
     void onCallToggleClicked();
     void onMuteToggleClicked();
     void onVideoToggleClicked();
@@ -108,6 +113,11 @@ private:
     /// channel, or -1 if none loaded yet — the beforeId cursor for the
     /// next "Load older messages" fetch. Reset on every channel switch.
     qint64 oldestMessageId_ = -1;
+    /// Filename to suggest in the save dialog once the matching
+    /// ChatRestClient::attachmentDownloaded() reply arrives (issue #116)
+    /// — keyed by attachment id since downloads can be in flight for more
+    /// than one message at a time.
+    QHash<qint64, QString> pendingDownloadFilenames_;
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;

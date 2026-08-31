@@ -37,6 +37,28 @@ struct Message {
     std::string body;
     std::string sentAt;                   // ISO 8601, as returned by Postgres
     std::optional<std::string> editedAt;  // unset if never edited (issue #107)
+    std::optional<std::int64_t> attachmentId;    // unset for a plain text message (issue #116)
+    std::optional<std::string> attachmentFilename;  // set iff attachmentId is
+};
+
+/// Metadata about a stored attachment (issue #116) — everything except
+/// the raw bytes, which findAttachmentData() fetches separately so a
+/// route that only needs metadata (e.g. rendering a message) doesn't
+/// pull megabytes of data through Postgres for nothing.
+struct AttachmentMetadata {
+    std::int64_t id = 0;
+    std::string filename;
+    std::string contentType;
+    std::int64_t sizeBytes = 0;
+};
+
+/// A stored attachment's data, for GET /attachments/{id} — @p data is
+/// still base64-encoded (as stored; see ChatRepository's doc comment on
+/// why), so HttpServer decodes it before writing the HTTP response body.
+struct AttachmentData {
+    std::string filename;
+    std::string contentType;
+    std::string data;
 };
 
 /// Outcome of editMessage() — MutationResult alone doesn't carry the
@@ -48,7 +70,8 @@ struct EditMessageResult {
 };
 
 /**
- * @brief Postgres-backed storage for communities/channels/memberships/messages.
+ * @brief Postgres-backed storage for communities/channels/memberships/
+ *        messages/attachments.
  *
  * Opens a fresh connection per call rather than pooling — pqxx::connection
  * isn't thread-safe and HttpServer/WebSocketServer may dispatch from
@@ -64,6 +87,15 @@ struct EditMessageResult {
  * moderators) and never edit someone else's message (see
  * editMessage()'s doc comment). Moderator status doesn't cross
  * communities: being a moderator of one grants nothing in another.
+ *
+ * Attachments (issue #116) are stored as base64-encoded TEXT rows
+ * directly in this same Postgres database rather than raw BYTEA — this
+ * sidesteps libpqxx's binary-parameter binding (pqxx::blob targets Large
+ * Objects, a different mechanism from a BYTEA column) at the cost of the
+ * usual ~33% base64 size overhead — and rather than on disk or in object
+ * storage, the simplest option for a first version, size-capped (see
+ * kMaxAttachmentSizeBytes in HttpServer.cpp) rather than built to scale
+ * to large files or real production traffic.
  */
 class ChatRepository {
 public:
@@ -115,9 +147,31 @@ public:
     [[nodiscard]] std::vector<std::string> listModerators(std::int64_t communityId);
 
     /// @return The stored message (with its assigned id/timestamp), or
-    ///         std::nullopt if @p channelId doesn't exist.
+    ///         std::nullopt if @p channelId doesn't exist, or
+    ///         @p attachmentId is set but doesn't exist/belong to a
+    ///         different channel.
     [[nodiscard]] std::optional<Message> insertMessage(std::int64_t channelId, const std::string& authorLogin,
-                                                        const std::string& body);
+                                                        const std::string& body,
+                                                        std::optional<std::int64_t> attachmentId = std::nullopt);
+
+    /// Stores @p dataBase64 (already base64-encoded by the caller — see
+    /// this class's doc comment) verbatim as a new attachment for
+    /// @p channelId, alongside @p sizeBytes (the *decoded* byte count,
+    /// which HttpServer already computed to enforce the size cap before
+    /// calling this — stored so findAttachmentData() callers don't need
+    /// to decode just to learn the size).
+    /// @return std::nullopt if @p channelId doesn't exist.
+    [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
+                                                                       const std::string& uploaderLogin,
+                                                                       const std::string& filename,
+                                                                       const std::string& contentType,
+                                                                       const std::string& dataBase64,
+                                                                       std::int64_t sizeBytes);
+
+    /// @return The attachment's data (still base64-encoded, as stored —
+    ///         see this class's doc comment), or std::nullopt if no
+    ///         such attachment exists.
+    [[nodiscard]] std::optional<AttachmentData> findAttachmentData(std::int64_t attachmentId);
     /// Chronological (oldest to newest) page of up to @p limit messages.
     /// With @p beforeId unset, the page ends at the newest message in
     /// the channel; with it set, the page ends just before that

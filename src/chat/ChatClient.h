@@ -41,6 +41,11 @@ namespace devicehub {
  * messageEdited()/messageDeleted(), the same "broadcast to everyone,
  * don't locally optimistic-update" pattern messageReceived() already
  * uses for new messages.
+ *
+ * sendMessage()'s optional @p attachmentId (issue #116) references a
+ * file already uploaded via ChatRestClient::uploadAttachment() — this
+ * class never touches attachment bytes itself, only the id/filename
+ * that ride along in messageReceived().
  */
 class ChatClient : public QObject {
     Q_OBJECT
@@ -51,8 +56,10 @@ public:
     /// Opens the connection and subscribes to @p channelId using @p token.
     void connectToChannel(const QString& token, qint64 channelId);
 
-    /// Posts @p body to the channel this client is subscribed to.
-    void sendMessage(const QString& body);
+    /// Posts @p body to the channel this client is subscribed to,
+    /// optionally referencing an already-uploaded @p attachmentId
+    /// (issue #116) — -1 (the default) means no attachment.
+    void sendMessage(const QString& body, qint64 attachmentId = -1);
 
     void disconnectFromChannel();
 
@@ -83,7 +90,10 @@ signals:
     void subscribed(qint64 channelId);
 
     /// Emitted for every message broadcast on the subscribed channel.
-    void messageReceived(qint64 id, const QString& author, const QString& body, const QString& sentAt);
+    /// @p attachmentId is -1 and @p attachmentFilename empty when the
+    /// message has no attachment (issue #116).
+    void messageReceived(qint64 id, const QString& author, const QString& body, const QString& sentAt,
+                          qint64 attachmentId, const QString& attachmentFilename);
 
     /// A message was edited — @p editedAt is the new edit timestamp
     /// (Postgres-serialized, same shape as sentAt).

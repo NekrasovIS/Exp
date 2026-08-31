@@ -18,12 +18,15 @@ struct ChatItem {
 /// A chat message as returned by chat-service's REST history endpoint —
 /// same shape as ChatClient's live messageReceived() fields, plus the
 /// id needed to page further back in history (see listMessages()'s
-/// beforeId).
+/// beforeId). @p attachmentId is -1 and @p attachmentFilename empty when
+/// the message has no attachment (issue #116).
 struct ChatMessageInfo {
     qint64 id = 0;
     QString author;
     QString body;
     QString sentAt;
+    qint64 attachmentId = -1;
+    QString attachmentFilename;
 };
 
 /**
@@ -63,6 +66,16 @@ public:
     /// is negative — the default, for the initial history load).
     void listMessages(const QString& token, qint64 channelId, int limit, qint64 beforeId = -1);
 
+    /// Uploads @p data (raw bytes, base64-encoded on the wire) as a new
+    /// attachment on @p channelId (issue #116); triggers attachmentUploaded()
+    /// with the id to then pass to ChatClient::sendMessage().
+    void uploadAttachment(const QString& token, qint64 channelId, const QString& filename,
+                           const QString& contentType, const QByteArray& data);
+
+    /// Downloads the raw bytes of attachment @p attachmentId; triggers
+    /// attachmentDownloaded().
+    void downloadAttachment(const QString& token, qint64 attachmentId);
+
 signals:
     void communityCreated(qint64 id, const QString& name);
     void communitiesListed(const QList<ChatItem>& communities);
@@ -79,6 +92,14 @@ signals:
     /// Reply to listMessages() — @p messages is chronological (oldest
     /// to newest), possibly empty if there's no more history.
     void messagesListed(qint64 channelId, const QList<ChatMessageInfo>& messages);
+
+    /// Reply to uploadAttachment().
+    void attachmentUploaded(qint64 id, const QString& filename);
+
+    /// Reply to downloadAttachment() — @p data is the raw (decoded)
+    /// attachment bytes.
+    void attachmentDownloaded(qint64 attachmentId, const QByteArray& data);
+
     void errorOccurred(const QString& message);
 
 private:

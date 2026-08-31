@@ -142,6 +142,17 @@ TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
 }
 
+TEST(MainWindowUiTest, AttachFileButtonExists) {
+    // #116: "Attach" sits next to Send in ChatView's send row — see
+    // MainWindow::onAttachFileClicked() for the upload-then-auto-send flow.
+    const MainWindow window;
+
+    auto* attachFileButton = window.findChild<QPushButton*>("attachFileButton");
+
+    ASSERT_NE(attachFileButton, nullptr);
+    EXPECT_EQ(attachFileButton->text(), QStringLiteral("Attach"));
+}
+
 TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
     // #68: Call/Mute buttons live in ChatView's channel header — see
     // ChatView::setCallState() for how MainWindow keeps their

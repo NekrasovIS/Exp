@@ -8,12 +8,16 @@ namespace chat_service {
 
 namespace {
 nlohmann::json toJson(const Message& message) {
-    return nlohmann::json{{"id", message.id},
-                           {"author", message.authorLogin},
-                           {"body", message.body},
-                           {"sent_at", message.sentAt},
-                           {"edited_at", message.editedAt.has_value() ? nlohmann::json(*message.editedAt)
-                                                                       : nlohmann::json(nullptr)}};
+    return nlohmann::json{
+        {"id", message.id},
+        {"author", message.authorLogin},
+        {"body", message.body},
+        {"sent_at", message.sentAt},
+        {"edited_at", message.editedAt.has_value() ? nlohmann::json(*message.editedAt) : nlohmann::json(nullptr)},
+        {"attachment_id",
+         message.attachmentId.has_value() ? nlohmann::json(*message.attachmentId) : nlohmann::json(nullptr)},
+        {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
+                                                                        : nlohmann::json(nullptr)}};
 }
 }  // namespace
 
@@ -134,10 +138,20 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
         return;
     }
 
-    const std::optional<Message> stored =
-        chatService_.postMessage(subscription.channelId, subscription.login, body["body"].get<std::string>());
+    // "attachment_id" (issue #116) is optional — the attachment itself
+    // is uploaded separately over REST (HttpServer::handleUploadAttachment())
+    // first; this frame only references it by id. No ownership check
+    // that the id belongs to this sender/channel — same trust level as
+    // the rest of this protocol (a valid token is the only gate).
+    const std::optional<std::int64_t> attachmentId =
+        (body.contains("attachment_id") && body["attachment_id"].is_number_integer())
+            ? std::make_optional(body["attachment_id"].get<std::int64_t>())
+            : std::nullopt;
+
+    const std::optional<Message> stored = chatService_.postMessage(
+        subscription.channelId, subscription.login, body["body"].get<std::string>(), attachmentId);
     if (!stored.has_value()) {
-        webSocket.send(nlohmann::json{{"error", "no such channel"}}.dump());
+        webSocket.send(nlohmann::json{{"error", "no such channel, or no such attachment"}}.dump());
         return;
     }
 
