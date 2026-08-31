@@ -39,6 +39,11 @@ Screen Capture) слева. Тёмная тема с зелёным градие
   текст.
 - Редактирование и удаление собственных сообщений (issue #107) —
   доступно только автору, с меткой «(edited)» на изменённых.
+- Профиль пользователя (issue #110): отображаемое имя и ссылка на
+  аватар, редактируются из «Account» → «Edit Profile»; футер и диалог
+  показывают display_name вместо логина, как только он задан. Реальная
+  загрузка/рендер картинки по avatar_url — за рамками этой версии,
+  ссылка пока только хранится и показывается текстом.
 
 ## Сборка
 
@@ -147,7 +152,15 @@ cmake --build services/user-service/build --parallel
 По умолчанию слушает `127.0.0.1:8081` (`USER_SERVICE_HOST`/`USER_SERVICE_PORT`),
 подключается к Postgres из `docker-compose.yml`
 (`USER_SERVICE_DATABASE_URL` — переопределить). REST:
-`POST /users/register`, `POST /users/verify-credentials`.
+`POST /users/register`, `POST /users/verify-credentials` (оба без
+авторизации — вызываются самим auth-service), `GET /users/{login}/profile`
+и `PATCH /users/me` (issue #110, оба требуют `Authorization: Bearer
+<token>` — проверяется через собственный `AuthServiceClient`, POST
+`/auth/verify` к auth-service, `AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`).
+`PATCH /users/me` всегда пишет в логин из проверенного токена — логин
+в теле запроса, если есть, игнорируется; частичное тело (только
+`display_name` или только `avatar_url`) не затирает несопровождённое
+поле.
 
 ### auth-service
 
@@ -467,6 +480,8 @@ docs/diagrams/*.puml`).
   ([chat.png](docs/diagrams/chat.png))
 - [ui.puml](docs/diagrams/ui.puml) — `src/ui`
   ([ui.png](docs/diagrams/ui.png))
+- [user.puml](docs/diagrams/user.puml) — `src/user` (issue #110)
+  ([user.png](docs/diagrams/user.png))
 - [mic-capture-sequence.puml](docs/diagrams/mic-capture-sequence.puml) —
   запуск захвата с микрофона
   ([mic-capture-sequence.png](docs/diagrams/mic-capture-sequence.png))

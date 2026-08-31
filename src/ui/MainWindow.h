@@ -14,6 +14,7 @@
 #include "devices/DeviceEnumerator.h"
 #include "devices/ScreenCaptureDevice.h"
 #include "ui/ToastBanner.h"
+#include "user/UserProfileClient.h"
 
 class QScreen;
 class QTimer;
@@ -26,6 +27,7 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class FooterBar;
+class ProfileDialog;
 class SettingsDialog;
 
 /**
@@ -58,6 +60,7 @@ private:
     void onCallToggleClicked();
     void onMuteToggleClicked();
     void onVideoToggleClicked();
+    void onEditProfileClicked();
 
     /// Re-lists communities from chat-service (no-op, with a status bar
     /// message, if not signed in yet).
@@ -83,6 +86,7 @@ private:
     ChatClient chatClient_;
     CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_};
     ChatRestClient chatRestClient_;
+    UserProfileClient userProfileClient_;
     QString lastToken_;
     /// Long-lived token (issue #105) that refreshTimer_ redeems for a
     /// fresh lastToken_ shortly before it expires — empty when not
@@ -109,6 +113,7 @@ private:
     AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
+    ProfileDialog* profileDialog_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;
 };

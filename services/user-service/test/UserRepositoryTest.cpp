@@ -91,5 +91,73 @@ TEST(UserRepositoryTest, FindPasswordHashReturnsNulloptForNonexistentLogin) {
     EXPECT_FALSE(hash.has_value());
 }
 
+TEST(UserRepositoryTest, FindProfileReturnsNulloptFieldsForFreshUser) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-profile-fresh");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    const std::optional<Profile> profile = repository.findProfile(login);
+
+    ASSERT_TRUE(profile.has_value());
+    EXPECT_EQ(profile->login, login);
+    EXPECT_FALSE(profile->displayName.has_value());
+    EXPECT_FALSE(profile->avatarUrl.has_value());
+}
+
+TEST(UserRepositoryTest, FindProfileReturnsNulloptForNonexistentLogin) {
+    UserRepository repository(connectionString());
+
+    std::optional<Profile> profile;
+    try {
+        profile = repository.findProfile("no-such-login-ever-created");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_FALSE(profile.has_value());
+}
+
+TEST(UserRepositoryTest, UpdateProfileRoundTripsThroughFindProfile) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-profile-update");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    ASSERT_TRUE(repository.updateProfile(login, "Alice", "https://example.test/alice.png"));
+
+    const std::optional<Profile> profile = repository.findProfile(login);
+    ASSERT_TRUE(profile.has_value());
+    ASSERT_TRUE(profile->displayName.has_value());
+    EXPECT_EQ(*profile->displayName, "Alice");
+    ASSERT_TRUE(profile->avatarUrl.has_value());
+    EXPECT_EQ(*profile->avatarUrl, "https://example.test/alice.png");
+}
+
+TEST(UserRepositoryTest, UpdateProfileReturnsFalseForNonexistentLogin) {
+    UserRepository repository(connectionString());
+
+    bool updated = true;
+    try {
+        updated = repository.updateProfile("no-such-login-ever-created", "Anyone", std::nullopt);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_FALSE(updated);
+}
+
 }  // namespace
 }  // namespace user_service

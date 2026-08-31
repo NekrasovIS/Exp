@@ -5,6 +5,16 @@
 
 namespace user_service {
 
+/// A user's public profile fields (issue #110) — displayName/avatarUrl
+/// are unset (std::nullopt) rather than empty strings when the user
+/// hasn't set them, so callers can tell "never set" apart from
+/// "explicitly cleared".
+struct Profile {
+    std::string login;
+    std::optional<std::string> displayName;
+    std::optional<std::string> avatarUrl;
+};
+
 /**
  * @brief Postgres-backed storage for user accounts (libpqxx).
  *
@@ -22,6 +32,14 @@ public:
 
     /// @return The stored password hash for @p login, or std::nullopt if no such user.
     [[nodiscard]] std::optional<std::string> findPasswordHash(const std::string& login);
+
+    /// @return @p login's profile, or std::nullopt if no such user (issue #110).
+    [[nodiscard]] std::optional<Profile> findProfile(const std::string& login);
+
+    /// Overwrites @p login's display_name/avatar_url. @return False if no
+    /// such user exists.
+    [[nodiscard]] bool updateProfile(const std::string& login, const std::optional<std::string>& displayName,
+                                      const std::optional<std::string>& avatarUrl);
 
 private:
     std::string connectionString_;

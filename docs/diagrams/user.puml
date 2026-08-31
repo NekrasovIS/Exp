@@ -1,0 +1,45 @@
+@startuml user
+title DeviceHub — src/user
+
+package "Qt Network" {
+  class QNetworkAccessManager
+}
+
+struct UserProfile {
+  +login: QString
+  +displayName: QString
+  +avatarUrl: QString
+}
+
+class UserProfileClient {
+  +fetchProfile(token: QString, login: QString)
+  +updateOwnProfile(token: QString, displayName: QString, avatarUrl: QString)
+  .. signals ..
+  +profileReceived(profile: UserProfile)
+  +profileUpdated(profile: UserProfile)
+  +errorOccurred(message: QString)
+}
+UserProfileClient *-- QNetworkAccessManager : owns
+UserProfileClient ..> UserProfile : emits
+UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
+
+note right of UserProfileClient
+  Separate from AuthClient
+  (auth-service) and ChatRestClient
+  (chat-service) — user-service owns
+  account/profile data, its own base
+  URL (USER_SERVICE_URL). Async only,
+  same pattern as the other REST
+  clients — result comes back via
+  signals, never blocks the GUI
+  thread.
+
+  updateOwnProfile() (issue #110)
+  always writes to the token's own
+  subject server-side — there's no
+  way to pass a different login, so
+  a caller can never edit someone
+  else's profile through this class.
+end note
+
+@enduml

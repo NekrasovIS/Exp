@@ -128,10 +128,23 @@ class AccountMenu {
   +passwordEdit() : QLineEdit*
   +requestTokenButton() : QPushButton*
   +registerButton() : QPushButton*
+  +editProfileButton() : QPushButton*
   +statusLabel() : QLabel*
   +toggleButton() : QPushButton*
+  +setEditProfileEnabled(enabled: bool)
   -togglePopup()
 }
+
+class ProfileDialog {
+  +setProfile(profile: UserProfile)
+  +displayNameEdit() : QLineEdit*
+  +avatarUrlEdit() : QLineEdit*
+  +saveButton() : QPushButton*
+  +statusLabel() : QLabel*
+  .. signals ..
+  +saveRequested(displayName: QString, avatarUrl: QString)
+}
+ProfileDialog ..> UserProfile : setProfile() >
 
 class SettingsDialog {
   +outputCombo() : QComboBox*
@@ -207,11 +220,17 @@ package "src/chat" {
   class CallManager
 }
 
+package "src/user" {
+  class UserProfileClient
+}
+
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- AccountMenu : owns (top-right)
+MainWindow *-- ProfileDialog : owns (opened from\nAccountMenu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
+MainWindow *-- UserProfileClient : owns
 MainWindow *-- FooterBar : owns (bottom)
 MainWindow *-- ToastBanner : owns (floats over ChatView)
 MainWindow *-- DesktopNotifier : owns (issue #92)
@@ -235,6 +254,12 @@ MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelC
 MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
+MainWindow ..> UserProfileClient : profileReceived()/Updated()\nerrorOccurred() (issue #110) >
+MainWindow ..> AccountMenu : setEditProfileEnabled() >
+MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
+MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
+AccountMenu ..> MainWindow : editProfileButton().clicked() >
+ProfileDialog ..> MainWindow : saveRequested() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
@@ -394,6 +419,21 @@ note right of MainWindow
   изображений для rich text сама по себе —
   markdown-картинка не становится вектором
   для трекинг-пикселя.
+
+  Профиль пользователя (issue #110):
+  tokenVerified(valid=true) сразу дёргает
+  UserProfileClient::fetchProfile() —
+  футер до ответа показывает голый логин,
+  после — display_name (если задан).
+  ProfileDialog держится в актуальном
+  состоянии на каждый profileReceived()/
+  profileUpdated(), не только при открытии
+  — setProfile() не трогает поле, в
+  котором сейчас фокус, чтобы фоновое
+  обновление не затирало недописанный
+  ввод. avatar_url пока только хранится и
+  показывается текстом — реальная загрузка/
+  рендер картинки за рамками первой версии.
 end note
 
 @enduml

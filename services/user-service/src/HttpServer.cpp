@@ -3,11 +3,13 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <string_view>
 
 namespace user_service {
 
 namespace {
 constexpr const char* kJsonContentType = "application/json";
+constexpr std::string_view kBearerPrefix = "Bearer ";
 
 // Both endpoints take the same {"login", "password"} shape.
 struct Credentials {
@@ -23,10 +25,27 @@ std::optional<Credentials> parseCredentials(const std::string& body) {
     }
     return Credentials{.login = json["login"].get<std::string>(), .password = json["password"].get<std::string>()};
 }
+
+nlohmann::json toJson(const Profile& profile) {
+    return nlohmann::json{{"login", profile.login},
+                           {"display_name", profile.displayName.has_value() ? nlohmann::json(*profile.displayName)
+                                                                             : nlohmann::json(nullptr)},
+                           {"avatar_url", profile.avatarUrl.has_value() ? nlohmann::json(*profile.avatarUrl)
+                                                                         : nlohmann::json(nullptr)}};
+}
 }  // namespace
 
-HttpServer::HttpServer(UserService& userService) : userService_(userService) {
+HttpServer::HttpServer(UserService& userService, const AuthServiceClient& authServiceClient)
+    : userService_(userService), authServiceClient_(authServiceClient) {
     registerRoutes();
+}
+
+std::optional<std::string> HttpServer::authenticate(const httplib::Request& request) const {
+    const std::string header = request.get_header_value("Authorization");
+    if (header.size() <= kBearerPrefix.size() || header.compare(0, kBearerPrefix.size(), kBearerPrefix) != 0) {
+        return std::nullopt;
+    }
+    return authServiceClient_.verifyToken(header.substr(kBearerPrefix.size()));
 }
 
 void HttpServer::registerRoutes() {
@@ -35,6 +54,12 @@ void HttpServer::registerRoutes() {
     });
     server_.Post("/users/verify-credentials", [this](const httplib::Request& request, httplib::Response& response) {
         handleVerifyCredentials(request, response);
+    });
+    server_.Get(R"(/users/([^/]+)/profile)", [this](const httplib::Request& request, httplib::Response& response) {
+        handleGetProfile(request, response);
+    });
+    server_.Patch("/users/me", [this](const httplib::Request& request, httplib::Response& response) {
+        handleUpdateOwnProfile(request, response);
     });
 }
 
@@ -63,6 +88,56 @@ void HttpServer::handleVerifyCredentials(const httplib::Request& request, httpli
 
     const bool valid = userService_.verifyCredentials(credentials->login, credentials->password);
     response.set_content(nlohmann::json{{"valid", valid}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleGetProfile(const httplib::Request& request, httplib::Response& response) {
+    if (!authenticate(request).has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const std::optional<Profile> profile = userService_.getProfile(request.matches[1].str());
+    if (!profile.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(toJson(*profile).dump(), kJsonContentType);
+}
+
+void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "malformed JSON"}}.dump(), kJsonContentType);
+        return;
+    }
+    // Partial update: a field missing from the body keeps its current
+    // value rather than being cleared — fetch-then-merge, since
+    // UserRepository::updateProfile() always writes both columns.
+    const std::optional<Profile> current = userService_.getProfile(*login);
+    std::optional<std::string> displayName = current.has_value() ? current->displayName : std::nullopt;
+    std::optional<std::string> avatarUrl = current.has_value() ? current->avatarUrl : std::nullopt;
+    if (body.contains("display_name") && body["display_name"].is_string()) {
+        displayName = body["display_name"].get<std::string>();
+    }
+    if (body.contains("avatar_url") && body["avatar_url"].is_string()) {
+        avatarUrl = body["avatar_url"].get<std::string>();
+    }
+
+    if (!userService_.updateProfile(*login, displayName, avatarUrl)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(toJson(Profile{.login = *login, .displayName = displayName, .avatarUrl = avatarUrl}).dump(),
+                          kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

@@ -25,6 +25,7 @@
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
 #include "ui/FooterBar.h"
+#include "ui/ProfileDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
 
@@ -34,6 +35,7 @@ namespace {
 constexpr const char* kDefaultAuthServiceUrl = "http://127.0.0.1:8080";
 constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
+constexpr const char* kDefaultUserServiceUrl = "http://127.0.0.1:8081";
 constexpr int kToastTimeoutMs = 4000;
 /// Redeem the refresh token this long before the access token actually
 /// expires (issue #105) — a little slack so a refresh in flight has
@@ -47,7 +49,8 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       authClient_(QUrl(qEnvironmentVariable("AUTH_SERVICE_URL", kDefaultAuthServiceUrl))),
       chatClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_WS_URL", kDefaultChatServiceWsUrl))),
-      chatRestClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_URL", kDefaultChatServiceUrl))) {
+      chatRestClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_URL", kDefaultChatServiceUrl))),
+      userProfileClient_(QUrl(qEnvironmentVariable("USER_SERVICE_URL", kDefaultUserServiceUrl))) {
     buildUi();
     populateDevices();
 
@@ -66,6 +69,22 @@ MainWindow::MainWindow(QWidget* parent)
             &MainWindow::onToggleScreenCaptureClicked);
     connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
     connect(accountMenu_->registerButton(), &QPushButton::clicked, this, &MainWindow::onRegisterClicked);
+    connect(accountMenu_->editProfileButton(), &QPushButton::clicked, this, &MainWindow::onEditProfileClicked);
+    connect(profileDialog_, &ProfileDialog::saveRequested, this, [this](const QString& displayName, const QString& avatarUrl) {
+        userProfileClient_.updateOwnProfile(lastToken_, displayName, avatarUrl);
+    });
+    connect(&userProfileClient_, &UserProfileClient::profileReceived, this, [this](const UserProfile& profile) {
+        footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
+        profileDialog_->setProfile(profile);
+    });
+    connect(&userProfileClient_, &UserProfileClient::profileUpdated, this, [this](const UserProfile& profile) {
+        footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
+        profileDialog_->setProfile(profile);
+        profileDialog_->statusLabel()->setText(tr("Saved"));
+    });
+    connect(&userProfileClient_, &UserProfileClient::errorOccurred, this, [this](const QString& message) {
+        profileDialog_->statusLabel()->setText(tr("Error: %1").arg(message));
+    });
     connect(&audioInput_, &AudioInputDevice::levelChanged, settingsDialog_->micLevelBar(), [this](float level) {
         settingsDialog_->micLevelBar()->setValue(static_cast<int>(level * 100.0f));
     });
@@ -101,8 +120,13 @@ MainWindow::MainWindow(QWidget* parent)
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
         chatView_->setCurrentUserLogin(currentUserLogin_);
+        accountMenu_->setEditProfileEnabled(valid);
         if (valid) {
             refreshCommunities();
+            // Populates the footer's display name (falls back to the
+            // bare login above until this returns) and prefills
+            // ProfileDialog for whenever Edit Profile is clicked.
+            userProfileClient_.fetchProfile(lastToken_, currentUserLogin_);
         }
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
@@ -364,6 +388,7 @@ void MainWindow::buildUi() {
     setCentralWidget(central);
 
     settingsDialog_ = new SettingsDialog(this);
+    profileDialog_ = new ProfileDialog(this);
 }
 
 void MainWindow::populateDevices() {
@@ -490,6 +515,13 @@ void MainWindow::onVideoToggleClicked() {
         callManager_.enableVideo(cameraDevice);
     }
     chatView_->setVideoEnabled(callManager_.videoEnabled());
+}
+
+void MainWindow::onEditProfileClicked() {
+    profileDialog_->statusLabel()->clear();
+    profileDialog_->show();
+    profileDialog_->raise();
+    profileDialog_->activateWindow();
 }
 
 void MainWindow::refreshCommunities() {

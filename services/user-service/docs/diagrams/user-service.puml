@@ -18,34 +18,65 @@ namespace password_hash {
   }
 }
 
+struct Profile {
+  +login: string
+  +displayName: optional<string>
+  +avatarUrl: optional<string>
+}
+
 class UserRepository {
   +createUser(login: string, passwordHash: string) : bool
   +findPasswordHash(login: string) : optional<string>
+  +findProfile(login: string) : optional<Profile>
+  +updateProfile(login: string, displayName: optional<string>, avatarUrl: optional<string>) : bool
 }
 UserRepository ..> PqxxConnection : opens per call
+UserRepository ..> Profile : creates
 
 class UserService {
   +registerUser(login: string, password: string) : bool
   +verifyCredentials(login: string, password: string) : bool
+  +getProfile(login: string) : optional<Profile>
+  +updateProfile(login: string, displayName: optional<string>, avatarUrl: optional<string>) : bool
 }
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
 password_hash.password_hash ..> Argon2 : implemented with
 
+class AuthServiceClient {
+  +verifyToken(token: string) : optional<string>
+}
+AuthServiceClient ..> "auth-service" : POST /auth/verify
+
 class HttpServer {
   +listen(host: string, port: int)
   +stop()
+  -authenticate(request) : optional<string>
   -handleRegister(request, response)
   -handleVerifyCredentials(request, response)
+  -handleGetProfile(request, response)
+  -handleUpdateOwnProfile(request, response)
 }
 HttpServer --> UserService : delegates to (&)
+HttpServer --> AuthServiceClient : authenticates via (const&)
 HttpServer *-- HttplibServer : owns
 HttpServer ..> Json : encodes responses as
 
 note right of HttpServer
   Routes:
-  POST /users/register           -> handleRegister
-  POST /users/verify-credentials -> handleVerifyCredentials
+  POST  /users/register             -> handleRegister (unauthenticated —
+                                        called by auth-service itself)
+  POST  /users/verify-credentials   -> handleVerifyCredentials (ditto)
+  GET   /users/{login}/profile      -> handleGetProfile (issue #110,
+                                        any authenticated caller)
+  PATCH /users/me                   -> handleUpdateOwnProfile (issue #110,
+                                        always writes the token's own
+                                        subject — login in the body, if
+                                        any, is ignored; partial body
+                                        preserves the field not sent,
+                                        fetch-then-merge since
+                                        UserRepository::updateProfile()
+                                        always writes both columns)
 end note
 
 note bottom of UserRepository
