@@ -74,5 +74,36 @@ TEST(TokenServiceTest, ValidSignatureButPayloadIsNotValidJsonIsRejected) {
     EXPECT_FALSE(service.verifyToken(payloadB64 + "." + signatureB64).has_value());
 }
 
+TEST(TokenServiceTest, IssuedRefreshTokenVerifiesWithSameSubject) {
+    const TokenService service("test-secret");
+    const Token refreshToken = service.issueRefreshToken("alice");
+
+    const std::optional<std::string> subject = service.verifyRefreshToken(refreshToken.value);
+
+    ASSERT_TRUE(subject.has_value());
+    EXPECT_EQ(*subject, "alice");
+}
+
+TEST(TokenServiceTest, AccessTokenIsRejectedAsARefreshToken) {
+    const TokenService service("test-secret");
+    const Token accessToken = service.issueToken("alice");
+
+    EXPECT_FALSE(service.verifyRefreshToken(accessToken.value).has_value());
+}
+
+TEST(TokenServiceTest, RefreshTokenIsRejectedAsAnAccessToken) {
+    const TokenService service("test-secret");
+    const Token refreshToken = service.issueRefreshToken("alice");
+
+    EXPECT_FALSE(service.verifyToken(refreshToken.value).has_value());
+}
+
+TEST(TokenServiceTest, ExpiredRefreshTokenIsRejected) {
+    const TokenService service("test-secret", std::chrono::seconds{3600}, std::chrono::seconds{0});
+    const Token refreshToken = service.issueRefreshToken("alice");
+
+    EXPECT_FALSE(service.verifyRefreshToken(refreshToken.value).has_value());
+}
+
 }  // namespace
 }  // namespace auth_service

@@ -26,6 +26,9 @@ void HttpServer::registerRoutes() {
     server_.Post("/auth/register", [this](const httplib::Request& request, httplib::Response& response) {
         handleRegister(request, response);
     });
+    server_.Post("/auth/refresh", [this](const httplib::Request& request, httplib::Response& response) {
+        handleRefresh(request, response);
+    });
 }
 
 void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Response& response) {
@@ -53,7 +56,9 @@ void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Resp
     }
 
     const Token token = tokenService_.issueToken(login);
-    const nlohmann::json responseBody{{"token", token.value}, {"expires_at", token.expiresAt}};
+    const Token refreshToken = tokenService_.issueRefreshToken(login);
+    const nlohmann::json responseBody{
+        {"token", token.value}, {"expires_at", token.expiresAt}, {"refresh_token", refreshToken.value}};
     response.set_content(responseBody.dump(), kJsonContentType);
 }
 
@@ -98,10 +103,35 @@ void HttpServer::handleRegister(const httplib::Request& request, httplib::Respon
     }
 
     const Token token = tokenService_.issueToken(login);
+    const Token refreshToken = tokenService_.issueRefreshToken(login);
     response.status = 201;
-    response.set_content(
-        nlohmann::json{{"registered", true}, {"token", token.value}, {"expires_at", token.expiresAt}}.dump(),
-        kJsonContentType);
+    response.set_content(nlohmann::json{{"registered", true},
+                                         {"token", token.value},
+                                         {"expires_at", token.expiresAt},
+                                         {"refresh_token", refreshToken.value}}
+                              .dump(),
+                          kJsonContentType);
+}
+
+void HttpServer::handleRefresh(const httplib::Request& request, httplib::Response& response) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("refresh_token") || !body["refresh_token"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'refresh_token' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> subject =
+        tokenService_.verifyRefreshToken(body["refresh_token"].get<std::string>());
+    if (!subject.has_value()) {
+        response.status = 401;
+        response.set_content(nlohmann::json{{"error", "invalid or expired refresh token"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const Token token = tokenService_.issueToken(*subject);
+    response.set_content(nlohmann::json{{"token", token.value}, {"expires_at", token.expiresAt}}.dump(),
+                          kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

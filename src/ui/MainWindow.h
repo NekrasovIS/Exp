@@ -16,6 +16,7 @@
 #include "ui/ToastBanner.h"
 
 class QScreen;
+class QTimer;
 
 namespace devicehub {
 
@@ -81,6 +82,11 @@ private:
     CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_};
     ChatRestClient chatRestClient_;
     QString lastToken_;
+    /// Long-lived token (issue #105) that refreshTimer_ redeems for a
+    /// fresh lastToken_ shortly before it expires — empty when not
+    /// signed in.
+    QString refreshToken_;
+    QTimer* refreshTimer_ = nullptr;
     QString currentUserLogin_;
     QList<QScreen*> screens_;
     QList<ChatItem> communities_;

@@ -156,7 +156,17 @@ REST: `POST /auth/token` (`{"login", "password"}`), `POST /auth/verify`,
 `POST /auth/register` (`{"login", "password"}` — forwards to
 user-service's own registration and, on success, immediately issues a
 token too, so a fresh account is auto-logged-in without a second
-request).
+request), `POST /auth/refresh` (`{"refresh_token"}` — issue #105,
+exchanges a still-valid refresh token for a fresh access token without
+re-entering credentials). `/auth/token` and `/auth/register` both
+return `refresh_token` alongside `token`/`expires_at` — long-lived
+(30 days by default), doesn't rotate on refresh, and is rejected if
+presented to `/auth/verify` or `/auth/token`-protected routes as if it
+were an access token (`TokenService` marks it with `"typ": "refresh"`
+in the signed payload). `/auth/token` and `/auth/register` are rate
+limited per client address (issue #102) — `/auth/refresh` isn't,
+matching `/auth/verify`'s reasoning (not meaningfully brute-forceable;
+it needs a valid signed token, not a guessed password).
 
 ### chat-service
 
@@ -212,6 +222,11 @@ REST остаётся источником истории, WebSocket — тол�
 проверяет его тем же сервисом; кнопка «Register» тем же способом
 регистрирует новый аккаунт через `POST /auth/register` и сразу
 входит под ним — без токена сайдбар сообществ/каналов не работает.
+Полученный при этом refresh-токен (issue #105) `MainWindow` использует
+сама, без участия пользователя: за минуту до истечения текущего
+access-токена автоматически шлётся `POST /auth/refresh`, так что
+сессия не обрывается посреди работы — повторно вводить логин/пароль
+не нужно, пока refresh-токен ещё не истёк (по умолчанию 30 дней).
 
 Сайдбар использует токен, полученный в меню аккаунта, чтобы через REST
 chat-service (`CHAT_SERVICE_URL`, по умолчанию `http://127.0.0.1:8082`):

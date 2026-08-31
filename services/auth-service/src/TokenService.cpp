@@ -28,21 +28,25 @@ std::vector<uint8_t> toBytes(const std::string& text) {
 
 }  // namespace
 
-TokenService::TokenService(std::string secret, std::chrono::seconds ttl) : secret_(std::move(secret)), ttl_(ttl) {}
+TokenService::TokenService(std::string secret, std::chrono::seconds ttl, std::chrono::seconds refreshTtl)
+    : secret_(std::move(secret)), ttl_(ttl), refreshTtl_(refreshTtl) {}
 
-Token TokenService::issueToken(const std::string& subject) const {
+Token TokenService::issueTokenInternal(const std::string& subject, std::chrono::seconds ttl, bool isRefresh) const {
     const auto expiresAt =
-        std::chrono::duration_cast<std::chrono::seconds>((std::chrono::system_clock::now() + ttl_).time_since_epoch())
+        std::chrono::duration_cast<std::chrono::seconds>((std::chrono::system_clock::now() + ttl).time_since_epoch())
             .count();
 
-    const nlohmann::json payload{{"sub", subject}, {"exp", expiresAt}};
+    nlohmann::json payload{{"sub", subject}, {"exp", expiresAt}};
+    if (isRefresh) {
+        payload["typ"] = "refresh";
+    }
     const std::string payloadB64 = base64_utils::encodeUrl(toBytes(payload.dump()));
     const std::string signatureB64 = base64_utils::encodeUrl(hmacSha256(secret_, payloadB64));
 
     return Token{.value = payloadB64 + "." + signatureB64, .expiresAt = expiresAt};
 }
 
-std::optional<std::string> TokenService::verifyToken(const std::string& token) const {
+std::optional<std::string> TokenService::verifyTokenInternal(const std::string& token, bool expectRefresh) const {
     const auto separator = token.find('.');
     if (separator == std::string::npos) {
         return std::nullopt;
@@ -66,6 +70,14 @@ std::optional<std::string> TokenService::verifyToken(const std::string& token) c
         return std::nullopt;
     }
 
+    const bool isRefresh = payload.contains("typ") && payload["typ"] == "refresh";
+    if (isRefresh != expectRefresh) {
+        // An access token presented where a refresh token was expected,
+        // or vice versa — reject rather than silently accepting either
+        // way, even though both are signed with the same secret.
+        return std::nullopt;
+    }
+
     const auto expiresAt = payload["exp"].get<std::int64_t>();
     const auto now =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -74,6 +86,22 @@ std::optional<std::string> TokenService::verifyToken(const std::string& token) c
     }
 
     return payload["sub"].get<std::string>();
+}
+
+Token TokenService::issueToken(const std::string& subject) const {
+    return issueTokenInternal(subject, ttl_, /*isRefresh=*/false);
+}
+
+std::optional<std::string> TokenService::verifyToken(const std::string& token) const {
+    return verifyTokenInternal(token, /*expectRefresh=*/false);
+}
+
+Token TokenService::issueRefreshToken(const std::string& subject) const {
+    return issueTokenInternal(subject, refreshTtl_, /*isRefresh=*/true);
+}
+
+std::optional<std::string> TokenService::verifyRefreshToken(const std::string& token) const {
+    return verifyTokenInternal(token, /*expectRefresh=*/true);
 }
 
 }  // namespace auth_service
