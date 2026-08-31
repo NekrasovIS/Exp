@@ -31,6 +31,7 @@ class ChatClient {
   +joinCall()
   +leaveCall()
   +sendCallSignal(to: QString, payload: QJsonObject)
+  +sendTyping()
   .. signals ..
   +subscribed(channelId: qint64)
   +messageReceived(author: QString, body: QString, sentAt: QString)
@@ -39,10 +40,12 @@ class ChatClient {
   +callPeerJoined(login: QString)
   +callPeerLeft(login: QString)
   +callSignalReceived(from: QString, payload: QJsonObject)
+  +userTyping(login: QString)
 }
 ChatClient *-- QWebSocket : owns
 ChatClient ..> "chat-service" : {"token", "channel_id"} then\n{"body"} over WebSocket
 ChatClient ..> "chat-service" : call_join/call_leave/call_signal\n(issue #46 signaling relay)
+ChatClient ..> "chat-service" : {"typing": true} ->\n{"user_typing": login} (issue #96)
 
 class CallManager {
   +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)

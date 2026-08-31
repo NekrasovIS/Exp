@@ -25,6 +25,12 @@ namespace devicehub {
  * callRosterReceived/callPeerJoined/callPeerLeft/callSignalReceived
  * signals fire for the corresponding server frames. Only valid once
  * subscribed() has fired.
+ *
+ * sendTyping() (issue #96) sends `{"typing": true}`; userTyping() fires
+ * for the matching `{"user_typing": "<login>"}` broadcast from another
+ * subscriber (chat-service never echoes this back to its sender).
+ * Ephemeral like call presence — no "stopped typing" message exists,
+ * ChatView times its own indicator out instead.
  */
 class ChatClient : public QObject {
     Q_OBJECT
@@ -51,6 +57,10 @@ public:
     /// candidate) to call participant @p to.
     void sendCallSignal(const QString& to, const QJsonObject& payload);
 
+    /// Tells chat-service the local user is typing in the subscribed
+    /// channel — triggers userTyping() on every other subscriber.
+    void sendTyping();
+
 signals:
     /// Emitted once chat-service confirms the subscription.
     void subscribed(qint64 channelId);
@@ -71,6 +81,9 @@ signals:
 
     /// Signaling payload relayed from another call participant.
     void callSignalReceived(const QString& from, const QJsonObject& payload);
+
+    /// Another subscriber is typing in the subscribed channel.
+    void userTyping(const QString& login);
 
 private:
     void onConnected();
