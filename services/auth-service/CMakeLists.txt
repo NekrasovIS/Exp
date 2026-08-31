@@ -47,6 +47,8 @@ add_library(auth_service_core
     src/base64_utils.cpp
     src/TokenService.h
     src/TokenService.cpp
+    src/RateLimiter.h
+    src/RateLimiter.cpp
     src/HttpServer.h
     src/HttpServer.cpp
     src/UserServiceClient.h
@@ -67,6 +69,7 @@ find_package(GTest CONFIG REQUIRED)
 
 add_executable(auth_service_tests
     test/TokenServiceTest.cpp
+    test/RateLimiterTest.cpp
     test/UserServiceClientIntegrationTest.cpp
 )
 target_link_libraries(auth_service_tests PRIVATE
