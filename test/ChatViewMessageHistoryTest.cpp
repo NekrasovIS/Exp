@@ -18,6 +18,7 @@ TEST(ChatViewMessageHistoryTest, LoadOlderButtonStartsHidden) {
 
 TEST(ChatViewMessageHistoryTest, SetLoadOlderVisibleTogglesTheButton) {
     ChatView view;
+    view.show();
     view.showChannel(QStringLiteral("general"));
 
     view.setLoadOlderVisible(true);
