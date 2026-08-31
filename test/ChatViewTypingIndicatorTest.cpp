@@ -20,6 +20,7 @@ void waitMs(int ms) {
 
 TEST(ChatViewTypingIndicatorTest, ShowTypingUserMakesLabelVisibleThenAutoHides) {
     ChatView view;
+    view.show();
     view.showChannel(QStringLiteral("general"));
 
     EXPECT_FALSE(view.typingIndicatorLabel()->isVisible());
@@ -31,6 +32,7 @@ TEST(ChatViewTypingIndicatorTest, ShowTypingUserMakesLabelVisibleThenAutoHides) 
 
 TEST(ChatViewTypingIndicatorTest, SwitchingChannelHidesStaleIndicator) {
     ChatView view;
+    view.show();
     view.showChannel(QStringLiteral("general"));
     view.showTypingUser(QStringLiteral("alice"));
     ASSERT_TRUE(view.typingIndicatorLabel()->isVisible());
