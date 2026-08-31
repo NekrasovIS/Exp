@@ -186,6 +186,35 @@ void ChatRestClient::listMessages(const QString& token, qint64 channelId, int li
     });
 }
 
+void ChatRestClient::searchMessages(const QString& token, qint64 channelId, const QString& query, int limit) {
+    QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/messages/search").arg(channelId)));
+    QUrlQuery urlQuery;
+    urlQuery.addQueryItem(QStringLiteral("q"), query);
+    urlQuery.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    url.setQuery(urlQuery);
+
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId, query]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<ChatMessageInfo> matches;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                matches.push_back(ChatMessageInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                    .author = object.value("author").toString(),
+                                                    .body = object.value("body").toString(),
+                                                    .sentAt = object.value("sent_at").toString()});
+            }
+        }
+        emit messagesFound(channelId, query, matches);
+    });
+}
+
 void ChatRestClient::deleteChannel(const QString& token, qint64 channelId) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1").arg(channelId)));
     QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));

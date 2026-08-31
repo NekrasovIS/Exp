@@ -10,6 +10,7 @@ namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
 constexpr int kDefaultMessageLimit = 50;
+constexpr int kDefaultSearchLimit = 20;
 
 nlohmann::json toJson(const Community& community) {
     return nlohmann::json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
@@ -79,6 +80,10 @@ void HttpServer::registerRoutes() {
     server_.Get(R"(/channels/(\d+)/messages)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMessages(request, response);
+                 });
+    server_.Get(R"(/channels/(\d+)/messages/search)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleSearchMessages(request, response);
                  });
 }
 
@@ -265,6 +270,30 @@ void HttpServer::handleListMessages(const httplib::Request& request, httplib::Re
 
     nlohmann::json messages = nlohmann::json::array();
     for (const Message& message : chatService_.recentMessages(channelId, limit, beforeId)) {
+        messages.push_back(toJson(message));
+    }
+    response.set_content(messages.dump(), kJsonContentType);
+}
+
+void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::Response& response) {
+    if (!authenticate(request).has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (!request.has_param("q") || request.get_param_value("q").empty()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected non-empty 'q' query parameter"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    const std::string query = request.get_param_value("q");
+    const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultSearchLimit;
+
+    nlohmann::json messages = nlohmann::json::array();
+    for (const Message& message : chatService_.searchMessages(channelId, query, limit)) {
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);

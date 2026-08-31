@@ -60,6 +60,7 @@ class ChatView {
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
   +appendSystemLine(text: QString)
@@ -75,6 +76,7 @@ class ChatView {
   +callToggleButton() : QPushButton*
   +muteToggleButton() : QPushButton*
   +videoToggleButton() : QPushButton*
+  +searchButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
   +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
@@ -86,6 +88,7 @@ class ChatView {
   +callToggleRequested()
   +muteToggleRequested()
   +videoToggleRequested()
+  +openSearchRequested()
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
@@ -96,6 +99,18 @@ struct ChatMessage {
   +body: QString
   +sentAt: QString
 }
+
+class SearchDialog {
+  +queryEdit() : QLineEdit*
+  +searchButton() : QPushButton*
+  +resultsList() : QListWidget*
+  +setResults(matches: QList<ChatMessageInfo>)
+  +clearResults()
+  .. signals ..
+  +searchRequested(query: QString)
+  +resultActivated(messageId: qint64)
+}
+SearchDialog ..> ChatMessageInfo : renders
 
 class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
@@ -212,6 +227,7 @@ MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
+MainWindow *-- SearchDialog : owns (opened from ChatView's\n"Search" button, issue #118)
 MainWindow *-- FooterBar : owns (bottom)
 MainWindow *-- ToastBanner : owns (floats over ChatView)
 MainWindow *-- DesktopNotifier : owns (issue #92)
@@ -246,6 +262,10 @@ MainWindow ..> ChatView : setVideoEnabled()\nshowRemoteVideoFrame()/removeRemote
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
+ChatView ..> MainWindow : openSearchRequested() -> show()/raise()\nSearchDialog (issue #118) >
+MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
+ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
+SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::scrollToMessage() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested() >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >

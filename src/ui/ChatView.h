@@ -73,6 +73,11 @@ public:
     /// Removes @p id's row entirely, if currently shown.
     void removeMessage(qint64 id);
 
+    /// Scrolls @p id's row into view, if currently shown (issue #118,
+    /// jumping to a search result) — @return false if that message isn't
+    /// currently loaded (e.g. further back than "Load older" has fetched).
+    bool scrollToMessage(qint64 id);
+
     /// True while the send box is editing an existing message rather
     /// than composing a new one — set by clicking a message's own
     /// "Edit" button, cleared by cancelEditingMessage() or (MainWindow)
@@ -128,6 +133,7 @@ public:
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
     [[nodiscard]] QPushButton* videoToggleButton() const { return videoToggleButton_; }
+    [[nodiscard]] QPushButton* searchButton() const { return searchButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
@@ -151,6 +157,10 @@ signals:
     /// based on CallManager::videoEnabled() and calls back into
     /// setVideoEnabled().
     void videoToggleRequested();
+
+    /// "Search" clicked (issue #118) — MainWindow shows/raises its
+    /// SearchDialog.
+    void openSearchRequested();
 
     /// The user is typing in the message box — throttled (at most once
     /// per cooldown window) rather than once per keystroke, so
@@ -183,6 +193,7 @@ private:
     QPushButton* callToggleButton_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QPushButton* videoToggleButton_ = nullptr;
+    QPushButton* searchButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
     QWidget* videoStrip_ = nullptr;
     QHBoxLayout* videoStripLayout_ = nullptr;

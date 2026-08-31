@@ -162,6 +162,7 @@ class ChatRestClient {
   +createChannel(token: QString, communityId: qint64, name: QString)
   +listChannels(token: QString, communityId: qint64)
   +listMessages(token: QString, channelId: qint64, limit: int, beforeId: qint64)
+  +searchMessages(token: QString, channelId: qint64, query: QString, limit: int = 20)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
@@ -169,11 +170,12 @@ class ChatRestClient {
   +channelCreated(id: qint64, name: QString)
   +channelsListed(channels: QList<ChatItem>)
   +messagesListed(channelId: qint64, messages: QList<ChatMessageInfo>)
+  +messagesFound(channelId: qint64, query: QString, matches: QList<ChatMessageInfo>)
   +errorOccurred(message: QString)
 }
 ChatRestClient *-- QNetworkAccessManager : owns
 ChatRestClient ..> ChatItem : emits lists of
-ChatRestClient ..> ChatMessageInfo : emits pages of (issue #100)
+ChatRestClient ..> ChatMessageInfo : emits pages of (issue #100)\nand search matches of (issue #118)
 ChatRestClient ..> "chat-service" : REST (Authorization: Bearer <token>)
 
 note right of ChatClient

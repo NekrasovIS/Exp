@@ -43,6 +43,7 @@ private:
     void handleRenameChannel(const httplib::Request& request, httplib::Response& response);
     void handleDeleteChannel(const httplib::Request& request, httplib::Response& response);
     void handleListMessages(const httplib::Request& request, httplib::Response& response);
+    void handleSearchMessages(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;

@@ -38,6 +38,7 @@ public:
                                                  const std::string& requesterLogin, const std::string& newBody);
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
+    [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
 
 private:
     ChatRepository& repository_;

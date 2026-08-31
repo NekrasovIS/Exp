@@ -264,6 +264,35 @@ TEST(ChatServiceIntegrationTest, RecentMessagesOfNonexistentChannelIsEmpty) {
     EXPECT_TRUE(messages.empty());
 }
 
+TEST(ChatServiceIntegrationTest, SearchMessagesFindsCaseInsensitiveSubstringNewestFirst) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-search-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-search-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "hello world").has_value());
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "unrelated").has_value());
+    ASSERT_TRUE(service.postMessage(*channelId, owner, "WORLD peace").has_value());
+
+    const std::vector<Message> found = service.searchMessages(*channelId, "world", 10);
+
+    ASSERT_EQ(found.size(), 2U);
+    EXPECT_EQ(found[0].body, "WORLD peace");
+    EXPECT_EQ(found[1].body, "hello world");
+}
+
 TEST(ChatServiceIntegrationTest, EditAndDeleteMessageAreRestrictedToTheAuthor) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
