@@ -42,21 +42,6 @@ else()
     )
 endif()
 
-# WebRTC's own build disables RTTI, so classes it exports (e.g.
-# AdaptedVideoTrackSource, used by CallVideoTrackSource, issue #72) have a
-# vtable but no typeinfo in libwebrtc.a. Any RTTI-enabled code that defines
-# a derived class's out-of-line virtuals — or instantiates
-# webrtc::RefCountedObject<T> for one via make_ref_counted<T>() — needs to
-# emit typeinfo referencing the base's, which doesn't exist, so the linker
-# fails. Nothing in this codebase uses dynamic_cast/typeid, so disabling
-# RTTI project-wide sidesteps this cleanly instead of chasing it file by
-# file as more WebRTC-derived classes are added.
-if(MSVC)
-    add_compile_options(/GR-)
-else()
-    add_compile_options(-fno-rtti)
-endif()
-
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network WebSockets Test)
 find_package(unofficial-webrtc CONFIG REQUIRED)
 
@@ -131,6 +116,29 @@ target_link_libraries(devicehub_core PUBLIC
     Qt6::WebSockets
     unofficial::webrtc::webrtc
 )
+
+# WebRTC's own build disables RTTI, so classes it exports (e.g.
+# AdaptedVideoTrackSource, used by CallVideoTrackSource, issue #72) have a
+# vtable but no typeinfo in libwebrtc.a. Any RTTI-enabled code that defines
+# a derived class's out-of-line virtuals — or instantiates
+# webrtc::RefCountedObject<T> for one via make_ref_counted<T>() — needs to
+# emit typeinfo referencing the base's, which doesn't exist, so the linker
+# fails. Scoped to just the files that define such classes (rather than
+# project-wide, as before): Qt itself is built with RTTI on, and disabling
+# it project-wide made every Qt-facing translation unit (MainWindow.cpp
+# included) disagree with Qt about RTTI, which crashes as soon as a
+# polymorphic exception/type crosses that boundary — MSVC's "Access
+# violation - no RTTI data!" (issue #104).
+set(devicehub_webrtc_derived_sources
+    src/devices/CallAudioDeviceModule.cpp
+    src/devices/CallVideoTrackSource.cpp
+    src/chat/CallManager.cpp
+)
+if(MSVC)
+    set_source_files_properties(${devicehub_webrtc_derived_sources} PROPERTIES COMPILE_OPTIONS "/GR-")
+else()
+    set_source_files_properties(${devicehub_webrtc_derived_sources} PROPERTIES COMPILE_OPTIONS "-fno-rtti")
+endif()
 add_executable(DeviceHub MACOSX_BUNDLE
     src/main.cpp
 )
