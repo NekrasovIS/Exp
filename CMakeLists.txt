@@ -183,6 +183,12 @@ add_executable(devicehub_tests
     test/CommunitiesPanelTest.cpp
     test/ChannelsPanelTest.cpp
     test/ChatViewTest.cpp
+    test/ChatMessageRowTest.cpp
+    test/ChatBubbleTest.cpp
+    test/FooterBarTest.cpp
+    test/AccountMenuTest.cpp
+    test/IconFactoryTest.cpp
+    test/ThemeTest.cpp
     test/ChatMessageGroupingTest.cpp
     test/ChatMessageRowMarkdownTest.cpp
     test/ChatViewTypingIndicatorTest.cpp
@@ -201,4 +207,4 @@ target_link_libraries(devicehub_tests PRIVATE
     GTest::gtest_main
 )
 include(GoogleTest)
-gtest_discover_tests(devicehub_tests)
+gtest_discover_tests(devicehub_tests DISCOVERY_TIMEOUT 60)
