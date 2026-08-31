@@ -57,7 +57,7 @@ else()
     add_compile_options(-fno-rtti)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network WebSockets Test)
 find_package(unofficial-webrtc CONFIG REQUIRED)
 
 add_library(devicehub_core
@@ -180,6 +180,9 @@ add_executable(devicehub_tests
     test/MainWindowUiTest.cpp
     test/ToastBannerTest.cpp
     test/NotificationPolicyTest.cpp
+    test/CommunitiesPanelTest.cpp
+    test/ChannelsPanelTest.cpp
+    test/ChatViewTest.cpp
     test/ChatMessageGroupingTest.cpp
     test/ChatMessageRowMarkdownTest.cpp
     test/ChatViewTypingIndicatorTest.cpp
@@ -193,6 +196,7 @@ add_executable(devicehub_tests
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core
+    Qt6::Test
     GTest::gtest
     GTest::gtest_main
 )
