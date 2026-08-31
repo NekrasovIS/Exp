@@ -17,6 +17,7 @@ package "src/devices" {
   class AudioOutputDevice
   class CallVideoTrackSource
   class CameraDevice
+  class ScreenCaptureDevice
 }
 
 class ChatItem {
@@ -61,6 +62,9 @@ class CallManager {
   +enableVideo(device: QCameraDevice)
   +disableVideo()
   +videoEnabled() : bool
+  +enableScreenShare(screen: QScreen*)
+  +disableScreenShare()
+  +screenShareEnabled() : bool
   .. signals ..
   +participantJoined(login: QString)
   +participantLeft(login: QString)
@@ -73,6 +77,8 @@ class CallManager {
   -negotiateLocal(peerLogin: QString)
   -onCapturedPcm(data: QByteArray, format: QAudioFormat)
   -onCameraFrame(frame: QVideoFrame)
+  -onScreenShareFrame(frame: QVideoFrame)
+  -ensureLocalVideoTrack()
   -attachVideoTrack(entry: PeerConnectionEntry&)
   -handleRemoteTrack(peerLogin: QString, transceiver: RtpTransceiverInterface*)
   -handleRemoteVideoFrame(peerLogin: QString, frame: QImage)
@@ -81,6 +87,7 @@ CallManager --> ChatClient : uses (&), listens to call_* signals
 CallManager --> AudioInputDevice : uses (&), pcmDataAvailable()\n-> pushCapturedAudio() (issue #70)
 CallManager --> AudioOutputDevice : uses (&), PlayoutSink\n-> writeAudio() (issue #70)
 CallManager --> CameraDevice : uses (&), frameAvailable()\n-> pushFrame() (issue #72)
+CallManager --> ScreenCaptureDevice : uses (&), frameAvailable()\n-> pushFrame() (issue #112)
 CallManager *-- WebrtcPeerConnectionFactory : owns (built lazily on joinCall())
 CallManager "1" *-- "0..*" WebrtcPeerConnection : owns, one per\nremote participant (mesh)
 CallManager *-- CallAudioDeviceModule : owns (issue #64), registered\nas the factory's ADM
@@ -141,6 +148,20 @@ note right of CallManager
   codec-list handling during live testing
   (media/base/codec_list.cc, "Check failed: present_codec
   == codec").
+
+  Screen share (issue #112) reuses camera video's exact
+  track/attach machinery instead of a second track —
+  ensureLocalVideoTrack() factors out the "create once,
+  attach to every peer" block enableVideo() used to do
+  inline. enableVideo()/enableScreenShare() are mutually
+  exclusive (enabling one disables the other first) and
+  just point the one shared CallVideoTrackSource at a
+  different frame source (camera_ vs screenCapture_),
+  flipping is_screencast() via setIsScreencast() to
+  match. Simpler than a second track (no extra
+  renegotiation/attach bookkeeping per peer), at the cost
+  of not sending both at once — accepted first-pass scope
+  limit.
 
   Receiving remote video (issue #91) mirrors the sending
   side: PeerObserver::OnTrack() -> handleRemoteTrack()

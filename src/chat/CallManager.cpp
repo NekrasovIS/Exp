@@ -150,18 +150,20 @@ private:
 };
 
 CallManager::CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, AudioOutputDevice& audioOutput,
-                          CameraDevice& camera, QObject* parent)
+                          CameraDevice& camera, ScreenCaptureDevice& screenCapture, QObject* parent)
     : QObject(parent),
       chatClient_(chatClient),
       audioInput_(audioInput),
       audioOutput_(audioOutput),
-      camera_(camera) {
+      camera_(camera),
+      screenCapture_(screenCapture) {
     connect(&chatClient_, &ChatClient::callRosterReceived, this, &CallManager::onCallRosterReceived);
     connect(&chatClient_, &ChatClient::callPeerJoined, this, &CallManager::onCallPeerJoined);
     connect(&chatClient_, &ChatClient::callPeerLeft, this, &CallManager::onCallPeerLeft);
     connect(&chatClient_, &ChatClient::callSignalReceived, this, &CallManager::onCallSignalReceived);
     connect(&audioInput_, &AudioInputDevice::pcmDataAvailable, this, &CallManager::onCapturedPcm);
     connect(&camera_, &CameraDevice::frameAvailable, this, &CallManager::onCameraFrame);
+    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this, &CallManager::onScreenShareFrame);
 }
 
 CallManager::~CallManager() {
@@ -223,34 +225,43 @@ void CallManager::setMuted(bool muted) {
     }
 }
 
-void CallManager::enableVideo(const QCameraDevice& device) {
+void CallManager::ensureLocalVideoTrack() {
     ensureFactory();
-    if (!localVideoTrack_) {
-        videoTrackSource_ = webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
-        localVideoTrack_ = peerConnectionFactory_->CreateVideoTrack(videoTrackSource_, "call-video0");
-        // First-ever enableVideo() call: attach the (new) track to
-        // every peer connection that already exists, and negotiate
-        // that change explicitly right here (the same pattern
-        // ensurePeerConnection()/onCallRosterReceived() already use
-        // for the initial audio track — see the class doc comment for
-        // why this stays explicit rather than reacting to WebRTC's own
-        // OnRenegotiationNeeded() notification). Any connection created
-        // after this point picks up the track as part of its own
-        // initial offer/answer instead (see ensurePeerConnection()).
-        //
-        // Later toggles just flip set_enabled() below, deliberately
-        // never removing the track again — RemoveTrackOrError() hit a
-        // real fatal assertion inside WebRTC's own codec-list handling
-        // during live testing (media/base/codec_list.cc, "Check failed:
-        // present_codec == codec"). set_enabled(false) achieves the same
-        // practical effect (no video sent) via the exact mechanism
-        // setMuted() already uses for audio, without touching tracks
-        // (and thus needing renegotiation) at all.
-        for (auto& [login, entry] : peers_) {
-            attachVideoTrack(entry);
-            negotiateLocal(QString::fromStdString(login));
-        }
+    if (localVideoTrack_) {
+        return;
     }
+    videoTrackSource_ = webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
+    localVideoTrack_ = peerConnectionFactory_->CreateVideoTrack(videoTrackSource_, "call-video0");
+    // First-ever enableVideo()/enableScreenShare() call: attach the
+    // (new) track to every peer connection that already exists, and
+    // negotiate that change explicitly right here (the same pattern
+    // ensurePeerConnection()/onCallRosterReceived() already use for the
+    // initial audio track — see the class doc comment for why this
+    // stays explicit rather than reacting to WebRTC's own
+    // OnRenegotiationNeeded() notification). Any connection created
+    // after this point picks up the track as part of its own initial
+    // offer/answer instead (see ensurePeerConnection()).
+    //
+    // Later toggles just flip set_enabled() below, deliberately never
+    // removing the track again — RemoveTrackOrError() hit a real fatal
+    // assertion inside WebRTC's own codec-list handling during live
+    // testing (media/base/codec_list.cc, "Check failed: present_codec
+    // == codec"). set_enabled(false) achieves the same practical effect
+    // (no video sent) via the exact mechanism setMuted() already uses
+    // for audio, without touching tracks (and thus needing
+    // renegotiation) at all.
+    for (auto& [login, entry] : peers_) {
+        attachVideoTrack(entry);
+        negotiateLocal(QString::fromStdString(login));
+    }
+}
+
+void CallManager::enableVideo(const QCameraDevice& device) {
+    if (screenShareEnabled_) {
+        disableScreenShare();
+    }
+    ensureLocalVideoTrack();
+    videoTrackSource_->setIsScreencast(false);
     localVideoTrack_->set_enabled(true);
     videoEnabled_ = true;
     camera_.setDevice(device);
@@ -263,6 +274,29 @@ void CallManager::disableVideo() {
     }
     videoEnabled_ = false;
     camera_.stop();
+    if (localVideoTrack_) {
+        localVideoTrack_->set_enabled(false);
+    }
+}
+
+void CallManager::enableScreenShare(QScreen* screen) {
+    if (videoEnabled_) {
+        disableVideo();
+    }
+    ensureLocalVideoTrack();
+    videoTrackSource_->setIsScreencast(true);
+    localVideoTrack_->set_enabled(true);
+    screenShareEnabled_ = true;
+    screenCapture_.setScreen(screen);
+    screenCapture_.start();
+}
+
+void CallManager::disableScreenShare() {
+    if (!screenShareEnabled_) {
+        return;
+    }
+    screenShareEnabled_ = false;
+    screenCapture_.stop();
     if (localVideoTrack_) {
         localVideoTrack_->set_enabled(false);
     }
@@ -469,6 +503,13 @@ void CallManager::onCapturedPcm(const QByteArray& data, const QAudioFormat& form
 
 void CallManager::onCameraFrame(const QVideoFrame& frame) {
     if (!videoEnabled_ || !videoTrackSource_) {
+        return;
+    }
+    videoTrackSource_->pushFrame(frame);
+}
+
+void CallManager::onScreenShareFrame(const QVideoFrame& frame) {
+    if (!screenShareEnabled_ || !videoTrackSource_) {
         return;
     }
     videoTrackSource_->pushFrame(frame);

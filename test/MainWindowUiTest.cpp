@@ -172,6 +172,18 @@ TEST(MainWindowUiTest, VideoToggleButtonExistsAndStartsDisabled) {
     EXPECT_FALSE(videoToggleButton->isEnabled());
 }
 
+TEST(MainWindowUiTest, ScreenShareToggleButtonExistsAndStartsDisabled) {
+    // #112: mirrors the video toggle button — mutually exclusive with it
+    // in CallManager, same UI-signal pattern.
+    const MainWindow window;
+
+    auto* screenShareToggleButton = window.findChild<QPushButton*>("screenShareToggleButton");
+
+    ASSERT_NE(screenShareToggleButton, nullptr);
+    EXPECT_EQ(screenShareToggleButton->text(), QStringLiteral("Share Screen"));
+    EXPECT_FALSE(screenShareToggleButton->isEnabled());
+}
+
 TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
     const MainWindow window;
 

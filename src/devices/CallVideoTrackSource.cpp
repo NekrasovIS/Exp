@@ -59,6 +59,10 @@ void CallVideoTrackSource::pushFrame(const QVideoFrame& frame) {
     OnFrame(webrtcFrame);
 }
 
+void CallVideoTrackSource::setIsScreencast(bool isScreencast) {
+    isScreencast_ = isScreencast;
+}
+
 bool CallVideoTrackSource::is_screencast() const {
     return isScreencast_;
 }

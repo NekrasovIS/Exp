@@ -107,6 +107,15 @@ public:
     /// CallManager::enableVideo()/disableVideo().
     void setVideoEnabled(bool enabled);
 
+    /// Same as setVideoEnabled(), for screen share (issue #112) —
+    /// MainWindow calls this after every
+    /// CallManager::enableScreenShare()/disableScreenShare(). Enabling
+    /// one always implies the other is now disabled (CallManager's
+    /// video/screen-share are mutually exclusive), so callers should
+    /// call both setters together rather than assuming one implies the
+    /// other here.
+    void setScreenShareEnabled(bool enabled);
+
     /// Shows (creating its tile on first call) the latest decoded frame
     /// from @p peerLogin's incoming video track.
     void showRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
@@ -128,6 +137,7 @@ public:
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
     [[nodiscard]] QPushButton* videoToggleButton() const { return videoToggleButton_; }
+    [[nodiscard]] QPushButton* screenShareToggleButton() const { return screenShareToggleButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
@@ -152,6 +162,10 @@ signals:
     /// setVideoEnabled().
     void videoToggleRequested();
 
+    /// Screen share toggle button clicked — same pattern as
+    /// videoToggleRequested().
+    void screenShareToggleRequested();
+
     /// The user is typing in the message box — throttled (at most once
     /// per cooldown window) rather than once per keystroke, so
     /// MainWindow's ChatClient::sendTyping() doesn't spam the network.
@@ -171,6 +185,13 @@ private:
     /// for now).
     void connectMessageRow(ChatMessageRow* row);
 
+    /// Local preview/strip visibility is "either camera video or screen
+    /// share is active" — recomputed from videoActive_/screenShareActive_
+    /// rather than each setter's own @p enabled, so calling
+    /// setVideoEnabled()/setScreenShareEnabled() in either order after a
+    /// mutually-exclusive toggle still leaves the right one visible.
+    void updateLocalVideoVisibility();
+
 
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
@@ -183,6 +204,9 @@ private:
     QPushButton* callToggleButton_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QPushButton* videoToggleButton_ = nullptr;
+    QPushButton* screenShareToggleButton_ = nullptr;
+    bool videoActive_ = false;
+    bool screenShareActive_ = false;
     QLabel* callParticipantsLabel_ = nullptr;
     QWidget* videoStrip_ = nullptr;
     QHBoxLayout* videoStripLayout_ = nullptr;

@@ -6,6 +6,7 @@
 #include "devices/AudioOutputDevice.h"
 #include "devices/CameraDevice.h"
 #include "devices/DeviceEnumerator.h"
+#include "devices/ScreenCaptureDevice.h"
 
 #include <gtest/gtest.h>
 
@@ -170,9 +171,11 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
     AudioOutputDevice audioOutputB;
     CameraDevice cameraA;
     CameraDevice cameraB;
+    ScreenCaptureDevice screenCaptureA;
+    ScreenCaptureDevice screenCaptureB;
 
-    CallManager callManagerA(chatClientA, audioInputA, audioOutputA, cameraA);
-    CallManager callManagerB(chatClientB, audioInputB, audioOutputB, cameraB);
+    CallManager callManagerA(chatClientA, audioInputA, audioOutputA, cameraA, screenCaptureA);
+    CallManager callManagerB(chatClientB, audioInputB, audioOutputB, cameraB, screenCaptureB);
 
     QStringList errorsA;
     QStringList errorsB;

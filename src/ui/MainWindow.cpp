@@ -139,6 +139,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(chatView_, &ChatView::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
     connect(chatView_, &ChatView::videoToggleRequested, this, &MainWindow::onVideoToggleClicked);
+    connect(chatView_, &ChatView::screenShareToggleRequested, this, &MainWindow::onScreenShareToggleClicked);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
     connect(&callManager_, &CallManager::participantJoined, this, [this](const QString& login) {
@@ -310,7 +311,14 @@ MainWindow::MainWindow(QWidget* parent)
     // is safe to leave connected unconditionally.
     connect(&camera_, &CameraDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
-    screenCapture_.captureSession().setVideoOutput(settingsDialog_->screenPreview());
+    // Same "owns the one sink, re-emits" refactor as CameraDevice (issue
+    // #112) — screen share and camera video share the one local-preview
+    // tile/track, mutually exclusive (CallManager::enableScreenShare()
+    // stops the camera and vice versa), so both fan out to it the same way.
+    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
+            [this](const QVideoFrame& frame) { settingsDialog_->screenPreview()->videoSink()->setVideoFrame(frame); });
+    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
+            [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
 }
 
 MainWindow::~MainWindow() = default;
@@ -466,6 +474,9 @@ void MainWindow::onCallToggleClicked() {
         if (callManager_.videoEnabled()) {
             callManager_.disableVideo();
         }
+        if (callManager_.screenShareEnabled()) {
+            callManager_.disableScreenShare();
+        }
         callManager_.leaveCall();
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);
@@ -489,7 +500,24 @@ void MainWindow::onVideoToggleClicked() {
         const QCameraDevice cameraDevice = settingsDialog_->cameraCombo()->currentData().value<QCameraDevice>();
         callManager_.enableVideo(cameraDevice);
     }
+    // enableVideo() may have just disabled screen share (CallManager's
+    // camera video and screen share are mutually exclusive, issue #112)
+    // — refresh both toggle buttons/the shared local preview together.
     chatView_->setVideoEnabled(callManager_.videoEnabled());
+    chatView_->setScreenShareEnabled(callManager_.screenShareEnabled());
+}
+
+void MainWindow::onScreenShareToggleClicked() {
+    if (callManager_.screenShareEnabled()) {
+        callManager_.disableScreenShare();
+    } else if (const int index = settingsDialog_->screenCombo()->currentIndex();
+               index >= 0 && index < screens_.size()) {
+        callManager_.enableScreenShare(screens_[index]);
+    } else {
+        showToast(tr("No screen available"), ToastBanner::Variant::kError);
+    }
+    chatView_->setVideoEnabled(callManager_.videoEnabled());
+    chatView_->setScreenShareEnabled(callManager_.screenShareEnabled());
 }
 
 void MainWindow::refreshCommunities() {
@@ -516,6 +544,9 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
         if (callManager_.videoEnabled()) {
             callManager_.disableVideo();
         }
+        if (callManager_.screenShareEnabled()) {
+            callManager_.disableScreenShare();
+        }
         callManager_.leaveCall();
         callParticipants_.clear();
         chatView_->setCallParticipants(callParticipants_);
@@ -534,6 +565,9 @@ void MainWindow::closeChatView() {
     if (callManager_.inCall()) {
         if (callManager_.videoEnabled()) {
             callManager_.disableVideo();
+        }
+        if (callManager_.screenShareEnabled()) {
+            callManager_.disableScreenShare();
         }
         callManager_.leaveCall();
         callParticipants_.clear();

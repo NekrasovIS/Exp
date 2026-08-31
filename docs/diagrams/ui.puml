@@ -67,6 +67,7 @@ class ChatView {
   +setCallState(inCall: bool, muted: bool)
   +setCallParticipants(participants: QStringList)
   +setVideoEnabled(enabled: bool)
+  +setScreenShareEnabled(enabled: bool)
   +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
   +removeRemoteVideo(peerLogin: QString)
   +messagesContainer() : QWidget*
@@ -75,17 +76,20 @@ class ChatView {
   +callToggleButton() : QPushButton*
   +muteToggleButton() : QPushButton*
   +videoToggleButton() : QPushButton*
+  +screenShareToggleButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
   +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
+  -updateLocalVideoVisibility()
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
   +muteToggleRequested()
   +videoToggleRequested()
+  +screenShareToggleRequested()
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
@@ -242,12 +246,12 @@ CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
-MainWindow ..> ChatView : setVideoEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
+MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
-ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested() >
+ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested()/screenShareToggleRequested() >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
 ChatMessageRow ..> ChatView : editRequested()/deleteRequested() >
@@ -317,6 +321,21 @@ note right of MainWindow
   из звонка (setCallState(false, ...))
   сбрасывает всю полоску разом — видео не
   переживает звонок, которому принадлежит.
+
+  Screen Share-кнопка (issue #112) — тот же
+  паттерн рядом: screenShareToggleRequested()
+  -> CallManager::enableScreenShare()/
+  disableScreenShare(), взаимоисключающие с
+  video-кнопкой на стороне CallManager.
+  Локальное превью и videoStrip_ теперь
+  видны, если активно ЛИБО видео, ЛИБО шаринг
+  (updateLocalVideoVisibility(), на двух
+  собственных bool-флагах videoActive_/
+  screenShareActive_ — а не на последнем
+  вызванном setVideoEnabled()/
+  setScreenShareEnabled(), чтобы порядок двух
+  вызовов после взаимоисключающего тоггла не
+  влиял на итоговую видимость).
 
   DesktopNotifier (issue #92) shows a native
   QSystemTrayIcon notification for
