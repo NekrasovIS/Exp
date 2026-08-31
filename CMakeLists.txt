@@ -83,6 +83,8 @@ add_library(devicehub_core
     src/chat/ChatRestClient.cpp
     src/chat/CallManager.h
     src/chat/CallManager.cpp
+    src/user/UserProfileClient.h
+    src/user/UserProfileClient.cpp
     src/ui/CommunitiesPanel.h
     src/ui/CommunitiesPanel.cpp
     src/ui/ChannelsPanel.h
@@ -99,6 +101,8 @@ add_library(devicehub_core
     src/ui/AccountMenu.cpp
     src/ui/SettingsDialog.h
     src/ui/SettingsDialog.cpp
+    src/ui/ProfileDialog.h
+    src/ui/ProfileDialog.cpp
     src/ui/FooterBar.h
     src/ui/FooterBar.cpp
     src/ui/Theme.h
@@ -187,6 +191,8 @@ add_executable(devicehub_tests
     test/ChatBubbleTest.cpp
     test/FooterBarTest.cpp
     test/AccountMenuTest.cpp
+    test/ProfileDialogTest.cpp
+    test/UserProfileClientTest.cpp
     test/IconFactoryTest.cpp
     test/ThemeTest.cpp
     test/ChatMessageGroupingTest.cpp

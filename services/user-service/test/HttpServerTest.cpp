@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 
+#include "AuthServiceClient.h"
 #include "UserRepository.h"
 #include "UserService.h"
 
@@ -42,11 +43,21 @@ std::string uniqueLogin(const std::string& prefix) {
 constexpr const char* kTestHost = "127.0.0.1";
 constexpr int kTestPort = 18081;
 
+// Real AuthServiceClient pointed at whatever auth-service is configured
+// for this test run (same env vars as AuthServiceClientTest.cpp) —
+// unauthenticated routes (register/verify-credentials) never invoke it,
+// so it's safe to construct even when auth-service isn't reachable.
+AuthServiceClient testAuthServiceClient() {
+    return AuthServiceClient(envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1"),
+                              std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080")));
+}
+
 // Starts a real HttpServer on a background thread for the lifetime of
 // the fixture and stops it on destruction.
 class ScopedServer {
 public:
-    explicit ScopedServer(UserService& userService) : server_(userService), thread_([this] { server_.listen(kTestHost, kTestPort); }) {
+    ScopedServer(UserService& userService, const AuthServiceClient& authServiceClient)
+        : server_(userService, authServiceClient), thread_([this] { server_.listen(kTestHost, kTestPort); }) {
         httplib::Client probe(kTestHost, kTestPort);
         probe.set_connection_timeout(0, 50000);
         for (int attempt = 0; attempt < 100; ++attempt) {
@@ -73,7 +84,8 @@ private:
 TEST(HttpServerTest, RegisterRouteRejectsMissingFieldsWith400) {
     UserRepository repository(connectionString());
     UserService userService(repository);
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
 
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result =
@@ -86,7 +98,8 @@ TEST(HttpServerTest, RegisterRouteRejectsMissingFieldsWith400) {
 TEST(HttpServerTest, RegisterRouteRejectsMalformedJsonWith400) {
     UserRepository repository(connectionString());
     UserService userService(repository);
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
 
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result = client.Post("/users/register", "not json", "application/json");
@@ -109,7 +122,8 @@ TEST(HttpServerTest, RegisterRouteCreatesAccountWith201) {
         GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
     }
 
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result = client.Post(
         "/users/register", nlohmann::json{{"login", login}, {"password", "integration-test-password"}}.dump(),
@@ -134,7 +148,8 @@ TEST(HttpServerTest, RegisterRouteRejectsDuplicateLoginWith409) {
     }
     ASSERT_TRUE(firstRegistered);
 
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result = client.Post(
         "/users/register", nlohmann::json{{"login", login}, {"password", "integration-test-password"}}.dump(),
@@ -149,7 +164,8 @@ TEST(HttpServerTest, RegisterRouteRejectsDuplicateLoginWith409) {
 TEST(HttpServerTest, VerifyCredentialsRouteRejectsMissingFieldsWith400) {
     UserRepository repository(connectionString());
     UserService userService(repository);
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
 
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result =
@@ -162,7 +178,8 @@ TEST(HttpServerTest, VerifyCredentialsRouteRejectsMissingFieldsWith400) {
 TEST(HttpServerTest, VerifyCredentialsRouteRejectsMalformedJsonWith400) {
     UserRepository repository(connectionString());
     UserService userService(repository);
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
 
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result = client.Post("/users/verify-credentials", "not json", "application/json");
@@ -185,7 +202,8 @@ TEST(HttpServerTest, VerifyCredentialsRouteReturnsTrueForCorrectPassword) {
     }
     ASSERT_TRUE(registered);
 
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result = client.Post(
         "/users/verify-credentials", nlohmann::json{{"login", login}, {"password", password}}.dump(), "application/json");
@@ -209,7 +227,8 @@ TEST(HttpServerTest, VerifyCredentialsRouteReturnsFalseForWrongPassword) {
     }
     ASSERT_TRUE(registered);
 
-    const ScopedServer server(userService);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
     const httplib::Result result = client.Post(
         "/users/verify-credentials", nlohmann::json{{"login", login}, {"password", "wrong-password"}}.dump(),
@@ -219,6 +238,79 @@ TEST(HttpServerTest, VerifyCredentialsRouteReturnsFalseForWrongPassword) {
     ASSERT_EQ(result->status, 200);
     const nlohmann::json body = nlohmann::json::parse(result->body);
     EXPECT_FALSE(body["valid"].get<bool>());
+}
+
+// Registers a brand-new user directly against a live auth-service (not
+// this test's ScopedServer) and returns its auto-issued token — the
+// profile routes need a token auth-service itself will actually verify.
+// Empty string means auth-service isn't reachable.
+std::string registerViaAuthServiceAndGetToken(const std::string& loginPrefix) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    httplib::Client client(authHost, authPort);
+    const nlohmann::json body{{"login", uniqueLogin(loginPrefix)}, {"password", "http-server-profile-test-password"}};
+    const httplib::Result result = client.Post("/auth/register", body.dump(), "application/json");
+    if (!result || result->status != 201) {
+        return {};
+    }
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded() || !response.contains("token")) {
+        return {};
+    }
+    return response["token"].get<std::string>();
+}
+
+TEST(HttpServerTest, GetProfileRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/users/anyone/profile");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnsetFieldsOnPartialUpdate) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-profile-test");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+
+    // Full update: both fields.
+    const httplib::Result patchResult =
+        client.Patch("/users/me", authHeader,
+                      nlohmann::json{{"display_name", "Alice"}, {"avatar_url", "https://example.test/alice.png"}}.dump(),
+                      "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+    const httplib::Result getResult = client.Get("/users/" + login + "/profile", authHeader);
+    ASSERT_TRUE(getResult);
+    ASSERT_EQ(getResult->status, 200);
+    nlohmann::json profile = nlohmann::json::parse(getResult->body);
+    EXPECT_EQ(profile["display_name"].get<std::string>(), "Alice");
+    EXPECT_EQ(profile["avatar_url"].get<std::string>(), "https://example.test/alice.png");
+
+    // Partial update: display_name only — avatar_url must survive unchanged.
+    const httplib::Result partialPatchResult =
+        client.Patch("/users/me", authHeader, nlohmann::json{{"display_name", "Alice B."}}.dump(), "application/json");
+    ASSERT_TRUE(partialPatchResult);
+    ASSERT_EQ(partialPatchResult->status, 200);
+    profile = nlohmann::json::parse(partialPatchResult->body);
+    EXPECT_EQ(profile["display_name"].get<std::string>(), "Alice B.");
+    EXPECT_EQ(profile["avatar_url"].get<std::string>(), "https://example.test/alice.png");
 }
 
 }  // namespace

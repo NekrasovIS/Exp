@@ -7,6 +7,26 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
         CACHE STRING "Vcpkg toolchain file")
 endif()
 
+# libpqxx's zview type publicly derives from std::string_view; MSVC's
+# dllexport propagates to inherited base-class members even when
+# they're plain STL inline functions, so building against the default
+# dynamic (DLL) triplet on Windows makes basic_string_view::size()/
+# data() get exported from pqxx.dll *and* locally instantiated by any
+# translation unit that also happens to use std::string_view directly
+# (issue #98's chat-service diagnosis — HttpServer.cpp's own
+# std::string_view Bearer-prefix check is enough to trigger it here
+# too, issue #110) — a link-time "already defined" for both. Scoped to
+# Windows only; this class of MSVC DLL-boundary issue doesn't exist on
+# the dynamic triplets vcpkg picks for macOS/Linux.
+if(WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "Vcpkg triplet")
+    # x64-windows-static's packages are built against the static CRT
+    # (/MT, /MTd) — CMake defaults to the dynamic CRT (/MD, /MDd)
+    # otherwise, which links fine but then every object file disagrees
+    # with every vcpkg .lib on which CRT it wants (LNK2038).
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library")
+endif()
+
 project(UserService LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -50,6 +70,8 @@ add_library(user_service_core
     src/UserRepository.cpp
     src/UserService.h
     src/UserService.cpp
+    src/AuthServiceClient.h
+    src/AuthServiceClient.cpp
     src/HttpServer.h
     src/HttpServer.cpp
 )
@@ -72,6 +94,7 @@ add_executable(user_service_tests
     test/UserServiceIntegrationTest.cpp
     test/UserRepositoryTest.cpp
     test/HttpServerTest.cpp
+    test/AuthServiceClientTest.cpp
 )
 target_link_libraries(user_service_tests PRIVATE
     user_service_core

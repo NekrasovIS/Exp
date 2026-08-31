@@ -49,6 +49,10 @@ AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
     actionsLayout->addWidget(requestTokenButton_);
     actionsLayout->addWidget(registerButton_);
 
+    editProfileButton_ = new QPushButton(tr("Edit Profile"), popup_);
+    editProfileButton_->setObjectName(QStringLiteral("editProfileButton"));
+    editProfileButton_->setEnabled(false);
+
     statusLabel_ = new QLabel(tr("No token requested yet"), popup_);
     statusLabel_->setObjectName(QStringLiteral("authStatusLabel"));
     statusLabel_->setWordWrap(true);
@@ -56,9 +60,14 @@ AccountMenu::AccountMenu(QWidget* parent) : QWidget(parent) {
     popupLayout->addWidget(loginEdit_);
     popupLayout->addWidget(passwordEdit_);
     popupLayout->addLayout(actionsLayout);
+    popupLayout->addWidget(editProfileButton_);
     popupLayout->addWidget(statusLabel_);
 
     connect(toggleButton_, &QPushButton::clicked, this, &AccountMenu::togglePopup);
+}
+
+void AccountMenu::setEditProfileEnabled(bool enabled) {
+    editProfileButton_->setEnabled(enabled);
 }
 
 void AccountMenu::togglePopup() {

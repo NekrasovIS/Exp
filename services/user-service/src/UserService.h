@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "UserRepository.h"
@@ -19,6 +20,14 @@ public:
 
     /// @return True if @p login exists and @p password matches its hash.
     [[nodiscard]] bool verifyCredentials(const std::string& login, const std::string& password);
+
+    /// @return @p login's profile, or std::nullopt if no such user (issue #110).
+    [[nodiscard]] std::optional<Profile> getProfile(const std::string& login);
+
+    /// Overwrites @p login's display_name/avatar_url. @return False if no
+    /// such user exists.
+    [[nodiscard]] bool updateProfile(const std::string& login, const std::optional<std::string>& displayName,
+                                      const std::optional<std::string>& avatarUrl);
 
 private:
     UserRepository& repository_;

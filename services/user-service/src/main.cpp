@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 
+#include "AuthServiceClient.h"
 #include "HttpServer.h"
 #include "UserRepository.h"
 #include "UserService.h"
@@ -22,10 +23,13 @@ int main() {
         "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5433/user_service");
     const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
     const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    const std::string authServiceHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authServicePort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
 
     user_service::UserRepository repository(connectionString);
     user_service::UserService service(repository);
-    user_service::HttpServer server(service);
+    const user_service::AuthServiceClient authServiceClient(authServiceHost, authServicePort);
+    user_service::HttpServer server(service, authServiceClient);
 
     std::cout << "user-service listening on " << host << ":" << port << "\n";
     server.listen(host, port);

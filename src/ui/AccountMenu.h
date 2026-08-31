@@ -26,8 +26,14 @@ public:
     [[nodiscard]] QLineEdit* passwordEdit() const { return passwordEdit_; }
     [[nodiscard]] QPushButton* requestTokenButton() const { return requestTokenButton_; }
     [[nodiscard]] QPushButton* registerButton() const { return registerButton_; }
+    [[nodiscard]] QPushButton* editProfileButton() const { return editProfileButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
     [[nodiscard]] QPushButton* toggleButton() const { return toggleButton_; }
+
+    /// Only meaningful while signed in — MainWindow enables it once
+    /// AuthClient::tokenVerified() reports a valid token, disables it
+    /// otherwise (issue #110).
+    void setEditProfileEnabled(bool enabled);
 
 private:
     void togglePopup();
@@ -38,6 +44,7 @@ private:
     QLineEdit* passwordEdit_ = nullptr;
     QPushButton* requestTokenButton_ = nullptr;
     QPushButton* registerButton_ = nullptr;
+    QPushButton* editProfileButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };
 
