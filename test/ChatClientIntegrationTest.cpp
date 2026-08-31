@@ -264,7 +264,7 @@ TEST(ChatClientIntegrationTest, DisconnectFromChannelStopsFurtherMessageDelivery
 
     int messagesReceivedByA = 0;
     QObject::connect(&chatClientA, &ChatClient::messageReceived, &chatClientA,
-                      [&](const QString&, const QString&, const QString&) { ++messagesReceivedByA; });
+                      [&](qint64, const QString&, const QString&, const QString&) { ++messagesReceivedByA; });
 
     chatClientA.disconnectFromChannel();
 
@@ -287,7 +287,7 @@ TEST(ChatClientIntegrationTest, DisconnectFromChannelStopsFurtherMessageDelivery
         QEventLoop loop;
         QTimer::singleShot(3000, &loop, &QEventLoop::quit);
         QObject::connect(&chatClientB, &ChatClient::messageReceived, &loop,
-                          [&](const QString&, const QString&, const QString&) { loop.quit(); });
+                          [&](qint64, const QString&, const QString&, const QString&) { loop.quit(); });
         chatClientB.sendMessage(QStringLiteral("posted after A disconnected"));
         loop.exec();
     }
