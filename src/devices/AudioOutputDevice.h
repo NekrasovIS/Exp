@@ -60,7 +60,7 @@ public:
     /// before it reaches writeAudio() — unlike a tight low-latency
     /// playback callback, that hop is subject to Qt GUI event-loop
     /// scheduling jitter, and the feeding thread itself is a
-    /// normal-priority std::thread with no real-time scheduling
+    /// normal-priority std::jthread with no real-time scheduling
     /// guarantee. QAudioSink's own default buffer is sized for the
     /// low-latency case and underruns easily under that jitter,
     /// audible as crackling; this is generous but a voice call

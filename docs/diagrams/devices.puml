@@ -172,7 +172,7 @@ note right of CallAudioDeviceModule
 
   Playout is pull-style but WebRTC does not
   drive the timing itself: this class runs its
-  own ~10ms std::thread loop calling
+  own ~10ms std::jthread loop calling
   AudioTransport::NeedMorePlayData() and
   forwards decoded PCM to a caller-supplied
   PlayoutSink callback — invoked on that
