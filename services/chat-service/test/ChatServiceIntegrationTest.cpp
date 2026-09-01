@@ -438,8 +438,12 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
 
     // "Hello" base64-encoded — no need for a real decoder here, this
     // level never decodes, only stores/retrieves verbatim.
-    const std::optional<AttachmentMetadata> attachment =
-        service.createAttachment(*channelId, owner, "greeting.txt", "text/plain", "SGVsbG8=", 5);
+    const std::optional<AttachmentMetadata> attachment = service.createAttachment(
+        *channelId, AttachmentUpload{.uploaderLogin = owner,
+                                      .filename = "greeting.txt",
+                                      .contentType = "text/plain",
+                                      .dataBase64 = "SGVsbG8=",
+                                      .sizeBytes = 5});
     ASSERT_TRUE(attachment.has_value());
     EXPECT_GT(attachment->id, 0);
     EXPECT_EQ(attachment->filename, "greeting.txt");
@@ -453,7 +457,13 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     EXPECT_EQ(fetched->data, "SGVsbG8=");
 
     EXPECT_FALSE(service.findAttachmentData(-1).has_value());
-    EXPECT_FALSE(service.createAttachment(-1, owner, "nowhere.txt", "text/plain", "SGVsbG8=", 5).has_value());
+    EXPECT_FALSE(service
+                     .createAttachment(-1, AttachmentUpload{.uploaderLogin = owner,
+                                                              .filename = "nowhere.txt",
+                                                              .contentType = "text/plain",
+                                                              .dataBase64 = "SGVsbG8=",
+                                                              .sizeBytes = 5})
+                     .has_value());
 
     const std::optional<Message> posted =
         service.postMessage(*channelId, owner, "check out this file", attachment->id);

@@ -42,6 +42,13 @@ class AttachmentMetadata {
   +contentType : string
   +sizeBytes : int64
 }
+class AttachmentUpload {
+  +uploaderLogin : string
+  +filename : string
+  +contentType : string
+  +dataBase64 : string
+  +sizeBytes : int64
+}
 class AttachmentData {
   +filename : string
   +contentType : string
@@ -70,7 +77,7 @@ class ChatRepository {
   +demoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
   +listModerators(communityId: int64) : vector<string>
   +insertMessage(channelId: int64, authorLogin: string, body: string,\n    attachmentId: optional<int64> = nullopt) : optional<Message>
-  +createAttachment(channelId: int64, uploaderLogin: string, filename: string,\n    contentType: string, dataBase64: string, sizeBytes: int64) : optional<AttachmentMetadata>
+  +createAttachment(channelId: int64, upload: AttachmentUpload) : optional<AttachmentMetadata>
   +findAttachmentData(attachmentId: int64) : optional<AttachmentData>
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
@@ -83,6 +90,7 @@ ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
 ChatRepository ..> AttachmentMetadata : creates
+ChatRepository ..> AttachmentUpload : reads
 ChatRepository ..> AttachmentData : reads
 ChatRepository ..> MutationResult : returns
 ChatRepository ..> PqxxConnection : opens per call
@@ -105,7 +113,7 @@ class ChatService {
   +demoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
   +listModerators(communityId: int64) : vector<string>
   +postMessage(channelId: int64, authorLogin: string, body: string,\n    attachmentId: optional<int64> = nullopt) : optional<Message>
-  +createAttachment(channelId: int64, uploaderLogin: string, filename: string,\n    contentType: string, dataBase64: string, sizeBytes: int64) : optional<AttachmentMetadata>
+  +createAttachment(channelId: int64, upload: AttachmentUpload) : optional<AttachmentMetadata>
   +findAttachmentData(attachmentId: int64) : optional<AttachmentData>
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult

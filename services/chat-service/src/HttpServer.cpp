@@ -455,10 +455,12 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
         return;
     }
 
-    const std::optional<AttachmentMetadata> attachment =
-        chatService_.createAttachment(channelId, *login, body["filename"].get<std::string>(),
-                                       body["content_type"].get<std::string>(), dataBase64,
-                                       static_cast<std::int64_t>(decoded->size()));
+    const std::optional<AttachmentMetadata> attachment = chatService_.createAttachment(
+        channelId, AttachmentUpload{.uploaderLogin = *login,
+                                     .filename = body["filename"].get<std::string>(),
+                                     .contentType = body["content_type"].get<std::string>(),
+                                     .dataBase64 = dataBase64,
+                                     .sizeBytes = static_cast<std::int64_t>(decoded->size())});
     if (!attachment.has_value()) {
         response.status = 404;
         response.set_content(nlohmann::json{{"error", "no such channel"}}.dump(), kJsonContentType);

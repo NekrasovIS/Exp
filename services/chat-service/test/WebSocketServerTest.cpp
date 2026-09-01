@@ -590,8 +590,12 @@ TEST(WebSocketServerTest, ChatMessageWithAttachmentIdBroadcastsAttachmentFields)
     const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
     ASSERT_TRUE(channelId.has_value());
 
-    const std::optional<AttachmentMetadata> attachment =
-        service.createAttachment(*channelId, owner, "photo.png", "image/png", "SGVsbG8=", 5);
+    const std::optional<AttachmentMetadata> attachment = service.createAttachment(
+        *channelId, AttachmentUpload{.uploaderLogin = owner,
+                                      .filename = "photo.png",
+                                      .contentType = "image/png",
+                                      .dataBase64 = "SGVsbG8=",
+                                      .sizeBytes = 5});
     ASSERT_TRUE(attachment.has_value());
 
     const std::optional<std::string> token = registerAndGetToken(authHost, authPort, owner);
