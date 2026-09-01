@@ -81,14 +81,19 @@ int32_t CallAudioDeviceModule::StartPlayout() {
     if (!playoutInitialized_.load() || playing_.load()) {
         return 0;
     }
-    stopPlayoutThread_.store(false);
     playing_.store(true);
-    playoutThread_ = std::thread(&CallAudioDeviceModule::playoutLoop, this);
+    // Not std::jthread(&CallAudioDeviceModule::playoutLoop, this): jthread
+    // inserts the stop_token as the argument right after the callable, which
+    // for a pointer-to-member-function lands in the *object* slot, not
+    // after it — silently falls back to calling playoutLoop() with no
+    // stop_token at all (ill-formed here, since it now takes one). A
+    // lambda sidesteps the ambiguity entirely.
+    playoutThread_ = std::jthread([this](std::stop_token stopToken) { playoutLoop(std::move(stopToken)); });
     return 0;
 }
 
 int32_t CallAudioDeviceModule::StopPlayout() {
-    stopPlayoutThread_.store(true);
+    playoutThread_.request_stop();
     if (playoutThread_.joinable()) {
         playoutThread_.join();
     }
@@ -128,7 +133,7 @@ bool CallAudioDeviceModule::Recording() const {
     return recording_.load();
 }
 
-void CallAudioDeviceModule::playoutLoop() {
+void CallAudioDeviceModule::playoutLoop(std::stop_token stopToken) {
     // Fixed for the lifetime of one playout session, per setPlayoutFormat()'s
     // documented precondition (set before StartPlayout(), not touched again
     // until it stops).
@@ -145,7 +150,7 @@ void CallAudioDeviceModule::playoutLoop() {
     // and starves the playout sink over time (audible as crackling),
     // not just the occasional jitter a bigger sink buffer can absorb.
     auto nextTick = std::chrono::steady_clock::now();
-    while (!stopPlayoutThread_.load()) {
+    while (!stopToken.stop_requested()) {
         nextTick += std::chrono::milliseconds(kPlayoutIntervalMs);
         webrtc::AudioTransport* callback = transport();
         if (callback != nullptr) {

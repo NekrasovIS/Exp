@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <stop_token>
 #include <thread>
 
 namespace devicehub {
@@ -23,7 +24,7 @@ namespace devicehub {
  *
  * Playout: WebRTC expects its AudioTransport::NeedMorePlayData() to be
  * pulled roughly every 10ms while playing — this class owns a
- * dedicated std::thread that does that pulling and forwards decoded
+ * dedicated std::jthread that does that pulling and forwards decoded
  * PCM to @p playoutSink. That callback runs on this class's own
  * thread, not the Qt GUI thread — a caller that touches Qt objects in
  * it is responsible for marshaling back (e.g.
@@ -82,7 +83,7 @@ public:
     bool Recording() const override;
 
 private:
-    void playoutLoop();
+    void playoutLoop(std::stop_token stopToken);
     [[nodiscard]] webrtc::AudioTransport* transport() const;
 
     PlayoutSink playoutSink_;
@@ -95,8 +96,9 @@ private:
     std::atomic<bool> playing_{false};
     std::atomic<bool> recording_{false};
 
-    std::thread playoutThread_;
-    std::atomic<bool> stopPlayoutThread_{false};
+    /// jthread rather than thread (C++20) — auto-requests-stop and joins
+    /// on destruction/reassignment, no hand-rolled atomic stop flag needed.
+    std::jthread playoutThread_;
 
     int playoutSampleRateHz_ = 48000;
     size_t playoutChannels_ = 1;
