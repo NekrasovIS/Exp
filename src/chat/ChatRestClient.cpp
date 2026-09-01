@@ -28,7 +28,8 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
         const QJsonObject object = value.toObject();
         items.push_back(ChatItem{.id = object.value("id").toVariant().toLongLong(),
                                   .name = object.value("name").toString(),
-                                  .ownerLogin = object.value("owner").toString()});
+                                  .ownerLogin = object.value("owner").toString(),
+                                  .isEncrypted = object.value("is_encrypted").toBool()});
     }
     return items;
 }
@@ -113,10 +114,11 @@ void ChatRestClient::joinCommunity(const QString& token, qint64 communityId) {
     });
 }
 
-void ChatRestClient::createChannel(const QString& token, qint64 communityId, const QString& name) {
+void ChatRestClient::createChannel(const QString& token, qint64 communityId, const QString& name, bool isEncrypted) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/channels").arg(communityId)));
-    QNetworkReply* reply =
-        networkManager_.post(buildRequest(url, token), QJsonDocument(QJsonObject{{"name", name}}).toJson(QJsonDocument::Compact));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token),
+        QJsonDocument(QJsonObject{{"name", name}, {"is_encrypted", isEncrypted}}).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply, name]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
@@ -124,7 +126,7 @@ void ChatRestClient::createChannel(const QString& token, qint64 communityId, con
             return;
         }
         const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
-        emit channelCreated(object.value("id").toVariant().toLongLong(), name);
+        emit channelCreated(object.value("id").toVariant().toLongLong(), name, object.value("is_encrypted").toBool());
     });
 }
 
@@ -317,6 +319,65 @@ void ChatRestClient::listModerators(const QString& token, qint64 communityId) {
             }
         }
         emit moderatorsListed(communityId, logins);
+    });
+}
+
+void ChatRestClient::listMembers(const QString& token, qint64 communityId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/members").arg(communityId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QStringList logins;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                logins.push_back(value.toString());
+            }
+        }
+        emit membersListed(communityId, logins);
+    });
+}
+
+void ChatRestClient::setChannelKey(const QString& token, qint64 channelId, const QString& memberLogin,
+                                    const QString& wrappedKey) {
+    const QUrl url = baseUrl_.resolved(
+        QUrl(QStringLiteral("/channels/%1/keys/%2")
+                 .arg(channelId)
+                 .arg(QString::fromUtf8(QUrl::toPercentEncoding(memberLogin)))));
+    QNetworkReply* reply = networkManager_.sendCustomRequest(
+        buildRequest(url, token), "PUT",
+        QJsonDocument(QJsonObject{{"wrapped_key", wrappedKey}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId, memberLogin]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit channelKeySet(channelId, memberLogin);
+    });
+}
+
+void ChatRestClient::fetchMyChannelKey(const QString& token, qint64 channelId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/keys/me").arg(channelId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::ContentNotFoundError) {
+            // Expected state (no key wrapped for this login yet) — not
+            // an error worth surfacing through errorOccurred().
+            emit myChannelKeyNotFound(channelId);
+            return;
+        }
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit myChannelKeyFetched(channelId, object.value("wrapped_key").toString());
     });
 }
 

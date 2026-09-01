@@ -43,7 +43,7 @@ public:
     [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
 
 signals:
-    void createRequested(const QString& name);
+    void createRequested(const QString& name, bool isEncrypted);
     void renameRequested(qint64 id, const QString& newName);
     void deleteRequested(qint64 id);
     void channelSelected(qint64 id, const QString& name);

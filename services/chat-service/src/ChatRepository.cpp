@@ -89,15 +89,15 @@ MutationResult ChatRepository::deleteCommunity(std::int64_t id, const std::strin
 }
 
 std::optional<std::int64_t> ChatRepository::createChannel(std::int64_t communityId, const std::string& name,
-                                                            const std::string& ownerLogin) {
+                                                            const std::string& ownerLogin, bool isEncrypted) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
     try {
-        const pqxx::result rows =
-            transaction.exec("INSERT INTO channels (community_id, name, owner_login) VALUES ($1, $2, $3) "
-                              "RETURNING id",
-                              pqxx::params{communityId, name, ownerLogin});
+        const pqxx::result rows = transaction.exec(
+            "INSERT INTO channels (community_id, name, owner_login, is_encrypted) VALUES ($1, $2, $3, $4) "
+            "RETURNING id",
+            pqxx::params{communityId, name, ownerLogin, isEncrypted});
         transaction.commit();
         return rows[0][0].as<std::int64_t>();
     } catch (const pqxx::foreign_key_violation&) {
@@ -107,24 +107,65 @@ std::optional<std::int64_t> ChatRepository::createChannel(std::int64_t community
     }
 }
 
+namespace {
+// Templated on the row type since pqxx returns different row-reference
+// types from range-for iteration (pqxx::row_ref) vs. indexed access
+// (pqxx::const_result_iterator::reference) — both support operator[]
+// identically, so a template sidesteps needing two near-identical
+// overloads.
+template <typename Row>
+Channel channelFromRow(const Row& row) {
+    return Channel{.id = row[0].template as<std::int64_t>(),
+                   .communityId = row[1].template as<std::int64_t>(),
+                   .name = row[2].template as<std::string>(),
+                   .ownerLogin = row[3].template as<std::string>(),
+                   .isEncrypted = row[4].template as<bool>()};
+}
+}  // namespace
+
 std::vector<Channel> ChatRepository::listChannels(std::int64_t communityId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows =
-        transaction.exec("SELECT id, community_id, name, owner_login FROM channels WHERE community_id = $1 "
-                          "ORDER BY id",
-                          pqxx::params{communityId});
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, community_id, name, owner_login, is_encrypted FROM channels WHERE community_id = $1 "
+        "ORDER BY id",
+        pqxx::params{communityId});
 
     std::vector<Channel> channels;
     channels.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
-        channels.push_back(Channel{.id = row[0].as<std::int64_t>(),
-                                    .communityId = row[1].as<std::int64_t>(),
-                                    .name = row[2].as<std::string>(),
-                                    .ownerLogin = row[3].as<std::string>()});
+        channels.push_back(channelFromRow(row));
     }
     return channels;
+}
+
+std::optional<Channel> ChatRepository::findChannel(std::int64_t id) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, community_id, name, owner_login, is_encrypted FROM channels WHERE id = $1", pqxx::params{id});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return channelFromRow(rows[0]);
+}
+
+std::vector<std::string> ChatRepository::listMembers(std::int64_t communityId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT member_login FROM memberships WHERE community_id = $1 ORDER BY member_login",
+        pqxx::params{communityId});
+
+    std::vector<std::string> members;
+    members.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        members.push_back(row[0].as<std::string>());
+    }
+    return members;
 }
 
 MutationResult ChatRepository::renameChannel(std::int64_t id, const std::string& newName,
@@ -441,6 +482,47 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
                         row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
     }
     return messages;
+}
+
+MutationResult ChatRepository::setChannelKey(std::int64_t channelId, const std::string& memberLogin,
+                                              const std::string& requesterLogin, const std::string& wrappedKey) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM channels ch "
+        "JOIN communities co ON co.id = ch.community_id WHERE ch.id = $1",
+        pqxx::params{channelId});
+    if (rows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner &&
+        !isModerator(transaction, communityId, requesterLogin)) {
+        return MutationResult::kForbidden;
+    }
+
+    transaction.exec(
+        "INSERT INTO channel_keys (channel_id, member_login, wrapped_key) VALUES ($1, $2, $3) "
+        "ON CONFLICT (channel_id, member_login) DO UPDATE SET wrapped_key = EXCLUDED.wrapped_key",
+        pqxx::params{channelId, memberLogin, wrappedKey});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::optional<std::string> ChatRepository::findChannelKey(std::int64_t channelId, const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT wrapped_key FROM channel_keys WHERE channel_id = $1 AND member_login = $2",
+                          pqxx::params{channelId, login});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return rows[0][0].as<std::string>();
 }
 
 }  // namespace chat_service

@@ -67,6 +67,8 @@ add_library(devicehub_core
     src/chat/ChatClient.cpp
     src/chat/ChatRestClient.h
     src/chat/ChatRestClient.cpp
+    src/chat/ChannelCrypto.h
+    src/chat/ChannelCrypto.cpp
     src/chat/CallManager.h
     src/chat/CallManager.cpp
     src/user/UserProfileClient.h
@@ -210,6 +212,7 @@ add_executable(devicehub_tests
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
     test/IdentityKeyStoreTest.cpp
+    test/ChannelCryptoTest.cpp
     test/ModeratorsDialogTest.cpp
     test/IconFactoryTest.cpp
     test/ThemeTest.cpp

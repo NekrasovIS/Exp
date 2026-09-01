@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS channels (
     name TEXT NOT NULL,
     owner_login TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- E2E encryption Phase 2 (issue #138) — set only at creation, never
+    -- changed afterwards; see Channel::isEncrypted's doc comment.
+    is_encrypted BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (community_id, name)
 );
 
@@ -49,6 +52,18 @@ CREATE TABLE IF NOT EXISTS attachments (
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- One row per (channel, member) holding that member's copy of the
+-- channel's symmetric key, sealed with their own X25519 public key
+-- (libsodium crypto_box_seal, issue #138) — chat-service never sees the
+-- raw key, only these per-recipient wrapped copies. No FK to a "users"
+-- table for the same reason member_login/author_login above have none.
+CREATE TABLE IF NOT EXISTS channel_keys (
+    channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    member_login TEXT NOT NULL,
+    wrapped_key TEXT NOT NULL,
+    PRIMARY KEY (channel_id, member_login)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id BIGSERIAL PRIMARY KEY,
     channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -72,5 +87,6 @@ CREATE TABLE IF NOT EXISTS messages (
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_id BIGINT REFERENCES attachments(id) ON DELETE SET NULL;
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS is_moderator BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS messages_channel_id_sent_at_idx ON messages (channel_id, sent_at);

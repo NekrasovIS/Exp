@@ -23,6 +23,7 @@ package "src/devices" {
 class ChatItem {
   +id : qint64
   +name : QString
+  +isEncrypted : bool
 }
 
 class ChatClient {
@@ -181,8 +182,11 @@ class ChatRestClient {
   +createCommunity(token: QString, name: QString)
   +listCommunities(token: QString)
   +joinCommunity(token: QString, communityId: qint64)
-  +createChannel(token: QString, communityId: qint64, name: QString)
+  +createChannel(token: QString, communityId: qint64, name: QString,\n    isEncrypted: bool = false)
   +listChannels(token: QString, communityId: qint64)
+  +listMembers(token: QString, communityId: qint64)
+  +setChannelKey(token: QString, channelId: qint64, memberLogin: QString, wrappedKey: QString)
+  +fetchMyChannelKey(token: QString, channelId: qint64)
   +listMessages(token: QString, channelId: qint64, limit: int, beforeId: qint64)
   +promoteModerator(token: QString, communityId: qint64, targetLogin: QString)
   +demoteModerator(token: QString, communityId: qint64, targetLogin: QString)
@@ -194,8 +198,12 @@ class ChatRestClient {
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
   +communityJoined(communityId: qint64)
-  +channelCreated(id: qint64, name: QString)
+  +channelCreated(id: qint64, name: QString, isEncrypted: bool)
   +channelsListed(channels: QList<ChatItem>)
+  +membersListed(communityId: qint64, logins: QStringList)
+  +channelKeySet(channelId: qint64, memberLogin: QString)
+  +myChannelKeyFetched(channelId: qint64, wrappedKey: QString)
+  +myChannelKeyNotFound(channelId: qint64)
   +messagesListed(channelId: qint64, messages: QList<ChatMessageInfo>)
   +moderatorPromoted(communityId: qint64, login: QString)
   +moderatorDemoted(communityId: qint64, login: QString)
@@ -205,10 +213,59 @@ class ChatRestClient {
   +messagesFound(channelId: qint64, query: QString, matches: QList<ChatMessageInfo>)
   +errorOccurred(message: QString)
 }
+
+package "libsodium" <<Rectangle>> {
+  class "crypto_secretbox_*() / crypto_box_seal*()" as Libsodium
+}
+
+namespace channel_crypto {
+  class channel_crypto <<namespace>> {
+    +{static} generateChannelKey() : QByteArray
+    +{static} encryptMessage(plaintext: QString, channelKey: QByteArray) : QString
+    +{static} decryptMessage(ciphertextBase64: QString, channelKey: QByteArray) : optional<QString>
+    +{static} wrapKeyForRecipient(channelKey: QByteArray, recipientPublicKey: QByteArray) : QString
+    +{static} unwrapKey(wrappedKeyBase64: QString, ownPublicKey: QByteArray,\n      ownSecretKey: QByteArray) : optional<QByteArray>
+  }
+}
+channel_crypto.channel_crypto ..> Libsodium : implemented with
 ChatRestClient *-- QNetworkAccessManager : owns
 ChatRestClient ..> ChatItem : emits lists of
 ChatRestClient ..> ChatMessageInfo : emits pages of (issue #100)\nand search matches of (issue #118)
 ChatRestClient ..> "chat-service" : REST (Authorization: Bearer <token>)
+
+note right of channel_crypto.channel_crypto
+  E2E encryption Phase 2 (issue
+  #138). MainWindow orchestrates:
+  creating an encrypted channel
+  generates a key here, wraps it
+  for the creator's own identity
+  (IdentityKeyStore) immediately,
+  then for every other community
+  member once listMembers()/
+  fetchProfile() resolve their
+  public key. Opening an encrypted
+  channel fetches+unwraps this
+  login's own wrapped copy first
+  (fetchMyChannelKey()) before
+  subscribing/loading history —
+  myChannelKeyNotFound() means no
+  one has granted this login access
+  yet. Resolved keys are cached in
+  MainWindow's channelKeys_ for the
+  session only, never persisted.
+
+  encryptMessage()/decryptMessage()
+  wrap chat-service's existing
+  {"body"} field — chat-service
+  itself never changes, it just
+  relays/stores a longer opaque
+  string. Attachments and server
+  search stay unavailable for an
+  encrypted channel this phase
+  (ChatView disables both buttons;
+  chat-service also rejects with
+  400 as a second line of defense).
+end note
 
 note right of ChatClient
   Async only — every call returns

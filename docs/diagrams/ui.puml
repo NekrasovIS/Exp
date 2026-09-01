@@ -14,7 +14,10 @@ class MainWindow {
   -refreshCommunities()
   -refreshChannelsForSelectedCommunity()
   -openChannel(id: int64, name: QString)
+  -finishOpeningChannel(id: int64)
   -closeChatView()
+  -wrapPendingEncryptedChannelKeyForMember(login: QString, publicKeyBase64: QString)
+  -decryptForDisplay(ciphertext: QString) : QString
   -showToast(text: QString, variant: ToastVariant)
 }
 
@@ -46,7 +49,7 @@ class ChannelsPanel {
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   .. signals ..
-  +createRequested(name: QString)
+  +createRequested(name: QString, isEncrypted: bool)
   +renameRequested(id: int64, newName: QString)
   +deleteRequested(id: int64)
   +channelSelected(id: int64, name: QString)
@@ -55,6 +58,7 @@ class ChannelsPanel {
 class ChatView {
   +showPlaceholder()
   +showChannel(channelName: QString)
+  +setEncrypted(encrypted: bool)
   +setCurrentUserLogin(login: QString)
   +appendMessage(message: ChatMessage)
   +prependMessages(messages: QList<ChatMessage>)

@@ -42,7 +42,8 @@ nlohmann::json toJson(const Channel& channel) {
     return nlohmann::json{{"id", channel.id},
                            {"community_id", channel.communityId},
                            {"name", channel.name},
-                           {"owner", channel.ownerLogin}};
+                           {"owner", channel.ownerLogin},
+                           {"is_encrypted", channel.isEncrypted}};
 }
 
 nlohmann::json toJson(const Message& message) {
@@ -129,6 +130,18 @@ void HttpServer::registerRoutes() {
     server_.Get(R"(/channels/(\d+)/messages/search)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleSearchMessages(request, response);
+                 });
+    server_.Get(R"(/communities/(\d+)/members)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleListMembers(request, response);
+                 });
+    server_.Put(R"(/channels/(\d+)/keys/([^/]+))",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleSetChannelKey(request, response);
+                 });
+    server_.Get(R"(/channels/(\d+)/keys/me)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleGetMyChannelKey(request, response);
                  });
 }
 
@@ -259,9 +272,12 @@ void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::R
         return;
     }
 
+    const bool isEncrypted = body.contains("is_encrypted") && body["is_encrypted"].is_boolean() &&
+                              body["is_encrypted"].get<bool>();
+
     const auto communityId = std::stoll(request.matches[1].str());
     const std::optional<std::int64_t> channelId =
-        chatService_.createChannel(communityId, body["name"].get<std::string>(), *login);
+        chatService_.createChannel(communityId, body["name"].get<std::string>(), *login, isEncrypted);
     if (!channelId.has_value()) {
         response.status = 404;
         response.set_content(nlohmann::json{{"error", "no such community, or channel name already taken"}}.dump(),
@@ -270,7 +286,7 @@ void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::R
     }
 
     response.status = 201;
-    response.set_content(nlohmann::json{{"id", *channelId}}.dump(), kJsonContentType);
+    response.set_content(nlohmann::json{{"id", *channelId}, {"is_encrypted", isEncrypted}}.dump(), kJsonContentType);
 }
 
 void HttpServer::handleListChannels(const httplib::Request& request, httplib::Response& response) {
@@ -427,6 +443,18 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
     }
 
     const auto channelId = std::stoll(request.matches[1].str());
+    const std::optional<Channel> channel = chatService_.findChannel(channelId);
+    if (channel.has_value() && channel->isEncrypted) {
+        // Attachments aren't encrypted client-side yet in this phase
+        // (issue #138) — rejecting rather than silently storing
+        // plaintext in a channel the UI presents as encrypted.
+        response.status = 400;
+        response.set_content(
+            nlohmann::json{{"error", "attachments aren't supported in encrypted channels yet"}}.dump(),
+            kJsonContentType);
+        return;
+    }
+
     const std::optional<AttachmentMetadata> attachment =
         chatService_.createAttachment(channelId, *login, body["filename"].get<std::string>(),
                                        body["content_type"].get<std::string>(), dataBase64,
@@ -489,6 +517,17 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
     }
 
     const auto channelId = std::stoll(request.matches[1].str());
+    const std::optional<Channel> channel = chatService_.findChannel(channelId);
+    if (channel.has_value() && channel->isEncrypted) {
+        // Server-side search needs plaintext bodies to match against —
+        // an encrypted channel's stored body is ciphertext, so there's
+        // nothing meaningful to search here (issue #138).
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "search isn't available for encrypted channels"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
     const std::string query = request.get_param_value("q");
     const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultSearchLimit;
 
@@ -497,6 +536,64 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListMembers(const httplib::Request& request, httplib::Response& response) {
+    if (!authenticate(request).has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    nlohmann::json members = nlohmann::json::array();
+    for (const std::string& login : chatService_.listMembers(communityId)) {
+        members.push_back(login);
+    }
+    response.set_content(members.dump(), kJsonContentType);
+}
+
+void HttpServer::handleSetChannelKey(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("wrapped_key") || !body["wrapped_key"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'wrapped_key' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    const std::string memberLogin = request.matches[2].str();
+    writeMutationResult(
+        chatService_.setChannelKey(channelId, memberLogin, *login, body["wrapped_key"].get<std::string>()),
+        response);
+}
+
+void HttpServer::handleGetMyChannelKey(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    const std::optional<std::string> wrappedKey = chatService_.findChannelKey(channelId, *login);
+    if (!wrappedKey.has_value()) {
+        response.status = 404;
+        response.set_content(
+            nlohmann::json{{"error", "no key set for you on this channel yet"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(nlohmann::json{{"wrapped_key", *wrappedKey}}.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

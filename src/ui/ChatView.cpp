@@ -239,11 +239,28 @@ void ChatView::showPlaceholder() {
 }
 
 void ChatView::showChannel(const QString& channelName) {
-    channelTitleLabel_->setText(channelName);
+    currentChannelName_ = channelName;
+    updateChannelTitleLabel();
     stack_->setCurrentIndex(kChannelPageIndex);
     // A typing indicator from the previous channel doesn't apply here.
     typingIndicatorHideTimer_->stop();
     typingIndicatorLabel_->setVisible(false);
+}
+
+void ChatView::setEncrypted(bool encrypted) {
+    encrypted_ = encrypted;
+    updateChannelTitleLabel();
+    attachButton_->setEnabled(!encrypted);
+    attachButton_->setToolTip(encrypted
+                                   ? tr("Attachments aren't supported in encrypted channels yet")
+                                   : QString());
+    searchButton_->setEnabled(!encrypted);
+    searchButton_->setToolTip(encrypted ? tr("Search isn't available in encrypted channels") : QString());
+}
+
+void ChatView::updateChannelTitleLabel() {
+    channelTitleLabel_->setText(encrypted_ ? QStringLiteral("\U0001F512 ") + currentChannelName_
+                                            : currentChannelName_);
 }
 
 void ChatView::setCurrentUserLogin(const QString& login) {

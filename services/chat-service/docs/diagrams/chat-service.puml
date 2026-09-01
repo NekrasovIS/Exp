@@ -20,6 +20,7 @@ class Channel {
   +communityId : int64
   +name : string
   +ownerLogin : string
+  +isEncrypted : bool
 }
 class Message {
   +id : int64
@@ -58,8 +59,10 @@ class ChatRepository {
   +listCommunities() : vector<Community>
   +renameCommunity(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteCommunity(id: int64, requesterLogin: string) : MutationResult
-  +createChannel(communityId: int64, name: string, ownerLogin: string) : optional<int64>
+  +createChannel(communityId: int64, name: string, ownerLogin: string,\n    isEncrypted: bool = false) : optional<int64>
   +listChannels(communityId: int64) : vector<Channel>
+  +findChannel(id: int64) : optional<Channel>
+  +listMembers(communityId: int64) : vector<string>
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
@@ -73,6 +76,8 @@ class ChatRepository {
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
+  +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
+  +findChannelKey(channelId: int64, login: string) : optional<string>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
@@ -87,10 +92,14 @@ class ChatService {
   +listCommunities() : vector<Community>
   +renameCommunity(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteCommunity(id: int64, requesterLogin: string) : MutationResult
-  +createChannel(communityId: int64, name: string, ownerLogin: string) : optional<int64>
+  +createChannel(communityId: int64, name: string, ownerLogin: string,\n    isEncrypted: bool = false) : optional<int64>
   +listChannels(communityId: int64) : vector<Channel>
+  +findChannel(id: int64) : optional<Channel>
+  +listMembers(communityId: int64) : vector<string>
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
+  +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
+  +findChannelKey(channelId: int64, login: string) : optional<string>
   +joinCommunity(communityId: int64, login: string) : bool
   +promoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
   +demoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
@@ -130,13 +139,23 @@ class HttpServer {
   -handleUploadAttachment(request, response)
   -handleDownloadAttachment(request, response)
   -handleSearchMessages(request, response)
+  -handleListMembers(request, response)
+  -handleSetChannelKey(request, response)
+  -handleGetMyChannelKey(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }
 HttpServer --> ChatService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
 HttpServer ..> Base64 : decode() (validates\nupload/download payloads)
+HttpServer ..> JsonGuard : guards parse() with (issue #129)
 HttpServer *-- HttplibServer : owns
+
+package "chat_service::json_guard" <<Rectangle>> {
+  class JsonGuard << (N,orchid) namespace >> {
+    +exceedsMaxNestingDepth(payload: string_view, maxDepth: int) : bool
+  }
+}
 
 class WebSocketServer {
   +start() : bool
@@ -179,7 +198,16 @@ note right of HttpServer
   POST   /channels/{id}/attachments
   GET    /attachments/{id}
   GET    /channels/{id}/messages/search
-                             (?q=, limit=20)
+                             (?q=, limit=20; 400 for
+                             an encrypted channel —
+                             issue #138, nothing to
+                             search server-side)
+  GET    /communities/{id}/members      (issue #138)
+  PUT    /channels/{id}/keys/{login}    (issue #138, channel
+                              owner, community owner, or
+                              community moderator only)
+  GET    /channels/{id}/keys/me         (issue #138, 404
+                              if no key set for you yet)
 
   Owner-only routes answer 403 for
   non-owners, 404 for a nonexistent
@@ -206,6 +234,38 @@ note right of HttpServer
   ranking/stemming, a first-version
   simplification. Missing/empty
   'q' is 400. Newest match first.
+
+  E2E encryption Phase 2 (issue
+  #138): Channel.isEncrypted is set
+  only at creation. This server
+  never sees a raw channel key or
+  plaintext body for an encrypted
+  channel — messages.body is
+  ciphertext the client produced,
+  relayed/stored as opaque TEXT
+  exactly like a plaintext channel's
+  body (no schema difference).
+  channel_keys holds one wrapped
+  copy of the channel's symmetric
+  key per member, sealed with that
+  member's own X25519 public key
+  (client-side crypto_box_seal) —
+  setChannelKey()'s authority is the
+  same owner/moderator check as
+  renameChannel()/deleteChannel(),
+  since only whoever already holds
+  the raw key could have produced a
+  valid wrapped copy in the first
+  place. A member who joins after
+  creation has no key until the
+  owner/moderator wraps one for
+  them — no automatic re-wrap on
+  join. Search and attachment
+  upload (POST /channels/{id}/
+  attachments) are both rejected
+  (400) for an encrypted channel in
+  this phase — attachments aren't
+  encrypted client-side yet.
 end note
 
 note right of WebSocketServer

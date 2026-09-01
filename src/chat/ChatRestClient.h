@@ -9,10 +9,13 @@
 namespace devicehub {
 
 /// A community or channel as returned by chat-service's REST API.
+/// isEncrypted is meaningless (always false) for a community — only
+/// channels can be encrypted (issue #138).
 struct ChatItem {
     qint64 id = 0;
     QString name;
     QString ownerLogin;
+    bool isEncrypted = false;
 };
 
 /// A chat message as returned by chat-service's REST history endpoint —
@@ -49,8 +52,27 @@ public:
     void renameCommunity(const QString& token, qint64 communityId, const QString& newName);
     void deleteCommunity(const QString& token, qint64 communityId);
     void joinCommunity(const QString& token, qint64 communityId);
-    void createChannel(const QString& token, qint64 communityId, const QString& name);
+    /// @p isEncrypted (issue #138) is fixed at creation — see
+    /// Channel::isEncrypted's doc comment on the chat-service side for
+    /// why there's no way to change it afterwards.
+    void createChannel(const QString& token, qint64 communityId, const QString& name, bool isEncrypted = false);
     void listChannels(const QString& token, qint64 communityId);
+
+    /// Every current member's login for @p communityId (issue #138) —
+    /// needed to know who an encrypted channel's key must be wrapped for.
+    void listMembers(const QString& token, qint64 communityId);
+
+    /// Stores @p wrappedKey (already sealed client-side for
+    /// @p memberLogin's public key — see ChannelCrypto) as their copy of
+    /// @p channelId's symmetric key. Only the channel/community owner or
+    /// a community moderator may call this (server-enforced).
+    void setChannelKey(const QString& token, qint64 channelId, const QString& memberLogin, const QString& wrappedKey);
+
+    /// Fetches the caller's own wrapped copy of @p channelId's key.
+    /// myChannelKeyNotFound() fires (not errorOccurred()) when none has
+    /// been set yet — an expected state (e.g. joined after creation),
+    /// not a failure.
+    void fetchMyChannelKey(const QString& token, qint64 channelId);
     void renameChannel(const QString& token, qint64 channelId, const QString& newName);
     void deleteChannel(const QString& token, qint64 channelId);
 
@@ -87,10 +109,14 @@ signals:
     void communityRenamed(qint64 id, const QString& newName);
     void communityDeleted(qint64 id);
     void communityJoined(qint64 communityId);
-    void channelCreated(qint64 id, const QString& name);
+    void channelCreated(qint64 id, const QString& name, bool isEncrypted);
     void channelsListed(const QList<ChatItem>& channels);
     void channelRenamed(qint64 id, const QString& newName);
     void channelDeleted(qint64 id);
+    void membersListed(qint64 communityId, const QStringList& logins);
+    void channelKeySet(qint64 channelId, const QString& memberLogin);
+    void myChannelKeyFetched(qint64 channelId, const QString& wrappedKey);
+    void myChannelKeyNotFound(qint64 channelId);
     void moderatorPromoted(qint64 communityId, const QString& login);
     void moderatorDemoted(qint64 communityId, const QString& login);
     void moderatorsListed(qint64 communityId, const QStringList& logins);

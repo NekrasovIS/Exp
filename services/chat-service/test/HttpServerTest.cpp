@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 // Route-level tests for HttpServer, hitting a real httplib::Server
 // instance over loopback HTTP. Requires a live Postgres (chat-service's
@@ -894,6 +895,199 @@ TEST(HttpServerTest, SearchMessagesRejectsMissingQueryParamWith400) {
     httplib::Client client(kTestHost, kTestPort);
     httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
     const httplib::Result result = client.Get("/channels/" + std::to_string(*channelId) + "/messages/search", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, CreateChannelWithIsEncryptedTrueSetsTheFlagInResponseAndListing) {
+    auto fixtureOpt = TestFixture::create("http-server-create-encrypted-channel");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-enc-channel-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result createResult =
+        client.Post("/communities/" + std::to_string(community.id) + "/channels", headers,
+                    nlohmann::json{{"name", "secret"}, {"is_encrypted", true}}.dump(), "application/json");
+    ASSERT_TRUE(createResult);
+    ASSERT_EQ(createResult->status, 201);
+    EXPECT_TRUE(nlohmann::json::parse(createResult->body)["is_encrypted"].get<bool>());
+
+    const httplib::Result listResult =
+        client.Get("/communities/" + std::to_string(community.id) + "/channels", headers);
+    ASSERT_TRUE(listResult);
+    const nlohmann::json channels = nlohmann::json::parse(listResult->body);
+    ASSERT_EQ(channels.size(), 1U);
+    EXPECT_TRUE(channels[0]["is_encrypted"].get<bool>());
+}
+
+TEST(HttpServerTest, CreateChannelWithoutIsEncryptedDefaultsToFalse) {
+    auto fixtureOpt = TestFixture::create("http-server-create-plain-channel");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-plain-channel-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result createResult =
+        client.Post("/communities/" + std::to_string(community.id) + "/channels", headers,
+                    nlohmann::json{{"name", "general"}}.dump(), "application/json");
+    ASSERT_TRUE(createResult);
+    EXPECT_FALSE(nlohmann::json::parse(createResult->body)["is_encrypted"].get<bool>());
+}
+
+TEST(HttpServerTest, ListMembersReturnsJoinedMember) {
+    auto fixtureOpt = TestFixture::create("http-server-list-members-owner");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    const std::string memberLogin = "http-server-list-members-user-" + uniqueSuffix();
+    const std::optional<std::string> memberToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, memberLogin);
+    ASSERT_TRUE(memberToken.has_value());
+
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-members-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers memberHeaders{{"Authorization", bearer(*memberToken)}};
+    const httplib::Result joinResult =
+        client.Post("/communities/" + std::to_string(community.id) + "/join", memberHeaders, "", "application/json");
+    ASSERT_TRUE(joinResult);
+    ASSERT_EQ(joinResult->status, 200);
+
+    httplib::Headers ownerHeaders{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result membersResult =
+        client.Get("/communities/" + std::to_string(community.id) + "/members", ownerHeaders);
+    ASSERT_TRUE(membersResult);
+    ASSERT_EQ(membersResult->status, 200);
+    const nlohmann::json members = nlohmann::json::parse(membersResult->body);
+    const std::vector<std::string> memberList = members.get<std::vector<std::string>>();
+    EXPECT_NE(std::find(memberList.begin(), memberList.end(), memberLogin), memberList.end());
+}
+
+TEST(HttpServerTest, SetChannelKeySucceedsForOwnerAndGetMyChannelKeyRoundTrips) {
+    auto fixtureOpt = TestFixture::create("http-server-set-channel-key");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-set-key-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "secret", fixture.ownerLogin, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    // Nothing set yet.
+    const httplib::Result beforeResult =
+        client.Get("/channels/" + std::to_string(*channelId) + "/keys/me", headers);
+    ASSERT_TRUE(beforeResult);
+    EXPECT_EQ(beforeResult->status, 404);
+
+    const httplib::Result setResult =
+        client.Put("/channels/" + std::to_string(*channelId) + "/keys/" + fixture.ownerLogin, headers,
+                   nlohmann::json{{"wrapped_key", "sealed-bytes-base64"}}.dump(), "application/json");
+    ASSERT_TRUE(setResult);
+    EXPECT_EQ(setResult->status, 200);
+
+    const httplib::Result afterResult =
+        client.Get("/channels/" + std::to_string(*channelId) + "/keys/me", headers);
+    ASSERT_TRUE(afterResult);
+    ASSERT_EQ(afterResult->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(afterResult->body)["wrapped_key"].get<std::string>(), "sealed-bytes-base64");
+}
+
+TEST(HttpServerTest, SetChannelKeyRejectsNonOwnerNonModeratorWith403) {
+    auto fixtureOpt = TestFixture::create("http-server-set-key-forbidden-owner");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    const std::optional<std::string> outsiderToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-set-key-outsider-" + uniqueSuffix());
+    ASSERT_TRUE(outsiderToken.has_value());
+
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-set-key-403-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "secret", fixture.ownerLogin, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers outsiderHeaders{{"Authorization", bearer(*outsiderToken)}};
+    const httplib::Result result =
+        client.Put("/channels/" + std::to_string(*channelId) + "/keys/" + fixture.ownerLogin, outsiderHeaders,
+                   nlohmann::json{{"wrapped_key", "forged"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 403);
+}
+
+TEST(HttpServerTest, SearchMessagesRejectsEncryptedChannelWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-search-encrypted");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-search-enc-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "secret", fixture.ownerLogin, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Get("/channels/" + std::to_string(*channelId) + "/messages/search?q=anything", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadAttachmentRejectsEncryptedChannelWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-upload-encrypted");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-upload-enc-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "secret", fixture.ownerLogin, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", headers,
+        nlohmann::json{{"filename", "x.txt"}, {"content_type", "text/plain"}, {"data_base64", "SGVsbG8="}}.dump(),
+        "application/json");
 
     ASSERT_TRUE(result);
     EXPECT_EQ(result->status, 400);

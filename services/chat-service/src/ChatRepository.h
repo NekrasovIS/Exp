@@ -18,6 +18,13 @@ struct Channel {
     std::int64_t communityId = 0;
     std::string name;
     std::string ownerLogin;
+    /// E2E encryption Phase 2 (issue #138) — set only at creation, never
+    /// changed afterwards (no path from plaintext history to encrypted
+    /// or back). When true, chat-service stores only ciphertext message
+    /// bodies and per-member wrapped copies of the channel's symmetric
+    /// key (see setChannelKey()/findChannelKey()) — it never sees the
+    /// raw key or plaintext body.
+    bool isEncrypted = false;
 };
 
 /// Outcome of a rename/delete attempt — distinguishes "doesn't exist"
@@ -110,8 +117,21 @@ public:
     /// @return The new channel's id, or std::nullopt if @p communityId doesn't exist
     ///         or already has a channel named @p name.
     [[nodiscard]] std::optional<std::int64_t> createChannel(std::int64_t communityId, const std::string& name,
-                                                             const std::string& ownerLogin);
+                                                             const std::string& ownerLogin,
+                                                             bool isEncrypted = false);
     [[nodiscard]] std::vector<Channel> listChannels(std::int64_t communityId);
+
+    /// @return @p id's channel, or std::nullopt if it doesn't exist — the
+    ///         single-channel counterpart to listChannels() (which needs
+    ///         the parent community id, not the channel id), e.g. for
+    ///         checking isEncrypted before a search/attachment request.
+    [[nodiscard]] std::optional<Channel> findChannel(std::int64_t id);
+
+    /// Every current member's login for @p communityId, in no particular
+    /// order — same "just return nothing" style as listModerators() for
+    /// a nonexistent community. Needed to know who an encrypted channel's
+    /// key must be wrapped for at creation time (issue #138).
+    [[nodiscard]] std::vector<std::string> listMembers(std::int64_t communityId);
 
     /// Allowed for the channel's own owner, the parent community's
     /// owner, or a moderator of the parent community (issue #114) — not
@@ -204,6 +224,27 @@ public:
     /// stemming), a deliberate first-version simplification. Empty
     /// results for a nonexistent channel, same as listRecentMessages().
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
+
+    /// Sets (or overwrites) @p memberLogin's wrapped copy of @p channelId's
+    /// symmetric key (issue #138) — @p wrappedKey is @p memberLogin's
+    /// public key sealed around the raw channel key (libsodium
+    /// crypto_box_seal), computed entirely client-side; this call never
+    /// sees the raw key. Same authority as renameChannel()/deleteChannel()
+    /// — the channel's own owner, the parent community's owner, or a
+    /// moderator of it — since only whoever already holds the raw key
+    /// (the creator, or someone it was wrapped for) can have produced a
+    /// valid wrapped copy for someone else in the first place.
+    [[nodiscard]] MutationResult setChannelKey(std::int64_t channelId, const std::string& memberLogin,
+                                                const std::string& requesterLogin, const std::string& wrappedKey);
+
+    /// @return @p login's own wrapped copy of @p channelId's key, or
+    ///         std::nullopt if none has been set for them yet (they don't
+    ///         have access to this encrypted channel's content). No
+    ///         authority check here beyond the caller only ever passing
+    ///         its own token's subject as @p login (enforced by
+    ///         HttpServer, same "always the token's own login" pattern
+    ///         as user-service's PATCH /users/me).
+    [[nodiscard]] std::optional<std::string> findChannelKey(std::int64_t channelId, const std::string& login);
 
 private:
     std::string connectionString_;
