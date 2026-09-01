@@ -63,12 +63,13 @@ public:
     void updateBody(const QString& newBody);
 
 signals:
-    /// "Edit" clicked (own messages only, issue #107) — @p currentBody
-    /// lets the caller pre-fill an edit box without looking the message
-    /// back up by id.
+    /// "Edit" chosen from the right-click context menu (own messages
+    /// only, issue #107/#150) — @p currentBody lets the caller pre-fill
+    /// an edit box without looking the message back up by id.
     void editRequested(qint64 id, const QString& currentBody);
 
-    /// "Delete" clicked (own messages only).
+    /// "Delete" chosen from the right-click context menu (own messages
+    /// only, issue #150).
     void deleteRequested(qint64 id);
 
     /// "Download" clicked on a message with an attachment (issue #116,

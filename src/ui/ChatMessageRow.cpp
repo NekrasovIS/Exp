@@ -1,8 +1,11 @@
 #include "ui/ChatMessageRow.h"
 
+#include <QAction>
 #include <QFontMetricsF>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
@@ -47,6 +50,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     rootLayout->setSpacing(spacing);
 
     bubble_ = new ChatBubble(isOwnMessage, this);
+    bubble_->setObjectName(QStringLiteral("chatMessageBubble"));
     auto* bubbleLayout = new QVBoxLayout(bubble_);
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
@@ -106,25 +110,28 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
 
     if (isOwnMessage) {
-        // Available on every own-message row regardless of showHeader —
-        // grouped (consecutive) messages don't repeat their header, but
-        // each individual message still needs its own way to target it
-        // for editing/deleting (issue #107).
-        auto* controlsRow = new QHBoxLayout;
-        controlsRow->setSpacing(spacing);
-        controlsRow->addStretch(1);
-        auto* editButton = new QPushButton(tr("Edit"), bubble_);
-        editButton->setObjectName(QStringLiteral("editMessageButton"));
-        editButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
-        connect(editButton, &QPushButton::clicked, this,
-                [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
-        auto* deleteButton = new QPushButton(tr("Delete"), bubble_);
-        deleteButton->setObjectName(QStringLiteral("deleteMessageButton"));
-        deleteButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
-        connect(deleteButton, &QPushButton::clicked, this, [this]() { emit deleteRequested(messageId_); });
-        controlsRow->addWidget(editButton);
-        controlsRow->addWidget(deleteButton);
-        bubbleLayout->addLayout(controlsRow);
+        // Right-click context menu rather than always-visible buttons
+        // (issue #150) — available on every own-message row regardless
+        // of showHeader, since grouped (consecutive) messages don't
+        // repeat their header but each individual message still needs
+        // its own way to target it for editing/deleting (issue #107).
+        // Built with popup() (non-blocking) instead of exec() so a test
+        // can trigger the resulting QAction directly without having to
+        // drive a modal event loop.
+        bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(bubble_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+            auto* menu = new QMenu(bubble_);
+            menu->setAttribute(Qt::WA_DeleteOnClose);
+            menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
+            QAction* editAction = menu->addAction(tr("Edit"));
+            editAction->setObjectName(QStringLiteral("editMessageAction"));
+            connect(editAction, &QAction::triggered, this,
+                    [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+            QAction* deleteAction = menu->addAction(tr("Delete"));
+            deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
+            connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
+            menu->popup(bubble_->mapToGlobal(pos));
+        });
 
         rootLayout->addStretch(1);
         rootLayout->addWidget(bubble_);
