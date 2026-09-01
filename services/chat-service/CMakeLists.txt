@@ -56,6 +56,22 @@ else()
     )
 endif()
 
+# Source-based code coverage (issue #146) — off by default, Clang-only
+# (LLVM's -fprofile-instr-generate/-fcoverage-mapping; GCC's --coverage
+# would need a different, gcov-based report pipeline). Applied project-
+# wide via add_compile_options()/add_link_options() before any target is
+# defined, so both chat_service_core and chat_service_tests are
+# instrumented consistently — coverage needs every object file that
+# participates in a test run built this way, not just the test binary.
+option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_COVERAGE requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 find_package(httplib CONFIG REQUIRED)
 find_package(ixwebsocket CONFIG REQUIRED)
 find_package(libpqxx CONFIG REQUIRED)

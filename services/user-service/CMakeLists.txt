@@ -58,6 +58,17 @@ else()
     )
 endif()
 
+# Source-based code coverage (issue #146) — see chat-service/CMakeLists.txt's
+# copy of this same block for the full rationale.
+option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_COVERAGE requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 find_package(httplib CONFIG REQUIRED)
 find_package(libpqxx CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
