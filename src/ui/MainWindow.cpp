@@ -14,6 +14,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVideoWidget>
@@ -137,6 +138,16 @@ MainWindow::MainWindow(QWidget* parent)
             // bare login above until this returns) and prefills
             // ProfileDialog for whenever Edit Profile is clicked.
             userProfileClient_.fetchProfile(lastToken_, currentUserLogin_);
+
+            // E2E encryption Phase 1 (issue #136): ensure this login has
+            // a local identity keypair, then (re-)publish its public
+            // half. Republishing on every verify is deliberately
+            // idempotent rather than tracked/skipped — the PATCH is
+            // cheap and harmless if the value hasn't changed.
+            const QString identityKeyDir =
+                QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/identity-keys");
+            identityKeyStore_.emplace(identityKeyDir, currentUserLogin_);
+            userProfileClient_.publishPublicKey(lastToken_, identityKeyStore_->publicKeyBase64());
         }
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {

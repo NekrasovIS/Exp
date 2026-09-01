@@ -12,6 +12,7 @@
     },
     "qtwebsockets",
     "gtest",
-    "webrtc"
+    "webrtc",
+    "libsodium"
   ]
 }

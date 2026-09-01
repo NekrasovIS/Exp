@@ -57,6 +57,13 @@ Screen Capture) слева. Тёмная тема с зелёным градие
   шапке канала открывает окно с полем запроса и списком совпадений
   (регистронезависимая подстрока по тексту сообщения); клик по
   результату прокручивает список к сообщению, если оно уже подгружено.
+- Сквозное шифрование, Phase 1 — identity-ключи (issue #136): при
+  входе клиент один раз генерирует локальную X25519-пару ключей
+  (libsodium), приватная половина никогда не покидает машину, публичная
+  публикуется через `user-service`. Это только инфраструктурный
+  фундамент — ни один канал пока не шифруется, никаких индикаторов
+  приватности в UI нет; само шифрование тела сообщений — следующая
+  фаза (см. issue #122).
 
 ## Сборка
 
@@ -172,8 +179,14 @@ cmake --build services/user-service/build --parallel
 `/auth/verify` к auth-service, `AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`).
 `PATCH /users/me` всегда пишет в логин из проверенного токена — логин
 в теле запроса, если есть, игнорируется; частичное тело (только
-`display_name` или только `avatar_url`) не затирает несопровождённое
-поле.
+`display_name`, только `avatar_url` или только `public_key`) не
+затирает несопровождённые поля.
+
+`public_key` (issue #136, Phase 1 сквозного шифрования — см. раздел
+«Сквозное шифрование» ниже) — base64 публичной половины X25519-пары,
+которую клиент публикует сюда; сам сервер её никак не использует,
+только хранит и отдаёт для того, чтобы другие клиенты могли
+шифровать этому пользователю.
 
 ### auth-service
 
@@ -570,7 +583,8 @@ docs/diagrams/*.puml`).
   ([chat.png](docs/diagrams/chat.png))
 - [ui.puml](docs/diagrams/ui.puml) — `src/ui`
   ([ui.png](docs/diagrams/ui.png))
-- [user.puml](docs/diagrams/user.puml) — `src/user` (issue #110)
+- [user.puml](docs/diagrams/user.puml) — `src/user` (issue #110,
+  `IdentityKeyStore` добавлен issue #136)
   ([user.png](docs/diagrams/user.png))
 - [mic-capture-sequence.puml](docs/diagrams/mic-capture-sequence.puml) —
   запуск захвата с микрофона

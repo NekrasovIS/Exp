@@ -44,6 +44,7 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Network WebSockets Test)
 find_package(unofficial-webrtc CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
 
 add_library(devicehub_core
     src/devices/DeviceEnumerator.h
@@ -70,6 +71,8 @@ add_library(devicehub_core
     src/chat/CallManager.cpp
     src/user/UserProfileClient.h
     src/user/UserProfileClient.cpp
+    src/user/IdentityKeyStore.h
+    src/user/IdentityKeyStore.cpp
     src/ui/CommunitiesPanel.h
     src/ui/CommunitiesPanel.cpp
     src/ui/ChannelsPanel.h
@@ -115,6 +118,7 @@ target_link_libraries(devicehub_core PUBLIC
     Qt6::Network
     Qt6::WebSockets
     unofficial::webrtc::webrtc
+    unofficial-sodium::sodium
 )
 
 # WebRTC's own build disables RTTI, so classes it exports (e.g.
@@ -205,6 +209,7 @@ add_executable(devicehub_tests
     test/AccountMenuTest.cpp
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
+    test/IdentityKeyStoreTest.cpp
     test/ModeratorsDialogTest.cpp
     test/IconFactoryTest.cpp
     test/ThemeTest.cpp

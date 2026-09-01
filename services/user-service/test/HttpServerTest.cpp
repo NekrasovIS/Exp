@@ -287,11 +287,14 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     httplib::Client client(kTestHost, kTestPort);
     httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
 
-    // Full update: both fields.
-    const httplib::Result patchResult =
-        client.Patch("/users/me", authHeader,
-                      nlohmann::json{{"display_name", "Alice"}, {"avatar_url", "https://example.test/alice.png"}}.dump(),
-                      "application/json");
+    // Full update: all three fields.
+    const httplib::Result patchResult = client.Patch(
+        "/users/me", authHeader,
+        nlohmann::json{{"display_name", "Alice"},
+                       {"avatar_url", "https://example.test/alice.png"},
+                       {"public_key", "base64-x25519-public-key"}}
+            .dump(),
+        "application/json");
     ASSERT_TRUE(patchResult);
     ASSERT_EQ(patchResult->status, 200);
 
@@ -302,8 +305,11 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     nlohmann::json profile = nlohmann::json::parse(getResult->body);
     EXPECT_EQ(profile["display_name"].get<std::string>(), "Alice");
     EXPECT_EQ(profile["avatar_url"].get<std::string>(), "https://example.test/alice.png");
+    EXPECT_EQ(profile["public_key"].get<std::string>(), "base64-x25519-public-key");
 
-    // Partial update: display_name only — avatar_url must survive unchanged.
+    // Partial update: display_name only — avatar_url/public_key must
+    // survive unchanged (issue #136's key shouldn't be droppable by an
+    // unrelated profile edit).
     const httplib::Result partialPatchResult =
         client.Patch("/users/me", authHeader, nlohmann::json{{"display_name", "Alice B."}}.dump(), "application/json");
     ASSERT_TRUE(partialPatchResult);
@@ -311,6 +317,7 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     profile = nlohmann::json::parse(partialPatchResult->body);
     EXPECT_EQ(profile["display_name"].get<std::string>(), "Alice B.");
     EXPECT_EQ(profile["avatar_url"].get<std::string>(), "https://example.test/alice.png");
+    EXPECT_EQ(profile["public_key"].get<std::string>(), "base64-x25519-public-key");
 }
 
 }  // namespace

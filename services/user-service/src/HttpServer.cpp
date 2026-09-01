@@ -36,6 +36,8 @@ nlohmann::json toJson(const Profile& profile) {
                            {"display_name", profile.displayName.has_value() ? nlohmann::json(*profile.displayName)
                                                                              : nlohmann::json(nullptr)},
                            {"avatar_url", profile.avatarUrl.has_value() ? nlohmann::json(*profile.avatarUrl)
+                                                                         : nlohmann::json(nullptr)},
+                           {"public_key", profile.publicKey.has_value() ? nlohmann::json(*profile.publicKey)
                                                                          : nlohmann::json(nullptr)}};
 }
 }  // namespace
@@ -130,24 +132,33 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
     }
     // Partial update: a field missing from the body keeps its current
     // value rather than being cleared — fetch-then-merge, since
-    // UserRepository::updateProfile() always writes both columns.
+    // UserRepository::updateProfile() always writes all three columns.
     const std::optional<Profile> current = userService_.getProfile(*login);
-    std::optional<std::string> displayName = current.has_value() ? current->displayName : std::nullopt;
-    std::optional<std::string> avatarUrl = current.has_value() ? current->avatarUrl : std::nullopt;
+    ProfileUpdate update{.displayName = current.has_value() ? current->displayName : std::nullopt,
+                          .avatarUrl = current.has_value() ? current->avatarUrl : std::nullopt,
+                          .publicKey = current.has_value() ? current->publicKey : std::nullopt};
     if (body.contains("display_name") && body["display_name"].is_string()) {
-        displayName = body["display_name"].get<std::string>();
+        update.displayName = body["display_name"].get<std::string>();
     }
     if (body.contains("avatar_url") && body["avatar_url"].is_string()) {
-        avatarUrl = body["avatar_url"].get<std::string>();
+        update.avatarUrl = body["avatar_url"].get<std::string>();
+    }
+    if (body.contains("public_key") && body["public_key"].is_string()) {
+        update.publicKey = body["public_key"].get<std::string>();
     }
 
-    if (!userService_.updateProfile(*login, displayName, avatarUrl)) {
+    if (!userService_.updateProfile(*login, update)) {
         response.status = 404;
         response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
         return;
     }
-    response.set_content(toJson(Profile{.login = *login, .displayName = displayName, .avatarUrl = avatarUrl}).dump(),
-                          kJsonContentType);
+    response.set_content(
+        toJson(Profile{.login = *login,
+                        .displayName = update.displayName,
+                        .avatarUrl = update.avatarUrl,
+                        .publicKey = update.publicKey})
+            .dump(),
+        kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

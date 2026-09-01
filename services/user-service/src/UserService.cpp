@@ -23,9 +23,8 @@ std::optional<Profile> UserService::getProfile(const std::string& login) {
     return repository_.findProfile(login);
 }
 
-bool UserService::updateProfile(const std::string& login, const std::optional<std::string>& displayName,
-                                 const std::optional<std::string>& avatarUrl) {
-    return repository_.updateProfile(login, displayName, avatarUrl);
+bool UserService::updateProfile(const std::string& login, const ProfileUpdate& update) {
+    return repository_.updateProfile(login, update);
 }
 
 }  // namespace user_service

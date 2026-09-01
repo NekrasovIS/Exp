@@ -20,7 +20,8 @@ UserProfile parseProfile(const QByteArray& jsonBytes) {
     const QJsonObject object = QJsonDocument::fromJson(jsonBytes).object();
     return UserProfile{.login = object.value("login").toString(),
                         .displayName = object.value("display_name").toString(),
-                        .avatarUrl = object.value("avatar_url").toString()};
+                        .avatarUrl = object.value("avatar_url").toString(),
+                        .publicKey = object.value("public_key").toString()};
 }
 
 // user-service reports the actual failure reason (e.g. "no such user")
@@ -52,6 +53,21 @@ void UserProfileClient::fetchProfile(const QString& token, const QString& login)
 void UserProfileClient::updateOwnProfile(const QString& token, const QString& displayName, const QString& avatarUrl) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/users/me")));
     const QJsonObject body{{"display_name", displayName}, {"avatar_url", avatarUrl}};
+    QNetworkReply* reply =
+        networkManager_.sendCustomRequest(buildRequest(url, token), "PATCH", QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit profileUpdated(parseProfile(reply->readAll()));
+    });
+}
+
+void UserProfileClient::publishPublicKey(const QString& token, const QString& publicKey) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/users/me")));
+    const QJsonObject body{{"public_key", publicKey}};
     QNetworkReply* reply =
         networkManager_.sendCustomRequest(buildRequest(url, token), "PATCH", QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {

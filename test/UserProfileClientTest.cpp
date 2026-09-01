@@ -91,6 +91,45 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
     EXPECT_EQ(fetched.avatarUrl, QStringLiteral("https://example.test/alice.png"));
 }
 
+TEST(UserProfileClientTest, PublishPublicKeyRoundTripsThroughFetchProfile) {
+    // issue #136 (E2E encryption Phase 1): publishing a key is a
+    // separate call from updateOwnProfile() — this confirms it goes to
+    // the same underlying profile without disturbing display_name/
+    // avatar_url (fetch-then-merge on the server side).
+    const auto [token, login] = registerAndGetTokenAndLogin(QStringLiteral("user-profile-client-pubkey"));
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
+    }
+
+    UserProfileClient client(userServiceUrl());
+    UserProfile updated;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &UserProfileClient::profileUpdated, &loop, [&](const UserProfile& profile) {
+            updated = profile;
+            loop.quit();
+        });
+        client.publishPublicKey(token, QStringLiteral("base64-x25519-public-key"));
+        loop.exec();
+    }
+    EXPECT_EQ(updated.login, login);
+    EXPECT_EQ(updated.publicKey, QStringLiteral("base64-x25519-public-key"));
+
+    UserProfile fetched;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &UserProfileClient::profileReceived, &loop, [&](const UserProfile& profile) {
+            fetched = profile;
+            loop.quit();
+        });
+        client.fetchProfile(token, login);
+        loop.exec();
+    }
+    EXPECT_EQ(fetched.publicKey, QStringLiteral("base64-x25519-public-key"));
+}
+
 TEST(UserProfileClientTest, FetchProfileWithoutAuthorizationEmitsError) {
     const auto [token, login] = registerAndGetTokenAndLogin(QStringLiteral("user-profile-client-noauth"));
     if (token.isEmpty()) {
