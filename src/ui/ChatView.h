@@ -13,6 +13,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QScrollArea;
+class QSplitter;
 class QStackedWidget;
 class QTimer;
 class QVBoxLayout;
@@ -156,6 +157,10 @@ public:
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
     [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
+    /// Show/Hide Chat button (issue #153) — only visible during a call,
+    /// when the video area and the chat panel share a QSplitter instead
+    /// of the chat always taking the same fixed share of the window.
+    [[nodiscard]] QPushButton* toggleChatVisibilityButton() const { return toggleChatVisibilityButton_; }
 
 signals:
     /// Emitted when the placeholder's "Create channel" button is
@@ -222,6 +227,11 @@ private:
     /// — shared by showChannel() and setEncrypted() so either can be
     /// called first without one clobbering the other's effect.
     void updateChannelTitleLabel();
+    /// "Hide Chat"/"Show Chat" clicked (issue #153) — collapses/restores
+    /// chatPanel_'s share of chatSplitter_, giving the video area (or,
+    /// once video/screen share activity settles, just empty space) the
+    /// rest of the window.
+    void onToggleChatVisibilityClicked();
 
 
     QStackedWidget* stack_ = nullptr;
@@ -246,6 +256,17 @@ private:
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
+    /// Video area (top) and chatPanel_ (bottom) — during a call the
+    /// video area gets most of the space, with chatPanel_ collapsible
+    /// via toggleChatVisibilityButton_ instead of a fixed 50/50 share
+    /// (issue #153).
+    QSplitter* chatSplitter_ = nullptr;
+    /// History (loadOlderButton_/scrollArea_/typingIndicatorLabel_) plus
+    /// the message composer row — grouped into one widget so it can be
+    /// a single QSplitter child.
+    QWidget* chatPanel_ = nullptr;
+    QPushButton* toggleChatVisibilityButton_ = nullptr;
+    bool chatPanelCollapsed_ = false;
     QWidget* videoStrip_ = nullptr;
     QHBoxLayout* videoStripLayout_ = nullptr;
     QVideoWidget* localVideoWidget_ = nullptr;

@@ -10,6 +10,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSizePolicy>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -113,6 +115,13 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     searchButton_->setObjectName(QStringLiteral("searchButton"));
     connect(searchButton_, &QPushButton::clicked, this, &ChatView::openSearchRequested);
 
+    // Only shown during a call (issue #153) — lets the video area take
+    // over the window without permanently losing access to the chat.
+    toggleChatVisibilityButton_ = new QPushButton(tr("Hide Chat"), channelPage);
+    toggleChatVisibilityButton_->setObjectName(QStringLiteral("toggleChatVisibilityButton"));
+    toggleChatVisibilityButton_->setVisible(false);
+    connect(toggleChatVisibilityButton_, &QPushButton::clicked, this, &ChatView::onToggleChatVisibilityClicked);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
@@ -120,6 +129,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     headerRow->addWidget(muteToggleButton_);
     headerRow->addWidget(videoToggleButton_);
     headerRow->addWidget(screenShareToggleButton_);
+    headerRow->addWidget(toggleChatVisibilityButton_);
     headerRow->addWidget(searchButton_);
 
     callParticipantsLabel_ = new QLabel(channelPage);
@@ -139,7 +149,13 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
 
     localVideoWidget_ = new QVideoWidget(videoStrip_);
     localVideoWidget_->setObjectName(QStringLiteral("localVideoWidget"));
-    localVideoWidget_->setFixedSize(kVideoTileSize, kVideoTileSize);
+    // A minimum, not a fixed, size (issue #153) — chatSplitter_ gives
+    // videoStrip_ most of the window during a call, and an Expanding
+    // size policy lets the tile actually grow into that space instead
+    // of staying pinned at kVideoTileSize regardless of how much room
+    // it's given.
+    localVideoWidget_->setMinimumSize(kVideoTileSize, kVideoTileSize);
+    localVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     videoStripLayout_->insertWidget(0, localVideoWidget_);
     videoStrip_->setVisible(false);
 
@@ -219,13 +235,33 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     sendRow->addWidget(attachButton_);
     sendRow->addWidget(sendButton_);
 
+    // Message history + composer, grouped into one widget so it can be a
+    // single QSplitter child alongside videoStrip_ (issue #153) — during
+    // a call the video area gets most of the space, with this panel
+    // collapsible via toggleChatVisibilityButton_ instead of a fixed
+    // share of the window at all times.
+    chatPanel_ = new QWidget(channelPage);
+    auto* chatPanelLayout = new QVBoxLayout(chatPanel_);
+    chatPanelLayout->setContentsMargins(0, 0, 0, 0);
+    chatPanelLayout->setSpacing(ui_theme::kSpacingSm);
+    chatPanelLayout->addWidget(loadOlderButton_, /*stretch=*/0, Qt::AlignHCenter);
+    chatPanelLayout->addWidget(scrollArea_, /*stretch=*/1);
+    chatPanelLayout->addWidget(typingIndicatorLabel_);
+    chatPanelLayout->addLayout(sendRow);
+
+    chatSplitter_ = new QSplitter(Qt::Vertical, channelPage);
+    chatSplitter_->setObjectName(QStringLiteral("chatSplitter"));
+    chatSplitter_->setChildrenCollapsible(true);
+    chatSplitter_->addWidget(videoStrip_);
+    chatSplitter_->addWidget(chatPanel_);
+    // Outside a call videoStrip_ is hidden (see updateLocalVideoVisibility())
+    // and chatPanel_ has the whole area to itself, matching the pre-#153
+    // layout; setCallState() re-splits this once a call actually starts.
+    chatSplitter_->setSizes({0, 1});
+
     channelLayout->addLayout(headerRow);
     channelLayout->addWidget(callParticipantsLabel_);
-    channelLayout->addWidget(videoStrip_);
-    channelLayout->addWidget(loadOlderButton_, /*stretch=*/0, Qt::AlignHCenter);
-    channelLayout->addWidget(scrollArea_, /*stretch=*/1);
-    channelLayout->addWidget(typingIndicatorLabel_);
-    channelLayout->addLayout(sendRow);
+    channelLayout->addWidget(chatSplitter_, /*stretch=*/1);
 
     stack_->insertWidget(kPlaceholderPageIndex, placeholderPage);
     stack_->insertWidget(kChannelPageIndex, channelPage);
@@ -384,7 +420,15 @@ void ChatView::setCallState(bool inCall, bool muted) {
     muteToggleButton_->setText(muted ? tr("Unmute") : tr("Mute"));
     videoToggleButton_->setEnabled(inCall);
     screenShareToggleButton_->setEnabled(inCall);
-    if (!inCall) {
+    toggleChatVisibilityButton_->setVisible(inCall);
+    if (inCall) {
+        // Give the video area most of the window rather than sharing it
+        // 50/50 with the chat (issue #153) — setSizes() only needs a
+        // ratio, Qt scales it to the splitter's actual pixel size.
+        chatPanelCollapsed_ = false;
+        toggleChatVisibilityButton_->setText(tr("Hide Chat"));
+        chatSplitter_->setSizes({3, 2});
+    } else {
         callParticipantsLabel_->setVisible(false);
         // Video/screen share can't outlive the call they belong to —
         // reset both here so every existing leave/channel-switch call
@@ -396,7 +440,20 @@ void ChatView::setCallState(bool inCall, bool muted) {
             delete tile;
         }
         remoteVideoTiles_.clear();
+        // Back to the normal, pre-call layout: chat gets the whole area
+        // (videoStrip_ is hidden by setVideoEnabled(false)/
+        // setScreenShareEnabled(false) above, so it takes no space
+        // regardless of the ratio, but 0/1 keeps chatSplitter_'s state
+        // consistent with how it starts before any call is ever joined).
+        chatPanelCollapsed_ = false;
+        chatSplitter_->setSizes({0, 1});
     }
+}
+
+void ChatView::onToggleChatVisibilityClicked() {
+    chatPanelCollapsed_ = !chatPanelCollapsed_;
+    toggleChatVisibilityButton_->setText(chatPanelCollapsed_ ? tr("Show Chat") : tr("Hide Chat"));
+    chatSplitter_->setSizes(chatPanelCollapsed_ ? QList<int>{1, 0} : QList<int>{3, 2});
 }
 
 void ChatView::setCallParticipants(const QStringList& participants) {
@@ -437,7 +494,10 @@ void ChatView::showRemoteVideoFrame(const QString& peerLogin, const QImage& fram
     if (tile == nullptr) {
         tile = new QLabel(videoStrip_);
         tile->setObjectName(QStringLiteral("remoteVideoTile"));
-        tile->setFixedSize(kVideoTileSize, kVideoTileSize);
+        // Minimum, not fixed, size — same reasoning as localVideoWidget_
+        // above (issue #153).
+        tile->setMinimumSize(kVideoTileSize, kVideoTileSize);
+        tile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         tile->setScaledContents(true);
         videoStripLayout_->addWidget(tile);
         remoteVideoTiles_.insert(peerLogin, tile);
