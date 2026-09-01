@@ -11,14 +11,16 @@ namespace devicehub {
 struct UserProfile;
 
 /**
- * @brief Edit-profile dialog opened from AccountMenu's "Edit Profile"
- *        button (issue #110): display name and avatar URL.
+ * @brief Диалог редактирования профиля, открываемый кнопкой "Edit
+ *        Profile" у AccountMenu (issue #110): отображаемое имя и URL
+ *        аватара.
  *
- * Pure presentation — MainWindow owns UserProfileClient and all the
- * wiring: it calls setProfile() to prefill fields (kept in sync with
- * every UserProfileClient::profileReceived()/profileUpdated(), not just
- * on open) and listens for saveRequested() to actually submit the
- * change, the same "dumb widget" pattern as SettingsDialog/AccountMenu.
+ * Чистое представление — MainWindow владеет UserProfileClient и всей
+ * связующей логикой: он вызывает setProfile() для предзаполнения полей
+ * (синхронизируется с каждым UserProfileClient::profileReceived()/
+ * profileUpdated(), а не только при открытии) и слушает saveRequested(),
+ * чтобы фактически отправить изменение — тот же паттерн "тупого
+ * виджета", что и у SettingsDialog/AccountMenu.
  */
 class ProfileDialog : public QDialog {
     Q_OBJECT
@@ -26,9 +28,10 @@ class ProfileDialog : public QDialog {
 public:
     explicit ProfileDialog(QWidget* parent = nullptr);
 
-    /// Prefills the fields — a no-op on the currently-focused field, so
-    /// it's safe to call while the user is mid-edit (e.g. a background
-    /// refresh landing while the dialog happens to be open).
+    /// Предзаполняет поля — ничего не делает с полем, находящимся сейчас
+    /// в фокусе, поэтому безопасно вызывать, пока пользователь
+    /// редактирует (например, фоновое обновление приходит, пока диалог
+    /// как раз открыт).
     void setProfile(const UserProfile& profile);
 
     [[nodiscard]] QLineEdit* displayNameEdit() const { return displayNameEdit_; }
