@@ -9,6 +9,8 @@
 #include <QPixmap>
 #include <QStyle>
 
+#include "ui/Theme.h"
+
 namespace devicehub::ui_icons {
 
 QIcon plusIcon(const QColor& strokeColor) {
@@ -45,8 +47,8 @@ QIcon communityAvatarIcon(const QString& label) {
     painter.setRenderHint(QPainter::Antialiasing);
 
     QLinearGradient gradient(0, 0, kSize, kSize);
-    gradient.setColorAt(0, QColor("#34d399"));
-    gradient.setColorAt(1, QColor("#059669"));
+    gradient.setColorAt(0, QColor(devicehub::ui_theme::kAccentGradientStart));
+    gradient.setColorAt(1, QColor(devicehub::ui_theme::kAccentGradientEnd));
     painter.setPen(Qt::NoPen);
     painter.setBrush(gradient);
     painter.drawRoundedRect(QRectF(0, 0, kSize, kSize), kCornerRadius, kCornerRadius);

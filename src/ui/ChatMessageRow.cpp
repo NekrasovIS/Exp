@@ -10,6 +10,7 @@
 #include "ui/ChatBubble.h"
 #include "ui/ChatMessageGrouping.h"
 #include "ui/IconFactory.h"
+#include "ui/Theme.h"
 
 namespace devicehub {
 
@@ -23,7 +24,7 @@ constexpr qreal kBubbleInnerSpacingEm = 0.15;
 constexpr qreal kNewGroupTopMarginEm = 0.5;
 constexpr qreal kGroupedTopMarginEm = 0.08;
 constexpr qreal kMaxBubbleWidthFraction = 0.7;
-constexpr const char* kOwnTextColor = "#ffffff";
+constexpr const char* kOwnTextColor = ui_theme::kAccentForeground;
 
 QString formatTime(const QString& rawSentAt) {
     const QDateTime parsed = chat_message_grouping::parseSentAt(rawSentAt);
