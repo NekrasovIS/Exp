@@ -32,6 +32,7 @@
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
 #include "ui/FooterBar.h"
+#include "ui/LoginWindow.h"
 #include "ui/ModeratorsDialog.h"
 #include "ui/ProfileDialog.h"
 #include "ui/SearchDialog.h"
@@ -83,9 +84,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
     connect(accountMenu_->registerButton(), &QPushButton::clicked, this, &MainWindow::onRegisterClicked);
     connect(accountMenu_->editProfileButton(), &QPushButton::clicked, this, &MainWindow::onEditProfileClicked);
-    connect(profileDialog_, &ProfileDialog::saveRequested, this, [this](const QString& displayName, const QString& avatarUrl) {
-        userProfileClient_.updateOwnProfile(lastToken_, displayName, avatarUrl);
-    });
+    connect(loginWindow_, &LoginWindow::requestCodeRequested, this, &MainWindow::onRequestOtpCodeClicked);
+    connect(loginWindow_, &LoginWindow::verifyCodeRequested, this, &MainWindow::onVerifyOtpCodeClicked);
+    connect(&authClient_, &AuthClient::otpRequested, this,
+            [this](const QString& identifier) { loginWindow_->showCodeSent(identifier); });
+    connect(profileDialog_, &ProfileDialog::saveRequested, this,
+            [this](const ProfileEdits& edits) { userProfileClient_.updateOwnProfile(lastToken_, edits); });
     connect(&userProfileClient_, &UserProfileClient::profileReceived, this, [this](const UserProfile& profile) {
         // fetchProfile() is also used to look up an encrypted channel's
         // member public keys (issue #138, see pendingEncryptedSetup_) —
@@ -142,6 +146,7 @@ MainWindow::MainWindow(QWidget* parent)
         chatView_->setCurrentUserLogin(currentUserLogin_);
         accountMenu_->setEditProfileEnabled(valid);
         if (valid) {
+            loginWindow_->hide();
             refreshCommunities();
             // Populates the footer's display name (falls back to the
             // bare login above until this returns) and prefills
@@ -161,6 +166,14 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
         accountMenu_->statusLabel()->setText(tr("Error: %1").arg(message));
+        // errorOccurred() is shared by every AuthClient call (issue
+        // #156's requestOtp()/verifyOtp() included) — showing it in
+        // LoginWindow too, whenever it's the window actually in front
+        // of the user, means an OTP failure doesn't only appear in the
+        // top-right AccountMenu the user isn't looking at.
+        if (loginWindow_->isVisible()) {
+            loginWindow_->showError(message);
+        }
     });
     connect(&authClient_, &AuthClient::registrationCompleted, this, [this](bool registered) {
         if (!registered) {
@@ -526,6 +539,13 @@ MainWindow::MainWindow(QWidget* parent)
             [this](const QVideoFrame& frame) { settingsDialog_->screenPreview()->videoSink()->setVideoFrame(frame); });
     connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
+
+    // Issue #156: there's no persisted token across restarts (every
+    // launch starts signed out), so gating on "not authenticated yet"
+    // reduces to "always show this at startup" — closed again once
+    // tokenVerified(true, ...) fires above, from either this window or
+    // the top-right AccountMenu's password login.
+    loginWindow_->show();
 }
 
 MainWindow::~MainWindow() = default;
@@ -582,6 +602,7 @@ void MainWindow::buildUi() {
     profileDialog_ = new ProfileDialog(this);
     moderatorsDialog_ = new ModeratorsDialog(this);
     searchDialog_ = new SearchDialog(this);
+    loginWindow_ = new LoginWindow(this);
 }
 
 void MainWindow::populateDevices() {
@@ -777,6 +798,14 @@ void MainWindow::onEditProfileClicked() {
     profileDialog_->show();
     profileDialog_->raise();
     profileDialog_->activateWindow();
+}
+
+void MainWindow::onRequestOtpCodeClicked(const QString& identifier) {
+    authClient_.requestOtp(identifier);
+}
+
+void MainWindow::onVerifyOtpCodeClicked(const QString& identifier, const QString& code) {
+    authClient_.verifyOtp(identifier, code);
 }
 
 void MainWindow::refreshCommunities() {

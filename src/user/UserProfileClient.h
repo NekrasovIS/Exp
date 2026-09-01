@@ -17,6 +17,19 @@ struct UserProfile {
     /// Base64-encoded X25519 public key (issue #136), empty if the user
     /// hasn't published one yet.
     QString publicKey;
+    /// Issue #156: empty until the user sets one — required before
+    /// one-time-code login can be used, otherwise unused client-side.
+    QString email;
+};
+
+/// Fields updateOwnProfile() may change — grouped per CLAUDE.md's
+/// "prefer fewer function arguments" rule (displayName/avatarUrl/email
+/// are three same-typed QStrings, easy to swap by position at the call
+/// site) rather than growing updateOwnProfile()'s own parameter list.
+struct ProfileEdits {
+    QString displayName;
+    QString avatarUrl;
+    QString email;
 };
 
 /**
@@ -39,7 +52,7 @@ public:
 
     /// Updates the caller's own profile (login comes from @p token
     /// server-side — never spoofable via this call).
-    void updateOwnProfile(const QString& token, const QString& displayName, const QString& avatarUrl);
+    void updateOwnProfile(const QString& token, const ProfileEdits& edits);
 
     /// Publishes the caller's X25519 public key (issue #136) — a separate
     /// method from updateOwnProfile() rather than a third parameter on it:

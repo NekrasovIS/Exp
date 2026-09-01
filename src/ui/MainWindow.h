@@ -31,6 +31,7 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class FooterBar;
+class LoginWindow;
 class ModeratorsDialog;
 class ProfileDialog;
 class SearchDialog;
@@ -72,6 +73,10 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+    /// LoginWindow::requestCodeRequested() — issue #156.
+    void onRequestOtpCodeClicked(const QString& identifier);
+    /// LoginWindow::verifyCodeRequested() — issue #156.
+    void onVerifyOtpCodeClicked(const QString& identifier, const QString& code);
 
     /// Re-lists communities from chat-service (no-op, with a status bar
     /// message, if not signed in yet).
@@ -183,6 +188,7 @@ private:
     ModeratorsDialog* moderatorsDialog_ = nullptr;
     ProfileDialog* profileDialog_ = nullptr;
     SearchDialog* searchDialog_ = nullptr;
+    LoginWindow* loginWindow_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;
 };

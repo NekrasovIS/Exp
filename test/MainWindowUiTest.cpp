@@ -26,6 +26,20 @@ TEST(MainWindowUiTest, ConstructsWithoutCrashing) {
     EXPECT_EQ(window.windowTitle(), QStringLiteral("DeviceHub"));
 }
 
+TEST(MainWindowUiTest, LoginWindowIsShownAtStartupSinceNoTokenIsEverPersisted) {
+    // Issue #156: there's no stored-token persistence across restarts,
+    // so "not authenticated yet" is unconditionally true right after
+    // construction — LoginWindow (a separate top-level QDialog, not a
+    // widget embedded in MainWindow's own layout, so isVisible() here
+    // doesn't depend on MainWindow itself ever being shown) should
+    // already be showing.
+    const MainWindow window;
+
+    const auto* identifierEdit = window.findChild<QLineEdit*>(QStringLiteral("loginIdentifierEdit"));
+    ASSERT_NE(identifierEdit, nullptr);
+    EXPECT_TRUE(identifierEdit->window()->isVisible());
+}
+
 TEST(MainWindowUiTest, DeviceSettingsAreSeparateTabsInDialog) {
     const MainWindow window;
 

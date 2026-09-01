@@ -126,6 +126,34 @@ class SearchDialog {
 }
 SearchDialog ..> ChatMessageInfo : renders
 
+class LoginWindow {
+  +showCodeSent(identifier: QString)
+  +showError(message: QString)
+  +reset()
+  +identifierEdit() : QLineEdit*
+  +requestCodeButton() : QPushButton*
+  +codeEdit() : QLineEdit*
+  +verifyCodeButton() : QPushButton*
+  +backButton() : QPushButton*
+  +statusLabel() : QLabel*
+  -onRequestCodeClicked()
+  -onVerifyCodeClicked()
+  -onBackClicked()
+  .. signals ..
+  +requestCodeRequested(identifier: QString)
+  +verifyCodeRequested(identifier: QString, code: QString)
+}
+note bottom of LoginWindow
+  issue #156: показывается MainWindow при
+  запуске (нет персистентности токена между
+  перезапусками — сигнал = "всегда показывать
+  при старте"), скрывается на первом
+  tokenVerified(true, ...). Пароль в
+  AccountMenu (правый верхний угол) продолжает
+  работать как раньше, тоже закрывает это окно.
+end note
+MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
+
 class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
   +messageId() : qint64
@@ -169,12 +197,14 @@ class ProfileDialog {
   +setProfile(profile: UserProfile)
   +displayNameEdit() : QLineEdit*
   +avatarUrlEdit() : QLineEdit*
+  +emailEdit() : QLineEdit*
   +saveButton() : QPushButton*
   +statusLabel() : QLabel*
   .. signals ..
-  +saveRequested(displayName: QString, avatarUrl: QString)
+  +saveRequested(edits: ProfileEdits)
 }
 ProfileDialog ..> UserProfile : setProfile() >
+ProfileDialog ..> ProfileEdits : saveRequested() >
 
 class SettingsDialog {
   +outputCombo() : QComboBox*

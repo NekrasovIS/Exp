@@ -9,10 +9,12 @@ class QPushButton;
 namespace devicehub {
 
 struct UserProfile;
+struct ProfileEdits;
 
 /**
  * @brief Edit-profile dialog opened from AccountMenu's "Edit Profile"
- *        button (issue #110): display name and avatar URL.
+ *        button (issue #110): display name, avatar URL, and email
+ *        (issue #156 — required before one-time-code login works).
  *
  * Pure presentation — MainWindow owns UserProfileClient and all the
  * wiring: it calls setProfile() to prefill fields (kept in sync with
@@ -33,15 +35,17 @@ public:
 
     [[nodiscard]] QLineEdit* displayNameEdit() const { return displayNameEdit_; }
     [[nodiscard]] QLineEdit* avatarUrlEdit() const { return avatarUrlEdit_; }
+    [[nodiscard]] QLineEdit* emailEdit() const { return emailEdit_; }
     [[nodiscard]] QPushButton* saveButton() const { return saveButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
 signals:
-    void saveRequested(const QString& displayName, const QString& avatarUrl);
+    void saveRequested(const ProfileEdits& edits);
 
 private:
     QLineEdit* displayNameEdit_ = nullptr;
     QLineEdit* avatarUrlEdit_ = nullptr;
+    QLineEdit* emailEdit_ = nullptr;
     QPushButton* saveButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };

@@ -10,11 +10,18 @@ struct UserProfile {
   +displayName: QString
   +avatarUrl: QString
   +publicKey: QString
+  +email: QString
+}
+
+struct ProfileEdits {
+  +displayName: QString
+  +avatarUrl: QString
+  +email: QString
 }
 
 class UserProfileClient {
   +fetchProfile(token: QString, login: QString)
-  +updateOwnProfile(token: QString, displayName: QString, avatarUrl: QString)
+  +updateOwnProfile(token: QString, edits: ProfileEdits)
   +publishPublicKey(token: QString, publicKey: QString)
   .. signals ..
   +profileReceived(profile: UserProfile)
@@ -23,7 +30,17 @@ class UserProfileClient {
 }
 UserProfileClient *-- QNetworkAccessManager : owns
 UserProfileClient ..> UserProfile : emits
+UserProfileClient ..> ProfileEdits : updateOwnProfile() >
 UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
+note bottom of ProfileEdits
+  issue #156: email — задан, значит,
+  вход по одноразовому коду доступен
+  для этого аккаунта; сгруппирован с
+  displayName/avatarUrl в структуру
+  (правило проекта про количество
+  аргументов — три однотипных QString
+  подряд легко перепутать местами).
+end note
 
 package "libsodium" {
   class "crypto_box_keypair()" as CryptoBoxKeypair

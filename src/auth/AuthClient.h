@@ -48,6 +48,18 @@ public:
     /// requestToken()/registerUser().
     void refreshAccessToken(const QString& refreshToken);
 
+    /// Запрашивает одноразовый код для @p identifier (login или email,
+    /// issue #156) через POST {baseUrl}/auth/otp/request — auth-service
+    /// всегда отвечает успехом независимо от того, существует ли такой
+    /// аккаунт, поэтому единственное, что можно узнать из результата —
+    /// прошёл ли сам сетевой запрос (otpRequested()/errorOccurred()).
+    void requestOtp(const QString& identifier);
+
+    /// Проверяет @p code для @p identifier через POST
+    /// {baseUrl}/auth/otp/verify — при совпадении выдаёт токен, отдаёт
+    /// его через tokenReceived(), как и остальные способы входа.
+    void verifyOtp(const QString& identifier, const QString& code);
+
 signals:
     /// Emitted when a new access token was issued successfully — by
     /// requestToken(), registerUser() (auto-login), or
@@ -64,6 +76,11 @@ signals:
     /// Emitted on any network or protocol error for any of the calls
     /// above.
     void errorOccurred(const QString& message);
+
+    /// Emitted when requestOtp() round-tripped successfully — echoes
+    /// back @p identifier so the caller (LoginWindow) doesn't need to
+    /// track it separately.
+    void otpRequested(const QString& identifier);
 
 private:
     QUrl baseUrl_;
