@@ -73,6 +73,13 @@ jobs:
       - name: Start Postgres (docker compose)
         run: docker compose up -d --wait
 
+      # Same class of dependency as build-and-test's own autotools step
+      # above (there for libb2, here for user-service's libsodium) —
+      # vcpkg builds these ports from their upstream autotools build
+      # system rather than vendoring a CMake port for them.
+      - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
+
       - name: Configure
         run: cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build
 
