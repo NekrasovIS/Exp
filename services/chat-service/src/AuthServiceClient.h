@@ -6,16 +6,17 @@
 namespace chat_service {
 
 /**
- * @brief Calls auth-service's POST /auth/verify to resolve a token.
+ * @brief Вызывает POST /auth/verify auth-service для разрешения токена.
  *
- * Fails closed: any network/protocol error or an invalid/expired token
- * is treated as "not authenticated" rather than propagating an exception.
+ * Отказывает закрыто (fail closed): любая сетевая/протокольная ошибка
+ * или недействительный/просроченный токен трактуются как "не
+ * аутентифицирован", а не приводят к исключению.
  */
 class AuthServiceClient {
 public:
     AuthServiceClient(std::string host, int port);
 
-    /// @return The token's subject (login) if it's valid, std::nullopt otherwise.
+    /// @return Субъект (логин) токена, если он действителен, иначе std::nullopt.
     [[nodiscard]] std::optional<std::string> verifyToken(const std::string& token) const;
 
 private:
