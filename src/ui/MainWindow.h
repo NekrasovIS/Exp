@@ -4,6 +4,7 @@
 #include <QList>
 #include <QMainWindow>
 #include <memory>
+#include <optional>
 
 #include "auth/AuthClient.h"
 #include "chat/CallManager.h"
@@ -15,6 +16,7 @@
 #include "devices/DeviceEnumerator.h"
 #include "devices/ScreenCaptureDevice.h"
 #include "ui/ToastBanner.h"
+#include "user/IdentityKeyStore.h"
 #include "user/UserProfileClient.h"
 
 class QScreen;
@@ -95,6 +97,10 @@ private:
     CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_, screenCapture_};
     ChatRestClient chatRestClient_;
     UserProfileClient userProfileClient_;
+    /// Constructed once currentUserLogin_ is known (issue #136) — no
+    /// default constructor, since a keypair is meaningless without a
+    /// login to scope its storage file to.
+    std::optional<IdentityKeyStore> identityKeyStore_;
     QString lastToken_;
     /// Long-lived token (issue #105) that refreshTimer_ redeems for a
     /// fresh lastToken_ shortly before it expires — empty when not

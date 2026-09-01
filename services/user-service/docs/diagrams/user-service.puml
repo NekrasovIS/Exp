@@ -22,22 +22,30 @@ struct Profile {
   +login: string
   +displayName: optional<string>
   +avatarUrl: optional<string>
+  +publicKey: optional<string>
+}
+
+struct ProfileUpdate {
+  +displayName: optional<string>
+  +avatarUrl: optional<string>
+  +publicKey: optional<string>
 }
 
 class UserRepository {
   +createUser(login: string, passwordHash: string) : bool
   +findPasswordHash(login: string) : optional<string>
   +findProfile(login: string) : optional<Profile>
-  +updateProfile(login: string, displayName: optional<string>, avatarUrl: optional<string>) : bool
+  +updateProfile(login: string, update: ProfileUpdate) : bool
 }
 UserRepository ..> PqxxConnection : opens per call
 UserRepository ..> Profile : creates
+UserRepository ..> ProfileUpdate : reads
 
 class UserService {
   +registerUser(login: string, password: string) : bool
   +verifyCredentials(login: string, password: string) : bool
   +getProfile(login: string) : optional<Profile>
-  +updateProfile(login: string, displayName: optional<string>, avatarUrl: optional<string>) : bool
+  +updateProfile(login: string, update: ProfileUpdate) : bool
 }
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
@@ -47,6 +55,12 @@ class AuthServiceClient {
   +verifyToken(token: string) : optional<string>
 }
 AuthServiceClient ..> "auth-service" : POST /auth/verify
+
+namespace json_guard {
+  class json_guard <<namespace>> {
+    +{static} exceedsMaxNestingDepth(payload: string_view, maxDepth: int) : bool
+  }
+}
 
 class HttpServer {
   +listen(host: string, port: int)
@@ -61,6 +75,7 @@ HttpServer --> UserService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
 HttpServer *-- HttplibServer : owns
 HttpServer ..> Json : encodes responses as
+HttpServer ..> json_guard.json_guard : guards parse() with (issue #129)
 
 note right of HttpServer
   Routes:
@@ -73,10 +88,22 @@ note right of HttpServer
                                         always writes the token's own
                                         subject — login in the body, if
                                         any, is ignored; partial body
-                                        preserves the field not sent,
+                                        preserves the fields not sent,
                                         fetch-then-merge since
                                         UserRepository::updateProfile()
-                                        always writes both columns)
+                                        always writes all three columns
+                                        — display_name/avatar_url/
+                                        public_key, the last added by
+                                        issue #136)
+end note
+
+note right of json_guard.json_guard
+  Issue #129: nlohmann::json::parse()
+  is recursive-descent and stack-
+  overflows the whole process on
+  deeply nested input — checked
+  before every parse() of a request
+  body, not caught after the fact.
 end note
 
 note bottom of UserRepository

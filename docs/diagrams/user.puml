@@ -9,11 +9,13 @@ struct UserProfile {
   +login: QString
   +displayName: QString
   +avatarUrl: QString
+  +publicKey: QString
 }
 
 class UserProfileClient {
   +fetchProfile(token: QString, login: QString)
   +updateOwnProfile(token: QString, displayName: QString, avatarUrl: QString)
+  +publishPublicKey(token: QString, publicKey: QString)
   .. signals ..
   +profileReceived(profile: UserProfile)
   +profileUpdated(profile: UserProfile)
@@ -22,6 +24,20 @@ class UserProfileClient {
 UserProfileClient *-- QNetworkAccessManager : owns
 UserProfileClient ..> UserProfile : emits
 UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
+
+package "libsodium" {
+  class "crypto_box_keypair()" as CryptoBoxKeypair
+}
+
+class IdentityKeyStore {
+  +IdentityKeyStore(storageDir: QString, login: QString)
+  +publicKeyBase64() : QString
+  +secretKeyBytes() : QByteArray
+  -loadIfExists() : bool
+  -generateAndPersist()
+}
+IdentityKeyStore ..> CryptoBoxKeypair : generates via
+IdentityKeyStore ..> "local file" : persists secret key to\n(QStandardPaths::AppDataLocation)
 
 note right of UserProfileClient
   Separate from AuthClient
@@ -40,6 +56,34 @@ note right of UserProfileClient
   way to pass a different login, so
   a caller can never edit someone
   else's profile through this class.
+
+  publishPublicKey() (issue #136,
+  E2E encryption Phase 1) is a
+  separate call rather than a third
+  parameter on updateOwnProfile() —
+  driven by a different trigger
+  (IdentityKeyStore at login time,
+  not the user-initiated profile-
+  edit flow).
+end note
+
+note right of IdentityKeyStore
+  E2E encryption Phase 1 (issue
+  #136) — infrastructure only, no
+  channel is yet marked encrypted.
+  One X25519 keypair per login;
+  the secret key never leaves this
+  store or crosses the network.
+  Public key is derived from the
+  persisted secret key on load
+  (crypto_scalarmult_base), not
+  also stored, so the two halves
+  can't drift apart.
+
+  No multi-device, rotation, or
+  backup/recovery in this phase —
+  a new login on another machine
+  means a new identity.
 end note
 
 @enduml

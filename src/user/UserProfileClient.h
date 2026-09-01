@@ -14,6 +14,9 @@ struct UserProfile {
     QString login;
     QString displayName;
     QString avatarUrl;
+    /// Base64-encoded X25519 public key (issue #136), empty if the user
+    /// hasn't published one yet.
+    QString publicKey;
 };
 
 /**
@@ -37,6 +40,12 @@ public:
     /// Updates the caller's own profile (login comes from @p token
     /// server-side — never spoofable via this call).
     void updateOwnProfile(const QString& token, const QString& displayName, const QString& avatarUrl);
+
+    /// Publishes the caller's X25519 public key (issue #136) — a separate
+    /// method from updateOwnProfile() rather than a third parameter on it:
+    /// this is driven by IdentityKeyStore at login time, a different
+    /// caller/trigger than the user-initiated profile-edit flow.
+    void publishPublicKey(const QString& token, const QString& publicKey);
 
 signals:
     void profileReceived(const UserProfile& profile);

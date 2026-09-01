@@ -7,7 +7,11 @@ CREATE TABLE IF NOT EXISTS users (
     -- falls back to login, avatar_url to an initial-letter icon, on the
     -- client side rather than defaulting them here.
     display_name TEXT,
-    avatar_url TEXT
+    avatar_url TEXT,
+    -- Base64-encoded X25519 public key (issue #136, E2E encryption
+    -- Phase 1) — the private half never reaches this server; NULL until
+    -- the client generates a keypair and publishes the public half.
+    public_key TEXT
 );
 
 -- ADD COLUMN IF NOT EXISTS rather than relying solely on the CREATE
@@ -16,3 +20,4 @@ CREATE TABLE IF NOT EXISTS users (
 -- database needs this to actually pick up the new columns.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT;

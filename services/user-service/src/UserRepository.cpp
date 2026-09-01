@@ -35,25 +35,25 @@ std::optional<Profile> UserRepository::findProfile(const std::string& login) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows =
-        transaction.exec("SELECT display_name, avatar_url FROM users WHERE login = $1", pqxx::params{login});
+    const pqxx::result rows = transaction.exec(
+        "SELECT display_name, avatar_url, public_key FROM users WHERE login = $1", pqxx::params{login});
     if (rows.empty()) {
         return std::nullopt;
     }
 
     return Profile{.login = login,
                     .displayName = rows[0][0].is_null() ? std::nullopt : std::make_optional(rows[0][0].as<std::string>()),
-                    .avatarUrl = rows[0][1].is_null() ? std::nullopt : std::make_optional(rows[0][1].as<std::string>())};
+                    .avatarUrl = rows[0][1].is_null() ? std::nullopt : std::make_optional(rows[0][1].as<std::string>()),
+                    .publicKey = rows[0][2].is_null() ? std::nullopt : std::make_optional(rows[0][2].as<std::string>())};
 }
 
-bool UserRepository::updateProfile(const std::string& login, const std::optional<std::string>& displayName,
-                                    const std::optional<std::string>& avatarUrl) {
+bool UserRepository::updateProfile(const std::string& login, const ProfileUpdate& update) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows =
-        transaction.exec("UPDATE users SET display_name = $1, avatar_url = $2 WHERE login = $3 RETURNING id",
-                          pqxx::params{displayName, avatarUrl, login});
+    const pqxx::result rows = transaction.exec(
+        "UPDATE users SET display_name = $1, avatar_url = $2, public_key = $3 WHERE login = $4 RETURNING id",
+        pqxx::params{update.displayName, update.avatarUrl, update.publicKey, login});
     transaction.commit();
     return !rows.empty();
 }

@@ -136,7 +136,10 @@ TEST(UserRepositoryTest, UpdateProfileRoundTripsThroughFindProfile) {
     }
     ASSERT_TRUE(created);
 
-    ASSERT_TRUE(repository.updateProfile(login, "Alice", "https://example.test/alice.png"));
+    ASSERT_TRUE(repository.updateProfile(
+        login, ProfileUpdate{.displayName = "Alice",
+                              .avatarUrl = "https://example.test/alice.png",
+                              .publicKey = "base64-x25519-public-key"}));
 
     const std::optional<Profile> profile = repository.findProfile(login);
     ASSERT_TRUE(profile.has_value());
@@ -144,6 +147,8 @@ TEST(UserRepositoryTest, UpdateProfileRoundTripsThroughFindProfile) {
     EXPECT_EQ(*profile->displayName, "Alice");
     ASSERT_TRUE(profile->avatarUrl.has_value());
     EXPECT_EQ(*profile->avatarUrl, "https://example.test/alice.png");
+    ASSERT_TRUE(profile->publicKey.has_value());
+    EXPECT_EQ(*profile->publicKey, "base64-x25519-public-key");
 }
 
 TEST(UserRepositoryTest, UpdateProfileReturnsFalseForNonexistentLogin) {
@@ -151,7 +156,8 @@ TEST(UserRepositoryTest, UpdateProfileReturnsFalseForNonexistentLogin) {
 
     bool updated = true;
     try {
-        updated = repository.updateProfile("no-such-login-ever-created", "Anyone", std::nullopt);
+        updated =
+            repository.updateProfile("no-such-login-ever-created", ProfileUpdate{.displayName = "Anyone"});
     } catch (const std::exception& error) {
         GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
     }
