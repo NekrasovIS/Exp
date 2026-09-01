@@ -22,12 +22,20 @@ MutationResult ChatService::deleteCommunity(std::int64_t id, const std::string& 
 }
 
 std::optional<std::int64_t> ChatService::createChannel(std::int64_t communityId, const std::string& name,
-                                                         const std::string& ownerLogin) {
-    return repository_.createChannel(communityId, name, ownerLogin);
+                                                         const std::string& ownerLogin, bool isEncrypted) {
+    return repository_.createChannel(communityId, name, ownerLogin, isEncrypted);
 }
 
 std::vector<Channel> ChatService::listChannels(std::int64_t communityId) {
     return repository_.listChannels(communityId);
+}
+
+std::optional<Channel> ChatService::findChannel(std::int64_t id) {
+    return repository_.findChannel(id);
+}
+
+std::vector<std::string> ChatService::listMembers(std::int64_t communityId) {
+    return repository_.listMembers(communityId);
 }
 
 MutationResult ChatService::renameChannel(std::int64_t id, const std::string& newName,
@@ -37,6 +45,15 @@ MutationResult ChatService::renameChannel(std::int64_t id, const std::string& ne
 
 MutationResult ChatService::deleteChannel(std::int64_t id, const std::string& requesterLogin) {
     return repository_.deleteChannel(id, requesterLogin);
+}
+
+MutationResult ChatService::setChannelKey(std::int64_t channelId, const std::string& memberLogin,
+                                           const std::string& requesterLogin, const std::string& wrappedKey) {
+    return repository_.setChannelKey(channelId, memberLogin, requesterLogin, wrappedKey);
+}
+
+std::optional<std::string> ChatService::findChannelKey(std::int64_t channelId, const std::string& login) {
+    return repository_.findChannelKey(channelId, login);
 }
 
 bool ChatService::joinCommunity(std::int64_t communityId, const std::string& login) {

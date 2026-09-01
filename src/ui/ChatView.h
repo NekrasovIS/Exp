@@ -42,6 +42,13 @@ public:
     /// Switches to the chat page and sets its header to @p channelName.
     void showChannel(const QString& channelName);
 
+    /// Marks whether the currently open channel is encrypted (issue
+    /// #138) — prefixes the header with a lock, and disables Attach/
+    /// Search (not supported for encrypted channels in this phase, so
+    /// disabled rather than left to fail server-side). Call after
+    /// showChannel() for the channel this applies to.
+    void setEncrypted(bool encrypted);
+
     /// Needed to decide whether an appended message is "own" (bubble
     /// right-aligned, accent-colored, no avatar) or someone else's.
     void setCurrentUserLogin(const QString& login);
@@ -211,10 +218,18 @@ private:
     /// setVideoEnabled()/setScreenShareEnabled() in either order after a
     /// mutually-exclusive toggle still leaves the right one visible.
     void updateLocalVideoVisibility();
+    /// Re-renders channelTitleLabel_ from currentChannelName_/encrypted_
+    /// — shared by showChannel() and setEncrypted() so either can be
+    /// called first without one clobbering the other's effect.
+    void updateChannelTitleLabel();
 
 
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
+    /// The plain channel name, without setEncrypted()'s lock prefix —
+    /// showChannel() sets this; setEncrypted() re-derives the label text
+    /// from it so the two can be called in either order.
+    QString currentChannelName_;
     QScrollArea* scrollArea_ = nullptr;
     QWidget* messagesContainer_ = nullptr;
     QVBoxLayout* messagesLayout_ = nullptr;
@@ -228,6 +243,7 @@ private:
     QPushButton* screenShareToggleButton_ = nullptr;
     bool videoActive_ = false;
     bool screenShareActive_ = false;
+    bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
     QWidget* videoStrip_ = nullptr;

@@ -1,5 +1,7 @@
 #include "ui/MainWindow.h"
 
+#include "chat/ChannelCrypto.h"
+
 #include <QComboBox>
 #include <QDateTime>
 #include <QFile>
@@ -85,8 +87,15 @@ MainWindow::MainWindow(QWidget* parent)
         userProfileClient_.updateOwnProfile(lastToken_, displayName, avatarUrl);
     });
     connect(&userProfileClient_, &UserProfileClient::profileReceived, this, [this](const UserProfile& profile) {
-        footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
-        profileDialog_->setProfile(profile);
+        // fetchProfile() is also used to look up an encrypted channel's
+        // member public keys (issue #138, see pendingEncryptedSetup_) —
+        // guard against clobbering the signed-in user's own footer/
+        // edit-profile dialog with someone else's profile.
+        if (profile.login == currentUserLogin_) {
+            footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
+            profileDialog_->setProfile(profile);
+        }
+        wrapPendingEncryptedChannelKeyForMember(profile.login, profile.publicKey);
     });
     connect(&userProfileClient_, &UserProfileClient::profileUpdated, this, [this](const UserProfile& profile) {
         footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
@@ -167,17 +176,18 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](qint64 id, const QString& author, const QString& body, const QString& sentAt,
                    qint64 attachmentId, const QString& attachmentFilename) {
+                const QString displayBody = currentChannelEncrypted_ ? decryptForDisplay(body) : body;
                 chatView_->appendMessage(ChatMessage{.id = id,
                                                       .author = author,
-                                                      .body = body,
+                                                      .body = displayBody,
                                                       .sentAt = sentAt,
                                                       .attachmentId = attachmentId,
                                                       .attachmentFilename = attachmentFilename});
-                desktopNotifier_->notifyMessage(author, body, currentUserLogin_);
+                desktopNotifier_->notifyMessage(author, displayBody, currentUserLogin_);
             });
     connect(&chatClient_, &ChatClient::messageEdited, this,
             [this](qint64 id, const QString& newBody, const QString& /*editedAt*/) {
-                chatView_->updateMessageBody(id, newBody);
+                chatView_->updateMessageBody(id, currentChannelEncrypted_ ? decryptForDisplay(newBody) : newBody);
             });
     connect(&chatClient_, &ChatClient::messageDeleted, this,
             [this](qint64 id) { chatView_->removeMessage(id); });
@@ -219,6 +229,12 @@ MainWindow::MainWindow(QWidget* parent)
                 }
             });
     connect(chatView_, &ChatView::openSearchRequested, this, [this]() {
+        if (currentChannelEncrypted_) {
+            // Belt-and-braces alongside ChatView disabling the Search
+            // button for an encrypted channel — see onAttachFileClicked().
+            showToast(tr("Search isn't available in encrypted channels"), ToastBanner::Variant::kInfo);
+            return;
+        }
         searchDialog_->show();
         searchDialog_->raise();
         searchDialog_->activateWindow();
@@ -289,12 +305,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(moderatorsDialog_, &ModeratorsDialog::demoteRequested, this,
             [this](qint64 id, const QString& login) { chatRestClient_.demoteModerator(lastToken_, id, login); });
 
-    connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name) {
+    connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {
             showToast(tr("Pick a community first"), ToastBanner::Variant::kInfo);
             return;
         }
-        chatRestClient_.createChannel(lastToken_, selectedCommunityId_, name);
+        chatRestClient_.createChannel(lastToken_, selectedCommunityId_, name, isEncrypted);
     });
     connect(channelsPanel_, &ChannelsPanel::renameRequested, this,
             [this](qint64 id, const QString& newName) { chatRestClient_.renameChannel(lastToken_, id, newName); });
@@ -350,10 +366,49 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64) {
         showToast(tr("Joined community"), ToastBanner::Variant::kSuccess);
     });
-    connect(&chatRestClient_, &ChatRestClient::channelCreated, this, [this](qint64 id, const QString& name) {
-        showToast(tr("Channel '%1' created").arg(name), ToastBanner::Variant::kSuccess);
-        pendingChannelSelection_ = id;
-        refreshChannelsForSelectedCommunity();
+    connect(&chatRestClient_, &ChatRestClient::channelCreated, this,
+            [this](qint64 id, const QString& name, bool isEncrypted) {
+                showToast(tr("Channel '%1' created").arg(name), ToastBanner::Variant::kSuccess);
+                if (isEncrypted && identityKeyStore_.has_value()) {
+                    // Generate the channel's symmetric key here — chat-service
+                    // never sees it, only per-member wrapped copies (issue #138).
+                    const QByteArray channelKey = channel_crypto::generateChannelKey();
+                    channelKeys_[id] = channelKey;
+                    pendingEncryptedSetup_ = PendingEncryptedChannelSetup{.channelId = id, .channelKey = channelKey};
+                    // Wrap for ourselves immediately — no round trip needed,
+                    // our own public key is already available locally.
+                    const QString ownWrapped = channel_crypto::wrapKeyForRecipient(
+                        channelKey, QByteArray::fromBase64(identityKeyStore_->publicKeyBase64().toUtf8()));
+                    chatRestClient_.setChannelKey(lastToken_, id, currentUserLogin_, ownWrapped);
+                    // Every other current member needs their own wrapped
+                    // copy too — resolved as membersListed()/profileReceived()
+                    // replies arrive.
+                    chatRestClient_.listMembers(lastToken_, selectedCommunityId_);
+                }
+                pendingChannelSelection_ = id;
+                refreshChannelsForSelectedCommunity();
+            });
+    connect(&chatRestClient_, &ChatRestClient::membersListed, this,
+            [this](qint64 /*communityId*/, const QStringList& logins) {
+                if (!pendingEncryptedSetup_.has_value()) {
+                    return;  // Not related to an in-flight encrypted-channel creation.
+                }
+                for (const QString& login : logins) {
+                    if (login != currentUserLogin_) {
+                        pendingEncryptedSetup_->pendingMemberLogins.insert(login);
+                        userProfileClient_.fetchProfile(lastToken_, login);
+                    }
+                }
+                if (pendingEncryptedSetup_->pendingMemberLogins.isEmpty()) {
+                    pendingEncryptedSetup_.reset();  // Solo community — only ourselves to wrap for.
+                }
+            });
+    connect(&chatRestClient_, &ChatRestClient::channelKeySet, this, [](qint64, const QString&) {
+        // Fire-and-forget confirmation — wrapPendingEncryptedChannelKeyForMember()
+        // already updates pendingEncryptedSetup_'s bookkeeping when it issues
+        // the setChannelKey() call, not when this reply arrives (a dropped
+        // reply here isn't retried in this phase — see issue #138's known
+        // limitations).
     });
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
         channels_ = channels;
@@ -382,6 +437,29 @@ MainWindow::MainWindow(QWidget* parent)
         }
         refreshChannelsForSelectedCommunity();
     });
+    connect(&chatRestClient_, &ChatRestClient::myChannelKeyFetched, this,
+            [this](qint64 channelId, const QString& wrappedKey) {
+                if (identityKeyStore_.has_value()) {
+                    const std::optional<QByteArray> unwrapped = channel_crypto::unwrapKey(
+                        wrappedKey, QByteArray::fromBase64(identityKeyStore_->publicKeyBase64().toUtf8()),
+                        identityKeyStore_->secretKeyBytes());
+                    if (unwrapped.has_value()) {
+                        channelKeys_[channelId] = *unwrapped;
+                    } else {
+                        showToast(tr("Failed to decrypt this channel's key"), ToastBanner::Variant::kError);
+                    }
+                }
+                if (channelId == selectedChannelId_) {
+                    finishOpeningChannel(channelId);
+                }
+            });
+    connect(&chatRestClient_, &ChatRestClient::myChannelKeyNotFound, this, [this](qint64 channelId) {
+        if (channelId == selectedChannelId_) {
+            showToast(tr("You don't have access to this encrypted channel yet — ask the owner to grant it"),
+                       ToastBanner::Variant::kInfo);
+            finishOpeningChannel(channelId);
+        }
+    });
     connect(&chatRestClient_, &ChatRestClient::messagesListed, this,
             [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
                 if (channelId != selectedChannelId_) {
@@ -392,7 +470,7 @@ MainWindow::MainWindow(QWidget* parent)
                 for (const ChatMessageInfo& info : messages) {
                     converted.append(ChatMessage{.id = info.id,
                                                   .author = info.author,
-                                                  .body = info.body,
+                                                  .body = currentChannelEncrypted_ ? decryptForDisplay(info.body) : info.body,
                                                   .sentAt = info.sentAt,
                                                   .attachmentId = info.attachmentId,
                                                   .attachmentFilename = info.attachmentFilename});
@@ -592,17 +670,34 @@ void MainWindow::onSendChatMessageClicked() {
         return;
     }
     const QString text = chatView_->messageEdit()->text();
+    QString outgoing = text;
+    if (currentChannelEncrypted_) {
+        const auto it = channelKeys_.constFind(selectedChannelId_);
+        if (it == channelKeys_.constEnd()) {
+            showToast(tr("No key for this channel yet — can't send"), ToastBanner::Variant::kError);
+            return;
+        }
+        outgoing = channel_crypto::encryptMessage(text, it.value());
+    }
     if (chatView_->editingMessageId() >= 0) {
-        chatClient_.sendEditMessage(chatView_->editingMessageId(), text);
+        chatClient_.sendEditMessage(chatView_->editingMessageId(), outgoing);
         chatView_->cancelEditingMessage();
     } else {
-        chatClient_.sendMessage(text);
+        chatClient_.sendMessage(outgoing);
         chatView_->messageEdit()->clear();
     }
 }
 
 void MainWindow::onAttachFileClicked() {
     if (selectedChannelId_ < 0) {
+        return;
+    }
+    if (currentChannelEncrypted_) {
+        // Belt-and-braces alongside ChatView disabling the Attach button
+        // for an encrypted channel — attachments aren't encrypted
+        // client-side yet (issue #138), chat-service also rejects the
+        // upload with 400.
+        showToast(tr("Attachments aren't supported in encrypted channels yet"), ToastBanner::Variant::kInfo);
         return;
     }
     const QString path = QFileDialog::getOpenFileName(this, tr("Attach File"));
@@ -722,6 +817,22 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     chatView_->showChannel(name);
     chatView_->clearLog();
     searchDialog_->clearResults();
+
+    const auto it = std::find_if(channels_.cbegin(), channels_.cend(), [id](const ChatItem& item) { return item.id == id; });
+    currentChannelEncrypted_ = it != channels_.cend() && it->isEncrypted;
+    chatView_->setEncrypted(currentChannelEncrypted_);
+
+    if (currentChannelEncrypted_ && !channelKeys_.contains(id)) {
+        // Deferred to myChannelKeyFetched()/myChannelKeyNotFound() — no
+        // point subscribing/loading history before we know whether we
+        // can even decrypt it.
+        chatRestClient_.fetchMyChannelKey(lastToken_, id);
+        return;
+    }
+    finishOpeningChannel(id);
+}
+
+void MainWindow::finishOpeningChannel(qint64 id) {
     chatClient_.connectToChannel(lastToken_, id);
     chatRestClient_.listMessages(lastToken_, id, kMessagePageSize);
 }
@@ -744,8 +855,37 @@ void MainWindow::closeChatView() {
     }
     selectedChannelId_ = -1;
     oldestMessageId_ = -1;
+    currentChannelEncrypted_ = false;
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
+}
+
+void MainWindow::wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64) {
+    if (!pendingEncryptedSetup_.has_value() || !pendingEncryptedSetup_->pendingMemberLogins.contains(login)) {
+        return;
+    }
+    pendingEncryptedSetup_->pendingMemberLogins.remove(login);
+
+    if (publicKeyBase64.isEmpty()) {
+        showToast(tr("'%1' hasn't set up encryption yet and won't have access to this channel").arg(login),
+                   ToastBanner::Variant::kInfo);
+    } else {
+        const QString wrappedKey = channel_crypto::wrapKeyForRecipient(
+            pendingEncryptedSetup_->channelKey, QByteArray::fromBase64(publicKeyBase64.toUtf8()));
+        chatRestClient_.setChannelKey(lastToken_, pendingEncryptedSetup_->channelId, login, wrappedKey);
+    }
+
+    if (pendingEncryptedSetup_->pendingMemberLogins.isEmpty()) {
+        pendingEncryptedSetup_.reset();
+    }
+}
+
+QString MainWindow::decryptForDisplay(const QString& ciphertext) const {
+    const auto it = channelKeys_.constFind(selectedChannelId_);
+    if (it == channelKeys_.constEnd()) {
+        return tr("\U0001F512 [no key for this channel yet]");
+    }
+    return channel_crypto::decryptMessage(ciphertext, it.value()).value_or(tr("\U0001F512 [unable to decrypt]"));
 }
 
 void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {

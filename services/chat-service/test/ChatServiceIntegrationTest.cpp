@@ -476,5 +476,128 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     EXPECT_EQ(*messages[0].attachmentFilename, "greeting.txt");
 }
 
+TEST(ChatServiceIntegrationTest, CreateChannelDefaultsToNotEncryptedAndFlagRoundTripsThroughListAndFind) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::optional<std::int64_t> plainChannelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(plainChannelId.has_value());
+    const std::optional<std::int64_t> encryptedChannelId =
+        service.createChannel(community.id, "secret", owner, /*isEncrypted=*/true);
+    ASSERT_TRUE(encryptedChannelId.has_value());
+
+    const std::vector<Channel> channels = service.listChannels(community.id);
+    ASSERT_EQ(channels.size(), 2U);
+    const auto plain = std::find_if(channels.begin(), channels.end(),
+                                     [&](const Channel& c) { return c.id == *plainChannelId; });
+    const auto encrypted = std::find_if(channels.begin(), channels.end(),
+                                         [&](const Channel& c) { return c.id == *encryptedChannelId; });
+    ASSERT_NE(plain, channels.end());
+    ASSERT_NE(encrypted, channels.end());
+    EXPECT_FALSE(plain->isEncrypted);
+    EXPECT_TRUE(encrypted->isEncrypted);
+
+    const std::optional<Channel> foundPlain = service.findChannel(*plainChannelId);
+    ASSERT_TRUE(foundPlain.has_value());
+    EXPECT_FALSE(foundPlain->isEncrypted);
+    const std::optional<Channel> foundEncrypted = service.findChannel(*encryptedChannelId);
+    ASSERT_TRUE(foundEncrypted.has_value());
+    EXPECT_TRUE(foundEncrypted->isEncrypted);
+
+    EXPECT_FALSE(service.findChannel(-1).has_value());
+}
+
+TEST(ChatServiceIntegrationTest, ListMembersReturnsEveryoneWhoJoined) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::string memberA = "integration-test-member-a-" + suffix;
+    const std::string memberB = "integration-test-member-b-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, memberA));
+    ASSERT_TRUE(service.joinCommunity(community.id, memberB));
+
+    const std::vector<std::string> members = service.listMembers(community.id);
+    EXPECT_NE(std::find(members.begin(), members.end(), memberA), members.end());
+    EXPECT_NE(std::find(members.begin(), members.end(), memberB), members.end());
+
+    EXPECT_TRUE(service.listMembers(-1).empty());
+}
+
+TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAndRestrictsToOwnerOrModerator) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId =
+        service.createChannel(community.id, "secret", owner, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string member = "integration-test-member-" + suffix;
+    const std::string outsider = "integration-test-outsider-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, member));
+
+    // No key set yet — nothing to find.
+    EXPECT_FALSE(service.findChannelKey(*channelId, owner).has_value());
+
+    // Owner wraps the key for themselves and for member.
+    EXPECT_EQ(service.setChannelKey(*channelId, owner, owner, "wrapped-for-owner"), MutationResult::kSuccess);
+    EXPECT_EQ(service.setChannelKey(*channelId, member, owner, "wrapped-for-member"), MutationResult::kSuccess);
+
+    const std::optional<std::string> ownerKey = service.findChannelKey(*channelId, owner);
+    ASSERT_TRUE(ownerKey.has_value());
+    EXPECT_EQ(*ownerKey, "wrapped-for-owner");
+    const std::optional<std::string> memberKey = service.findChannelKey(*channelId, member);
+    ASSERT_TRUE(memberKey.has_value());
+    EXPECT_EQ(*memberKey, "wrapped-for-member");
+
+    // Nobody has wrapped a key for outsider.
+    EXPECT_FALSE(service.findChannelKey(*channelId, outsider).has_value());
+
+    // outsider has no authority to set anyone's key on this channel.
+    EXPECT_EQ(service.setChannelKey(*channelId, member, outsider, "forged"), MutationResult::kForbidden);
+
+    // Overwriting an existing key succeeds (ON CONFLICT DO UPDATE).
+    EXPECT_EQ(service.setChannelKey(*channelId, member, owner, "re-wrapped-for-member"), MutationResult::kSuccess);
+    const std::optional<std::string> updatedMemberKey = service.findChannelKey(*channelId, member);
+    ASSERT_TRUE(updatedMemberKey.has_value());
+    EXPECT_EQ(*updatedMemberKey, "re-wrapped-for-member");
+
+    EXPECT_EQ(service.setChannelKey(-1, member, owner, "irrelevant"), MutationResult::kNotFound);
+}
+
 }  // namespace
 }  // namespace chat_service

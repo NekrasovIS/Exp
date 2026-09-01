@@ -20,6 +20,34 @@ TEST(ChatViewTest, ShowChannelSetsTitleAndSwitchesAwayFromPlaceholder) {
     EXPECT_EQ(title->text(), QStringLiteral("general"));
 }
 
+TEST(ChatViewTest, SetEncryptedAddsLockPrefixAndDisablesAttachAndSearch) {
+    ChatView view;
+    view.showChannel(QStringLiteral("secret"));
+
+    view.setEncrypted(true);
+
+    const QLabel* title = view.findChild<QLabel*>(QStringLiteral("chatChannelTitle"));
+    ASSERT_NE(title, nullptr);
+    EXPECT_TRUE(title->text().endsWith(QStringLiteral("secret")));
+    EXPECT_NE(title->text(), QStringLiteral("secret"));  // lock prefix present
+    EXPECT_FALSE(view.attachButton()->isEnabled());
+    EXPECT_FALSE(view.searchButton()->isEnabled());
+}
+
+TEST(ChatViewTest, SetEncryptedFalseRestoresPlainTitleAndReenablesButtons) {
+    ChatView view;
+    view.showChannel(QStringLiteral("general"));
+    view.setEncrypted(true);
+
+    view.setEncrypted(false);
+
+    const QLabel* title = view.findChild<QLabel*>(QStringLiteral("chatChannelTitle"));
+    ASSERT_NE(title, nullptr);
+    EXPECT_EQ(title->text(), QStringLiteral("general"));
+    EXPECT_TRUE(view.attachButton()->isEnabled());
+    EXPECT_TRUE(view.searchButton()->isEnabled());
+}
+
 TEST(ChatViewTest, ShowPlaceholderSwitchesBackFromChannel) {
     ChatView view;
     view.showChannel(QStringLiteral("general"));

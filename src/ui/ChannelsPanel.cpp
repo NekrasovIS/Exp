@@ -1,6 +1,9 @@
 #include "ui/ChannelsPanel.h"
 
+#include <QCheckBox>
 #include <QColor>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -127,11 +130,32 @@ void ChannelsPanel::setCurrentUserLogin(const QString& login) {
 }
 
 void ChannelsPanel::showAddDialog() {
-    bool ok = false;
-    const QString name =
-        QInputDialog::getText(this, tr("New channel"), tr("Channel name:"), QLineEdit::Normal, QString(), &ok);
-    if (ok && !name.trimmed().isEmpty()) {
-        emit createRequested(name.trimmed());
+    // A plain QInputDialog::getText() (the previous implementation) has
+    // no room for a second control, so an "encrypted" checkbox (issue
+    // #138) needs a small dedicated dialog instead.
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("New channel"));
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(tr("Channel name:"), &dialog));
+    auto* nameEdit = new QLineEdit(&dialog);
+    nameEdit->setObjectName(QStringLiteral("newChannelNameEdit"));
+    layout->addWidget(nameEdit);
+
+    auto* encryptedCheckBox = new QCheckBox(tr("Encrypted channel"), &dialog);
+    encryptedCheckBox->setObjectName(QStringLiteral("newChannelEncryptedCheckBox"));
+    encryptedCheckBox->setToolTip(
+        tr("Message bodies are encrypted on this device before sending — the server never sees the "
+           "plaintext. File attachments and server-side search aren't available in encrypted channels yet."));
+    layout->addWidget(encryptedCheckBox);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() == QDialog::Accepted && !nameEdit->text().trimmed().isEmpty()) {
+        emit createRequested(nameEdit->text().trimmed(), encryptedCheckBox->isChecked());
     }
 }
 

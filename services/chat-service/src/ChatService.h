@@ -22,11 +22,18 @@ public:
     [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);
 
     [[nodiscard]] std::optional<std::int64_t> createChannel(std::int64_t communityId, const std::string& name,
-                                                             const std::string& ownerLogin);
+                                                             const std::string& ownerLogin,
+                                                             bool isEncrypted = false);
     [[nodiscard]] std::vector<Channel> listChannels(std::int64_t communityId);
+    [[nodiscard]] std::optional<Channel> findChannel(std::int64_t id);
+    [[nodiscard]] std::vector<std::string> listMembers(std::int64_t communityId);
     [[nodiscard]] MutationResult renameChannel(std::int64_t id, const std::string& newName,
                                                 const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteChannel(std::int64_t id, const std::string& requesterLogin);
+
+    [[nodiscard]] MutationResult setChannelKey(std::int64_t channelId, const std::string& memberLogin,
+                                                const std::string& requesterLogin, const std::string& wrappedKey);
+    [[nodiscard]] std::optional<std::string> findChannelKey(std::int64_t channelId, const std::string& login);
 
     [[nodiscard]] bool joinCommunity(std::int64_t communityId, const std::string& login);
 

@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QList>
 #include <QMainWindow>
+#include <QSet>
 #include <memory>
 #include <optional>
 
@@ -78,11 +79,33 @@ private:
     /// Re-lists channels for selectedCommunityId_ (no-op, with a status
     /// bar message, if no community is selected).
     void refreshChannelsForSelectedCommunity();
-    /// Switches ChatView to @p id/@p name, (re)connecting ChatClient.
+    /// Switches ChatView to @p id/@p name, (re)connecting ChatClient. For
+    /// an encrypted channel (issue #138) with no cached key yet, this
+    /// fetches/unwraps the key first and defers subscribing/loading
+    /// history to finishOpeningChannel() so nothing tries to decrypt
+    /// before the key is available.
     void openChannel(qint64 id, const QString& name);
+    /// Second half of openChannel() — subscribes ChatClient and loads
+    /// history. Called immediately for a plaintext channel or one whose
+    /// key is already cached; otherwise called from the
+    /// myChannelKeyFetched()/myChannelKeyNotFound() handlers.
+    void finishOpeningChannel(qint64 id);
     /// Drops the current channel selection/connection and shows
     /// ChatView's placeholder again.
     void closeChatView();
+    /// One step of the pending encrypted-channel-creation flow (issue
+    /// #138): if @p login is in pendingEncryptedSetup_->pendingMemberLogins,
+    /// wraps the pending channel key for @p publicKeyBase64 (unless
+    /// empty — that member hasn't published a key yet, so they're
+    /// skipped with a toast) and publishes it via setChannelKey().
+    /// A no-op if @p login isn't currently pending (i.e. this is an
+    /// unrelated profileReceived(), e.g. the signed-in user's own).
+    void wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64);
+    /// Decrypts @p ciphertext with channelKeys_[selectedChannelId_] for
+    /// display — a placeholder string (never the raw ciphertext) if no
+    /// key is cached yet or decryption fails, so a decrypt failure reads
+    /// as "can't decrypt" rather than showing garbled bytes.
+    [[nodiscard]] QString decryptForDisplay(const QString& ciphertext) const;
     /// CRUD feedback (create/rename/delete/join, errors) goes through
     /// this toast rather than statusBar() — much easier to notice.
     void showToast(const QString& text, ToastBanner::Variant variant);
@@ -125,6 +148,31 @@ private:
     /// — keyed by attachment id since downloads can be in flight for more
     /// than one message at a time.
     QHash<qint64, QString> pendingDownloadFilenames_;
+
+    /// Resolved (unwrapped) raw symmetric keys for encrypted channels
+    /// (issue #138), keyed by channel id — session-only, never persisted.
+    /// A missing entry for an encrypted channel means either the key
+    /// hasn't been fetched/unwrapped yet, or none has been wrapped for
+    /// this login (see myChannelKeyNotFound()).
+    QHash<qint64, QByteArray> channelKeys_;
+    /// True while selectedChannelId_ refers to an encrypted channel —
+    /// gates encrypt-before-send/decrypt-before-display and disables
+    /// Attach/Search (unsupported for encrypted channels this phase).
+    bool currentChannelEncrypted_ = false;
+
+    /// State for the multi-step "create an encrypted channel" flow:
+    /// generate a key, then wrap+publish it for every community member
+    /// who has already published a public key (issue #136). Valid only
+    /// between channelCreated() for an encrypted channel and the last
+    /// setChannelKey() call completing.
+    struct PendingEncryptedChannelSetup {
+        qint64 channelId = -1;
+        QByteArray channelKey;
+        /// Logins still waiting on a fetchProfile() reply to learn their
+        /// public key before they can be wrapped for.
+        QSet<QString> pendingMemberLogins;
+    };
+    std::optional<PendingEncryptedChannelSetup> pendingEncryptedSetup_;
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
