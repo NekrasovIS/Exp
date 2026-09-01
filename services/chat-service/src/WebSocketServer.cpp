@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <vector>
 
 namespace chat_service {
 
@@ -307,29 +308,54 @@ void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix
 
 void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::string& json,
                                           const ix::WebSocket* excludeSocket) {
-    const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
-    for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
-        if (client.get() == excludeSocket) {
-            continue;
+    // Collect the target list under the lock, then send() outside it (CP.22:
+    // never call unknown/third-party code — ix::WebSocket::send() does
+    // network I/O — while holding a lock; also CP.43, minimize time in a
+    // critical section). shared_ptr copies keep each target alive
+    // regardless of what happens to subscriptions_/server_'s own client
+    // list between releasing the lock and sending.
+    std::vector<std::shared_ptr<ix::WebSocket>> targets;
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            if (client.get() == excludeSocket) {
+                continue;
+            }
+            const auto it = subscriptions_.find(client.get());
+            if (it != subscriptions_.end() && it->second.channelId == channelId) {
+                targets.push_back(client);
+            }
         }
-        const auto it = subscriptions_.find(client.get());
-        if (it != subscriptions_.end() && it->second.channelId == channelId) {
-            client->send(json);
-        }
+    }
+    for (const std::shared_ptr<ix::WebSocket>& client : targets) {
+        client->send(json);
     }
 }
 
 void WebSocketServer::broadcastToCallParticipants(std::int64_t channelId, const std::string& json,
                                                    const ix::WebSocket* excludeSocket) {
-    const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
-    const auto channelIt = callParticipants_.find(channelId);
-    if (channelIt == callParticipants_.end()) {
-        return;
-    }
-    for (const auto& entry : channelIt->second) {
-        if (entry.second != excludeSocket) {
-            entry.second->send(json);
+    // Same CP.22/CP.43 reasoning as broadcastToChannel() above. Unlike
+    // there, callParticipants_ stores non-owning ix::WebSocket* (see its
+    // doc comment) rather than shared_ptr, so this doesn't extend that
+    // pointer's validity window beyond what the rest of this class
+    // already assumes elsewhere (e.g. removeCallParticipant() also acts
+    // on a raw socket pointer after releasing this same lock) — only
+    // narrows how long subscriptionsMutex_ itself stays held.
+    std::vector<ix::WebSocket*> targets;
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        const auto channelIt = callParticipants_.find(channelId);
+        if (channelIt == callParticipants_.end()) {
+            return;
         }
+        for (const auto& entry : channelIt->second) {
+            if (entry.second != excludeSocket) {
+                targets.push_back(entry.second);
+            }
+        }
+    }
+    for (ix::WebSocket* client : targets) {
+        client->send(json);
     }
 }
 
