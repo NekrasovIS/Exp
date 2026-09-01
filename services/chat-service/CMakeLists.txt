@@ -114,5 +114,28 @@ target_link_libraries(chat_service_tests PRIVATE
     GTest::gtest
     GTest::gtest_main
 )
+
+# Real coverage-guided fuzzing (issue #132/#133) — needs Clang's
+# libFuzzer; MSVC's cl.exe doesn't support -fsanitize=fuzzer (issue
+# #121's original blocker), so this is off by default and only usable
+# where Clang is the compiler (macOS CI, or clang-cl if installed
+# locally). Off by default so the ordinary build/test path (used
+# everywhere, including Windows dev machines) never needs Clang.
+option(DEVICEHUB_ENABLE_FUZZING "Build libFuzzer targets (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_FUZZING requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+
+    function(chat_service_add_fuzz_target name source)
+        add_executable(${name} ${source})
+        target_link_libraries(${name} PRIVATE chat_service_core)
+        target_compile_options(${name} PRIVATE -fsanitize=fuzzer,address)
+        target_link_options(${name} PRIVATE -fsanitize=fuzzer,address)
+    endfunction()
+
+    chat_service_add_fuzz_target(base64_fuzz fuzz/Base64Fuzz.cpp)
+    chat_service_add_fuzz_target(json_guard_fuzz fuzz/JsonGuardFuzz.cpp)
+endif()
 include(GoogleTest)
 gtest_discover_tests(chat_service_tests)
