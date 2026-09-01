@@ -9,6 +9,17 @@ jobs:
   build-and-test:
     runs-on: macos-14
     timeout-minutes: 180
+    env:
+      # issue #169: собранная сборка Qt6+WebRTC из исходников через
+      # vcpkg занимает часы, и этот job не всегда успевает/успешно
+      # доживает до конца — а actions/cache сохраняет кэш только один
+      # раз, post-step'ом в самом конце job. Раз job ни разу не дожил
+      # до конца, кэш ни разу не сохранялся, и каждый следующий прогон
+      # снова собирал всё с нуля. Нативный GitHub Actions cache backend
+      # vcpkg (x-gha) заливает в кэш каждый собранный порт сразу по
+      # готовности — упавший на середине прогон всё равно сохраняет
+      # то, что успел собрать.
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
     steps:
       - name: Checkout
@@ -16,13 +27,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache vcpkg binary cache
-        uses: actions/cache@v4
+      - name: Export GitHub Actions cache environment variables (vcpkg x-gha backend)
+        uses: actions/github-script@v7
         with:
-          path: ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Install autotools (needed by vcpkg's libb2 port, a qtbase dependency)
         run: brew install autoconf autoconf-archive automake libtool
