@@ -55,11 +55,7 @@ public:
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
 
     [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
-                                                                       const std::string& uploaderLogin,
-                                                                       const std::string& filename,
-                                                                       const std::string& contentType,
-                                                                       const std::string& dataBase64,
-                                                                       std::int64_t sizeBytes);
+                                                                       const AttachmentUpload& upload);
     [[nodiscard]] std::optional<AttachmentData> findAttachmentData(std::int64_t attachmentId);
 
 private:

@@ -94,12 +94,8 @@ MutationResult ChatService::deleteMessage(std::int64_t messageId, std::int64_t c
 }
 
 std::optional<AttachmentMetadata> ChatService::createAttachment(std::int64_t channelId,
-                                                                   const std::string& uploaderLogin,
-                                                                   const std::string& filename,
-                                                                   const std::string& contentType,
-                                                                   const std::string& dataBase64,
-                                                                   std::int64_t sizeBytes) {
-    return repository_.createAttachment(channelId, uploaderLogin, filename, contentType, dataBase64, sizeBytes);
+                                                                   const AttachmentUpload& upload) {
+    return repository_.createAttachment(channelId, upload);
 }
 
 std::optional<AttachmentData> ChatService::findAttachmentData(std::int64_t attachmentId) {

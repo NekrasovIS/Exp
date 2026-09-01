@@ -68,6 +68,23 @@ struct AttachmentData {
     std::string data;
 };
 
+/// Fields createAttachment() needs beyond the target channelId — grouped
+/// per CLAUDE.md's "prefer fewer function arguments" rule rather than a
+/// 6-parameter createAttachment() signature.
+struct AttachmentUpload {
+    std::string uploaderLogin;
+    std::string filename;
+    std::string contentType;
+    /// Already base64-encoded by the caller — see this class's doc
+    /// comment on why attachments are stored as base64 TEXT.
+    std::string dataBase64;
+    /// The *decoded* byte count (HttpServer computes this to enforce
+    /// the size cap before calling createAttachment(), stored so
+    /// findAttachmentData() callers don't need to decode just to learn
+    /// the size).
+    std::int64_t sizeBytes = 0;
+};
+
 /// Outcome of editMessage() — MutationResult alone doesn't carry the
 /// new edited_at Postgres assigned, which WebSocketServer needs for
 /// the broadcast payload.
@@ -174,19 +191,11 @@ public:
                                                         const std::string& body,
                                                         std::optional<std::int64_t> attachmentId = std::nullopt);
 
-    /// Stores @p dataBase64 (already base64-encoded by the caller — see
-    /// this class's doc comment) verbatim as a new attachment for
-    /// @p channelId, alongside @p sizeBytes (the *decoded* byte count,
-    /// which HttpServer already computed to enforce the size cap before
-    /// calling this — stored so findAttachmentData() callers don't need
-    /// to decode just to learn the size).
+    /// Stores @p upload verbatim as a new attachment for @p channelId —
+    /// see AttachmentUpload's doc comment for its fields.
     /// @return std::nullopt if @p channelId doesn't exist.
     [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
-                                                                       const std::string& uploaderLogin,
-                                                                       const std::string& filename,
-                                                                       const std::string& contentType,
-                                                                       const std::string& dataBase64,
-                                                                       std::int64_t sizeBytes);
+                                                                       const AttachmentUpload& upload);
 
     /// @return The attachment's data (still base64-encoded, as stored —
     ///         see this class's doc comment), or std::nullopt if no

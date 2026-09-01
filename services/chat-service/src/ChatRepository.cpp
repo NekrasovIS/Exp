@@ -416,11 +416,7 @@ MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_
 }
 
 std::optional<AttachmentMetadata> ChatRepository::createAttachment(std::int64_t channelId,
-                                                                     const std::string& uploaderLogin,
-                                                                     const std::string& filename,
-                                                                     const std::string& contentType,
-                                                                     const std::string& dataBase64,
-                                                                     std::int64_t sizeBytes) {
+                                                                     const AttachmentUpload& upload) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
@@ -428,12 +424,13 @@ std::optional<AttachmentMetadata> ChatRepository::createAttachment(std::int64_t 
         const pqxx::result rows = transaction.exec(
             "INSERT INTO attachments (channel_id, uploader_login, filename, content_type, data_base64, size_bytes) "
             "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-            pqxx::params{channelId, uploaderLogin, filename, contentType, dataBase64, sizeBytes});
+            pqxx::params{channelId, upload.uploaderLogin, upload.filename, upload.contentType, upload.dataBase64,
+                         upload.sizeBytes});
         transaction.commit();
         return AttachmentMetadata{.id = rows[0][0].as<std::int64_t>(),
-                                   .filename = filename,
-                                   .contentType = contentType,
-                                   .sizeBytes = sizeBytes};
+                                   .filename = upload.filename,
+                                   .contentType = upload.contentType,
+                                   .sizeBytes = upload.sizeBytes};
     } catch (const pqxx::foreign_key_violation&) {
         return std::nullopt;
     }
