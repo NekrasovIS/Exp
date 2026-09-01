@@ -157,9 +157,10 @@ public:
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
     [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
-    /// Show/Hide Chat button (issue #153) — only visible during a call,
-    /// when the video area and the chat panel share a QSplitter instead
-    /// of the chat always taking the same fixed share of the window.
+    /// Кнопка "Show/Hide Chat" (issue #153) — видна только во время
+    /// звонка, когда область видео и панель чата делят QSplitter вместо
+    /// того, чтобы чат всегда занимал одну и ту же фиксированную долю
+    /// окна.
     [[nodiscard]] QPushButton* toggleChatVisibilityButton() const { return toggleChatVisibilityButton_; }
 
 signals:
@@ -227,10 +228,10 @@ private:
     /// — shared by showChannel() and setEncrypted() so either can be
     /// called first without one clobbering the other's effect.
     void updateChannelTitleLabel();
-    /// "Hide Chat"/"Show Chat" clicked (issue #153) — collapses/restores
-    /// chatPanel_'s share of chatSplitter_, giving the video area (or,
-    /// once video/screen share activity settles, just empty space) the
-    /// rest of the window.
+    /// Клик по "Hide Chat"/"Show Chat" (issue #153) — сворачивает/
+    /// восстанавливает долю chatPanel_ в chatSplitter_, отдавая
+    /// остальную часть окна области видео (или, если видео/демонстрация
+    /// экрана уже не активны, просто пустому месту).
     void onToggleChatVisibilityClicked();
 
 
@@ -256,14 +257,14 @@ private:
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
-    /// Video area (top) and chatPanel_ (bottom) — during a call the
-    /// video area gets most of the space, with chatPanel_ collapsible
-    /// via toggleChatVisibilityButton_ instead of a fixed 50/50 share
-    /// (issue #153).
+    /// Область видео (сверху) и chatPanel_ (снизу) — во время звонка
+    /// область видео получает большую часть пространства, а chatPanel_
+    /// можно свернуть через toggleChatVisibilityButton_ вместо
+    /// фиксированной доли 50/50 (issue #153).
     QSplitter* chatSplitter_ = nullptr;
-    /// History (loadOlderButton_/scrollArea_/typingIndicatorLabel_) plus
-    /// the message composer row — grouped into one widget so it can be
-    /// a single QSplitter child.
+    /// История (loadOlderButton_/scrollArea_/typingIndicatorLabel_) плюс
+    /// строка ввода сообщения — сгруппированы в один виджет, чтобы быть
+    /// одним дочерним элементом QSplitter.
     QWidget* chatPanel_ = nullptr;
     QPushButton* toggleChatVisibilityButton_ = nullptr;
     bool chatPanelCollapsed_ = false;

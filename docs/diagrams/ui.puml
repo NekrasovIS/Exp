@@ -108,17 +108,17 @@ class ChatView {
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
 }
 note right of ChatView
-  Issue #153: videoStrip_ and the new
-  chatPanel_ (history + composer) sit in a
-  QSplitter (chatSplitter_) instead of a
-  fixed QVBoxLayout — during a call the
-  video area gets most of the space
-  (setCallState(true, ...)), collapsible
-  back to full-width via
-  toggleChatVisibilityButton_. Video tiles
-  switched from a fixed size to a minimum
-  size + Expanding QSizePolicy so they
-  actually grow into the extra space.
+  Issue #153: videoStrip_ и новый chatPanel_
+  (история + строка ввода) сидят в QSplitter
+  (chatSplitter_) вместо фиксированного
+  QVBoxLayout — во время звонка область видео
+  получает большую часть места
+  (setCallState(true, ...)), сворачивается
+  обратно во весь чат через
+  toggleChatVisibilityButton_. Видео-плитки
+  переключены с фиксированного размера на
+  минимальный + Expanding QSizePolicy, чтобы
+  реально расти в дополнительное пространство.
 end note
 
 struct ChatMessage {

@@ -119,9 +119,9 @@ TEST(ChatViewTest, SetCallStateReflectsNotInCall) {
 TEST(ChatViewTest, ToggleChatVisibilityButtonHiddenOutsideACall) {
     ChatView view;
 
-    // isHidden() reflects the explicit hide/show flag regardless of
-    // whether the (never-shown, headless-test) widget is actually
-    // mapped on screen — see ToastBannerTest.cpp for the same pattern.
+    // isHidden() отражает явный флаг hide/show независимо от того,
+    // отображается ли (никогда не показанный, headless-тест) виджет
+    // реально на экране — см. ToastBannerTest.cpp для того же паттерна.
     EXPECT_TRUE(view.toggleChatVisibilityButton()->isHidden());
 
     view.setCallState(/*inCall=*/true, /*muted=*/false);
