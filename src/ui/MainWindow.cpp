@@ -2,6 +2,7 @@
 
 #include "chat/ChannelCrypto.h"
 
+#include <QAction>
 #include <QComboBox>
 #include <QDateTime>
 #include <QFile>
@@ -11,8 +12,10 @@
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMimeDatabase>
 #include <QPlainTextEdit>
+#include <QPoint>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
@@ -83,6 +86,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
     connect(accountMenu_->registerButton(), &QPushButton::clicked, this, &MainWindow::onRegisterClicked);
     connect(accountMenu_->editProfileButton(), &QPushButton::clicked, this, &MainWindow::onEditProfileClicked);
+    connect(footerBar_, &FooterBar::accountSettingsRequested, this, &MainWindow::onAccountSettingsClicked);
     connect(profileDialog_, &ProfileDialog::saveRequested, this, [this](const QString& displayName, const QString& avatarUrl) {
         userProfileClient_.updateOwnProfile(lastToken_, displayName, avatarUrl);
     });
@@ -777,6 +781,49 @@ void MainWindow::onEditProfileClicked() {
     profileDialog_->show();
     profileDialog_->raise();
     profileDialog_->activateWindow();
+}
+
+void MainWindow::onAccountSettingsClicked() {
+    auto* menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->setObjectName(QStringLiteral("accountSettingsMenu"));
+
+    QAction* editProfileAction = menu->addAction(tr("Edit Profile..."));
+    editProfileAction->setObjectName(QStringLiteral("editProfileAction"));
+    editProfileAction->setEnabled(!currentUserLogin_.isEmpty());
+    connect(editProfileAction, &QAction::triggered, this, &MainWindow::onEditProfileClicked);
+
+    QAction* signOutAction = menu->addAction(tr("Sign Out"));
+    signOutAction->setObjectName(QStringLiteral("signOutAction"));
+    signOutAction->setEnabled(!currentUserLogin_.isEmpty());
+    connect(signOutAction, &QAction::triggered, this, &MainWindow::signOut);
+
+    menu->popup(footerBar_->avatarLabel()->mapToGlobal(QPoint(0, 0)) - QPoint(0, menu->sizeHint().height()));
+}
+
+void MainWindow::signOut() {
+    refreshTimer_->stop();
+    lastToken_.clear();
+    refreshToken_.clear();
+    currentUserLogin_.clear();
+    identityKeyStore_.reset();
+    closeChatView();
+    selectedCommunityId_ = -1;
+    pendingCommunitySelection_ = -1;
+    pendingChannelSelection_ = -1;
+    channelKeys_.clear();
+    pendingEncryptedSetup_.reset();
+    pendingDownloadFilenames_.clear();
+    communities_.clear();
+    channels_.clear();
+    communitiesPanel_->setCommunities(communities_);
+    channelsPanel_->setChannels(channels_);
+    communitiesPanel_->setCurrentUserLogin(QString());
+    channelsPanel_->setCurrentUserLogin(QString());
+    chatView_->setCurrentUserLogin(QString());
+    footerBar_->setProfileText(tr("Not signed in"));
+    accountMenu_->setEditProfileEnabled(false);
+    accountMenu_->statusLabel()->setText(tr("Signed out"));
 }
 
 void MainWindow::refreshCommunities() {

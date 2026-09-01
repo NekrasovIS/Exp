@@ -72,6 +72,14 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+    /// Avatar clicked in the footer (issue #151) — shows a small menu
+    /// (Edit Profile / Sign Out) anchored to the avatar instead of the
+    /// account actions living only in the top-right AccountMenu popup.
+    void onAccountSettingsClicked();
+    /// Clears local auth state and returns the UI to "not signed in" —
+    /// no server-side token revocation endpoint exists yet, so this is
+    /// a client-side-only sign-out.
+    void signOut();
 
     /// Re-lists communities from chat-service (no-op, with a status bar
     /// message, if not signed in yet).

@@ -2,10 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QTabWidget>
 
@@ -50,6 +54,28 @@ TEST(MainWindowUiTest, SidebarFooterAndAccountMenuExist) {
     ASSERT_NE(accountMenuButton, nullptr);
 
     EXPECT_EQ(footerProfileLabel->text(), QStringLiteral("Not signed in"));
+}
+
+TEST(MainWindowUiTest, AvatarClickShowsAccountMenuWithDisabledActionsWhenSignedOut) {
+    // Issue #151: account settings move to a menu anchored on the
+    // footer avatar rather than living only in the top-right
+    // AccountMenu popup. Edit Profile/Sign Out only make sense once
+    // signed in, so both start disabled here.
+    const MainWindow window;
+
+    auto* avatar = window.findChild<QLabel*>("footerAvatar");
+    ASSERT_NE(avatar, nullptr);
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(5, 5), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(avatar, &press);
+
+    auto* menu = window.findChild<QMenu*>("accountSettingsMenu");
+    ASSERT_NE(menu, nullptr);
+    auto* editProfileAction = menu->findChild<QAction*>("editProfileAction");
+    auto* signOutAction = menu->findChild<QAction*>("signOutAction");
+    ASSERT_NE(editProfileAction, nullptr);
+    ASSERT_NE(signOutAction, nullptr);
+    EXPECT_FALSE(editProfileAction->isEnabled());
+    EXPECT_FALSE(signOutAction->isEnabled());
 }
 
 TEST(MainWindowUiTest, DeviceCombosMatchEnumerator) {
