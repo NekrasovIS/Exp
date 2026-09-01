@@ -532,7 +532,8 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::buildUi() {
     setWindowTitle(tr("DeviceHub"));
-    resize(1000, 700);
+    resize(1280, 800);
+    setMinimumSize(900, 600);
 
     auto* central = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(central);
