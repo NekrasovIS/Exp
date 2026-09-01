@@ -54,13 +54,13 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bodyLabel_ = new QLabel(message.body, bubble_);
     bodyLabel_->setObjectName(QStringLiteral("chatMessageBody"));
     bodyLabel_->setWordWrap(true);
-    // Issue #94: render **bold**/*italic*/`code`/links/lists via Qt's
-    // own markdown-to-richtext conversion rather than a hand-rolled
-    // parser. QLabel doesn't wire up network image loading for rich
-    // text on its own, so a message body isn't a vector for fetching
-    // attacker-controlled URLs (e.g. a tracking-pixel image) — links
-    // only ever open on an explicit click (setOpenExternalLinks()),
-    // never automatically.
+    // Issue #94: рендерим **bold**/*italic*/`code`/ссылки/списки через
+    // встроенное в Qt преобразование markdown в rich text, а не через
+    // самописный парсер. QLabel сам по себе не подключает загрузку
+    // изображений по сети для rich text, поэтому тело сообщения не
+    // становится вектором для запроса URL, контролируемых атакующим
+    // (например, изображения-трекера) — ссылки открываются только по
+    // явному клику (setOpenExternalLinks()), никогда автоматически.
     bodyLabel_->setTextFormat(Qt::MarkdownText);
     bodyLabel_->setOpenExternalLinks(true);
     bodyLabel_->setTextInteractionFlags(Qt::TextBrowserInteraction);
@@ -106,10 +106,11 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
 
     if (isOwnMessage) {
-        // Available on every own-message row regardless of showHeader —
-        // grouped (consecutive) messages don't repeat their header, but
-        // each individual message still needs its own way to target it
-        // for editing/deleting (issue #107).
+        // Доступно на каждой строке собственного сообщения независимо
+        // от showHeader — сгруппированные (последовательные) сообщения
+        // не повторяют заголовок, но каждому отдельному сообщению всё
+        // равно нужен свой способ адресации для редактирования/удаления
+        // (issue #107).
         auto* controlsRow = new QHBoxLayout;
         controlsRow->setSpacing(spacing);
         controlsRow->addStretch(1);

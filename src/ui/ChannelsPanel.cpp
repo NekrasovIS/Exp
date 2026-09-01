@@ -130,9 +130,9 @@ void ChannelsPanel::setCurrentUserLogin(const QString& login) {
 }
 
 void ChannelsPanel::showAddDialog() {
-    // A plain QInputDialog::getText() (the previous implementation) has
-    // no room for a second control, so an "encrypted" checkbox (issue
-    // #138) needs a small dedicated dialog instead.
+    // У обычного QInputDialog::getText() (прежняя реализация) нет места
+    // для второго элемента управления, поэтому для чекбокса "encrypted"
+    // (issue #138) вместо него нужен небольшой отдельный диалог.
     QDialog dialog(this);
     dialog.setWindowTitle(tr("New channel"));
 

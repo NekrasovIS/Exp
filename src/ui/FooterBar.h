@@ -8,8 +8,8 @@ class QPushButton;
 namespace devicehub {
 
 /**
- * @brief Bottom bar: the current user's mini-profile on the left plus a
- *        gear button that opens SettingsDialog.
+ * @brief Нижняя панель: мини-профиль текущего пользователя слева и
+ *        кнопка-шестерёнка, открывающая SettingsDialog.
  */
 class FooterBar : public QWidget {
     Q_OBJECT
@@ -17,8 +17,8 @@ class FooterBar : public QWidget {
 public:
     explicit FooterBar(QWidget* parent = nullptr);
 
-    /// Updates the profile text (e.g. the signed-in login, or a
-    /// not-signed-in placeholder).
+    /// Обновляет текст профиля (например, логин вошедшего пользователя
+    /// или заглушку "не выполнен вход").
     void setProfileText(const QString& text);
 
     [[nodiscard]] QPushButton* settingsButton() const { return settingsButton_; }

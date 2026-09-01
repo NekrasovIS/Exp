@@ -46,15 +46,16 @@ constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
 constexpr const char* kDefaultUserServiceUrl = "http://127.0.0.1:8081";
 constexpr int kToastTimeoutMs = 4000;
-/// Redeem the refresh token this long before the access token actually
-/// expires (issue #105) — a little slack so a refresh in flight has
-/// time to land before anything using lastToken_ would start getting
-/// 401s.
+/// За сколько до фактического истечения срока действия access-токена
+/// обменивать refresh-токен (issue #105) — небольшой запас, чтобы
+/// обмен, выполняемый в фоне, успел завершиться прежде, чем что-либо,
+/// использующее lastToken_, начнёт получать 401.
 constexpr qint64 kRefreshBufferSeconds = 60;
 constexpr int kMessagePageSize = 50;
-/// Mirrors chat-service's kMaxAttachmentSizeBytes (issue #116) — checked
-/// client-side too so an oversized file is rejected with an immediate
-/// toast instead of a round trip to the server just to get the same 400.
+/// Отражает kMaxAttachmentSizeBytes у chat-service (issue #116) —
+/// проверяется и на стороне клиента, чтобы слишком большой файл
+/// отклонялся немедленным toast, а не круговым походом на сервер лишь
+/// затем, чтобы получить тот же 400.
 constexpr qint64 kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
 }  // namespace
 
@@ -87,10 +88,11 @@ MainWindow::MainWindow(QWidget* parent)
         userProfileClient_.updateOwnProfile(lastToken_, displayName, avatarUrl);
     });
     connect(&userProfileClient_, &UserProfileClient::profileReceived, this, [this](const UserProfile& profile) {
-        // fetchProfile() is also used to look up an encrypted channel's
-        // member public keys (issue #138, see pendingEncryptedSetup_) —
-        // guard against clobbering the signed-in user's own footer/
-        // edit-profile dialog with someone else's profile.
+        // fetchProfile() также используется, чтобы искать открытые
+        // ключи участников зашифрованного канала (issue #138, см.
+        // pendingEncryptedSetup_) — защита от того, чтобы не затереть
+        // подвал/диалог редактирования профиля вошедшего пользователя
+        // чужим профилем.
         if (profile.login == currentUserLogin_) {
             footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
             profileDialog_->setProfile(profile);
@@ -124,9 +126,10 @@ MainWindow::MainWindow(QWidget* parent)
                 accountMenu_->statusLabel()->setText(tr("Token received, verifying..."));
                 authClient_.verifyToken(token);
 
-                // Silently redeem the refresh token shortly before this
-                // access token expires, rather than waiting for a 401
-                // and forcing the user to log in again mid-session.
+                // Незаметно обмениваем refresh-токен незадолго до
+                // истечения срока действия этого access-токена, вместо
+                // того чтобы дожидаться 401 и заставлять пользователя
+                // заново входить посреди сессии.
                 if (!refreshToken_.isEmpty()) {
                     const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
                     const qint64 delaySecs = std::max<qint64>(1, expiresAt - nowSecs - kRefreshBufferSeconds);
@@ -143,16 +146,17 @@ MainWindow::MainWindow(QWidget* parent)
         accountMenu_->setEditProfileEnabled(valid);
         if (valid) {
             refreshCommunities();
-            // Populates the footer's display name (falls back to the
-            // bare login above until this returns) and prefills
-            // ProfileDialog for whenever Edit Profile is clicked.
+            // Заполняет отображаемое имя в подвале (до возврата этого
+            // запроса используется просто логин выше) и заранее
+            // заполняет ProfileDialog на случай клика по Edit Profile.
             userProfileClient_.fetchProfile(lastToken_, currentUserLogin_);
 
-            // E2E encryption Phase 1 (issue #136): ensure this login has
-            // a local identity keypair, then (re-)publish its public
-            // half. Republishing on every verify is deliberately
-            // idempotent rather than tracked/skipped — the PATCH is
-            // cheap and harmless if the value hasn't changed.
+            // E2E-шифрование, фаза 1 (issue #136): убеждаемся, что для
+            // этого логина есть локальная пара ключей identity, затем
+            // (пере)публикуем её открытую половину. Повторная публикация
+            // при каждой проверке намеренно идемпотентна, а не
+            // отслеживается/пропускается — PATCH дёшев и безвреден,
+            // если значение не изменилось.
             const QString identityKeyDir =
                 QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/identity-keys");
             identityKeyStore_.emplace(identityKeyDir, currentUserLogin_);
@@ -166,8 +170,8 @@ MainWindow::MainWindow(QWidget* parent)
         if (!registered) {
             accountMenu_->statusLabel()->setText(tr("Registration failed — login already taken"));
         }
-        // On success, tokenReceived() (auto-login) fires right after this
-        // and takes the status label the rest of the way to "Verified".
+        // При успехе сразу после этого срабатывает tokenReceived()
+        // (автовход) и доводит метку статуса до "Verified".
     });
 
     connect(chatView_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
@@ -230,8 +234,9 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(chatView_, &ChatView::openSearchRequested, this, [this]() {
         if (currentChannelEncrypted_) {
-            // Belt-and-braces alongside ChatView disabling the Search
-            // button for an encrypted channel — see onAttachFileClicked().
+            // Подстраховка вдобавок к тому, что ChatView отключает
+            // кнопку Search для зашифрованного канала — см.
+            // onAttachFileClicked().
             showToast(tr("Search isn't available in encrypted channels"), ToastBanner::Variant::kInfo);
             return;
         }
@@ -370,19 +375,21 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QString& name, bool isEncrypted) {
                 showToast(tr("Channel '%1' created").arg(name), ToastBanner::Variant::kSuccess);
                 if (isEncrypted && identityKeyStore_.has_value()) {
-                    // Generate the channel's symmetric key here — chat-service
-                    // never sees it, only per-member wrapped copies (issue #138).
+                    // Генерируем симметричный ключ канала здесь —
+                    // chat-service никогда его не видит, только
+                    // обёрнутые копии для каждого участника (issue #138).
                     const QByteArray channelKey = channel_crypto::generateChannelKey();
                     channelKeys_[id] = channelKey;
                     pendingEncryptedSetup_ = PendingEncryptedChannelSetup{.channelId = id, .channelKey = channelKey};
-                    // Wrap for ourselves immediately — no round trip needed,
-                    // our own public key is already available locally.
+                    // Оборачиваем для себя сразу — не нужен круговой
+                    // запрос, наш собственный открытый ключ уже доступен
+                    // локально.
                     const QString ownWrapped = channel_crypto::wrapKeyForRecipient(
                         channelKey, QByteArray::fromBase64(identityKeyStore_->publicKeyBase64().toUtf8()));
                     chatRestClient_.setChannelKey(lastToken_, id, currentUserLogin_, ownWrapped);
-                    // Every other current member needs their own wrapped
-                    // copy too — resolved as membersListed()/profileReceived()
-                    // replies arrive.
+                    // Каждому другому текущему участнику тоже нужна своя
+                    // обёрнутая копия — разрешается по мере поступления
+                    // ответов membersListed()/profileReceived().
                     chatRestClient_.listMembers(lastToken_, selectedCommunityId_);
                 }
                 pendingChannelSelection_ = id;
@@ -391,7 +398,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::membersListed, this,
             [this](qint64 /*communityId*/, const QStringList& logins) {
                 if (!pendingEncryptedSetup_.has_value()) {
-                    return;  // Not related to an in-flight encrypted-channel creation.
+                    return;  // Не связано с текущим созданием зашифрованного канала.
                 }
                 for (const QString& login : logins) {
                     if (login != currentUserLogin_) {
@@ -400,15 +407,15 @@ MainWindow::MainWindow(QWidget* parent)
                     }
                 }
                 if (pendingEncryptedSetup_->pendingMemberLogins.isEmpty()) {
-                    pendingEncryptedSetup_.reset();  // Solo community — only ourselves to wrap for.
+                    pendingEncryptedSetup_.reset();  // Сообщество без других участников — оборачивать только для себя.
                 }
             });
     connect(&chatRestClient_, &ChatRestClient::channelKeySet, this, [](qint64, const QString&) {
-        // Fire-and-forget confirmation — wrapPendingEncryptedChannelKeyForMember()
-        // already updates pendingEncryptedSetup_'s bookkeeping when it issues
-        // the setChannelKey() call, not when this reply arrives (a dropped
-        // reply here isn't retried in this phase — see issue #138's known
-        // limitations).
+        // Подтверждение в стиле fire-and-forget —
+        // wrapPendingEncryptedChannelKeyForMember() уже обновляет учёт в
+        // pendingEncryptedSetup_ в момент вызова setChannelKey(), а не
+        // когда приходит этот ответ (потерянный здесь ответ на этом
+        // этапе не повторяется — см. известные ограничения issue #138).
     });
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
         channels_ = channels;
@@ -463,7 +470,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::messagesListed, this,
             [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
                 if (channelId != selectedChannelId_) {
-                    return;  // Stale reply for a channel we've since left.
+                    return;  // Устаревший ответ для канала, который мы уже покинули.
                 }
                 QList<ChatMessage> converted;
                 converted.reserve(messages.size());
@@ -476,9 +483,10 @@ MainWindow::MainWindow(QWidget* parent)
                                                   .attachmentFilename = info.attachmentFilename});
                 }
                 if (oldestMessageId_ < 0) {
-                    // Initial history load for this channel — list was
-                    // empty, so appending in chronological order (as
-                    // returned) reads the same as prepending would.
+                    // Первоначальная загрузка истории для этого канала —
+                    // список был пуст, поэтому добавление в конец в
+                    // хронологическом порядке (как пришло) выглядит так
+                    // же, как и вставка в начало.
                     for (const ChatMessage& message : converted) {
                         chatView_->appendMessage(message);
                     }
@@ -505,23 +513,25 @@ MainWindow::MainWindow(QWidget* parent)
         settingsDialog_->activateWindow();
     });
 
-    // CameraDevice owns the one video sink QMediaCaptureSession allows
-    // (see its doc comment) — the preview widget gets frames pushed
-    // manually instead of being attached as the session's output
-    // directly, so the same frames are also available for a call's
-    // outgoing video (issue #72).
+    // CameraDevice владеет единственным video sink, который допускает
+    // QMediaCaptureSession (см. её doc-комментарий) — виджет превью
+    // получает кадры вручную, вместо того чтобы быть подключённым как
+    // выход сессии напрямую, так что те же кадры также доступны для
+    // исходящего видео звонка (issue #72).
     connect(&camera_, &CameraDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { settingsDialog_->videoPreview()->videoSink()->setVideoFrame(frame); });
-    // Same fan-out, third consumer: the call's own local-preview tile
-    // (issue #91). Frames only actually flow while the camera is
-    // running (Settings preview or CallManager::enableVideo()), so this
-    // is safe to leave connected unconditionally.
+    // Тот же разветвлённый вывод, третий потребитель: собственная
+    // плитка локального превью звонка (issue #91). Кадры реально идут
+    // только пока камера работает (превью в Settings или
+    // CallManager::enableVideo()), поэтому это безопасно оставить
+    // подключённым безусловно.
     connect(&camera_, &CameraDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
-    // Same "owns the one sink, re-emits" refactor as CameraDevice (issue
-    // #112) — screen share and camera video share the one local-preview
-    // tile/track, mutually exclusive (CallManager::enableScreenShare()
-    // stops the camera and vice versa), so both fan out to it the same way.
+    // Тот же рефакторинг "владеет единственным sink, ретранслирует", что
+    // и у CameraDevice (issue #112) — демонстрация экрана и видео с
+    // камеры используют одну и ту же плитку/трек локального превью,
+    // взаимоисключающе (CallManager::enableScreenShare() останавливает
+    // камеру и наоборот), поэтому оба разветвляются на неё одинаково.
     connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { settingsDialog_->screenPreview()->videoSink()->setVideoFrame(frame); });
     connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
@@ -693,10 +703,10 @@ void MainWindow::onAttachFileClicked() {
         return;
     }
     if (currentChannelEncrypted_) {
-        // Belt-and-braces alongside ChatView disabling the Attach button
-        // for an encrypted channel — attachments aren't encrypted
-        // client-side yet (issue #138), chat-service also rejects the
-        // upload with 400.
+        // Подстраховка вдобавок к тому, что ChatView отключает кнопку
+        // Attach для зашифрованного канала — вложения пока не
+        // шифруются на стороне клиента (issue #138), chat-service тоже
+        // отклоняет загрузку с 400.
         showToast(tr("Attachments aren't supported in encrypted channels yet"), ToastBanner::Variant::kInfo);
         return;
     }
@@ -715,9 +725,10 @@ void MainWindow::onAttachFileClicked() {
     }
     const QByteArray data = file.readAll();
     const QString contentType = QMimeDatabase().mimeTypeForFile(path).name();
-    // Uploads immediately, then attachmentUploaded() auto-sends it as a
-    // message (issue #116) — a deliberate simplification over a
-    // two-step "attach, review, then click Send" flow.
+    // Загружает немедленно, затем attachmentUploaded() автоматически
+    // отправляет его как сообщение (issue #116) — намеренное упрощение
+    // по сравнению с двухшаговым сценарием "прикрепить, просмотреть,
+    // затем нажать Send".
     chatRestClient_.uploadAttachment(lastToken_, selectedChannelId_, QFileInfo(path).fileName(), contentType, data);
 }
 
@@ -752,9 +763,10 @@ void MainWindow::onVideoToggleClicked() {
         const QCameraDevice cameraDevice = settingsDialog_->cameraCombo()->currentData().value<QCameraDevice>();
         callManager_.enableVideo(cameraDevice);
     }
-    // enableVideo() may have just disabled screen share (CallManager's
-    // camera video and screen share are mutually exclusive, issue #112)
-    // — refresh both toggle buttons/the shared local preview together.
+    // enableVideo() мог только что отключить демонстрацию экрана (видео
+    // с камеры и демонстрация экрана в CallManager взаимоисключающие,
+    // issue #112) — обновляем обе кнопки переключения/общее локальное
+    // превью вместе.
     chatView_->setVideoEnabled(callManager_.videoEnabled());
     chatView_->setScreenShareEnabled(callManager_.screenShareEnabled());
 }
@@ -796,9 +808,9 @@ void MainWindow::refreshChannelsForSelectedCommunity() {
 }
 
 void MainWindow::openChannel(qint64 id, const QString& name) {
-    // A call is scoped to whichever channel we're subscribed to — leave
-    // it before switching, rather than stranding PeerConnections tied
-    // to a channel we're no longer even connected to.
+    // Звонок привязан к тому каналу, на который мы подписаны — выходим
+    // из него перед переключением, а не оставляем PeerConnection
+    // висящими на канале, к которому мы уже даже не подключены.
     if (callManager_.inCall()) {
         if (callManager_.videoEnabled()) {
             callManager_.disableVideo();
@@ -823,9 +835,9 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     chatView_->setEncrypted(currentChannelEncrypted_);
 
     if (currentChannelEncrypted_ && !channelKeys_.contains(id)) {
-        // Deferred to myChannelKeyFetched()/myChannelKeyNotFound() — no
-        // point subscribing/loading history before we know whether we
-        // can even decrypt it.
+        // Отложено до myChannelKeyFetched()/myChannelKeyNotFound() —
+        // нет смысла подписываться/загружать историю, пока не известно,
+        // сможем ли мы вообще её расшифровать.
         chatRestClient_.fetchMyChannelKey(lastToken_, id);
         return;
     }
