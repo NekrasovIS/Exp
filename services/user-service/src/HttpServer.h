@@ -11,28 +11,28 @@
 namespace user_service {
 
 /**
- * @brief REST front-end for UserService: POST /users/register,
- *        POST /users/verify-credentials (both unauthenticated — called by
- *        auth-service itself, not directly by end-user clients), plus
- *        GET /users/{login}/profile and PATCH /users/me (issue #110),
- *        which require a valid `Authorization: Bearer <token>` header,
- *        checked against auth-service via AuthServiceClient.
+ * @brief REST-фасад над UserService: POST /users/register,
+ *        POST /users/verify-credentials (оба без аутентификации — их вызывает
+ *        сам auth-service, а не напрямую клиенты конечных пользователей), а также
+ *        GET /users/{login}/profile и PATCH /users/me (issue #110),
+ *        которые требуют действительный заголовок `Authorization: Bearer <token>`,
+ *        проверяемый через AuthServiceClient у auth-service.
  *
- * PATCH /users/me always writes to the token's own subject — the login
- * in the URL/body, if any, is ignored, so a caller can never edit
- * another user's profile.
+ * PATCH /users/me всегда пишет в собственный субъект токена — логин
+ * в URL/теле запроса, если он указан, игнорируется, поэтому вызывающий
+ * не может отредактировать чужой профиль.
  *
- * Thin wrapper around httplib::Server — all account logic lives in
- * UserService, this class only translates HTTP requests/responses.
+ * Тонкая обёртка над httplib::Server — вся логика работы с аккаунтами
+ * находится в UserService, этот класс лишь транслирует HTTP-запросы/ответы.
  */
 class HttpServer {
 public:
     HttpServer(UserService& userService, const AuthServiceClient& authServiceClient);
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокирует выполнение, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:
