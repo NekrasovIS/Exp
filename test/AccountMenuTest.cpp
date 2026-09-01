@@ -28,5 +28,19 @@ TEST(AccountMenuTest, ClickingToggleButtonShowsThenHidesThePopup) {
     EXPECT_TRUE(popup->isHidden());
 }
 
+TEST(AccountMenuTest, EditProfileButtonStartsDisabledAndFollowsSetEditProfileEnabled) {
+    AccountMenu menu;
+
+    QPushButton* editProfileButton = menu.findChild<QPushButton*>(QStringLiteral("editProfileButton"));
+    ASSERT_NE(editProfileButton, nullptr);
+    EXPECT_FALSE(editProfileButton->isEnabled());
+
+    menu.setEditProfileEnabled(true);
+    EXPECT_TRUE(editProfileButton->isEnabled());
+
+    menu.setEditProfileEnabled(false);
+    EXPECT_FALSE(editProfileButton->isEnabled());
+}
+
 }  // namespace
 }  // namespace devicehub

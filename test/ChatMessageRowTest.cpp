@@ -74,5 +74,41 @@ TEST(ChatMessageRowTest, MessageWithAttachmentShowsDownloadButtonAndEmitsOnClick
     EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("report.pdf"));
 }
 
+TEST(ChatMessageRowTest, OwnMessageEditButtonEmitsEditRequestedWithIdAndCurrentBody) {
+    ChatMessage message = sampleMessage();
+    message.id = 7;
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    auto* editButton = row.findChild<QPushButton*>("editMessageButton");
+    ASSERT_NE(editButton, nullptr);
+
+    QSignalSpy spy(&row, &ChatMessageRow::editRequested);
+    editButton->click();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 7);
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("hello"));
+}
+
+TEST(ChatMessageRowTest, OwnMessageDeleteButtonEmitsDeleteRequestedWithId) {
+    ChatMessage message = sampleMessage();
+    message.id = 7;
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    auto* deleteButton = row.findChild<QPushButton*>("deleteMessageButton");
+    ASSERT_NE(deleteButton, nullptr);
+
+    QSignalSpy spy(&row, &ChatMessageRow::deleteRequested);
+    deleteButton->click();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 7);
+}
+
+TEST(ChatMessageRowTest, NonOwnMessageHasNoEditOrDeleteButtons) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_EQ(row.findChild<QPushButton*>("editMessageButton"), nullptr);
+    EXPECT_EQ(row.findChild<QPushButton*>("deleteMessageButton"), nullptr);
+}
+
 }  // namespace
 }  // namespace devicehub
