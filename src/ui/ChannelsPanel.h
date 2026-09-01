@@ -4,6 +4,7 @@
 
 #include "chat/ChatRestClient.h"
 
+class QLineEdit;
 class QListWidget;
 class QPoint;
 class QPushButton;
@@ -41,6 +42,9 @@ public:
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
     [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
+    /// Поле фильтра над списком (issue #152) — ввод текста сужает
+    /// listWidget() до строк, чьё имя его содержит.
+    [[nodiscard]] QLineEdit* filterEdit() const { return filterEdit_; }
 
 signals:
     void createRequested(const QString& name, bool isEncrypted);
@@ -51,11 +55,17 @@ signals:
 private:
     void showAddDialog();
     void showContextMenu(const QPoint& pos);
+    /// Скрывает строки, чьё сохранённое имя не содержит текущий текст
+    /// filterEdit_ (без учёта регистра) — вызывается при каждом
+    /// изменении filterEdit_ и после того, как setChannels()
+    /// пересоздаёт список.
+    void applyFilter();
 
     QListWidget* listWidget_ = nullptr;
     QStackedWidget* listStack_ = nullptr;
     QPushButton* addButton_ = nullptr;
     QPushButton* refreshButton_ = nullptr;
+    QLineEdit* filterEdit_ = nullptr;
     QString currentUserLogin_;
 };
 
