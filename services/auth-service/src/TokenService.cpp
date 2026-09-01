@@ -16,6 +16,12 @@ std::vector<uint8_t> hmacSha256(const std::string& key, const std::string& messa
     std::vector<uint8_t> digest(EVP_MAX_MD_SIZE);
     unsigned int digestLen = 0;
 
+    // HMAC() из OpenSSL принимает const unsigned char*, а
+    // std::string::data() отдаёт const char* — reinterpret_cast здесь
+    // единственный стандартный способ перейти между этими типами
+    // указателей (они не связаны, static_cast так не умеет);
+    // message.size() передаётся рядом, поэтому чтение через
+    // переинтерпретированный указатель никогда не выйдет за границы.
     HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()),
          reinterpret_cast<const unsigned char*>(message.data()), message.size(), digest.data(), &digestLen);
 
@@ -65,6 +71,9 @@ std::optional<std::string> TokenService::verifyTokenInternal(const std::string& 
     }
 
     const std::vector<uint8_t> payloadBytes = base64_utils::decodeUrl(payloadB64);
+    // Та же граница типов char*/uint8_t*, что и в hmacSha256() выше,
+    // только в обратную сторону — decodeUrl() работает с uint8_t, а
+    // string_view (и JSON-парсер за exceedsMaxNestingDepth()) нужен char.
     const std::string_view payloadView(reinterpret_cast<const char*>(payloadBytes.data()), payloadBytes.size());
     if (json_guard::exceedsMaxNestingDepth(payloadView, json_guard::kMaxNestingDepth)) {
         return std::nullopt;
