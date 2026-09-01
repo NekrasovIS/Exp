@@ -18,18 +18,25 @@ struct UserProfile {
     /// hasn't published one yet.
     QString publicKey;
     /// Issue #156: empty until the user sets one — required before
-    /// one-time-code login can be used, otherwise unused client-side.
+    /// one-time-code login can be used via email, otherwise unused
+    /// client-side.
     QString email;
+    /// Issue #174: empty until the user links their Telegram — an
+    /// alternative one-time-code delivery channel, preferred over email
+    /// server-side when both are set.
+    QString telegramChatId;
 };
 
 /// Fields updateOwnProfile() may change — grouped per CLAUDE.md's
-/// "prefer fewer function arguments" rule (displayName/avatarUrl/email
-/// are three same-typed QStrings, easy to swap by position at the call
-/// site) rather than growing updateOwnProfile()'s own parameter list.
+/// "prefer fewer function arguments" rule (displayName/avatarUrl/email/
+/// telegramChatId are four same-typed QStrings, easy to swap by
+/// position at the call site) rather than growing updateOwnProfile()'s
+/// own parameter list.
 struct ProfileEdits {
     QString displayName;
     QString avatarUrl;
     QString email;
+    QString telegramChatId;
 };
 
 /**

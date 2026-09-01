@@ -2,7 +2,6 @@
 
 #include <optional>
 #include <string>
-#include <utility>
 
 #include "UserRepository.h"
 
@@ -28,9 +27,8 @@ public:
     /// Перезаписывает display_name/avatar_url/public_key/email для @p login.
     [[nodiscard]] UpdateProfileResult updateProfile(const std::string& login, const ProfileUpdate& update);
 
-    /// См. UserRepository::resolveOtpIdentifier() (issue #156).
-    [[nodiscard]] std::optional<std::pair<std::string, std::string>> resolveOtpIdentifier(
-        const std::string& identifier);
+    /// См. UserRepository::resolveOtpIdentifier() (issue #156/#174).
+    [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier);
 
 private:
     UserRepository& repository_;

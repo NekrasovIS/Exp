@@ -7,6 +7,7 @@
 #include "HttpServer.h"
 #include "LoggingCodeDeliveryChannel.h"
 #include "SmtpCodeDeliveryChannel.h"
+#include "TelegramCodeDeliveryChannel.h"
 #include "TokenService.h"
 #include "UserServiceClient.h"
 
@@ -47,7 +48,18 @@ int main() {
         std::cout << "One-time-code delivery: logging only (SMTP_HOST not set)\n";
     }
 
-    auth_service::HttpServer server(tokenService, userServiceClient, *codeDeliveryChannel);
+    // Telegram настроен только если задан TELEGRAM_BOT_TOKEN (issue
+    // #174) — иначе доставка идёт по email/логированием, как и раньше;
+    // канал остаётся необязательным (nullptr), не заменяет
+    // codeDeliveryChannel, а лишь имеет приоритет над ним на аккаунт.
+    std::unique_ptr<auth_service::ICodeDeliveryChannel> telegramChannel;
+    if (const auto telegramConfig = auth_service::TelegramCodeDeliveryChannel::fromEnvironment();
+        telegramConfig.has_value()) {
+        telegramChannel = std::make_unique<auth_service::TelegramCodeDeliveryChannel>(*telegramConfig);
+        std::cout << "One-time-code delivery: Telegram bot configured (preferred over email when both are set)\n";
+    }
+
+    auth_service::HttpServer server(tokenService, userServiceClient, *codeDeliveryChannel, telegramChannel.get());
 
     std::cout << "auth-service listening on " << host << ":" << port << "\n";
     server.listen(host, port);

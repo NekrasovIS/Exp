@@ -6,7 +6,6 @@
 
 #include <optional>
 #include <string_view>
-#include <utility>
 
 namespace user_service {
 
@@ -33,15 +32,17 @@ std::optional<Credentials> parseCredentials(const std::string& body) {
 }
 
 nlohmann::json toJson(const Profile& profile) {
-    return nlohmann::json{{"login", profile.login},
-                           {"display_name", profile.displayName.has_value() ? nlohmann::json(*profile.displayName)
-                                                                             : nlohmann::json(nullptr)},
-                           {"avatar_url", profile.avatarUrl.has_value() ? nlohmann::json(*profile.avatarUrl)
-                                                                         : nlohmann::json(nullptr)},
-                           {"public_key", profile.publicKey.has_value() ? nlohmann::json(*profile.publicKey)
-                                                                         : nlohmann::json(nullptr)},
-                           {"email",
-                            profile.email.has_value() ? nlohmann::json(*profile.email) : nlohmann::json(nullptr)}};
+    return nlohmann::json{
+        {"login", profile.login},
+        {"display_name",
+         profile.displayName.has_value() ? nlohmann::json(*profile.displayName) : nlohmann::json(nullptr)},
+        {"avatar_url",
+         profile.avatarUrl.has_value() ? nlohmann::json(*profile.avatarUrl) : nlohmann::json(nullptr)},
+        {"public_key",
+         profile.publicKey.has_value() ? nlohmann::json(*profile.publicKey) : nlohmann::json(nullptr)},
+        {"email", profile.email.has_value() ? nlohmann::json(*profile.email) : nlohmann::json(nullptr)},
+        {"telegram_chat_id", profile.telegramChatId.has_value() ? nlohmann::json(*profile.telegramChatId)
+                                                                  : nlohmann::json(nullptr)}};
 }
 
 std::optional<std::string> parseIdentifier(const std::string& body) {
@@ -154,7 +155,8 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
     ProfileUpdate update{.displayName = current.has_value() ? current->displayName : std::nullopt,
                           .avatarUrl = current.has_value() ? current->avatarUrl : std::nullopt,
                           .publicKey = current.has_value() ? current->publicKey : std::nullopt,
-                          .email = current.has_value() ? current->email : std::nullopt};
+                          .email = current.has_value() ? current->email : std::nullopt,
+                          .telegramChatId = current.has_value() ? current->telegramChatId : std::nullopt};
     if (body.contains("display_name") && body["display_name"].is_string()) {
         update.displayName = body["display_name"].get<std::string>();
     }
@@ -167,6 +169,9 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
     if (body.contains("email") && body["email"].is_string()) {
         update.email = body["email"].get<std::string>();
     }
+    if (body.contains("telegram_chat_id") && body["telegram_chat_id"].is_string()) {
+        update.telegramChatId = body["telegram_chat_id"].get<std::string>();
+    }
 
     switch (userService_.updateProfile(*login, update)) {
         using enum UpdateProfileResult;
@@ -178,6 +183,11 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
             response.status = 409;
             response.set_content(nlohmann::json{{"error", "email already in use"}}.dump(), kJsonContentType);
             return;
+        case kTelegramChatIdTaken:
+            response.status = 409;
+            response.set_content(nlohmann::json{{"error", "telegram_chat_id already in use"}}.dump(),
+                                  kJsonContentType);
+            return;
         case kUpdated:
             break;
     }
@@ -186,7 +196,8 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
                         .displayName = update.displayName,
                         .avatarUrl = update.avatarUrl,
                         .publicKey = update.publicKey,
-                        .email = update.email})
+                        .email = update.email,
+                        .telegramChatId = update.telegramChatId})
             .dump(),
         kJsonContentType);
 }
@@ -199,15 +210,20 @@ void HttpServer::handleResolveOtpIdentifier(const httplib::Request& request, htt
         return;
     }
 
-    const std::optional<std::pair<std::string, std::string>> resolved =
-        userService_.resolveOtpIdentifier(*identifier);
+    const std::optional<OtpIdentity> resolved = userService_.resolveOtpIdentifier(*identifier);
     if (!resolved.has_value()) {
         response.set_content(nlohmann::json{{"found", false}}.dump(), kJsonContentType);
         return;
     }
-    response.set_content(
-        nlohmann::json{{"found", true}, {"login", resolved->first}, {"email", resolved->second}}.dump(),
-        kJsonContentType);
+    response.set_content(nlohmann::json{{"found", true},
+                                         {"login", resolved->login},
+                                         {"email", resolved->email.has_value() ? nlohmann::json(*resolved->email)
+                                                                                : nlohmann::json(nullptr)},
+                                         {"telegram_chat_id", resolved->telegramChatId.has_value()
+                                                                   ? nlohmann::json(*resolved->telegramChatId)
+                                                                   : nlohmann::json(nullptr)}}
+                              .dump(),
+                          kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

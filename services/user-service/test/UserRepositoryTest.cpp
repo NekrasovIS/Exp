@@ -7,7 +7,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 // Requires a live Postgres (see docker-compose.yml) reachable at
 // USER_SERVICE_DATABASE_URL (default matches docker-compose.yml).
@@ -203,8 +202,9 @@ TEST(UserRepositoryTest, ResolveOtpIdentifierFindsUserByLoginWhenEmailIsSet) {
     const auto resolved = repository.resolveOtpIdentifier(login);
 
     ASSERT_TRUE(resolved.has_value());
-    EXPECT_EQ(resolved->first, login);
-    EXPECT_EQ(resolved->second, email);
+    EXPECT_EQ(resolved->login, login);
+    ASSERT_TRUE(resolved->email.has_value());
+    EXPECT_EQ(*resolved->email, email);
 }
 
 TEST(UserRepositoryTest, ResolveOtpIdentifierFindsUserByEmail) {
@@ -224,8 +224,9 @@ TEST(UserRepositoryTest, ResolveOtpIdentifierFindsUserByEmail) {
     const auto resolved = repository.resolveOtpIdentifier(email);
 
     ASSERT_TRUE(resolved.has_value());
-    EXPECT_EQ(resolved->first, login);
-    EXPECT_EQ(resolved->second, email);
+    EXPECT_EQ(resolved->login, login);
+    ASSERT_TRUE(resolved->email.has_value());
+    EXPECT_EQ(*resolved->email, email);
 }
 
 TEST(UserRepositoryTest, ResolveOtpIdentifierReturnsNulloptWhenNoEmailIsSet) {
@@ -246,7 +247,7 @@ TEST(UserRepositoryTest, ResolveOtpIdentifierReturnsNulloptWhenNoEmailIsSet) {
 TEST(UserRepositoryTest, ResolveOtpIdentifierReturnsNulloptForUnknownIdentifier) {
     UserRepository repository(connectionString());
 
-    std::optional<std::pair<std::string, std::string>> resolved;
+    std::optional<OtpIdentity> resolved;
     try {
         resolved = repository.resolveOtpIdentifier("no-such-identifier-ever-created@example.test");
     } catch (const std::exception& error) {
@@ -254,6 +255,52 @@ TEST(UserRepositoryTest, ResolveOtpIdentifierReturnsNulloptForUnknownIdentifier)
     }
 
     EXPECT_FALSE(resolved.has_value());
+}
+
+TEST(UserRepositoryTest, ResolveOtpIdentifierFindsUserByTelegramChatId) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-otp-telegram");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    const std::string chatId = uniqueLogin("chat-id");
+    ASSERT_EQ(repository.updateProfile(login, ProfileUpdate{.telegramChatId = chatId}),
+              UpdateProfileResult::kUpdated);
+
+    const auto resolvedByLogin = repository.resolveOtpIdentifier(login);
+    ASSERT_TRUE(resolvedByLogin.has_value());
+    ASSERT_TRUE(resolvedByLogin->telegramChatId.has_value());
+    EXPECT_EQ(*resolvedByLogin->telegramChatId, chatId);
+
+    const auto resolvedByChatId = repository.resolveOtpIdentifier(chatId);
+    ASSERT_TRUE(resolvedByChatId.has_value());
+    EXPECT_EQ(resolvedByChatId->login, login);
+}
+
+TEST(UserRepositoryTest, UpdateProfileReturnsTelegramChatIdTakenForDuplicateChatId) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-telegram-taken-a");
+    const std::string loginB = uniqueLogin("user-repository-test-telegram-taken-b");
+    const std::string chatId = uniqueLogin("chat-id-taken");
+
+    bool createdA = false;
+    try {
+        createdA = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(createdA);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+    ASSERT_EQ(repository.updateProfile(loginA, ProfileUpdate{.telegramChatId = chatId}),
+              UpdateProfileResult::kUpdated);
+
+    EXPECT_EQ(repository.updateProfile(loginB, ProfileUpdate{.telegramChatId = chatId}),
+              UpdateProfileResult::kTelegramChatIdTaken);
 }
 
 }  // namespace

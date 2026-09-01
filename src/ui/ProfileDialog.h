@@ -13,8 +13,9 @@ struct ProfileEdits;
 
 /**
  * @brief Edit-profile dialog opened from AccountMenu's "Edit Profile"
- *        button (issue #110): display name, avatar URL, and email
- *        (issue #156 — required before one-time-code login works).
+ *        button (issue #110): display name, avatar URL, email (issue
+ *        #156) and Telegram chat_id (issue #174) — either of the last
+ *        two enables one-time-code login through that channel.
  *
  * Pure presentation — MainWindow owns UserProfileClient and all the
  * wiring: it calls setProfile() to prefill fields (kept in sync with
@@ -36,6 +37,7 @@ public:
     [[nodiscard]] QLineEdit* displayNameEdit() const { return displayNameEdit_; }
     [[nodiscard]] QLineEdit* avatarUrlEdit() const { return avatarUrlEdit_; }
     [[nodiscard]] QLineEdit* emailEdit() const { return emailEdit_; }
+    [[nodiscard]] QLineEdit* telegramChatIdEdit() const { return telegramChatIdEdit_; }
     [[nodiscard]] QPushButton* saveButton() const { return saveButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
@@ -46,6 +48,7 @@ private:
     QLineEdit* displayNameEdit_ = nullptr;
     QLineEdit* avatarUrlEdit_ = nullptr;
     QLineEdit* emailEdit_ = nullptr;
+    QLineEdit* telegramChatIdEdit_ = nullptr;
     QPushButton* saveButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };

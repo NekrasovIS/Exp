@@ -56,8 +56,12 @@ add_library(auth_service_core
     src/CodeDeliveryChannel.h
     src/LoggingCodeDeliveryChannel.h
     src/LoggingCodeDeliveryChannel.cpp
+    src/TlsConnection.h
+    src/TlsConnection.cpp
     src/SmtpCodeDeliveryChannel.h
     src/SmtpCodeDeliveryChannel.cpp
+    src/TelegramCodeDeliveryChannel.h
+    src/TelegramCodeDeliveryChannel.cpp
     src/HttpServer.h
     src/HttpServer.cpp
     src/UserServiceClient.h
@@ -82,6 +86,7 @@ add_executable(auth_service_tests
     test/RateLimiterTest.cpp
     test/OtpStoreTest.cpp
     test/SmtpCodeDeliveryChannelTest.cpp
+    test/TelegramCodeDeliveryChannelTest.cpp
     test/UserServiceClientIntegrationTest.cpp
     test/base64_utilsTest.cpp
     test/HttpServerTest.cpp

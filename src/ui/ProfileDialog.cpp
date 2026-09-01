@@ -29,13 +29,18 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     emailEdit_->setObjectName(QStringLiteral("profileEmailEdit"));
     emailEdit_->setPlaceholderText(tr("Email (needed for one-time-code sign-in)"));
 
+    telegramChatIdEdit_ = new QLineEdit(this);
+    telegramChatIdEdit_->setObjectName(QStringLiteral("profileTelegramChatIdEdit"));
+    telegramChatIdEdit_->setPlaceholderText(tr("Telegram chat ID (alternative one-time-code delivery)"));
+
     saveButton_ = new QPushButton(tr("Save"), this);
     saveButton_->setObjectName(QStringLiteral("profileSaveButton"));
     saveButton_->setProperty("accent", true);
     connect(saveButton_, &QPushButton::clicked, this, [this]() {
         emit saveRequested(ProfileEdits{.displayName = displayNameEdit_->text(),
                                          .avatarUrl = avatarUrlEdit_->text(),
-                                         .email = emailEdit_->text()});
+                                         .email = emailEdit_->text(),
+                                         .telegramChatId = telegramChatIdEdit_->text()});
     });
 
     statusLabel_ = new QLabel(this);
@@ -45,6 +50,7 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     layout->addWidget(displayNameEdit_);
     layout->addWidget(avatarUrlEdit_);
     layout->addWidget(emailEdit_);
+    layout->addWidget(telegramChatIdEdit_);
     layout->addWidget(saveButton_);
     layout->addWidget(statusLabel_);
 }
@@ -58,6 +64,9 @@ void ProfileDialog::setProfile(const UserProfile& profile) {
     }
     if (!emailEdit_->hasFocus()) {
         emailEdit_->setText(profile.email);
+    }
+    if (!telegramChatIdEdit_->hasFocus()) {
+        telegramChatIdEdit_->setText(profile.telegramChatId);
     }
 }
 

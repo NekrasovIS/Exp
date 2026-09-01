@@ -16,11 +16,12 @@ constexpr int kOtpMaxAttempts = 5;
 }  // namespace
 
 HttpServer::HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
-                        const ICodeDeliveryChannel& codeDeliveryChannel, int rateLimitMaxRequests,
-                        std::chrono::milliseconds rateLimitWindow)
+                        const ICodeDeliveryChannel& codeDeliveryChannel, const ICodeDeliveryChannel* telegramChannel,
+                        int rateLimitMaxRequests, std::chrono::milliseconds rateLimitWindow)
     : tokenService_(tokenService),
       userServiceClient_(userServiceClient),
       codeDeliveryChannel_(codeDeliveryChannel),
+      telegramChannel_(telegramChannel),
       rateLimiter_(rateLimitMaxRequests, rateLimitWindow),
       otpStore_(kOtpTtl, kOtpMaxAttempts) {
     registerRoutes();
@@ -192,11 +193,19 @@ void HttpServer::handleOtpRequest(const httplib::Request& request, httplib::Resp
 
     // Всегда отвечаем 200 независимо от того, нашёлся ли реальный
     // аккаунт — иначе ответ сам по себе становится способом проверить,
-    // какие email/login существуют в системе.
+    // какие email/login/telegram_chat_id существуют в системе.
     if (const auto resolved = userServiceClient_.resolveOtpIdentifier(body["identifier"].get<std::string>());
         resolved.has_value()) {
-        const std::string code = otpStore_.issue(resolved->first);
-        codeDeliveryChannel_.send(resolved->second, code);
+        const std::string code = otpStore_.issue(resolved->login);
+        // Telegram предпочтительнее email, когда у аккаунта задано и
+        // то и другое, а на сервере настроен TELEGRAM_BOT_TOKEN —
+        // мгновенная доставка в чат, а не письмо, которое может уйти в
+        // спам/прийти с задержкой.
+        if (telegramChannel_ != nullptr && resolved->telegramChatId.has_value()) {
+            telegramChannel_->send(*resolved->telegramChatId, code);
+        } else if (resolved->email.has_value()) {
+            codeDeliveryChannel_.send(*resolved->email, code);
+        }
     }
     response.set_content(nlohmann::json{{"sent", true}}.dump(), kJsonContentType);
 }
@@ -224,13 +233,13 @@ void HttpServer::handleOtpVerify(const httplib::Request& request, httplib::Respo
     }
 
     const auto resolved = userServiceClient_.resolveOtpIdentifier(body["identifier"].get<std::string>());
-    if (!resolved.has_value() || !otpStore_.verify(resolved->first, body["code"].get<std::string>())) {
+    if (!resolved.has_value() || !otpStore_.verify(resolved->login, body["code"].get<std::string>())) {
         response.status = 401;
         response.set_content(nlohmann::json{{"error", "invalid or expired code"}}.dump(), kJsonContentType);
         return;
     }
 
-    const std::string& login = resolved->first;
+    const std::string& login = resolved->login;
     const Token token = tokenService_.issueToken(login);
     const Token refreshToken = tokenService_.issueRefreshToken(login);
     response.set_content(

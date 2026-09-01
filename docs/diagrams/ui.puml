@@ -198,6 +198,7 @@ class ProfileDialog {
   +displayNameEdit() : QLineEdit*
   +avatarUrlEdit() : QLineEdit*
   +emailEdit() : QLineEdit*
+  +telegramChatIdEdit() : QLineEdit*
   +saveButton() : QPushButton*
   +statusLabel() : QLabel*
   .. signals ..

@@ -148,8 +148,50 @@ TEST(UserServiceClientIntegrationTest, ResolveOtpIdentifierFindsUserByLoginOrEma
     for (const std::string& identifier : {login, email}) {
         const auto resolved = client.resolveOtpIdentifier(identifier);
         ASSERT_TRUE(resolved.has_value());
-        EXPECT_EQ(resolved->first, login);
-        EXPECT_EQ(resolved->second, email);
+        EXPECT_EQ(resolved->login, login);
+        ASSERT_TRUE(resolved->email.has_value());
+        EXPECT_EQ(*resolved->email, email);
+    }
+}
+
+TEST(UserServiceClientIntegrationTest, ResolveOtpIdentifierFindsUserByTelegramChatIdOnceSet) {
+    const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+
+    const std::string login =
+        "auth-service-otp-telegram-resolve-test-" +
+        std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    const std::string password = "integration-test-password";
+    const std::string chatId = login + "-chat";
+
+    httplib::Client setupClient(host, port);
+    const httplib::Result registerResult =
+        setupClient.Post("/users/register", nlohmann::json{{"login", login}, {"password", password}}.dump(),
+                          "application/json");
+    if (!registerResult) {
+        GTEST_SKIP() << "user-service not reachable at " << host << ":" << port
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+    ASSERT_EQ(registerResult->status, 201);
+
+    const TokenService tokenService(envOrDefault("AUTH_SERVICE_SECRET", "dev-only-secret"));
+    const Token profileToken = tokenService.issueToken(login);
+
+    const httplib::Result patchResult =
+        setupClient.Patch("/users/me", httplib::Headers{{"Authorization", "Bearer " + profileToken.value}},
+                           nlohmann::json{{"telegram_chat_id", chatId}}.dump(), "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+
+    const UserServiceClient client(host, port);
+    for (const std::string& identifier : {login, chatId}) {
+        const auto resolved = client.resolveOtpIdentifier(identifier);
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(resolved->login, login);
+        ASSERT_TRUE(resolved->telegramChatId.has_value());
+        EXPECT_EQ(*resolved->telegramChatId, chatId);
     }
 }
 
