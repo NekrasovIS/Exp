@@ -5,12 +5,12 @@
 namespace auth_service {
 
 /**
- * @brief Calls user-service's POST /users/verify-credentials and
- *        POST /users/register.
+ * @brief Вызывает POST /users/verify-credentials и POST /users/register
+ *        у user-service.
  *
- * Fails closed: any network/protocol error is treated as "not
- * verified"/"not registered" rather than propagating an exception into
- * the request handler.
+ * Отказывает по умолчанию (fails closed): любая сетевая/протокольная
+ * ошибка трактуется как "не подтверждено"/"не зарегистрировано", а не
+ * распространяется исключением в обработчик запроса.
  */
 class UserServiceClient {
 public:
@@ -18,8 +18,8 @@ public:
 
     [[nodiscard]] bool verifyCredentials(const std::string& login, const std::string& password) const;
 
-    /// Calls user-service's POST /users/register.
-    /// @return True if the login was free and the account was created.
+    /// Вызывает POST /users/register у user-service.
+    /// @return True, если логин был свободен и аккаунт был создан.
     [[nodiscard]] bool registerUser(const std::string& login, const std::string& password) const;
 
 private:
