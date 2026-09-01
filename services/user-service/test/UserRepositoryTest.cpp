@@ -4,8 +4,10 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 // Requires a live Postgres (see docker-compose.yml) reachable at
 // USER_SERVICE_DATABASE_URL (default matches docker-compose.yml).
@@ -136,10 +138,11 @@ TEST(UserRepositoryTest, UpdateProfileRoundTripsThroughFindProfile) {
     }
     ASSERT_TRUE(created);
 
-    ASSERT_TRUE(repository.updateProfile(
-        login, ProfileUpdate{.displayName = "Alice",
-                              .avatarUrl = "https://example.test/alice.png",
-                              .publicKey = "base64-x25519-public-key"}));
+    ASSERT_EQ(repository.updateProfile(
+                  login, ProfileUpdate{.displayName = "Alice",
+                                        .avatarUrl = "https://example.test/alice.png",
+                                        .publicKey = "base64-x25519-public-key"}),
+              UpdateProfileResult::kUpdated);
 
     const std::optional<Profile> profile = repository.findProfile(login);
     ASSERT_TRUE(profile.has_value());
@@ -151,18 +154,106 @@ TEST(UserRepositoryTest, UpdateProfileRoundTripsThroughFindProfile) {
     EXPECT_EQ(*profile->publicKey, "base64-x25519-public-key");
 }
 
-TEST(UserRepositoryTest, UpdateProfileReturnsFalseForNonexistentLogin) {
+TEST(UserRepositoryTest, UpdateProfileReturnsNoSuchUserForNonexistentLogin) {
     UserRepository repository(connectionString());
 
-    bool updated = true;
+    UpdateProfileResult result = UpdateProfileResult::kUpdated;
     try {
-        updated =
-            repository.updateProfile("no-such-login-ever-created", ProfileUpdate{.displayName = "Anyone"});
+        result = repository.updateProfile("no-such-login-ever-created", ProfileUpdate{.displayName = "Anyone"});
     } catch (const std::exception& error) {
         GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
     }
 
-    EXPECT_FALSE(updated);
+    EXPECT_EQ(result, UpdateProfileResult::kNoSuchUser);
+}
+
+TEST(UserRepositoryTest, UpdateProfileReturnsEmailTakenForDuplicateEmail) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-email-taken-a");
+    const std::string loginB = uniqueLogin("user-repository-test-email-taken-b");
+    const std::string email = uniqueLogin("user-repository-test-email-taken") + "@example.test";
+
+    bool createdA = false;
+    try {
+        createdA = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(createdA);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+    ASSERT_EQ(repository.updateProfile(loginA, ProfileUpdate{.email = email}), UpdateProfileResult::kUpdated);
+
+    EXPECT_EQ(repository.updateProfile(loginB, ProfileUpdate{.email = email}), UpdateProfileResult::kEmailTaken);
+}
+
+TEST(UserRepositoryTest, ResolveOtpIdentifierFindsUserByLoginWhenEmailIsSet) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-otp-login");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    const std::string email = login + "@example.test";
+    ASSERT_EQ(repository.updateProfile(login, ProfileUpdate{.email = email}), UpdateProfileResult::kUpdated);
+
+    const auto resolved = repository.resolveOtpIdentifier(login);
+
+    ASSERT_TRUE(resolved.has_value());
+    EXPECT_EQ(resolved->first, login);
+    EXPECT_EQ(resolved->second, email);
+}
+
+TEST(UserRepositoryTest, ResolveOtpIdentifierFindsUserByEmail) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-otp-email");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    const std::string email = login + "@example.test";
+    ASSERT_EQ(repository.updateProfile(login, ProfileUpdate{.email = email}), UpdateProfileResult::kUpdated);
+
+    const auto resolved = repository.resolveOtpIdentifier(email);
+
+    ASSERT_TRUE(resolved.has_value());
+    EXPECT_EQ(resolved->first, login);
+    EXPECT_EQ(resolved->second, email);
+}
+
+TEST(UserRepositoryTest, ResolveOtpIdentifierReturnsNulloptWhenNoEmailIsSet) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-otp-no-email");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_FALSE(repository.resolveOtpIdentifier(login).has_value());
+}
+
+TEST(UserRepositoryTest, ResolveOtpIdentifierReturnsNulloptForUnknownIdentifier) {
+    UserRepository repository(connectionString());
+
+    std::optional<std::pair<std::string, std::string>> resolved;
+    try {
+        resolved = repository.resolveOtpIdentifier("no-such-identifier-ever-created@example.test");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_FALSE(resolved.has_value());
 }
 
 }  // namespace

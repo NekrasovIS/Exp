@@ -31,4 +31,21 @@ bool UserServiceClient::registerUser(const std::string& login, const std::string
     return result && result->status == 201;
 }
 
+std::optional<std::pair<std::string, std::string>> UserServiceClient::resolveOtpIdentifier(
+    const std::string& identifier) const {
+    httplib::Client client(host_, port_);
+
+    const nlohmann::json body{{"identifier", identifier}};
+    const httplib::Result result = client.Post("/users/resolve-otp-identifier", body.dump(), "application/json");
+    if (!result || result->status != 200) {
+        return std::nullopt;
+    }
+
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded() || !response.value("found", false)) {
+        return std::nullopt;
+    }
+    return std::make_pair(response.value("login", std::string()), response.value("email", std::string()));
+}
+
 }  // namespace auth_service

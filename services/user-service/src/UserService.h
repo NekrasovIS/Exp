@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "UserRepository.h"
 
@@ -24,9 +25,12 @@ public:
     /// @return @p login's profile, or std::nullopt if no such user (issue #110).
     [[nodiscard]] std::optional<Profile> getProfile(const std::string& login);
 
-    /// Overwrites @p login's display_name/avatar_url/public_key. @return
-    /// False if no such user exists.
-    [[nodiscard]] bool updateProfile(const std::string& login, const ProfileUpdate& update);
+    /// Перезаписывает display_name/avatar_url/public_key/email для @p login.
+    [[nodiscard]] UpdateProfileResult updateProfile(const std::string& login, const ProfileUpdate& update);
+
+    /// См. UserRepository::resolveOtpIdentifier() (issue #156).
+    [[nodiscard]] std::optional<std::pair<std::string, std::string>> resolveOtpIdentifier(
+        const std::string& identifier);
 
 private:
     UserRepository& repository_;

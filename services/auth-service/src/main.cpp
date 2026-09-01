@@ -1,8 +1,12 @@
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 
+#include "CodeDeliveryChannel.h"
 #include "HttpServer.h"
+#include "LoggingCodeDeliveryChannel.h"
+#include "SmtpCodeDeliveryChannel.h"
 #include "TokenService.h"
 #include "UserServiceClient.h"
 
@@ -30,7 +34,20 @@ int main() {
 
     const auth_service::TokenService tokenService(secret);
     const auth_service::UserServiceClient userServiceClient(userServiceHost, userServicePort);
-    auth_service::HttpServer server(tokenService, userServiceClient);
+
+    // SMTP настроен только если задан SMTP_HOST — иначе коды входа
+    // просто логируются (issue #156), чтобы dev/CI не требовали
+    // реальных учётных данных email для сквозной проверки flow.
+    std::unique_ptr<auth_service::ICodeDeliveryChannel> codeDeliveryChannel;
+    if (const auto smtpConfig = auth_service::SmtpCodeDeliveryChannel::fromEnvironment(); smtpConfig.has_value()) {
+        codeDeliveryChannel = std::make_unique<auth_service::SmtpCodeDeliveryChannel>(*smtpConfig);
+        std::cout << "One-time-code delivery: SMTP (" << smtpConfig->host << ")\n";
+    } else {
+        codeDeliveryChannel = std::make_unique<auth_service::LoggingCodeDeliveryChannel>();
+        std::cout << "One-time-code delivery: logging only (SMTP_HOST not set)\n";
+    }
+
+    auth_service::HttpServer server(tokenService, userServiceClient, *codeDeliveryChannel);
 
     std::cout << "auth-service listening on " << host << ":" << port << "\n";
     server.listen(host, port);

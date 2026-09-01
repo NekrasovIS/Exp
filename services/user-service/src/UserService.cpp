@@ -23,8 +23,12 @@ std::optional<Profile> UserService::getProfile(const std::string& login) {
     return repository_.findProfile(login);
 }
 
-bool UserService::updateProfile(const std::string& login, const ProfileUpdate& update) {
+UpdateProfileResult UserService::updateProfile(const std::string& login, const ProfileUpdate& update) {
     return repository_.updateProfile(login, update);
+}
+
+std::optional<std::pair<std::string, std::string>> UserService::resolveOtpIdentifier(const std::string& identifier) {
+    return repository_.resolveOtpIdentifier(identifier);
 }
 
 }  // namespace user_service
