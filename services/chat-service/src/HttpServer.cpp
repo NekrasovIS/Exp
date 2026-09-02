@@ -13,16 +13,17 @@ namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
 constexpr int kDefaultMessageLimit = 50;
-/// Enforced on the *decoded* byte count, not the base64 wire payload
-/// (issue #116) — see ChatRepository's class doc comment for why
-/// attachments are stored as base64 TEXT rather than BYTEA/on-disk.
+/// Применяется к количеству байт *после декодирования*, а не к
+/// передаваемому по проводу base64-payload (issue #116) — см.
+/// doc-комментарий класса ChatRepository о том, почему вложения
+/// хранятся как base64 TEXT, а не как BYTEA/на диске.
 constexpr std::size_t kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
 constexpr int kDefaultSearchLimit = 20;
 
-// Attachment filenames come from an untrusted client (issue #116) and
-// get embedded verbatim into a Content-Disposition response header —
-// strips CR/LF (header/response-splitting injection) and '"' (would
-// otherwise break out of the quoted filename value) before that happens.
+// Имена файлов вложений приходят от недоверенного клиента (issue #116)
+// и встраиваются дословно в заголовок ответа Content-Disposition —
+// перед этим вырезает CR/LF (инъекция типа header/response-splitting) и
+// '"' (иначе позволило бы вырваться из значения имени файла в кавычках).
 std::string sanitizeForHeaderValue(const std::string& value) {
     std::string sanitized;
     sanitized.reserve(value.size());
@@ -445,9 +446,9 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
     const auto channelId = std::stoll(request.matches[1].str());
     const std::optional<Channel> channel = chatService_.findChannel(channelId);
     if (channel.has_value() && channel->isEncrypted) {
-        // Attachments aren't encrypted client-side yet in this phase
-        // (issue #138) — rejecting rather than silently storing
-        // plaintext in a channel the UI presents as encrypted.
+        // Вложения ещё не шифруются на стороне клиента на этом этапе
+        // (issue #138) — отклоняем вместо того, чтобы молча хранить
+        // открытый текст в канале, который UI представляет как зашифрованный.
         response.status = 400;
         response.set_content(
             nlohmann::json{{"error", "attachments aren't supported in encrypted channels yet"}}.dump(),
@@ -490,10 +491,11 @@ void HttpServer::handleDownloadAttachment(const httplib::Request& request, httpl
         return;
     }
 
-    // Decoded here rather than stored raw (see ChatRepository's doc
-    // comment) — response.set_content() is binary-safe (tracks length
-    // explicitly, not null-terminated), so the decoded bytes reach the
-    // client exactly as uploaded regardless of content.
+    // Декодируется здесь, а не хранится в сыром виде (см. doc-комментарий
+    // ChatRepository) — response.set_content() бинарно-безопасен (явно
+    // отслеживает длину, а не полагается на null-терминатор), поэтому
+    // декодированные байты доходят до клиента ровно в том виде, в каком
+    // были загружены, независимо от содержимого.
     const std::optional<std::string> decoded = base64::decode(attachment->data);
     if (!decoded.has_value()) {
         response.status = 500;
@@ -521,9 +523,9 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
     const auto channelId = std::stoll(request.matches[1].str());
     const std::optional<Channel> channel = chatService_.findChannel(channelId);
     if (channel.has_value() && channel->isEncrypted) {
-        // Server-side search needs plaintext bodies to match against —
-        // an encrypted channel's stored body is ciphertext, so there's
-        // nothing meaningful to search here (issue #138).
+        // Поиску на стороне сервера нужны открытые тела для сопоставления
+        // — сохранённое тело зашифрованного канала является шифротекстом,
+        // так что искать здесь по существу нечего (issue #138).
         response.status = 400;
         response.set_content(nlohmann::json{{"error", "search isn't available for encrypted channels"}}.dump(),
                               kJsonContentType);

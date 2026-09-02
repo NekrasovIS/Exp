@@ -72,10 +72,10 @@ void AuthClient::registerUser(const QString& login, const QString& password) {
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
-        // Both success (201) and "login taken" (409) come back as a JSON
-        // body with a "registered" field — check that before falling back
-        // to reply->error(), which QNetworkReply also sets for the 409
-        // case even though it's a normal, expected outcome here.
+        // И успех (201), и «логин занят» (409) возвращаются как JSON-тело
+        // с полем "registered" — проверяем его прежде чем откатываться к
+        // reply->error(), которое QNetworkReply также выставляет для
+        // случая 409, хотя здесь это нормальный, ожидаемый исход.
         const QJsonDocument response = QJsonDocument::fromJson(reply->readAll());
         if (response.isObject() && response.object().contains("registered")) {
             const QJsonObject object = response.object();
@@ -115,9 +115,9 @@ void AuthClient::refreshAccessToken(const QString& refreshToken) {
             return;
         }
 
-        // /auth/refresh doesn't mint a new refresh token (they don't
-        // rotate — see TokenService's doc comment), so the one that was
-        // just successfully redeemed is still the current one.
+        // /auth/refresh не выпускает новый refresh-токен (они не
+        // ротируются — см. doc-комментарий TokenService), поэтому тот, что
+        // только что был успешно погашен, остаётся текущим.
         const QJsonObject object = response.object();
         emit tokenReceived(object.value("token").toString(), refreshToken,
                             object.value("expires_at").toVariant().toLongLong());

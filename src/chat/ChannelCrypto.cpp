@@ -9,7 +9,7 @@ namespace devicehub::channel_crypto {
 namespace {
 
 void ensureSodiumInitialized() {
-    // Same idiom as IdentityKeyStore.cpp / user-service's password_hash.cpp.
+    // Та же идиома, что в IdentityKeyStore.cpp / password_hash.cpp сервиса user-service.
     static const bool initialized = [] {
         if (sodium_init() < 0) {
             throw std::runtime_error("libsodium failed to initialize");

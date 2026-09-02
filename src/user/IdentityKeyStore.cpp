@@ -10,10 +10,11 @@ namespace devicehub {
 namespace {
 
 void ensureSodiumInitialized() {
-    // sodium_init() is safe to call multiple times; guard with a static
-    // local so concurrent callers only pay for it once (C++11 guarantees
-    // thread-safe initialization of function-local statics) — same idiom
-    // as services/user-service/src/password_hash.cpp.
+    // sodium_init() безопасно вызывать многократно; защищаем статической
+    // локальной переменной, чтобы конкурентные вызывающие платили за это
+    // только один раз (C++11 гарантирует потокобезопасную инициализацию
+    // локальных статических переменных функции) — та же идиома, что в
+    // services/user-service/src/password_hash.cpp.
     static const bool initialized = [] {
         if (sodium_init() < 0) {
             throw std::runtime_error("libsodium failed to initialize");
@@ -34,8 +35,9 @@ IdentityKeyStore::IdentityKeyStore(QString storageDir, QString login)
 }
 
 QString IdentityKeyStore::keyFilePath() const {
-    // One file per login: a machine can hold identity keys for more than
-    // one account (e.g. switching users without logging out first).
+    // Один файл на логин: машина может хранить ключи идентичности более
+    // чем для одного аккаунта (например, при переключении пользователей
+    // без предварительного выхода).
     return QDir(storageDir_).filePath(login_ + QStringLiteral(".identity-key"));
 }
 
@@ -49,14 +51,15 @@ bool IdentityKeyStore::loadIfExists() {
     }
     const QByteArray bytes = file.readAll();
     if (bytes.size() != crypto_box_SECRETKEYBYTES) {
-        // Wrong size — corrupt or foreign file. Treat as absent rather
-        // than crash; a fresh keypair gets generated and overwrites it.
+        // Неверный размер — повреждённый или чужой файл. Считаем
+        // отсутствующим, а не падаем; будет сгенерирована новая пара
+        // ключей, которая его перезапишет.
         return false;
     }
     std::copy(bytes.begin(), bytes.end(), secretKey_);
-    // The public key is deterministically derived from the secret key
-    // (X25519 base-point multiplication) rather than also persisted —
-    // one fewer thing that could get out of sync with the secret half.
+    // Публичный ключ детерминированно выводится из секретного (умножение
+    // на базовую точку X25519), а не тоже сохраняется — на одну вещь
+    // меньше, которая могла бы разойтись с секретной половиной.
     crypto_scalarmult_base(publicKey_, secretKey_);
     return true;
 }
@@ -76,10 +79,11 @@ void IdentityKeyStore::generateAndPersist() {
     // границы массива.
     file.write(reinterpret_cast<const char*>(secretKey_), sizeof(secretKey_));
     file.close();
-    // Best-effort only: Qt's cross-platform permission bits don't map to
-    // real Windows ACLs (no restriction against other local accounts
-    // there), unlike POSIX where this actually limits the file to the
-    // owner. Documented limitation for this phase (see issue #136).
+    // Только best-effort: кроссплатформенные биты прав доступа Qt не
+    // отображаются на настоящие Windows ACL (там нет ограничения для
+    // других локальных аккаунтов), в отличие от POSIX, где это реально
+    // ограничивает файл владельцем. Задокументированное ограничение для
+    // этого этапа (см. issue #136).
     file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 }
 

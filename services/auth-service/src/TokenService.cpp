@@ -86,9 +86,10 @@ std::optional<std::string> TokenService::verifyTokenInternal(const std::string& 
 
     const bool isRefresh = payload.contains("typ") && payload["typ"] == "refresh";
     if (isRefresh != expectRefresh) {
-        // An access token presented where a refresh token was expected,
-        // or vice versa — reject rather than silently accepting either
-        // way, even though both are signed with the same secret.
+        // Access-токен предъявлен там, где ожидался refresh-токен, или
+        // наоборот — отклоняем, а не принимаем молча ни один из
+        // вариантов, даже несмотря на то, что оба подписаны одним и тем
+        // же секретом.
         return std::nullopt;
     }
 
