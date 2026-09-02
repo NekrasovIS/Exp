@@ -176,6 +176,11 @@ void ChannelsPanel::showAddDialog() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons);
 
+    // Без явного setDefault() кнопка OK не отмечена как дефолтная, и
+    // Enter, нажатый в nameEdit (не сама кнопка), никого не находит —
+    // диалог не закрывается по Enter, только по клику мышью.
+    buttons->button(QDialogButtonBox::Ok)->setDefault(true);
+
     if (dialog.exec() == QDialog::Accepted && !nameEdit->text().trimmed().isEmpty()) {
         emit createRequested(nameEdit->text().trimmed(), encryptedCheckBox->isChecked());
     }

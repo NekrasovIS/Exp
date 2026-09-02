@@ -234,6 +234,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     sendButton_ = new QPushButton(tr("Send"), channelPage);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
     sendButton_->setProperty("accent", true);
+    connect(messageEdit_, &QLineEdit::returnPressed, sendButton_, &QPushButton::click);
 
     sendRow->addWidget(messageEdit_, /*stretch=*/1);
     sendRow->addWidget(attachButton_);
