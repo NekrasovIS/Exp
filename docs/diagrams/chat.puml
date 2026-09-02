@@ -188,6 +188,7 @@ class ChatRestClient {
   +setChannelKey(token: QString, channelId: qint64, memberLogin: QString, wrappedKey: QString)
   +fetchMyChannelKey(token: QString, channelId: qint64)
   +listMessages(token: QString, channelId: qint64, limit: int, beforeId: qint64)
+  +fetchLatestMessage(token: QString, channelId: qint64)
   +promoteModerator(token: QString, communityId: qint64, targetLogin: QString)
   +demoteModerator(token: QString, communityId: qint64, targetLogin: QString)
   +listModerators(token: QString, communityId: qint64)
@@ -205,6 +206,7 @@ class ChatRestClient {
   +myChannelKeyFetched(channelId: qint64, wrappedKey: QString)
   +myChannelKeyNotFound(channelId: qint64)
   +messagesListed(channelId: qint64, messages: QList<ChatMessageInfo>)
+  +latestMessageFetched(channelId: qint64, messages: QList<ChatMessageInfo>)
   +moderatorPromoted(communityId: qint64, login: QString)
   +moderatorDemoted(communityId: qint64, login: QString)
   +moderatorsListed(communityId: qint64, logins: QStringList)
@@ -281,6 +283,20 @@ note right of ChatRestClient
   CRUD/management (this class) vs. the
   live message stream (ChatClient) are
   different responsibilities.
+
+  fetchLatestMessage() (issue #152) is
+  listMessages(limit=1) under the hood
+  but answers via its own signal
+  (latestMessageFetched, not
+  messagesListed) — used by MainWindow
+  to seed ChannelsPanel's sidebar
+  previews for channels that aren't
+  open. Sharing messagesListed would let
+  a background preview fetch and a real
+  history load for the same channel
+  (user opens it before the preview
+  response lands) get misrouted into
+  each other's handling.
 end note
 
 @enduml

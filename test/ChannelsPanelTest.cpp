@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QDateTime>
 #include <QDialog>
 #include <QLineEdit>
 #include <QListWidget>
@@ -150,6 +151,94 @@ TEST(ChannelsPanelTest, SetChannelsReappliesTheCurrentFilterToTheNewContents) {
 
     EXPECT_FALSE(panel.listWidget()->item(0)->isHidden());
     EXPECT_TRUE(panel.listWidget()->item(1)->isHidden());
+}
+
+TEST(ChannelsPanelTest, RecordChannelActivityAddsPreviewAsSecondLine) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+
+    panel.recordChannelActivity(10, 1, QStringLiteral("hey there"), QDateTime::currentDateTime());
+
+    QListWidgetItem* item = panel.listWidget()->item(0);
+    ASSERT_EQ(item->data(Qt::UserRole).toLongLong(), 10);
+    EXPECT_EQ(item->text(), QStringLiteral("general\nhey there"));
+}
+
+TEST(ChannelsPanelTest, RecordChannelActivitySortsChannelsWithActivityFirst) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());  // id 10 "general" first, id 11 "random" second.
+
+    // "random" (id 11) gets activity — should float to the top even
+    // though it was listed second by the server.
+    panel.recordChannelActivity(11, 1, QStringLiteral("ping"), QDateTime::currentDateTime());
+
+    ASSERT_EQ(panel.listWidget()->count(), 2);
+    EXPECT_EQ(panel.listWidget()->item(0)->data(Qt::UserRole).toLongLong(), 11);
+    EXPECT_EQ(panel.listWidget()->item(1)->data(Qt::UserRole).toLongLong(), 10);
+}
+
+TEST(ChannelsPanelTest, MoreRecentActivitySortsAboveOlderActivity) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    const QDateTime now = QDateTime::currentDateTime();
+
+    panel.recordChannelActivity(10, 1, QStringLiteral("older"), now.addSecs(-60));
+    panel.recordChannelActivity(11, 2, QStringLiteral("newer"), now);
+
+    ASSERT_EQ(panel.listWidget()->count(), 2);
+    EXPECT_EQ(panel.listWidget()->item(0)->data(Qt::UserRole).toLongLong(), 11);
+    EXPECT_EQ(panel.listWidget()->item(1)->data(Qt::UserRole).toLongLong(), 10);
+}
+
+TEST(ChannelsPanelTest, RecordChannelActivityMarksTheRowBoldForAChannelThatIsNotOpen) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    ASSERT_FALSE(panel.listWidget()->item(0)->font().bold());
+
+    panel.recordChannelActivity(10, 1, QStringLiteral("new message"), QDateTime::currentDateTime());
+
+    EXPECT_TRUE(panel.listWidget()->item(0)->font().bold());
+}
+
+TEST(ChannelsPanelTest, ActivityForTheCurrentlyOpenChannelIsNeverMarkedUnread) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    panel.setOpenChannelId(10);
+
+    panel.recordChannelActivity(10, 1, QStringLiteral("I'm looking at this"), QDateTime::currentDateTime());
+
+    EXPECT_FALSE(panel.listWidget()->item(0)->font().bold());
+}
+
+TEST(ChannelsPanelTest, OpeningAnAlreadyUnreadChannelClearsTheBoldIndicator) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    panel.recordChannelActivity(10, 1, QStringLiteral("new message"), QDateTime::currentDateTime());
+    ASSERT_TRUE(panel.listWidget()->item(0)->font().bold());
+
+    panel.setOpenChannelId(10);
+
+    EXPECT_FALSE(panel.listWidget()->item(0)->font().bold());
+}
+
+TEST(ChannelsPanelTest, ANewerMessageArrivingAfterTheChannelWasReadIsMarkedUnreadAgain) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    panel.recordChannelActivity(10, 1, QStringLiteral("first"), QDateTime::currentDateTime());
+    panel.setOpenChannelId(10);
+    panel.setOpenChannelId(-1);  // Leave the channel — id 1 is now the "read" watermark.
+    ASSERT_FALSE(panel.listWidget()->item(0)->font().bold());
+
+    panel.recordChannelActivity(10, 2, QStringLiteral("second"), QDateTime::currentDateTime());
+
+    EXPECT_TRUE(panel.listWidget()->item(0)->font().bold());
+}
+
+TEST(ChannelsPanelTest, RefreshButtonExists) {
+    ChannelsPanel panel;
+
+    ASSERT_NE(panel.refreshButton(), nullptr);
+    EXPECT_TRUE(panel.refreshButton()->isEnabled());
 }
 
 }  // namespace

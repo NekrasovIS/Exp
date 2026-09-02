@@ -30,6 +30,7 @@
 
 #include "ui/AccountMenu.h"
 #include "ui/ChannelsPanel.h"
+#include "ui/ChatMessageGrouping.h"
 #include "ui/ChatMessageRow.h"
 #include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
@@ -61,6 +62,23 @@ constexpr int kMessagePageSize = 50;
 /// отклонялся немедленным toast, а не круговым походом на сервер лишь
 /// затем, чтобы получить тот же 400.
 constexpr qint64 kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
+/// Длина превью последнего сообщения под именем канала в сайдбаре
+/// (issue #152) — только косметическое ограничение строки, не имеет
+/// отношения к лимитам самого тела сообщения.
+constexpr int kChannelPreviewMaxChars = 60;
+
+/// Однострочное превью тела сообщения для списка каналов (issue #152):
+/// переносы строк схлопываются в пробел, длина ограничена
+/// kChannelPreviewMaxChars с многоточием.
+QString truncateForChannelPreview(const QString& body) {
+    QString flattened = body;
+    flattened.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    if (flattened.size() > kChannelPreviewMaxChars) {
+        flattened.truncate(kChannelPreviewMaxChars);
+        flattened += QStringLiteral("…");
+    }
+    return flattened;
+}
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -205,6 +223,13 @@ MainWindow::MainWindow(QWidget* parent)
                                                       .attachmentId = attachmentId,
                                                       .attachmentFilename = attachmentFilename});
                 desktopNotifier_->notifyMessage(author, displayBody, currentUserLogin_);
+                // Канал уже открыт — не непрочитанный, но превью в
+                // сайдбаре (issue #152) всё равно должно оставаться
+                // актуальным без отдельного REST-похода.
+                channelsPanel_->recordChannelActivity(
+                    selectedChannelId_, id,
+                    currentChannelEncrypted_ ? tr("🔒 Encrypted message") : truncateForChannelPreview(displayBody),
+                    chat_message_grouping::parseSentAt(sentAt));
             });
     connect(&chatClient_, &ChatClient::messageEdited, this,
             [this](qint64 id, const QString& newBody, const QString& /*editedAt*/) {
@@ -314,6 +339,9 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
     });
+    // Иконка обновления в обеих панелях (issue #152) была ни к чему не
+    // подключена — клик просто ничего не делал.
+    connect(communitiesPanel_->refreshButton(), &QPushButton::clicked, this, &MainWindow::refreshCommunities);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
                 moderatorsDialog_->setCommunity(id, name);
@@ -340,6 +368,8 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id) { chatRestClient_.deleteChannel(lastToken_, id); });
     connect(channelsPanel_, &ChannelsPanel::channelSelected, this,
             [this](qint64 id, const QString& name) { openChannel(id, name); });
+    connect(channelsPanel_->refreshButton(), &QPushButton::clicked, this,
+            &MainWindow::refreshChannelsForSelectedCommunity);
 
     connect(chatView_, &ChatView::createChannelRequested, channelsPanel_->addButton(), &QPushButton::click);
 
@@ -437,6 +467,19 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
         channels_ = channels;
         channelsPanel_->setChannels(channels_);
+        // Превью последнего сообщения + сортировка по активности в
+        // сайдбаре (issue #152) — единственный способ узнать о канале,
+        // который сейчас не открыт (ChatClient подписан ровно на один
+        // канал одновременно, см. его doc-комментарий), не трогая
+        // chat-service: свой отдельный REST-запрос на канал (см.
+        // ChatRestClient::fetchLatestMessage()), ответ приходит через
+        // latestMessageFetched() выше, а не через messagesListed() —
+        // чтобы никогда не перепутаться с реальной подгрузкой истории,
+        // если пользователь откроет один из этих каналов раньше, чем
+        // придёт ответ на его превью.
+        for (const ChatItem& channel : channels_) {
+            chatRestClient_.fetchLatestMessage(lastToken_, channel.id);
+        }
         if (pendingChannelSelection_ >= 0) {
             channelsPanel_->selectChannelId(pendingChannelSelection_);
             const auto it = std::find_if(channels_.cbegin(), channels_.cend(),
@@ -484,6 +527,26 @@ MainWindow::MainWindow(QWidget* parent)
             finishOpeningChannel(channelId);
         }
     });
+    connect(&chatRestClient_, &ChatRestClient::latestMessageFetched, this,
+            [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
+                // Фоновый запрос превью для сайдбара (issue #152) — своя
+                // ветка, отдельная от messagesListed()/подгрузки истории
+                // открытого канала ниже, специально чтобы ответ на этот
+                // запрос никогда не мог быть перепутан с ответом на
+                // реальную подгрузку истории для того же канала, даже
+                // если оба запроса оказались в полёте одновременно (см.
+                // doc-комментарий ChatRestClient::fetchLatestMessage()).
+                if (messages.isEmpty()) {
+                    return;
+                }
+                const ChatMessageInfo& latest = messages.first();
+                const auto it = std::find_if(channels_.cbegin(), channels_.cend(),
+                                              [channelId](const ChatItem& item) { return item.id == channelId; });
+                const bool isEncrypted = it != channels_.cend() && it->isEncrypted;
+                channelsPanel_->recordChannelActivity(
+                    channelId, latest.id, isEncrypted ? tr("🔒 Encrypted message") : truncateForChannelPreview(latest.body),
+                    chat_message_grouping::parseSentAt(latest.sentAt));
+            });
     connect(&chatRestClient_, &ChatRestClient::messagesListed, this,
             [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
                 if (channelId != selectedChannelId_) {
@@ -902,6 +965,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     }
     selectedChannelId_ = id;
     oldestMessageId_ = -1;
+    channelsPanel_->setOpenChannelId(id);
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
     chatView_->clearLog();
@@ -945,6 +1009,7 @@ void MainWindow::closeChatView() {
     selectedChannelId_ = -1;
     oldestMessageId_ = -1;
     currentChannelEncrypted_ = false;
+    channelsPanel_->setOpenChannelId(-1);
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
 }

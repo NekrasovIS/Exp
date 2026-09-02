@@ -45,6 +45,8 @@ class ChannelsPanel {
   +setChannels(channels: QList<ChatItem>)
   +selectChannelId(id: int64)
   +setCurrentUserLogin(login: QString)
+  +recordChannelActivity(channelId: int64, messageId: int64, previewText: QString, activityAt: QDateTime)
+  +setOpenChannelId(channelId: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +refreshButton() : QPushButton*
@@ -52,6 +54,7 @@ class ChannelsPanel {
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   -applyFilter()
+  -rebuildList()
   .. signals ..
   +createRequested(name: QString, isEncrypted: bool)
   +renameRequested(id: int64, newName: QString)
@@ -67,6 +70,21 @@ note right of ChannelsPanel
   в строке, но channelSelected()/rename
   всегда используют настоящее имя, а не
   отображаемый текст с префиксом.
+
+  rebuildList() сортирует по activity_
+  (последняя активность — выше) и
+  накладывает превью второй строкой +
+  жирный/акцентный шрифт для
+  непрочитанного. "Прочитано" — id
+  последнего сообщения канала на момент
+  setOpenChannelId(); recordChannelActivity()
+  для открытого канала прямо сейчас
+  всегда продвигает эту метку вместе с
+  activity_, а не только в момент
+  открытия — иначе сообщение, реально
+  увиденное, зажигало бы непрочитанное
+  задним числом после переключения на
+  другой канал.
 end note
 
 class ChatView {
