@@ -30,15 +30,17 @@ constexpr int kChannelPageIndex = 1;
 constexpr int kVideoTileSize = 160;
 constexpr int kTypingIndicatorHideMs = 3000;
 constexpr int kTypingThrottleMs = 2000;
-/// How close to the bottom (in px) still counts as "at the bottom" for
-/// stickToBottom_ — a hair of slack rather than requiring the exact max
-/// value, which layout rounding can miss by a pixel or two.
+/// Насколько близко к низу (в пикселях) всё ещё считается "внизу" для
+/// stickToBottom_ — небольшой запас, а не требование точного
+/// максимального значения, которое округление layout'а может промахнуть
+/// на пиксель-другой.
 constexpr int kStickToBottomThresholdPx = 4;
 
-/// Linear scan for the ChatMessageRow showing @p id — not every widget
-/// in messagesLayout_ is one (appendSystemLine() adds plain QLabels
-/// too), hence the qobject_cast guard. Message lists are short enough
-/// (one page at a time) that this doesn't need to be anything fancier.
+/// Линейный перебор в поисках ChatMessageRow, показывающего @p id — не
+/// каждый виджет в messagesLayout_ им является (appendSystemLine()
+/// тоже добавляет обычные QLabel), отсюда защита через qobject_cast.
+/// Списки сообщений достаточно короткие (по одной странице за раз),
+/// чтобы не требовалось ничего более изощрённого.
 ChatMessageRow* findMessageRow(QVBoxLayout* layout, qint64 id) {
     for (int i = 0; i < layout->count(); ++i) {
         if (auto* row = qobject_cast<ChatMessageRow*>(layout->itemAt(i)->widget()); row != nullptr) {
@@ -137,10 +139,11 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     callParticipantsLabel_->setWordWrap(true);
     callParticipantsLabel_->setVisible(false);
 
-    // Local preview + one tile per remote participant currently sending
-    // video (issue #91) — hidden whenever there's nothing to show (no
-    // active call, or video not yet enabled), same show/hide idiom as
-    // callParticipantsLabel_ above.
+    // Локальное превью + по одной плитке на каждого удалённого
+    // участника, сейчас отправляющего видео (issue #91) — скрывается,
+    // когда показывать нечего (нет активного звонка или видео ещё не
+    // включено), тот же приём show/hide, что и у callParticipantsLabel_
+    // выше.
     videoStrip_ = new QWidget(channelPage);
     videoStripLayout_ = new QHBoxLayout(videoStrip_);
     videoStripLayout_->setContentsMargins(0, 0, 0, 0);
@@ -178,12 +181,12 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     messagesLayout_->addStretch(1);
     scrollArea_->setWidget(messagesContainer_);
 
-    // Keep the view pinned to the newest message whenever the content
-    // grows, but only while the user was already at the bottom
-    // (stickToBottom_, updated below as they scroll) — otherwise a new
-    // live message, or a prependMessages() history page loaded above
-    // the current view, would yank them back down while they're
-    // reading older messages.
+    // Удерживаем вид на самом новом сообщении при росте содержимого, но
+    // только пока пользователь уже был внизу (stickToBottom_,
+    // обновляется ниже по мере прокрутки) — иначе новое живое сообщение
+    // или страница истории от prependMessages(), загруженная выше
+    // текущего вида, дёргала бы их обратно вниз, пока они читают более
+    // старые сообщения.
     connect(scrollArea_->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this](int /*min*/, int max) {
         if (stickToBottom_) {
             scrollArea_->verticalScrollBar()->setValue(max);
@@ -203,9 +206,10 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     connect(typingIndicatorHideTimer_, &QTimer::timeout, this,
             [this]() { typingIndicatorLabel_->setVisible(false); });
 
-    // Throttles typingRequested() to at most once per kTypingThrottleMs
-    // while the user keeps typing, rather than emitting (and sending a
-    // WebSocket frame) on every single keystroke.
+    // Ограничивает typingRequested() не чаще одного раза за
+    // kTypingThrottleMs, пока пользователь продолжает печатать, вместо
+    // испускания сигнала (и отправки WebSocket-фрейма) на каждое
+    // нажатие клавиши.
     typingThrottleTimer_ = new QTimer(this);
     typingThrottleTimer_->setSingleShot(true);
     typingThrottleTimer_->setInterval(kTypingThrottleMs);
@@ -280,7 +284,7 @@ void ChatView::showChannel(const QString& channelName) {
     currentChannelName_ = channelName;
     updateChannelTitleLabel();
     stack_->setCurrentIndex(kChannelPageIndex);
-    // A typing indicator from the previous channel doesn't apply here.
+    // Индикатор набора текста из предыдущего канала здесь неприменим.
     typingIndicatorHideTimer_->stop();
     typingIndicatorLabel_->setVisible(false);
 }
@@ -323,10 +327,11 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
     const int previousMax = scrollBar->maximum();
     const int previousValue = scrollBar->value();
 
-    // Grouped against the previous message within this same batch only
-    // — not compared to whatever was already the oldest message shown,
-    // so pagination boundaries don't reach back into already-rendered
-    // history (see prependMessages()'s doc comment in ChatView.h).
+    // Группировка идёт только относительно предыдущего сообщения в этой
+    // же пачке — не сравнивается с тем, что уже было самым старым
+    // показанным сообщением, так что границы пагинации не дотягиваются
+    // до уже отрисованной истории (см. doc-комментарий prependMessages()
+    // в ChatView.h).
     bool showHeaderForNext = true;
     ChatMessage previousInBatch{};
     int insertIndex = 0;
@@ -340,15 +345,16 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
         showHeaderForNext = false;
     }
 
-    // Content just grew above the current viewport — rangeChanged won't
-    // re-pin to the bottom (stickToBottom_ is false whenever this is
-    // reachable, since loading older history only ever happens after
-    // scrolling up), but the raw scrollbar value still needs shifting
-    // by however much taller the content got, or the view would appear
-    // to jump. Qt hasn't finished recomputing the range synchronously
-    // within this call, so the adjustment is deferred one event-loop
-    // turn; guarded via QPointer in case the view's gone by then (e.g.
-    // a channel switch tore it down).
+    // Содержимое только что выросло выше текущей видимой области —
+    // rangeChanged не станет заново прижимать вид к низу (stickToBottom_
+    // всегда false, когда этот код достижим, поскольку загрузка старой
+    // истории случается только после прокрутки вверх), но сырое
+    // значение полосы прокрутки всё равно нужно сдвинуть на величину,
+    // на которую выросло содержимое, иначе вид как будто дёрнется.
+    // Qt не успевает синхронно пересчитать диапазон в рамках этого
+    // вызова, поэтому корректировка откладывается на один оборот цикла
+    // событий; защищена через QPointer на случай, если к тому моменту
+    // view уже уничтожен (например, из-за переключения канала).
     QPointer<QScrollBar> guardedScrollBar(scrollBar);
     QTimer::singleShot(0, this, [guardedScrollBar, previousMax, previousValue]() {
         if (guardedScrollBar.isNull()) {
@@ -393,9 +399,10 @@ bool ChatView::scrollToMessage(qint64 id) {
 
 void ChatView::removeMessage(qint64 id) {
     if (id == editingMessageId_) {
-        // The message being edited just got deleted out from under the
-        // send box — leave edit mode rather than letting "Update" send
-        // an edit_message for an id that no longer exists.
+        // Сообщение, которое редактировалось, только что удалили прямо
+        // из-под поля отправки — выходим из режима редактирования, а не
+        // позволяем "Update" отправить edit_message для id, которого
+        // больше не существует.
         cancelEditingMessage();
     }
     delete findMessageRow(messagesLayout_, id);
@@ -433,10 +440,10 @@ void ChatView::setCallState(bool inCall, bool muted) {
         chatSplitter_->setSizes({3, 2});
     } else {
         callParticipantsLabel_->setVisible(false);
-        // Video/screen share can't outlive the call they belong to —
-        // reset both here so every existing leave/channel-switch call
-        // site gets this for free instead of needing its own cleanup
-        // call.
+        // Видео/демонстрация экрана не могут пережить звонок, которому
+        // принадлежат — сбрасываем оба здесь, чтобы каждое место
+        // вызова, связанное с выходом/переключением канала, получало
+        // это бесплатно, а не требовало отдельного вызова очистки.
         setVideoEnabled(false);
         setScreenShareEnabled(false);
         for (QLabel* tile : std::as_const(remoteVideoTiles_)) {
@@ -482,12 +489,13 @@ void ChatView::setScreenShareEnabled(bool enabled) {
 }
 
 void ChatView::updateLocalVideoVisibility() {
-    // Camera and screen share are mutually exclusive in CallManager, but
-    // MainWindow calls both setVideoEnabled()/setScreenShareEnabled()
-    // after every toggle (whichever one flips true, the other flips
-    // false) — tracking both flags here rather than trusting whichever
-    // setter ran last keeps the local preview's visibility correct
-    // regardless of call order.
+    // Камера и демонстрация экрана в CallManager взаимоисключающие, но
+    // MainWindow вызывает оба setVideoEnabled()/setScreenShareEnabled()
+    // после каждого переключения (какой бы из них ни стал true, другой
+    // становится false) — отслеживание обоих флагов здесь, а не
+    // доверие тому, какой сеттер вызывался последним, сохраняет
+    // корректность видимости локального превью независимо от порядка
+    // вызовов.
     const bool anyActive = videoActive_ || screenShareActive_;
     localVideoWidget_->setVisible(anyActive);
     videoStrip_->setVisible(anyActive || !remoteVideoTiles_.isEmpty());
@@ -535,9 +543,10 @@ void ChatView::clearLog() {
     }
     hasLastMessage_ = false;
     setLoadOlderVisible(false);
-    // Whatever was being edited belonged to the channel that just got
-    // cleared — an id from it would be meaningless (or, worse, collide
-    // with some other channel's id) once a new channel's messages load.
+    // То, что редактировалось, принадлежало каналу, который только что
+    // очистили — id из него потеряет смысл (или, хуже, совпадёт с id
+    // из другого канала), как только загрузятся сообщения нового
+    // канала.
     cancelEditingMessage();
 }
 

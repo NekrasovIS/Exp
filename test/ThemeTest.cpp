@@ -7,10 +7,11 @@
 namespace devicehub {
 namespace {
 
-// Smoke test: this is a QSS stylesheet string applied wholesale via
-// QApplication::setStyleSheet() — visual correctness is a rendering
-// concern this project's tests don't verify (no pixel sampling); the
-// only thing meaningfully assertable here is that it's non-empty.
+// Smoke-тест: это строка QSS-стилей, применяемая целиком через
+// QApplication::setStyleSheet() — визуальная корректность является
+// вопросом рендеринга, который тесты этого проекта не проверяют (нет
+// сэмплирования пикселей); единственное, что здесь можно осмысленно
+// проверить, — это что строка непустая.
 TEST(ThemeTest, DiscordDarkStyleSheetIsNonEmpty) {
     const QString stylesheet = ui_theme::discordDarkStyleSheet();
 

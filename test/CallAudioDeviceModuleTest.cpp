@@ -16,9 +16,10 @@
 namespace devicehub {
 namespace {
 
-/// Hand-written webrtc::AudioTransport double — lets CallAudioDeviceModule's
-/// business logic (callback registration, playout-loop cadence, capture
-/// forwarding) be exercised without a real PeerConnection or audio hardware.
+/// Написанный вручную дублёр webrtc::AudioTransport — позволяет проверить
+/// бизнес-логику CallAudioDeviceModule (регистрацию колбэка, ритм цикла
+/// воспроизведения, пересылку захваченных данных) без реального
+/// PeerConnection или аудио-железа.
 class FakeAudioTransport : public webrtc::AudioTransport {
 public:
     int32_t RecordedDataIsAvailable(const void* audioSamples, size_t nSamples, size_t /*nBytesPerSample*/,
@@ -144,7 +145,7 @@ TEST(CallAudioDeviceModuleTest, PushCapturedAudioForwardsOnlyWhileRecording) {
 
     const std::vector<int16_t> samples{1, 2, 3, 4};
 
-    // Not recording yet — pushed audio is dropped.
+    // Запись ещё не идёт — переданное аудио отбрасывается.
     adm->pushCapturedAudio(samples.data(), samples.size(), 16000, 1);
     EXPECT_EQ(transport.recordedCallCount(), 0);
 
@@ -206,10 +207,10 @@ TEST(CallAudioDeviceModuleTest, SetPlayoutFormatChangesRateAndChannelsReportedTo
 TEST(CallAudioDeviceModuleTest, SetTotalDelayMsIsForwardedToRecordedDataIsAvailable) {
     auto adm = webrtc::make_ref_counted<CallAudioDeviceModule>(CallAudioDeviceModule::PlayoutSink{});
 
-    // FakeAudioTransport ignores totalDelayMS entirely (see its
-    // RecordedDataIsAvailable override), so this test uses a small
-    // dedicated double that actually captures the parameter — the
-    // shared fake wasn't built to assert on it.
+    // FakeAudioTransport полностью игнорирует totalDelayMS (см. её
+    // переопределение RecordedDataIsAvailable), поэтому этот тест использует
+    // небольшой отдельный дублёр, который реально захватывает этот параметр —
+    // общий фейк не был рассчитан на проверку этого значения.
     class DelayCapturingTransport : public webrtc::AudioTransport {
     public:
         int32_t RecordedDataIsAvailable(const void* /*audioSamples*/, size_t /*nSamples*/, size_t /*nBytesPerSample*/,

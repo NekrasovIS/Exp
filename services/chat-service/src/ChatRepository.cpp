@@ -8,10 +8,10 @@ namespace chat_service {
 
 namespace {
 
-/// @return True if @p login is a moderator of @p communityId, within an
-/// already-open @p transaction — shared by deleteMessage()/
-/// renameChannel()/deleteChannel(), each of which needs this same
-/// check alongside their own owner check.
+/// @return True, если @p login — модератор @p communityId, в рамках уже
+/// открытой @p transaction — используется совместно deleteMessage()/
+/// renameChannel()/deleteChannel(), каждому из которых нужна та же
+/// проверка наряду с собственной проверкой владельца.
 bool isModerator(pqxx::work& transaction, std::int64_t communityId, const std::string& login) {
     const pqxx::result rows =
         transaction.exec("SELECT is_moderator FROM memberships WHERE community_id = $1 AND member_login = $2",
@@ -82,7 +82,7 @@ MutationResult ChatRepository::deleteCommunity(std::int64_t id, const std::strin
         return MutationResult::kForbidden;
     }
 
-    // channels/memberships/messages cascade via ON DELETE CASCADE (see db/init.sql).
+    // channels/memberships/messages каскадно удаляются через ON DELETE CASCADE (см. db/init.sql).
     transaction.exec("DELETE FROM communities WHERE id = $1", pqxx::params{id});
     transaction.commit();
     return MutationResult::kSuccess;
@@ -108,11 +108,11 @@ std::optional<std::int64_t> ChatRepository::createChannel(std::int64_t community
 }
 
 namespace {
-// Templated on the row type since pqxx returns different row-reference
-// types from range-for iteration (pqxx::row_ref) vs. indexed access
-// (pqxx::const_result_iterator::reference) — both support operator[]
-// identically, so a template sidesteps needing two near-identical
-// overloads.
+// Шаблон по типу строки, поскольку pqxx возвращает разные типы ссылок
+// на строку при итерации range-for (pqxx::row_ref) и при индексированном
+// доступе (pqxx::const_result_iterator::reference) — оба одинаково
+// поддерживают operator[], поэтому шаблон избавляет от необходимости в
+// двух почти идентичных перегрузках.
 template <typename Row>
 Channel channelFromRow(const Row& row) {
     return Channel{.id = row[0].template as<std::int64_t>(),
@@ -216,7 +216,7 @@ MutationResult ChatRepository::deleteChannel(std::int64_t id, const std::string&
         return MutationResult::kForbidden;
     }
 
-    // messages cascade via ON DELETE CASCADE (see db/init.sql).
+    // messages каскадно удаляются через ON DELETE CASCADE (см. db/init.sql).
     transaction.exec("DELETE FROM channels WHERE id = $1", pqxx::params{id});
     transaction.commit();
     return MutationResult::kSuccess;
@@ -273,8 +273,8 @@ MutationResult ChatRepository::demoteModerator(std::int64_t communityId, const s
         return MutationResult::kForbidden;
     }
 
-    // A no-op UPDATE (targetLogin was never a member/moderator) is still
-    // kSuccess — see this method's doc comment.
+    // UPDATE без эффекта (targetLogin никогда не был участником/
+    // модератором) всё равно даёт kSuccess — см. doc-комментарий этого метода.
     transaction.exec("UPDATE memberships SET is_moderator = FALSE WHERE community_id = $1 AND member_login = $2",
                       pqxx::params{communityId, targetLogin});
     transaction.commit();
@@ -326,7 +326,7 @@ std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, con
                         .attachmentId = attachmentId,
                         .attachmentFilename = attachmentFilename};
     } catch (const pqxx::foreign_key_violation&) {
-        // Either channelId or attachmentId (if set) doesn't exist.
+        // Либо channelId, либо attachmentId (если установлен) не существует.
         return std::nullopt;
     }
 }
@@ -336,13 +336,13 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    // Newest-first LIMIT, then reversed below, so the result is
-    // chronological (oldest to newest) like a normal message log.
-    // beforeId unset binds SQL NULL, matched by the IS NULL branch
-    // (page ends at the newest message); set, it pages backward
-    // through history (only messages older than that id). id DESC as
-    // a secondary sort key makes the cursor unambiguous even if two
-    // messages share the same sent_at.
+    // LIMIT сначала по новейшим, затем разворачивается ниже, чтобы
+    // результат был хронологическим (от старых к новым), как в обычном
+    // логе сообщений. Неустановленный beforeId связывается с SQL NULL,
+    // что соответствует ветке IS NULL (страница заканчивается самым
+    // новым сообщением); установленный — листает историю назад (только
+    // сообщения старше этого id). id DESC как вторичный ключ сортировки
+    // делает курсор однозначным, даже если у двух сообщений совпадает sent_at.
     const pqxx::result rows = transaction.exec(
         "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
         "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
@@ -455,9 +455,9 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    // position(...) > 0 rather than ILIKE — a plain case-insensitive
-    // substring test, so characters like '%'/'_' in the query are
-    // matched literally instead of being treated as SQL wildcards.
+    // position(...) > 0 вместо ILIKE — обычная регистронезависимая
+    // проверка подстроки, поэтому символы вроде '%'/'_' в запросе
+    // сопоставляются буквально, а не трактуются как SQL-подстановочные знаки.
     const pqxx::result rows = transaction.exec(
         "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
         "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "

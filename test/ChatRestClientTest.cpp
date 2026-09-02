@@ -12,9 +12,9 @@
 #include <algorithm>
 #include <cstdlib>
 
-// Requires a live auth-service + user-service (to mint a real token)
-// and chat-service (REST). Skips itself rather than failing when the
-// stack isn't running — same pattern as ChatClientIntegrationTest.cpp.
+// Требует запущенных auth-service + user-service (чтобы выпустить настоящий
+// токен) и chat-service (REST). Пропускает себя вместо падения, если стек
+// не запущен — тот же паттерн, что и в ChatClientIntegrationTest.cpp.
 
 namespace devicehub {
 namespace {
@@ -36,9 +36,9 @@ QString uniqueLogin(const QString& prefix) {
     return prefix + QStringLiteral("-") + QString::number(QDateTime::currentMSecsSinceEpoch());
 }
 
-// Registers a brand-new user against a live auth-service and returns
-// its auto-issued token, or an empty string if the stack isn't
-// reachable within the timeout.
+// Регистрирует нового пользователя на живом auth-service и возвращает
+// автоматически выданный ему токен, либо пустую строку, если стек
+// недоступен в течение тайм-аута.
 QString registerAndGetToken(const QString& loginPrefix) {
     AuthClient authClient(authServiceUrl());
     QString token;
@@ -179,9 +179,9 @@ TEST(ChatRestClientTest, RenameCommunityByNonOwnerEmitsErrorWithServerDetail) {
     intruderClient.renameCommunity(intruderToken, communityId, QStringLiteral("hijacked"));
     loop.exec();
 
-    // The server's own detail ("only the owner can do that"), not a
-    // generic "server replied: Forbidden" — this is exactly the bug
-    // extractErrorMessage() was written to fix (see issue #41).
+    // Собственная детализация сервера ("only the owner can do that"), а не
+    // общее "server replied: Forbidden" — это именно тот баг, для
+    // исправления которого написан extractErrorMessage() (см. issue #41).
     EXPECT_FALSE(errorMessage.isEmpty());
     EXPECT_NE(errorMessage.indexOf(QStringLiteral("owner")), -1);
 }
@@ -538,8 +538,9 @@ TEST(ChatRestClientTest, PromoteThenListThenDemoteModeratorRoundTrip) {
     }
     ASSERT_GT(communityId, 0);
 
-    // Doesn't need to be a real registered account — chat-service's
-    // memberships table has no foreign key into user-service's users.
+    // Не обязан быть реальным зарегистрированным аккаунтом — у таблицы
+    // memberships в chat-service нет внешнего ключа на таблицу users
+    // в user-service.
     const QString targetLogin = uniqueLogin(QStringLiteral("chat-rest-mod-target"));
 
     {
