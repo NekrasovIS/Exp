@@ -88,3 +88,54 @@ jobs:
 
       - name: Test
         run: ctest --test-dir services/${{ matrix.service }}/build --output-on-failure
+
+  fuzz:
+    # Real coverage-guided fuzzing (issue #121/#132/#133) — replaces the
+    # "clang-cl unavailable on this Windows dev machine" blocker with
+    # ubuntu-latest, which ships Clang (and its bundled libFuzzer runtime)
+    # out of the box. A bounded smoke run (-max_total_time), not a full
+    # scheduled fuzzing campaign — this catches regressions on every
+    # push/PR; long-running exploratory fuzzing is a separate concern.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: chat-service
+            targets: base64_fuzz json_guard_fuzz
+          - service: auth-service
+            targets: token_verify_fuzz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      - name: Configure
+        run: >
+          cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-fuzz
+          -DCMAKE_CXX_COMPILER=clang++ -DDEVICEHUB_ENABLE_FUZZING=ON
+
+      - name: Build fuzz targets
+        run: cmake --build services/${{ matrix.service }}/build-fuzz --target ${{ matrix.targets }} --parallel
+
+      - name: Run fuzz targets (bounded smoke run)
+        run: |
+          for target in ${{ matrix.targets }}; do
+            echo "::group::$target"
+            ./services/${{ matrix.service }}/build-fuzz/$target -max_total_time=30
+            echo "::endgroup::"
+          done

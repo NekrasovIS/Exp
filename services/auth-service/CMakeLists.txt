@@ -84,3 +84,18 @@ target_link_libraries(auth_service_tests PRIVATE
 )
 include(GoogleTest)
 gtest_discover_tests(auth_service_tests)
+
+# Real coverage-guided fuzzing (issue #121/#132/#133) — off by default,
+# Clang-only; see chat-service/CMakeLists.txt's copy of this same block
+# for the full rationale (MSVC's cl.exe doesn't support -fsanitize=fuzzer).
+option(DEVICEHUB_ENABLE_FUZZING "Build libFuzzer targets (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_FUZZING requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+
+    add_executable(token_verify_fuzz fuzz/TokenVerifyFuzz.cpp)
+    target_link_libraries(token_verify_fuzz PRIVATE auth_service_core)
+    target_compile_options(token_verify_fuzz PRIVATE -fsanitize=fuzzer,address)
+    target_link_options(token_verify_fuzz PRIVATE -fsanitize=fuzzer,address)
+endif()
