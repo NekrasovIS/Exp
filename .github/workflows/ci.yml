@@ -5,10 +5,34 @@ on:
     branches: ["**"]
   pull_request:
 
+concurrency:
+  # issue #169: macOS-раннеры этого аккаунта — общий, сильно
+  # ограниченный по конкурентности ресурс (обычно один одновременный
+  # job), а build-and-test занимает часы. Без отмены устаревших
+  # прогонов при повторном пуше в ту же ветку/PR они просто копятся в
+  # очереди друг за другом — реальная причина того, что job выглядит
+  # "зависшим": он не падает, он часами ждёт своей очереди за
+  # прогонами по более старым, уже неактуальным коммитам.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
-    runs-on: macos-14
+    # issue #169: macos-14 не пережил ни одного прогона этого job'а
+    # даже после фикса кэша (x-gha) — раннер обрывается ~1ч20-25м внутрь
+    # шага Configure, без финального лога (инфраструктурный предел
+    # GitHub-хостинга macOS-раннеров на этом аккаунте, не что-то
+    # исправимое правкой workflow). Бизнес-логика проекта кроссплатформенна
+    # по CLAUDE.md — ubuntu-latest быстрее и стабильнее на GitHub-хостинге;
+    # macOS-специфика (codesign, permissions) остаётся непроверенной этим
+    # job'ом, но это уже лучше, чем job, который никогда не завершается.
+    runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      # Нативный GitHub Actions cache backend vcpkg (x-gha) заливает в
+      # кэш каждый собранный порт сразу по готовности — упавший на
+      # середине прогон всё равно сохраняет то, что успел собрать.
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
     steps:
       - name: Checkout
@@ -16,16 +40,26 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache vcpkg binary cache
-        uses: actions/cache@v4
+      - name: Export GitHub Actions cache environment variables (vcpkg x-gha backend)
+        uses: actions/github-script@v7
         with:
-          path: ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Install autotools (needed by vcpkg's libb2 port, a qtbase dependency)
-        run: brew install autoconf autoconf-archive automake libtool
+      - name: Install build dependencies (autotools for vcpkg's libb2 port, X11/xkbcommon/OpenGL/PulseAudio dev headers for qtbase's Linux platform plugin)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf autoconf-archive automake libtool libltdl-dev \
+            libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev \
+            libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev \
+            libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev \
+            libxcb-xinput-dev libsm-dev libice-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libatspi2.0-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libpulse-dev libdrm-dev \
+            libfontconfig1-dev libfreetype-dev nasm
 
       - name: Configure
         run: cmake -S . -B build
@@ -34,4 +68,11 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Test
+        # Никакого реального дисплея на раннере нет — Qt-тесты всё равно
+        # создают настоящие QWidget/QApplication (структура окна,
+        # заполнение списков), просто без реального захвата устройств
+        # (см. README, раздел «Тесты»); offscreen-платформенный плагин
+        # Qt не требует ни X-сервера, ни xvfb.
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure
