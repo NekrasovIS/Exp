@@ -10,43 +10,46 @@
 namespace devicehub {
 
 /**
- * @brief Bridges Qt camera/screen-capture frames into libwebrtc's video
- *        pipeline — the video-side counterpart to CallAudioDeviceModule
- *        (issue #64): Qt Multimedia has no built-in way to push frames
- *        into a webrtc::VideoTrackSourceInterface, so this class exists
- *        to be that bridge.
+ * @brief Соединяет кадры с камеры/захвата экрана Qt с видео-конвейером
+ *        libwebrtc — видео-аналог CallAudioDeviceModule (issue #64):
+ *        у Qt Multimedia нет встроенного способа проталкивать кадры в
+ *        webrtc::VideoTrackSourceInterface, поэтому этот класс
+ *        существует как такой мост.
  *
- * pushFrame() converts each QVideoFrame to I420 via QImage as an
- * intermediate step (QVideoFrame::toImage(), then
- * libyuv::ARGBToI420()) rather than hand-parsing every possible native
- * camera pixel format directly — simpler and more robust at the cost
- * of an extra conversion pass, matching the "first pass, not yet
- * tuned for peak efficiency" scope of CallAudioDeviceModule. Feeds the
- * result to AdaptedVideoTrackSource::OnFrame(), which — via
- * AdaptFrame() — also handles per-sink resolution adaptation (e.g. a
- * receiver asking for a smaller frame under bandwidth pressure) and
- * all sink registration/management.
+ * pushFrame() конвертирует каждый QVideoFrame в I420 через QImage как
+ * промежуточный шаг (QVideoFrame::toImage(), затем
+ * libyuv::ARGBToI420()), а не разбирает вручную каждый возможный
+ * нативный формат пикселей камеры напрямую — проще и надёжнее ценой
+ * дополнительного прохода конвертации, что соответствует объёму «первый
+ * проход, ещё не настроено на пиковую эффективность», как и у
+ * CallAudioDeviceModule. Передаёт результат в
+ * AdaptedVideoTrackSource::OnFrame(), которая — через AdaptFrame() —
+ * также занимается адаптацией разрешения для каждого sink'а (например,
+ * приёмник просит кадр поменьше под давлением пропускной способности) и
+ * всей регистрацией/управлением sink'ами.
  */
 class CallVideoTrackSource : public webrtc::AdaptedVideoTrackSource {
 public:
-    /// @p isScreencast should be true for a screen-share source — see
-    /// is_screencast()'s contract in webrtc::VideoTrackSourceInterface
-    /// (lets receivers apply screencast-appropriate defaults).
+    /// @p isScreencast должен быть true для источника демонстрации
+    /// экрана — см. контракт is_screencast() в
+    /// webrtc::VideoTrackSourceInterface (позволяет приёмникам применять
+    /// значения по умолчанию, подходящие для screencast).
     explicit CallVideoTrackSource(bool isScreencast = false);
 
-    /// Converts and pushes a captured frame into the pipeline. Safe to
-    /// call from any thread (matches AdaptedVideoTrackSource's own
-    /// OnFrame()/AdaptFrame() contract); a no-op if the frame is
-    /// invalid or there are no interested sinks.
+    /// Конвертирует и проталкивает захваченный кадр в конвейер.
+    /// Безопасно вызывать из любого потока (соответствует собственному
+    /// контракту OnFrame()/AdaptFrame() у AdaptedVideoTrackSource);
+    /// ничего не делает, если кадр невалиден или нет заинтересованных
+    /// sink'ов.
     void pushFrame(const QVideoFrame& frame);
 
-    /// Flips the screencast hint on an already-created source — CallManager
-    /// (issue #112) shares this one track/source between camera video and
-    /// screen share rather than creating a second track, so switching
-    /// which one is active needs the hint to change after construction
-    /// too. Thread-safe like the rest of this class's public surface —
-    /// is_screencast() can be queried from a WebRTC thread while this is
-    /// called from the GUI thread.
+    /// Переключает подсказку screencast на уже созданном источнике —
+    /// CallManager (issue #112) делит этот единственный трек/источник
+    /// между видео с камеры и демонстрацией экрана, а не создаёт второй,
+    /// поэтому переключение того, что активно, требует менять подсказку
+    /// и после конструирования. Потокобезопасно, как и остальная
+    /// публичная поверхность этого класса — is_screencast() может
+    /// опрашиваться с потока WebRTC, пока это вызывается с GUI-потока.
     void setIsScreencast(bool isScreencast);
 
     bool is_screencast() const override;

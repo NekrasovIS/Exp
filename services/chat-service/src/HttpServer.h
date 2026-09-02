@@ -11,29 +11,29 @@
 namespace chat_service {
 
 /**
- * @brief REST front-end for ChatService: communities, channels, joining,
- *        moderator management (issue #114), message history,
- *        attachment upload/download (issue #116), message search
- *        (issue #118), and per-member channel-key exchange for E2E
- *        encryption (issue #138). Every route requires a valid
- *        `Authorization: Bearer <token>` header, checked against
- *        auth-service via AuthServiceClient.
+ * @brief REST-фронтенд для ChatService: сообщества, каналы, вступление,
+ *        управление модераторами (issue #114), история сообщений,
+ *        загрузка/скачивание вложений (issue #116), поиск сообщений
+ *        (issue #118) и обмен пер-участник ключами канала для E2E-
+ *        шифрования (issue #138). Каждый маршрут требует действительный
+ *        заголовок `Authorization: Bearer <token>`, проверяемый через
+ *        auth-service посредством AuthServiceClient.
  *
- * Promoting/demoting a moderator is owner-only — writeMutationResult()'s
- * kForbidden ("only the owner can do that") already covers it, same as
- * rename/delete community.
+ * Назначение/снятие модератора — только для владельца: kForbidden
+ * ("only the owner can do that") из writeMutationResult() уже покрывает
+ * это, как и переименование/удаление сообщества.
  *
- * Real-time message delivery is WebSocketServer's job, not this class's
- * — this is history/CRUD only.
+ * Доставка сообщений в реальном времени — задача WebSocketServer, а не
+ * этого класса — здесь только история/CRUD.
  */
 class HttpServer {
 public:
     HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient);
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокируется, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:

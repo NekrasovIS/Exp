@@ -2,7 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <QApplication>
 #include <QLabel>
+#include <QMouseEvent>
+#include <QSignalSpy>
 
 namespace devicehub {
 namespace {
@@ -24,6 +27,22 @@ TEST(FooterBarTest, SetProfileTextWithEmptyStringFallsBackToQuestionMark) {
 
     EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerProfileLabel"))->text(), QString());
     EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerAvatar"))->text(), QStringLiteral("?"));
+}
+
+TEST(FooterBarTest, ClickingAvatarEmitsAccountSettingsRequested) {
+    FooterBar bar;
+    QSignalSpy spy(&bar, &FooterBar::accountSettingsRequested);
+
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(5, 5), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(bar.avatarLabel(), &press);
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(FooterBarTest, AvatarHasPointingHandCursorToSignalItIsClickable) {
+    FooterBar bar;
+
+    EXPECT_EQ(bar.avatarLabel()->cursor().shape(), Qt::PointingHandCursor);
 }
 
 }  // namespace

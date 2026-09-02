@@ -29,7 +29,7 @@ TEST(ChatViewTest, SetEncryptedAddsLockPrefixAndDisablesAttachAndSearch) {
     const QLabel* title = view.findChild<QLabel*>(QStringLiteral("chatChannelTitle"));
     ASSERT_NE(title, nullptr);
     EXPECT_TRUE(title->text().endsWith(QStringLiteral("secret")));
-    EXPECT_NE(title->text(), QStringLiteral("secret"));  // lock prefix present
+    EXPECT_NE(title->text(), QStringLiteral("secret"));  // присутствует префикс с замком
     EXPECT_FALSE(view.attachButton()->isEnabled());
     EXPECT_FALSE(view.searchButton()->isEnabled());
 }
@@ -52,11 +52,11 @@ TEST(ChatViewTest, ShowPlaceholderSwitchesBackFromChannel) {
     ChatView view;
     view.showChannel(QStringLiteral("general"));
 
-    // No public accessor for the current stack page; showPlaceholder()'s
-    // observable contract from outside is "doesn't crash and can be
-    // followed by showChannel() again" — covered together with the next
-    // assertion, since the title label is only meaningfully re-checked
-    // after switching back to a (possibly different) channel.
+    // Публичного метода доступа к текущей странице стека нет; наблюдаемый
+    // извне контракт showPlaceholder() — «не падает и после него можно снова
+    // вызвать showChannel()» — проверяется вместе со следующим assert'ом,
+    // поскольку метку заголовка осмысленно перепроверять только после
+    // переключения обратно на (возможно, другой) канал.
     view.showPlaceholder();
     view.showChannel(QStringLiteral("random"));
 
@@ -93,7 +93,7 @@ TEST(ChatViewTest, ClearLogRemovesAllAppendedRows) {
 
     view.clearLog();
 
-    EXPECT_EQ(view.messagesContainer()->layout()->count(), 1);  // just the trailing stretch
+    EXPECT_EQ(view.messagesContainer()->layout()->count(), 1);  // остался только завершающий stretch
 }
 
 TEST(ChatViewTest, SetCallStateReflectsJoinedAndMuted) {
@@ -121,9 +121,9 @@ TEST(ChatViewTest, SetCallParticipantsShowsJoinedNames) {
 
     view.setCallParticipants({QStringLiteral("alice"), QStringLiteral("bob")});
 
-    // isHidden() reflects the explicit hide/show flag regardless of
-    // whether the (never-shown, headless-test) widget is actually
-    // mapped on screen — see ToastBannerTest.cpp for the same pattern.
+    // isHidden() отражает явный флаг hide/show независимо от того,
+    // отображается ли (никогда не показываемый, в headless-тесте) виджет
+    // реально на экране — тот же паттерн см. в ToastBannerTest.cpp.
     EXPECT_FALSE(view.callParticipantsLabel()->isHidden());
     EXPECT_TRUE(view.callParticipantsLabel()->text().contains(QStringLiteral("alice")));
     EXPECT_TRUE(view.callParticipantsLabel()->text().contains(QStringLiteral("bob")));

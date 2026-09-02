@@ -21,14 +21,15 @@ class QVideoWidget;
 namespace devicehub {
 
 /**
- * @brief Main content area: shows a placeholder until a channel is
- *        selected in ChannelsPanel, then a grouped, avatar-annotated
- *        message list and send box for that channel.
+ * @brief Основная область содержимого: показывает заглушку, пока в
+ *        ChannelsPanel не выбран канал, а затем сгруппированный список
+ *        сообщений с аватарами и поле отправки для этого канала.
  *
- * Pure presentation — MainWindow owns ChatClient and feeds messages in
- * via appendMessage()/appendSystemLine()/clearLog(); this class only
- * owns layout, the placeholder/channel toggle, and deciding (via
- * chat_message_grouping) whether a message needs its own header.
+ * Чистое представление — MainWindow владеет ChatClient и передаёт
+ * сообщения через appendMessage()/appendSystemLine()/clearLog(); этот
+ * класс отвечает только за layout, переключение заглушка/канал и
+ * решение (через chat_message_grouping), нужен ли сообщению собственный
+ * заголовок.
  */
 class ChatView : public QWidget {
     Q_OBJECT
@@ -36,111 +37,118 @@ class ChatView : public QWidget {
 public:
     explicit ChatView(QWidget* parent = nullptr);
 
-    /// Switches back to the "no channel selected" placeholder.
+    /// Возвращает обратно к заглушке "канал не выбран".
     void showPlaceholder();
 
-    /// Switches to the chat page and sets its header to @p channelName.
+    /// Переключает на страницу чата и выставляет заголовок @p channelName.
     void showChannel(const QString& channelName);
 
-    /// Marks whether the currently open channel is encrypted (issue
-    /// #138) — prefixes the header with a lock, and disables Attach/
-    /// Search (not supported for encrypted channels in this phase, so
-    /// disabled rather than left to fail server-side). Call after
-    /// showChannel() for the channel this applies to.
+    /// Отмечает, зашифрован ли текущий открытый канал (issue #138) —
+    /// добавляет к заголовку значок замка и отключает Attach/Search (не
+    /// поддерживаются для зашифрованных каналов на этом этапе, поэтому
+    /// отключены, а не оставлены падать на стороне сервера). Вызывать
+    /// после showChannel() для того канала, к которому это относится.
     void setEncrypted(bool encrypted);
 
-    /// Needed to decide whether an appended message is "own" (bubble
-    /// right-aligned, accent-colored, no avatar) or someone else's.
+    /// Нужно, чтобы решить, является ли добавляемое сообщение "своим"
+    /// (пузырь выровнен вправо, акцентный цвет, без аватара) или чужим.
     void setCurrentUserLogin(const QString& login);
 
-    /// Appends a real chat message — grouped under the previous one
-    /// (no repeated avatar/name/time) if they're from the same author
-    /// within a few minutes of each other.
+    /// Добавляет настоящее сообщение чата — группируется с предыдущим
+    /// (без повтора аватара/имени/времени), если они от одного автора
+    /// и в пределах нескольких минут друг от друга.
     void appendMessage(const ChatMessage& message);
 
-    /// Inserts @p messages (chronological, oldest to newest) at the top
-    /// of the list, above whatever's already shown — issue #100's
-    /// "Load older messages". Grouping between them is computed only
-    /// within this batch (compared to whatever was the previously
-    /// oldest message shown is deliberately skipped — see class doc
-    /// comment). Preserves the user's current scroll position rather
-    /// than jumping to the bottom, unlike appendMessage().
+    /// Вставляет @p messages (в хронологическом порядке, от старых к
+    /// новым) в начало списка, над уже показанным — "Load older
+    /// messages" из issue #100. Группировка между ними считается только
+    /// внутри этой пачки (сравнение с тем, что было ранее самым старым
+    /// показанным сообщением, намеренно пропускается — см.
+    /// doc-комментарий класса). В отличие от appendMessage(), сохраняет
+    /// текущую позицию прокрутки пользователя, а не прыгает вниз.
     void prependMessages(const QList<ChatMessage>& messages);
 
-    /// Shows/hides the "Load older messages" button above the message
-    /// list — MainWindow calls this with whether the last history page
-    /// it fetched looked like there might be more (came back full).
+    /// Показывает/скрывает кнопку "Load older messages" над списком
+    /// сообщений — MainWindow вызывает это с признаком того, выглядела
+    /// ли последняя загруженная страница истории так, будто есть ещё
+    /// (пришла полной).
     void setLoadOlderVisible(bool visible);
 
-    /// Updates @p id's displayed body in place (issue #107) — a no-op
-    /// if that message isn't currently shown (e.g. scrolled out of a
-    /// history page that's since been replaced).
+    /// Обновляет отображаемый текст сообщения @p id на месте (issue
+    /// #107) — ничего не делает, если это сообщение сейчас не
+    /// показано (например, прокручено за пределы страницы истории,
+    /// которая с тех пор была заменена).
     void updateMessageBody(qint64 id, const QString& newBody);
 
-    /// Removes @p id's row entirely, if currently shown.
+    /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
 
-    /// Scrolls @p id's row into view, if currently shown (issue #118,
-    /// jumping to a search result) — @return false if that message isn't
-    /// currently loaded (e.g. further back than "Load older" has fetched).
+    /// Прокручивает к строке @p id, если она сейчас показана (issue
+    /// #118, переход к результату поиска) — @return false, если это
+    /// сообщение сейчас не загружено (например, дальше в истории, чем
+    /// успел загрузить "Load older").
     bool scrollToMessage(qint64 id);
 
-    /// True while the send box is editing an existing message rather
-    /// than composing a new one — set by clicking a message's own
-    /// "Edit" button, cleared by cancelEditingMessage() or (MainWindow)
-    /// once the edit is actually submitted. -1 when not editing.
+    /// True, пока поле отправки редактирует существующее сообщение, а
+    /// не составляет новое — устанавливается кликом по собственной
+    /// кнопке "Edit" сообщения, сбрасывается cancelEditingMessage() или
+    /// (со стороны MainWindow) после того, как правка фактически
+    /// отправлена. -1, если редактирование не идёт.
     [[nodiscard]] qint64 editingMessageId() const { return editingMessageId_; }
 
-    /// Leaves edit mode: clears editingMessageId_, restores the send
-    /// button's normal text, and clears the message box.
+    /// Выходит из режима редактирования: сбрасывает editingMessageId_,
+    /// восстанавливает обычный текст кнопки отправки и очищает поле
+    /// сообщения.
     void cancelEditingMessage();
 
-    /// Appends a muted, centered system/status line (subscribed,
-    /// errors, ...) — always breaks any pending message grouping, so
-    /// the next real message gets its own header regardless of author.
+    /// Добавляет приглушённую, центрированную системную/статусную строку
+    /// (подписка, ошибки, ...) — всегда прерывает текущую группировку
+    /// сообщений, так что следующее настоящее сообщение получает
+    /// собственный заголовок независимо от автора.
     void appendSystemLine(const QString& text);
 
-    /// Clears the message list and resets grouping state.
+    /// Очищает список сообщений и сбрасывает состояние группировки.
     void clearLog();
 
-    /// Updates the Call/Leave and Mute/Unmute buttons — MainWindow calls
-    /// this after every CallManager state change (join, leave, mute
-    /// toggle), rather than this widget tracking call state itself.
-    /// Leaving a call (inCall == false) also resets the video strip:
-    /// hides it and drops every remote tile, since video can't outlive
-    /// the call it belongs to.
+    /// Обновляет кнопки Call/Leave и Mute/Unmute — MainWindow вызывает
+    /// это после каждого изменения состояния CallManager (вход, выход,
+    /// переключение mute), а не сам этот виджет отслеживает состояние
+    /// звонка. Выход из звонка (inCall == false) также сбрасывает
+    /// видео-полосу: скрывает её и убирает все удалённые плитки,
+    /// поскольку видео не может пережить звонок, которому принадлежит.
     void setCallState(bool inCall, bool muted);
 
-    /// Updates the small "who's in the call" label.
+    /// Обновляет небольшую метку "кто в звонке".
     void setCallParticipants(const QStringList& participants);
 
-    /// Updates the video toggle button and the local preview's
-    /// visibility — MainWindow calls this after every
+    /// Обновляет кнопку переключения видео и видимость локального
+    /// превью — MainWindow вызывает это после каждого
     /// CallManager::enableVideo()/disableVideo().
     void setVideoEnabled(bool enabled);
 
-    /// Same as setVideoEnabled(), for screen share (issue #112) —
-    /// MainWindow calls this after every
-    /// CallManager::enableScreenShare()/disableScreenShare(). Enabling
-    /// one always implies the other is now disabled (CallManager's
-    /// video/screen-share are mutually exclusive), so callers should
-    /// call both setters together rather than assuming one implies the
-    /// other here.
+    /// То же самое, что setVideoEnabled(), для демонстрации экрана
+    /// (issue #112) — MainWindow вызывает это после каждого
+    /// CallManager::enableScreenShare()/disableScreenShare(). Включение
+    /// одного всегда подразумевает, что другое теперь отключено (видео
+    /// и демонстрация экрана в CallManager взаимоисключающие), поэтому
+    /// вызывающий код должен вызывать оба сеттера вместе, а не полагаться
+    /// здесь на то, что один подразумевает другой.
     void setScreenShareEnabled(bool enabled);
 
-    /// Shows (creating its tile on first call) the latest decoded frame
-    /// from @p peerLogin's incoming video track.
+    /// Показывает (создавая плитку при первом вызове) последний
+    /// декодированный кадр входящего видеотрека @p peerLogin.
     void showRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
 
-    /// Drops @p peerLogin's video tile, if it has one.
+    /// Убирает видео-плитку @p peerLogin, если она есть.
     void removeRemoteVideo(const QString& peerLogin);
 
-    /// Shows "<login> is typing…" for a few seconds, then auto-hides —
-    /// MainWindow calls this from ChatClient::userTyping(). Issue #96:
-    /// only the most recently reported typer is shown at a time
-    /// (accepted first-version simplification — chat-service has no
-    /// "stopped typing" message, so there's no clean way to track a set
-    /// of simultaneous typers without one).
+    /// Показывает "<login> is typing…" на несколько секунд, затем
+    /// автоматически скрывает — MainWindow вызывает это из
+    /// ChatClient::userTyping(). Issue #96: одновременно показывается
+    /// только последний, о ком пришло сообщение о наборе текста
+    /// (принятое упрощение первой версии — у chat-service нет сообщения
+    /// "перестал печатать", поэтому без него нет чистого способа
+    /// отслеживать набор одновременно печатающих).
     void showTypingUser(const QString& login);
 
     [[nodiscard]] QWidget* messagesContainer() const { return messagesContainer_; }
@@ -158,77 +166,83 @@ public:
     [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
 
 signals:
-    /// Emitted when the placeholder's "Create channel" button is
-    /// clicked — MainWindow wires this to the same handling as
-    /// ChannelsPanel's own "+" button.
+    /// Испускается при клике по кнопке "Create channel" на заглушке —
+    /// MainWindow подключает это к той же обработке, что и собственная
+    /// кнопка "+" у ChannelsPanel.
     void createChannelRequested();
 
-    /// Call button clicked — MainWindow decides join vs. leave based on
-    /// CallManager::inCall() and calls back into setCallState().
+    /// Клик по кнопке звонка — MainWindow решает, входить или выходить,
+    /// на основе CallManager::inCall(), и вызывает обратно
+    /// setCallState().
     void callToggleRequested();
 
-    /// Mute button clicked — same pattern as callToggleRequested().
+    /// Клик по кнопке mute — тот же паттерн, что и callToggleRequested().
     void muteToggleRequested();
 
-    /// Video toggle button clicked — same pattern as
-    /// callToggleRequested(): MainWindow decides enable vs. disable
-    /// based on CallManager::videoEnabled() and calls back into
+    /// Клик по кнопке переключения видео — тот же паттерн, что и
+    /// callToggleRequested(): MainWindow решает включить или отключить
+    /// на основе CallManager::videoEnabled() и вызывает обратно
     /// setVideoEnabled().
     void videoToggleRequested();
 
-    /// Screen share toggle button clicked — same pattern as
-    /// videoToggleRequested().
+    /// Клик по кнопке переключения демонстрации экрана — тот же
+    /// паттерн, что и videoToggleRequested().
     void screenShareToggleRequested();
 
-    /// "Search" clicked (issue #118) — MainWindow shows/raises its
-    /// SearchDialog.
+    /// Клик по "Search" (issue #118) — MainWindow показывает/поднимает
+    /// свой SearchDialog.
     void openSearchRequested();
 
-    /// The user is typing in the message box — throttled (at most once
-    /// per cooldown window) rather than once per keystroke, so
-    /// MainWindow's ChatClient::sendTyping() doesn't spam the network.
+    /// Пользователь печатает в поле сообщения — с ограничением частоты
+    /// (не чаще одного раза за окно охлаждения), а не при каждом
+    /// нажатии клавиши, чтобы ChatClient::sendTyping() из MainWindow не
+    /// заваливал сеть.
     void typingRequested();
 
-    /// "Load older messages" clicked — MainWindow fetches the next page
-    /// before the oldest message ChatView currently has.
+    /// Клик по "Load older messages" — MainWindow запрашивает
+    /// следующую страницу перед самым старым сообщением, которое
+    /// сейчас есть у ChatView.
     void loadOlderMessagesRequested();
 
-    /// "Delete" clicked on one of the user's own messages.
+    /// Клик по "Delete" на одном из собственных сообщений пользователя.
     void deleteMessageRequested(qint64 id);
 
-    /// "Attach" clicked (issue #116) — MainWindow opens a file picker,
-    /// uploads the chosen file via ChatRestClient, then auto-sends it as
-    /// a message (see MainWindow::onAttachFileClicked()'s doc comment).
+    /// Клик по "Attach" (issue #116) — MainWindow открывает выбор
+    /// файла, загружает выбранный файл через ChatRestClient, затем
+    /// автоматически отправляет его как сообщение (см. doc-комментарий
+    /// MainWindow::onAttachFileClicked()).
     void attachFileRequested();
 
-    /// "Download" clicked on a message with an attachment — bubbled up
-    /// from whichever ChatMessageRow it came from.
+    /// Клик по "Download" на сообщении с вложением — всплывает вверх
+    /// из того ChatMessageRow, откуда пришёл.
     void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
 
 private:
-    /// Wires a freshly created row's editRequested()/deleteRequested()
-    /// to this view's own edit-mode state / deleteMessageRequested() —
-    /// shared by appendMessage() (the only place rows are created,
-    /// for now).
+    /// Подключает editRequested()/deleteRequested() свежесозданной
+    /// строки к собственному состоянию режима редактирования этого
+    /// view / deleteMessageRequested() — используется совместно
+    /// appendMessage() (пока единственное место, где создаются строки).
     void connectMessageRow(ChatMessageRow* row);
 
-    /// Local preview/strip visibility is "either camera video or screen
-    /// share is active" — recomputed from videoActive_/screenShareActive_
-    /// rather than each setter's own @p enabled, so calling
-    /// setVideoEnabled()/setScreenShareEnabled() in either order after a
-    /// mutually-exclusive toggle still leaves the right one visible.
+    /// Видимость локального превью/полосы — это "активно видео с
+    /// камеры или демонстрация экрана" — пересчитывается из
+    /// videoActive_/screenShareActive_, а не из собственного @p enabled
+    /// каждого сеттера, так что вызов setVideoEnabled()/
+    /// setScreenShareEnabled() в любом порядке после взаимоисключающего
+    /// переключения всё равно оставляет видимым нужное.
     void updateLocalVideoVisibility();
-    /// Re-renders channelTitleLabel_ from currentChannelName_/encrypted_
-    /// — shared by showChannel() and setEncrypted() so either can be
-    /// called first without one clobbering the other's effect.
+    /// Перерисовывает channelTitleLabel_ из currentChannelName_/encrypted_
+    /// — используется совместно showChannel() и setEncrypted(), так что
+    /// любой из них можно вызвать первым, не затерев эффект другого.
     void updateChannelTitleLabel();
 
 
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
-    /// The plain channel name, without setEncrypted()'s lock prefix —
-    /// showChannel() sets this; setEncrypted() re-derives the label text
-    /// from it so the two can be called in either order.
+    /// Обычное имя канала, без префикса-замка от setEncrypted() —
+    /// showChannel() устанавливает это; setEncrypted() заново выводит
+    /// текст метки из этого значения, так что оба метода можно вызывать
+    /// в любом порядке.
     QString currentChannelName_;
     QScrollArea* scrollArea_ = nullptr;
     QWidget* messagesContainer_ = nullptr;
@@ -256,11 +270,12 @@ private:
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;
-    /// True while the scrollbar is at (or very near) the bottom — new
-    /// messages keep it pinned there, matching a normal chat's
-    /// behavior, but stop doing so once the user scrolls up to read
-    /// history, and updated as they scroll further. See the
-    /// rangeChanged/valueChanged wiring in the constructor.
+    /// True, пока полоса прокрутки находится (или почти находится)
+    /// внизу — новые сообщения удерживают её там, как ведёт себя
+    /// обычный чат, но это прекращается, как только пользователь
+    /// прокручивает вверх для чтения истории, и обновляется по мере
+    /// дальнейшей прокрутки. См. подключение rangeChanged/valueChanged
+    /// в конструкторе.
     bool stickToBottom_ = true;
     qint64 editingMessageId_ = -1;
 };

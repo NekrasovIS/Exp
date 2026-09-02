@@ -2,21 +2,26 @@
 
 #include <gtest/gtest.h>
 
+#include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QTabWidget>
 
 #include "devices/DeviceEnumerator.h"
 
-// These tests deliberately never click a button that would start real
-// capture (mic/camera/screen): the plain devicehub_tests CLI binary has
-// no Info.plist usage descriptions, and macOS aborts a process that
-// touches those APIs without one — unlike DeviceHub.app. What's safe to
-// verify without opening a device is that the UI builds correctly and
-// its device lists match what DeviceEnumerator reports.
+// Эти тесты намеренно никогда не нажимают кнопку, которая запускала бы
+// реальный захват (микрофон/камера/экран): у обычного CLI-бинарника
+// devicehub_tests нет описаний использования (usage descriptions) в
+// Info.plist, и macOS аварийно завершает процесс, который обращается к этим
+// API без них — в отличие от DeviceHub.app. Безопасно проверить без
+// открытия устройства можно то, что UI собирается корректно и его списки
+// устройств совпадают с тем, что сообщает DeviceEnumerator.
 
 namespace devicehub {
 namespace {
@@ -50,6 +55,28 @@ TEST(MainWindowUiTest, SidebarFooterAndAccountMenuExist) {
     ASSERT_NE(accountMenuButton, nullptr);
 
     EXPECT_EQ(footerProfileLabel->text(), QStringLiteral("Not signed in"));
+}
+
+TEST(MainWindowUiTest, AvatarClickShowsAccountMenuWithDisabledActionsWhenSignedOut) {
+    // Issue #151: account settings move to a menu anchored on the
+    // footer avatar rather than living only in the top-right
+    // AccountMenu popup. Edit Profile/Sign Out only make sense once
+    // signed in, so both start disabled here.
+    const MainWindow window;
+
+    auto* avatar = window.findChild<QLabel*>("footerAvatar");
+    ASSERT_NE(avatar, nullptr);
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(5, 5), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(avatar, &press);
+
+    auto* menu = window.findChild<QMenu*>("accountSettingsMenu");
+    ASSERT_NE(menu, nullptr);
+    auto* editProfileAction = menu->findChild<QAction*>("editProfileAction");
+    auto* signOutAction = menu->findChild<QAction*>("signOutAction");
+    ASSERT_NE(editProfileAction, nullptr);
+    ASSERT_NE(signOutAction, nullptr);
+    EXPECT_FALSE(editProfileAction->isEnabled());
+    EXPECT_FALSE(signOutAction->isEnabled());
 }
 
 TEST(MainWindowUiTest, DeviceCombosMatchEnumerator) {
@@ -126,9 +153,9 @@ TEST(MainWindowUiTest, DeviceErrorStatusLabelsExistAndStartEmpty) {
 TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     const MainWindow window;
 
-    // #51: the flat QPlainTextEdit log was replaced by a scrollable,
-    // dynamically-populated message list (ChatMessageRow widgets) — see
-    // ChatMessageGroupingTest for the header-grouping logic itself.
+    // #51: плоский лог на QPlainTextEdit заменён прокручиваемым, динамически
+    // заполняемым списком сообщений (виджеты ChatMessageRow) — саму логику
+    // группировки заголовков см. в ChatMessageGroupingTest.
     auto* chatMessagesContainer = window.findChild<QWidget*>("chatMessagesContainer");
     auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
     auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
@@ -143,8 +170,9 @@ TEST(MainWindowUiTest, ChatMessagingControlsExist) {
 }
 
 TEST(MainWindowUiTest, AttachFileButtonExists) {
-    // #116: "Attach" sits next to Send in ChatView's send row — see
-    // MainWindow::onAttachFileClicked() for the upload-then-auto-send flow.
+    // #116: кнопка "Attach" расположена рядом с Send в строке отправки
+    // ChatView — про сценарий «загрузить, затем автоматически отправить» см.
+    // MainWindow::onAttachFileClicked().
     const MainWindow window;
 
     auto* attachFileButton = window.findChild<QPushButton*>("attachFileButton");
@@ -154,9 +182,9 @@ TEST(MainWindowUiTest, AttachFileButtonExists) {
 }
 
 TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
-    // #68: Call/Mute buttons live in ChatView's channel header — see
-    // ChatView::setCallState() for how MainWindow keeps their
-    // label/enabled state in sync with CallManager.
+    // #68: кнопки Call/Mute находятся в заголовке канала ChatView — про то,
+    // как MainWindow синхронизирует их текст/состояние доступности с
+    // CallManager, см. ChatView::setCallState().
     const MainWindow window;
 
     auto* callToggleButton = window.findChild<QPushButton*>("callToggleButton");
@@ -171,9 +199,9 @@ TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
 }
 
 TEST(MainWindowUiTest, VideoToggleButtonExistsAndStartsDisabled) {
-    // #91: video toggle lives in ChatView's channel header next to
-    // Call/Mute — see ChatView::setVideoEnabled() for how MainWindow
-    // keeps its label/enabled state in sync with CallManager.
+    // #91: переключатель видео находится в заголовке канала ChatView рядом
+    // с Call/Mute — про то, как MainWindow синхронизирует его текст/
+    // состояние доступности с CallManager, см. ChatView::setVideoEnabled().
     const MainWindow window;
 
     auto* videoToggleButton = window.findChild<QPushButton*>("videoToggleButton");
@@ -184,8 +212,8 @@ TEST(MainWindowUiTest, VideoToggleButtonExistsAndStartsDisabled) {
 }
 
 TEST(MainWindowUiTest, ScreenShareToggleButtonExistsAndStartsDisabled) {
-    // #112: mirrors the video toggle button — mutually exclusive with it
-    // in CallManager, same UI-signal pattern.
+    // #112: зеркально повторяет кнопку переключения видео — в CallManager
+    // взаимоисключает её, тот же паттерн UI-сигналов.
     const MainWindow window;
 
     auto* screenShareToggleButton = window.findChild<QPushButton*>("screenShareToggleButton");
@@ -196,8 +224,8 @@ TEST(MainWindowUiTest, ScreenShareToggleButtonExistsAndStartsDisabled) {
 }
 
 TEST(MainWindowUiTest, SearchButtonExists) {
-    // #118: "Search" lives in ChatView's channel header — see
-    // MainWindow's SearchDialog wiring for the query/results flow.
+    // #118: кнопка "Search" находится в заголовке канала ChatView — про
+    // сценарий запроса/результатов см. подключение SearchDialog в MainWindow.
     const MainWindow window;
 
     auto* searchButton = window.findChild<QPushButton*>("searchButton");
@@ -232,10 +260,11 @@ TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
 TEST(MainWindowUiTest, EmptyStatesOfferAnActionButton) {
     const MainWindow window;
 
-    // CommunitiesPanel is now a narrow icon rail (#50) with no room for
-    // descriptive empty-state text — its ever-present "+" button is the
-    // rail's own call to action, so only ChannelsPanel and ChatView's
-    // placeholder still have a dedicated empty-state button.
+    // CommunitiesPanel теперь представляет собой узкую панель с иконками
+    // (#50), на которой нет места для описательного текста пустого
+    // состояния — её всегда присутствующая кнопка "+" сама служит призывом к
+    // действию, поэтому отдельная кнопка пустого состояния всё ещё есть
+    // только у ChannelsPanel и у плейсхолдера ChatView.
     auto* channelEmptyStateButton = window.findChild<QPushButton*>("emptyStateCreateChannelButton");
     auto* placeholderCreateButton = window.findChild<QPushButton*>("placeholderCreateChannelButton");
 
