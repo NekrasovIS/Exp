@@ -22,17 +22,23 @@ struct UserProfile {
     /// чем можно будет использовать вход по одноразовому коду, иначе не
     /// используется на клиенте.
     QString email;
+    /// Issue #174: empty until the user links their Telegram — an
+    /// alternative one-time-code delivery channel, preferred over email
+    /// server-side when both are set.
+    QString telegramChatId;
 };
 
 /// Поля, которые может изменить updateOwnProfile() — сгруппированы
 /// согласно правилу CLAUDE.md "предпочитать меньшее количество
-/// аргументов функций" (displayName/avatarUrl/email — три однотипных
-/// QString подряд, легко перепутать местами при вызове), вместо того
-/// чтобы дальше расширять список параметров самого updateOwnProfile().
+/// аргументов функций" (displayName/avatarUrl/email/telegramChatId —
+/// четыре однотипных QString подряд, легко перепутать местами при
+/// вызове), вместо того чтобы дальше расширять список параметров самого
+/// updateOwnProfile().
 struct ProfileEdits {
     QString displayName;
     QString avatarUrl;
     QString email;
+    QString telegramChatId;
 };
 
 /**

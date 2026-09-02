@@ -27,7 +27,7 @@ UpdateProfileResult UserService::updateProfile(const std::string& login, const P
     return repository_.updateProfile(login, update);
 }
 
-std::optional<std::pair<std::string, std::string>> UserService::resolveOtpIdentifier(const std::string& identifier) {
+std::optional<OtpIdentity> UserService::resolveOtpIdentifier(const std::string& identifier) {
     return repository_.resolveOtpIdentifier(identifier);
 }
 

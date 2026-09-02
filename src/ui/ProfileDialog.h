@@ -14,8 +14,9 @@ struct ProfileEdits;
 /**
  * @brief Диалог редактирования профиля, открываемый кнопкой "Edit
  *        Profile" у AccountMenu (issue #110): отображаемое имя, URL
- *        аватара и email (issue #156 — нужен, чтобы работал вход по
- *        одноразовому коду).
+ *        аватара, email (issue #156) и Telegram chat_id (issue #174) —
+ *        любой из последних двух включает вход по одноразовому коду
+ *        через этот канал.
  *
  * Чистое представление — MainWindow владеет UserProfileClient и всей
  * связующей логикой: он вызывает setProfile() для предзаполнения полей
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] QLineEdit* displayNameEdit() const { return displayNameEdit_; }
     [[nodiscard]] QLineEdit* avatarUrlEdit() const { return avatarUrlEdit_; }
     [[nodiscard]] QLineEdit* emailEdit() const { return emailEdit_; }
+    [[nodiscard]] QLineEdit* telegramChatIdEdit() const { return telegramChatIdEdit_; }
     [[nodiscard]] QPushButton* saveButton() const { return saveButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
@@ -49,6 +51,7 @@ private:
     QLineEdit* displayNameEdit_ = nullptr;
     QLineEdit* avatarUrlEdit_ = nullptr;
     QLineEdit* emailEdit_ = nullptr;
+    QLineEdit* telegramChatIdEdit_ = nullptr;
     QPushButton* saveButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };

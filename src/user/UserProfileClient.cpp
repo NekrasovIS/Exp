@@ -22,7 +22,8 @@ UserProfile parseProfile(const QByteArray& jsonBytes) {
                         .displayName = object.value("display_name").toString(),
                         .avatarUrl = object.value("avatar_url").toString(),
                         .publicKey = object.value("public_key").toString(),
-                        .email = object.value("email").toString()};
+                        .email = object.value("email").toString(),
+                        .telegramChatId = object.value("telegram_chat_id").toString()};
 }
 
 // user-service сообщает настоящую причину сбоя (например, «нет такого
@@ -54,8 +55,10 @@ void UserProfileClient::fetchProfile(const QString& token, const QString& login)
 
 void UserProfileClient::updateOwnProfile(const QString& token, const ProfileEdits& edits) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/users/me")));
-    const QJsonObject body{
-        {"display_name", edits.displayName}, {"avatar_url", edits.avatarUrl}, {"email", edits.email}};
+    const QJsonObject body{{"display_name", edits.displayName},
+                            {"avatar_url", edits.avatarUrl},
+                            {"email", edits.email},
+                            {"telegram_chat_id", edits.telegramChatId}};
     QNetworkReply* reply =
         networkManager_.sendCustomRequest(buildRequest(url, token), "PATCH", QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {

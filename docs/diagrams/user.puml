@@ -11,12 +11,14 @@ struct UserProfile {
   +avatarUrl: QString
   +publicKey: QString
   +email: QString
+  +telegramChatId: QString
 }
 
 struct ProfileEdits {
   +displayName: QString
   +avatarUrl: QString
   +email: QString
+  +telegramChatId: QString
 }
 
 class UserProfileClient {
@@ -33,13 +35,16 @@ UserProfileClient ..> UserProfile : emits
 UserProfileClient ..> ProfileEdits : updateOwnProfile() >
 UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
 note bottom of ProfileEdits
-  issue #156: email — задан, значит,
-  вход по одноразовому коду доступен
-  для этого аккаунта; сгруппирован с
-  displayName/avatarUrl в структуру
-  (правило проекта про количество
-  аргументов — три однотипных QString
-  подряд легко перепутать местами).
+  issue #156/#174: email/telegramChatId —
+  заданы, значит, вход по одноразовому
+  коду доступен через этот канал для
+  этого аккаунта (Telegram в приоритете
+  на сервере, если задан и настроен);
+  сгруппированы с displayName/avatarUrl
+  в структуру (правило проекта про
+  количество аргументов — четыре
+  однотипных QString подряд легко
+  перепутать местами).
 end note
 
 package "libsodium" {

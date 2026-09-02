@@ -28,14 +28,17 @@ namespace auth_service {
  * свежий access-токен через {"refresh_token"} — без повторного ввода
  * учётных данных пользователем — та же форма ответа, что у /auth/token.
  *
- * POST /auth/otp/request принимает {"identifier"} (login или email,
- * issue #156) — всегда отвечает 200 независимо от того, находится ли
- * реальный аккаунт по этому идентификатору, чтобы ответ нельзя было
- * использовать для проверки существования аккаунта; если идентификатор
- * находится, код доставляется через codeDeliveryChannel_. POST
- * /auth/otp/verify принимает {"identifier", "code"} и при совпадении
- * ещё действующего кода выдаёт пару токен/refresh-токен — та же форма
- * ответа, что у /auth/token.
+ * POST /auth/otp/request принимает {"identifier"} (login, email или
+ * Telegram chat_id, issue #156/#174) — всегда отвечает 200 независимо
+ * от того, находится ли реальный аккаунт по этому идентификатору,
+ * чтобы ответ нельзя было использовать для проверки существования
+ * аккаунта; если идентификатор находится, код доставляется через
+ * telegramChannel_ (если у аккаунта задан telegram_chat_id и канал
+ * настроен на сервере), иначе через codeDeliveryChannel_ (email), если
+ * задан email — предпочтение Telegram над email, когда оба доступны.
+ * POST /auth/otp/verify принимает {"identifier", "code"} и при
+ * совпадении ещё действующего кода выдаёт пару токен/refresh-токен —
+ * та же форма ответа, что у /auth/token.
  *
  * В остальном — тонкая обёртка над httplib::Server: вся логика токенов
  * живёт в TokenService, этот класс только переводит HTTP-запросы/ответы.
@@ -50,14 +53,17 @@ namespace auth_service {
  */
 class HttpServer {
 public:
-    /// @p rateLimitMaxRequests/@p rateLimitWindow настраивают лимитер
-    /// для /auth/token + /auth/register + /auth/otp/* — значения по
-    /// умолчанию рассчитаны на прод; тесты передают крошечное окно,
+    /// @p telegramChannel — nullptr, если TELEGRAM_BOT_TOKEN не
+    /// настроен на сервере (issue #174); тогда доставка всегда идёт
+    /// через @p codeDeliveryChannel (email), как и без Telegram-
+    /// поддержки. @p rateLimitMaxRequests/@p rateLimitWindow настраивают
+    /// лимитер для /auth/token + /auth/register + /auth/otp/* — значения
+    /// по умолчанию рассчитаны на прод; тесты передают крошечное окно,
     /// чтобы сработать быстро и детерминированно, а не ждать реальные
     /// часы.
     HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
-               const ICodeDeliveryChannel& codeDeliveryChannel, int rateLimitMaxRequests = 10,
-               std::chrono::milliseconds rateLimitWindow = std::chrono::seconds{60});
+               const ICodeDeliveryChannel& codeDeliveryChannel, const ICodeDeliveryChannel* telegramChannel = nullptr,
+               int rateLimitMaxRequests = 10, std::chrono::milliseconds rateLimitWindow = std::chrono::seconds{60});
 
     /// Блокирует поток, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
@@ -77,6 +83,7 @@ private:
     const TokenService& tokenService_;
     const UserServiceClient& userServiceClient_;
     const ICodeDeliveryChannel& codeDeliveryChannel_;
+    const ICodeDeliveryChannel* telegramChannel_;
     RateLimiter rateLimiter_;
     OtpStore otpStore_;
     httplib::Server server_;

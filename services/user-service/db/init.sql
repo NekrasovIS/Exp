@@ -16,7 +16,11 @@ CREATE TABLE IF NOT EXISTS users (
     -- одноразовому коду) — нужен, прежде чем можно будет входить по
     -- коду через email, но не при регистрации, чтобы не ломать
     -- существующие аккаунты.
-    email TEXT
+    email TEXT,
+    -- NULL, пока пользователь не привяжет свой Telegram (issue #174 —
+    -- альтернативный канал доставки OTP-кода): численный chat_id чата
+    -- пользователя с ботом DeviceHub, не username и не номер телефона.
+    telegram_chat_id TEXT
 );
 
 -- ADD COLUMN IF NOT EXISTS rather than relying solely on the CREATE
@@ -27,6 +31,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT;
 
 -- Частичный уникальный индекс (а не обычное ограничение UNIQUE на
 -- колонку), потому что у нескольких пользователей email может быть ещё
@@ -34,3 +39,5 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
 -- различные значения по этой же причине, но частичный индекс выражает
 -- это намерение явно, а не полагается на побочный эффект.
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS users_telegram_chat_id_unique ON users (telegram_chat_id)
+    WHERE telegram_chat_id IS NOT NULL;

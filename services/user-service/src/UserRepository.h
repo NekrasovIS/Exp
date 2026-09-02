@@ -2,7 +2,6 @@
 
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace user_service {
 
@@ -20,9 +19,13 @@ struct Profile {
     /// и никогда не используется на стороне сервера.
     std::optional<std::string> publicKey;
     /// Задан, если пользователь подключил вход по одноразовому коду
-    /// (issue #156); не задан — значит, вход по OTP пока недоступен,
-    /// только по паролю.
+    /// через email (issue #156); не задан — значит, этот канал OTP
+    /// пока недоступен для аккаунта.
     std::optional<std::string> email;
+    /// chat_id чата пользователя с Telegram-ботом DeviceHub (issue
+    /// #174) — альтернативный/предпочтительный канал доставки OTP-кода,
+    /// когда задан оба сразу с email.
+    std::optional<std::string> telegramChatId;
 };
 
 /// Поля, которые может изменить updateProfile() — сгруппированы согласно
@@ -33,16 +36,28 @@ struct ProfileUpdate {
     std::optional<std::string> avatarUrl;
     std::optional<std::string> publicKey;
     std::optional<std::string> email;
+    std::optional<std::string> telegramChatId;
 };
 
 /// Результат updateProfile() — обычный bool не может различить "нет
-/// такого пользователя" и "email уже занят другим аккаунтом"
-/// (ограничение уникальности email из issue #156), а вызывающей
-/// стороне на них нужно реагировать по-разному (404 vs. 409).
+/// такого пользователя" и "email/telegram_chat_id уже заняты другим
+/// аккаунтом" (ограничения уникальности из issue #156/#174), а
+/// вызывающей стороне на них нужно реагировать по-разному (404 vs. 409).
 enum class UpdateProfileResult {
     kUpdated,
     kNoSuchUser,
     kEmailTaken,
+    kTelegramChatIdTaken,
+};
+
+/// Профиль, к которому можно доставить OTP-код (issue #156/#174) —
+/// сгруппированы в структуру, а не std::pair/std::tuple из трёх
+/// std::string подряд, которые легко перепутать местами (правило
+/// проекта про количество/однотипность параметров).
+struct OtpIdentity {
+    std::string login;
+    std::optional<std::string> email;
+    std::optional<std::string> telegramChatId;
 };
 
 /**
@@ -70,14 +85,13 @@ public:
     /// Перезаписывает display_name/avatar_url/public_key/email для @p login.
     [[nodiscard]] UpdateProfileResult updateProfile(const std::string& login, const ProfileUpdate& update);
 
-    /// Приводит @p identifier — принимается и как login, и как email
-    /// (issue #156, вход по коду через email) — к паре (login, email),
-    /// которая нужна auth-service, чтобы отправить код и затем выдать
-    /// токен. @return std::nullopt, если по @p identifier никто не
-    /// найден ни по одному из полей, либо найден, но email не задан
-    /// (отправлять код некуда).
-    [[nodiscard]] std::optional<std::pair<std::string, std::string>> resolveOtpIdentifier(
-        const std::string& identifier);
+    /// Приводит @p identifier — принимается как login, email (issue
+    /// #156) или Telegram chat_id (issue #174) — к OtpIdentity, которая
+    /// нужна auth-service, чтобы отправить код и затем выдать токен.
+    /// @return std::nullopt, если по @p identifier никто не найден ни
+    /// по одному из полей, либо найден, но ни email, ни telegram_chat_id
+    /// не заданы (отправлять код некуда).
+    [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier);
 
 private:
     std::string connectionString_;

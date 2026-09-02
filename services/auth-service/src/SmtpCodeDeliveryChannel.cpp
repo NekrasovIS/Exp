@@ -1,8 +1,8 @@
 #include "SmtpCodeDeliveryChannel.h"
 
-#include <openssl/bio.h>
+#include "TlsConnection.h"
+
 #include <openssl/evp.h>
-#include <openssl/ssl.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -12,62 +12,6 @@
 namespace auth_service {
 
 namespace {
-
-/// Тонкая обёртка над OpenSSL BIO для TLS-соединения по одной строке за
-/// раз — ровно то, что нужно текстовому протоколу SMTP, без обвязки
-/// внешней библиотеки вроде libcurl.
-class TlsConnection {
-public:
-    TlsConnection(const std::string& host, int port) {
-        ctx_ = SSL_CTX_new(TLS_client_method());
-        bio_ = BIO_new_ssl_connect(ctx_);
-        SSL* ssl = nullptr;
-        BIO_get_ssl(bio_, &ssl);
-        SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
-        SSL_set_tlsext_host_name(ssl, host.c_str());  // SNI
-
-        const std::string hostPort = host + ":" + std::to_string(port);
-        BIO_set_conn_hostname(bio_, hostPort.c_str());
-        connected_ = BIO_do_connect(bio_) == 1 && BIO_do_handshake(bio_) == 1;
-    }
-
-    ~TlsConnection() {
-        BIO_free_all(bio_);
-        SSL_CTX_free(ctx_);
-    }
-
-    TlsConnection(const TlsConnection&) = delete;
-    TlsConnection& operator=(const TlsConnection&) = delete;
-
-    [[nodiscard]] bool isConnected() const { return connected_; }
-
-    void writeLine(const std::string& line) {
-        const std::string withCrlf = line + "\r\n";
-        BIO_write(bio_, withCrlf.data(), static_cast<int>(withCrlf.size()));
-    }
-
-    void writeRaw(const std::string& data) { BIO_write(bio_, data.data(), static_cast<int>(data.size())); }
-
-    /// Читает одну строку ответа сервера (до \n), без завершающих \r\n.
-    std::string readLine() {
-        std::string line;
-        char ch = 0;
-        while (BIO_read(bio_, &ch, 1) == 1) {
-            if (ch == '\n') {
-                break;
-            }
-            if (ch != '\r') {
-                line.push_back(ch);
-            }
-        }
-        return line;
-    }
-
-private:
-    SSL_CTX* ctx_ = nullptr;
-    BIO* bio_ = nullptr;
-    bool connected_ = false;
-};
 
 /// Ответ SMTP-сервера может занимать несколько строк ("250-первая",
 /// "250-вторая", "250 последняя") — код повторяется на каждой, дефис

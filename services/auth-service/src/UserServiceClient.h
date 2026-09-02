@@ -2,9 +2,19 @@
 
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace auth_service {
+
+/// Профиль, к которому можно доставить OTP-код (issue #156/#174) —
+/// зеркало user_service::OtpIdentity на стороне auth-service (сюда
+/// приходит уже как JSON-ответ POST /users/resolve-otp-identifier, а не
+/// напрямую из БД). Сгруппированы в структуру, а не std::pair из двух
+/// std::string подряд, которые легко перепутать местами.
+struct OtpIdentity {
+    std::string login;
+    std::optional<std::string> email;
+    std::optional<std::string> telegramChatId;
+};
 
 /**
  * @brief Вызывает user-service: POST /users/verify-credentials,
@@ -26,11 +36,11 @@ public:
     [[nodiscard]] bool registerUser(const std::string& login, const std::string& password) const;
 
     /// Вызывает POST /users/resolve-otp-identifier — приводит
-    /// @p identifier (login или email) к паре (login, email) для
-    /// входа по одноразовому коду (issue #156). @return std::nullopt,
-    /// если такого пользователя нет или у него не задан email.
-    [[nodiscard]] std::optional<std::pair<std::string, std::string>> resolveOtpIdentifier(
-        const std::string& identifier) const;
+    /// @p identifier (login, email или Telegram chat_id) к OtpIdentity
+    /// для входа по одноразовому коду (issue #156/#174). @return
+    /// std::nullopt, если такого пользователя нет или у него не задано
+    /// ни одного канала доставки.
+    [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier) const;
 
 private:
     std::string host_;

@@ -388,5 +388,37 @@ TEST(HttpServerTest, ResolveOtpIdentifierRouteFindsUserByLoginOrEmailOnceEmailIs
     }
 }
 
+TEST(HttpServerTest, ResolveOtpIdentifierRouteFindsUserByTelegramChatId) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-otp-telegram-resolve-test");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+
+    const std::string chatId = uniqueLogin("otp-telegram-resolve-test");
+    const httplib::Result patchResult = client.Patch("/users/me", authHeader,
+                                                       nlohmann::json{{"telegram_chat_id", chatId}}.dump(),
+                                                       "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+
+    const httplib::Result resolveResult = client.Post(
+        "/users/resolve-otp-identifier", nlohmann::json{{"identifier", chatId}}.dump(), "application/json");
+    ASSERT_TRUE(resolveResult);
+    ASSERT_EQ(resolveResult->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(resolveResult->body);
+    EXPECT_TRUE(body["found"].get<bool>());
+    EXPECT_EQ(body["login"].get<std::string>(), login);
+    EXPECT_EQ(body["telegram_chat_id"].get<std::string>(), chatId);
+}
+
 }  // namespace
 }  // namespace user_service

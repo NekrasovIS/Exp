@@ -58,6 +58,16 @@ public:
         waitUntilReady();
     }
 
+    /// Вариант с двумя каналами доставки (issue #174) — тестам,
+    /// проверяющим, что Telegram предпочитается email, когда у аккаунта
+    /// заданы оба и сервер настроен на оба канала.
+    ScopedServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
+                 const ICodeDeliveryChannel& codeDeliveryChannel, const ICodeDeliveryChannel& telegramChannel)
+        : server_(tokenService, userServiceClient, codeDeliveryChannel, &telegramChannel),
+          thread_([this] { server_.listen(kTestHost, kTestPort); }) {
+        waitUntilReady();
+    }
+
     ~ScopedServer() {
         server_.stop();
         thread_.join();
@@ -453,6 +463,49 @@ TEST(HttpServerTest, OtpRequestThenVerifyRoundTripsToAValidToken) {
         "application/json");
     ASSERT_TRUE(reuseResult);
     EXPECT_EQ(reuseResult->status, 401);
+}
+
+TEST(HttpServerTest, OtpRequestPrefersTelegramOverEmailWhenBothAreSet) {
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    if (!userServiceReachable(userServiceHost, userServicePort)) {
+        GTEST_SKIP() << "user-service not reachable at " << userServiceHost << ":" << userServicePort;
+    }
+
+    const std::string login = uniqueLogin("http-server-otp-telegram-preference-test");
+    const std::string email = login + "@example.test";
+    const std::string chatId = login + "-chat";
+    httplib::Client userServiceSetup(userServiceHost, userServicePort);
+    const httplib::Result registerResult = userServiceSetup.Post(
+        "/users/register", nlohmann::json{{"login", login}, {"password", "integration-test-password"}}.dump(),
+        "application/json");
+    ASSERT_TRUE(registerResult);
+    ASSERT_EQ(registerResult->status, 201);
+
+    const TokenService realAuthServiceTokenService(envOrDefault("AUTH_SERVICE_SECRET", "dev-only-secret"));
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const Token profileToken = realAuthServiceTokenService.issueToken(login);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + profileToken.value}};
+    const httplib::Result patchResult = userServiceSetup.Patch(
+        "/users/me", authHeader, nlohmann::json{{"email", email}, {"telegram_chat_id", chatId}}.dump(),
+        "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+
+    CapturingCodeDeliveryChannel emailChannel;
+    CapturingCodeDeliveryChannel telegramChannel;
+    const ScopedServer server(tokenService, userServiceClient, emailChannel, telegramChannel);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result requestResult =
+        client.Post("/auth/otp/request", nlohmann::json{{"identifier", login}}.dump(), "application/json");
+    ASSERT_TRUE(requestResult);
+    ASSERT_EQ(requestResult->status, 200);
+
+    EXPECT_EQ(telegramChannel.lastDestination, chatId);
+    EXPECT_FALSE(telegramChannel.lastCode.empty());
+    EXPECT_TRUE(emailChannel.lastDestination.empty());
 }
 
 }  // namespace

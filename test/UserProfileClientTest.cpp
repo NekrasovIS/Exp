@@ -83,9 +83,11 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
             updateError = message;
             loop.quit();
         });
-        client.updateOwnProfile(
-            token, ProfileEdits{.displayName = QStringLiteral("Alice"),
-                                 .avatarUrl = QStringLiteral("https://example.test/alice.png"), .email = email});
+        client.updateOwnProfile(token,
+                                 ProfileEdits{.displayName = QStringLiteral("Alice"),
+                                              .avatarUrl = QStringLiteral("https://example.test/alice.png"),
+                                              .email = email,
+                                              .telegramChatId = login + QStringLiteral("-chat")});
         loop.exec();
     }
     ASSERT_TRUE(updateError.isEmpty()) << updateError.toStdString();
@@ -93,6 +95,7 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
     EXPECT_EQ(updated.displayName, QStringLiteral("Alice"));
     EXPECT_EQ(updated.avatarUrl, QStringLiteral("https://example.test/alice.png"));
     EXPECT_EQ(updated.email, email);
+    EXPECT_EQ(updated.telegramChatId, login + QStringLiteral("-chat"));
 
     UserProfile fetched;
     {
@@ -108,6 +111,7 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
     EXPECT_EQ(fetched.displayName, QStringLiteral("Alice"));
     EXPECT_EQ(fetched.avatarUrl, QStringLiteral("https://example.test/alice.png"));
     EXPECT_EQ(fetched.email, email);
+    EXPECT_EQ(fetched.telegramChatId, login + QStringLiteral("-chat"));
 }
 
 TEST(UserProfileClientTest, PublishPublicKeyRoundTripsThroughFetchProfile) {
