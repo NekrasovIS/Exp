@@ -36,6 +36,59 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  services:
+    # Separate job on Linux rather than folding into build-and-test above:
+    # GitHub-hosted macOS runners don't support the `services:`/`container:`
+    # Docker features these three microservices' Postgres-backed tests need
+    # (issue #134 — previously none of them ran in CI at all).
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, user-service, chat-service]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      # user-service and chat-service need a live Postgres for most of
+      # their tests; auth-service doesn't use one, but starting it
+      # unconditionally keeps this step identical across the matrix. Tests
+      # that also need a live auth-service/user-service (not just Postgres)
+      # skip themselves (GTEST_SKIP) rather than failing — see each test
+      # file's own "Requires a live ..." comment — so this alone doesn't
+      # give full cross-service integration coverage, only each service's
+      # own business logic against a real database.
+      - name: Start Postgres (docker compose)
+        run: docker compose up -d --wait
+
+      # Same class of dependency as build-and-test's own autotools step
+      # above (there for libb2, here for user-service's libsodium) —
+      # vcpkg builds these ports from their upstream autotools build
+      # system rather than vendoring a CMake port for them.
+      - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
+
+      - name: Configure
+        run: cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build
+
+      - name: Build
+        run: cmake --build services/${{ matrix.service }}/build --parallel
+
+      - name: Test
+        run: ctest --test-dir services/${{ matrix.service }}/build --output-on-failure
+
   fuzz:
     # Real coverage-guided fuzzing (issue #121/#132/#133) — replaces the
     # "clang-cl unavailable on this Windows dev machine" blocker with
