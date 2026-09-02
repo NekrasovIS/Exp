@@ -9,18 +9,21 @@
 #include <string>
 #include <thread>
 
+#include "LoggingCodeDeliveryChannel.h"
 #include "TokenService.h"
 #include "UserServiceClient.h"
 
-// Route-level tests for HttpServer, hitting a real httplib::Server
-// instance over loopback HTTP (not calling the handler methods
-// directly — they're private, and the point is to verify the actual
-// request/response contract). Tests that only exercise validation
-// (missing fields, malformed JSON) or token verification (pure local
-// logic in TokenService) need no other service running. Tests that
-// reach UserServiceClient (valid-credentials /auth/token, /auth/register)
-// need a live user-service + Postgres, same as UserServiceClientIntegrationTest,
-// and skip themselves rather than fail when it isn't reachable.
+// Тесты уровня маршрутов для HttpServer, обращающиеся к реальному
+// экземпляру httplib::Server по loopback-HTTP (а не вызывающие методы
+// обработчиков напрямую — они приватные, и суть в том, чтобы проверить
+// реальный контракт запрос/ответ). Тестам, которые проверяют только
+// валидацию (отсутствующие поля, некорректный JSON) или проверку
+// токена (чистая локальная логика в TokenService), не требуется
+// запущенный другой сервис. Тестам, которые обращаются к
+// UserServiceClient (валидные учётные данные для /auth/token,
+// /auth/register), нужен работающий user-service + Postgres, так же
+// как и UserServiceClientIntegrationTest, и они самоотключаются
+// (skip), а не падают, когда сервис недоступен.
 
 namespace auth_service {
 namespace {
@@ -33,22 +36,26 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
 constexpr const char* kTestHost = "127.0.0.1";
 constexpr int kTestPort = 18080;
 
-// Starts a real HttpServer on a background thread for the lifetime of
-// the fixture and stops it on destruction, so each TEST gets a fresh
-// server without repeating the thread/readiness boilerplate.
+// Запускает реальный HttpServer в фоновом потоке на время жизни
+// фикстуры и останавливает его при уничтожении, так что каждый TEST
+// получает свежий сервер без повторения шаблонного кода запуска потока
+// и ожидания готовности.
 class ScopedServer {
 public:
     ScopedServer(const TokenService& tokenService, const UserServiceClient& userServiceClient)
-        : server_(tokenService, userServiceClient),
+        : server_(tokenService, userServiceClient, codeDeliveryChannel_),
           thread_([this] { server_.listen(kTestHost, kTestPort); }) {
-        httplib::Client probe(kTestHost, kTestPort);
-        probe.set_connection_timeout(0, 50000);
-        for (int attempt = 0; attempt < 100; ++attempt) {
-            if (probe.Get("/")) {
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
+        waitUntilReady();
+    }
+
+    /// Вариант с внешним каналом доставки — тестам на /auth/otp/*, которым
+    /// нужно перехватить сгенерированный код, а не просто убедиться, что
+    /// он куда-то залогирован.
+    ScopedServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
+                 const ICodeDeliveryChannel& codeDeliveryChannel)
+        : server_(tokenService, userServiceClient, codeDeliveryChannel),
+          thread_([this] { server_.listen(kTestHost, kTestPort); }) {
+        waitUntilReady();
     }
 
     ~ScopedServer() {
@@ -60,13 +67,44 @@ public:
     ScopedServer& operator=(const ScopedServer&) = delete;
 
 private:
+    void waitUntilReady() {
+        httplib::Client probe(kTestHost, kTestPort);
+        probe.set_connection_timeout(0, 50000);
+        for (int attempt = 0; attempt < 100; ++attempt) {
+            if (probe.Get("/")) {
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+
+    // Объявлен раньше server_ — порядок инициализации членов идёт по
+    // порядку объявления, а server_'s constructor принимает ссылку на
+    // него. Не используется 3-аргументным конструктором (тот получает
+    // канал доставки снаружи), но всё равно должен существовать —
+    // самодостаточно конструируется по умолчанию, лишним не мешает.
+    LoggingCodeDeliveryChannel codeDeliveryChannel_;
     HttpServer server_;
     std::thread thread_;
 };
 
-// True if user-service is reachable at USER_SERVICE_HOST/PORT (defaults
-// 127.0.0.1:8081), probed via a throwaway registration the same way
-// UserServiceClientIntegrationTest does.
+/// Перехватывает последнюю пару (получатель, код) вместо реальной
+/// отправки — тестам /auth/otp/* нужно знать сгенерированный код, чтобы
+/// затем передать его в /auth/otp/verify.
+class CapturingCodeDeliveryChannel : public ICodeDeliveryChannel {
+public:
+    void send(const std::string& destination, const std::string& code) const override {
+        lastDestination = destination;
+        lastCode = code;
+    }
+
+    mutable std::string lastDestination;
+    mutable std::string lastCode;
+};
+
+// True, если user-service доступен по USER_SERVICE_HOST/PORT (по
+// умолчанию 127.0.0.1:8081), проверяется через одноразовую
+// регистрацию, так же как это делает UserServiceClientIntegrationTest.
 bool userServiceReachable(const std::string& host, int port) {
     httplib::Client client(host, port);
     const nlohmann::json probeBody{{"login", "http-server-test-probe"}, {"password", "irrelevant"}};
@@ -82,7 +120,7 @@ std::string uniqueLogin(const std::string& prefix) {
 
 TEST(HttpServerTest, TokenRouteRejectsMissingFieldsWith400) {
     const TokenService tokenService("test-secret");
-    const UserServiceClient userServiceClient("127.0.0.1", 1);  // unreachable, must not be hit
+    const UserServiceClient userServiceClient("127.0.0.1", 1);  // недоступен, не должен вызываться
     const ScopedServer server(tokenService, userServiceClient);
 
     httplib::Client client(kTestHost, kTestPort);
@@ -287,6 +325,134 @@ TEST(HttpServerTest, RegisterRouteRejectsDuplicateLoginWith409) {
     ASSERT_EQ(result->status, 409);
     const nlohmann::json body = nlohmann::json::parse(result->body);
     EXPECT_FALSE(body["registered"].get<bool>());
+}
+
+TEST(HttpServerTest, OtpRequestRouteRejectsMissingFieldWith400) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/auth/otp/request", "{}", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, OtpRequestRouteAlwaysReturns200EvenForUnknownIdentifier) {
+    // Issue #156: ответ не должен палить, реальный ли это аккаунт — он
+    // обязан выглядеть одинаково независимо от того, нашёл ли
+    // resolveOtpIdentifier() кого-то на самом деле; UserServiceClient
+    // ("127.0.0.1", 1) (никто не слушает) как раз гарантированно вернёт
+    // здесь std::nullopt.
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/auth/otp/request", nlohmann::json{{"identifier", "no-such-identifier@example.test"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(result->body)["sent"].get<bool>());
+}
+
+TEST(HttpServerTest, OtpVerifyRouteRejectsMissingFieldsWith400) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/auth/otp/verify", nlohmann::json{{"identifier", "alice"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, OtpVerifyRouteRejectsAWrongOrMissingCodeWith401) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/auth/otp/verify", nlohmann::json{{"identifier", "no-such-identifier@example.test"}, {"code", "000000"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, OtpRequestThenVerifyRoundTripsToAValidToken) {
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    if (!userServiceReachable(userServiceHost, userServicePort)) {
+        GTEST_SKIP() << "user-service not reachable at " << userServiceHost << ":" << userServicePort;
+    }
+
+    // Регистрируем пользователя и проставляем email напрямую через
+    // user-service, в обход HTTP-роутов auth-service — этот тест
+    // проверяет именно otp/request → otp/verify, а не регистрацию.
+    const std::string login = uniqueLogin("http-server-otp-roundtrip-test");
+    const std::string email = login + "@example.test";
+    httplib::Client userServiceSetup(userServiceHost, userServicePort);
+    const httplib::Result registerResult = userServiceSetup.Post(
+        "/users/register", nlohmann::json{{"login", login}, {"password", "integration-test-password"}}.dump(),
+        "application/json");
+    ASSERT_TRUE(registerResult);
+    ASSERT_EQ(registerResult->status, 201);
+
+    const httplib::Result tokenResult = userServiceSetup.Post(
+        "/users/verify-credentials",
+        nlohmann::json{{"login", login}, {"password", "integration-test-password"}}.dump(), "application/json");
+    ASSERT_TRUE(tokenResult);
+    ASSERT_TRUE(nlohmann::json::parse(tokenResult->body)["valid"].get<bool>());
+
+    // PATCH /users/me ниже проверяется отдельным, реально запущенным
+    // auth-service.exe (через AuthServiceClient внутри user-service), а
+    // не ScopedServer, который заведётся чуть ниже, — секрет здесь
+    // должен совпадать с тем, каким тот отдельный процесс был запущен
+    // (см. README: по умолчанию для локальной разработки — "dev-only-secret"),
+    // а не с секретом ScopedServer, который совершенно независим от него.
+    const TokenService realAuthServiceTokenService(envOrDefault("AUTH_SERVICE_SECRET", "dev-only-secret"));
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const Token profileToken = realAuthServiceTokenService.issueToken(login);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + profileToken.value}};
+    const httplib::Result patchResult = userServiceSetup.Patch(
+        "/users/me", authHeader, nlohmann::json{{"email", email}}.dump(), "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+
+    CapturingCodeDeliveryChannel codeDeliveryChannel;
+    const ScopedServer server(tokenService, userServiceClient, codeDeliveryChannel);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result requestResult =
+        client.Post("/auth/otp/request", nlohmann::json{{"identifier", email}}.dump(), "application/json");
+    ASSERT_TRUE(requestResult);
+    ASSERT_EQ(requestResult->status, 200);
+    ASSERT_EQ(codeDeliveryChannel.lastDestination, email);
+    ASSERT_FALSE(codeDeliveryChannel.lastCode.empty());
+
+    const httplib::Result verifyResult = client.Post(
+        "/auth/otp/verify", nlohmann::json{{"identifier", login}, {"code", codeDeliveryChannel.lastCode}}.dump(),
+        "application/json");
+    ASSERT_TRUE(verifyResult);
+    ASSERT_EQ(verifyResult->status, 200);
+    const nlohmann::json verifyBody = nlohmann::json::parse(verifyResult->body);
+    EXPECT_FALSE(verifyBody["token"].get<std::string>().empty());
+    EXPECT_FALSE(verifyBody["refresh_token"].get<std::string>().empty());
+
+    // Одноразовый — повторное использование того же кода отклоняется.
+    const httplib::Result reuseResult = client.Post(
+        "/auth/otp/verify", nlohmann::json{{"identifier", login}, {"code", codeDeliveryChannel.lastCode}}.dump(),
+        "application/json");
+    ASSERT_TRUE(reuseResult);
+    EXPECT_EQ(reuseResult->status, 401);
 }
 
 }  // namespace

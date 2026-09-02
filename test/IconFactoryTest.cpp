@@ -7,10 +7,11 @@
 namespace devicehub {
 namespace {
 
-// Smoke tests only — these icons are hand-painted with QPainter rather
-// than loaded from a resource, so the only thing meaningfully
-// assertable without pixel sampling (a rendering concern this
-// project's tests avoid) is that a real, non-empty icon comes back.
+// Только smoke-тесты — эти иконки рисуются вручную через QPainter, а не
+// загружаются из ресурса, поэтому единственное, что можно осмысленно
+// проверить без сэмплирования пикселей (вопрос рендеринга, которого этот
+// проект в тестах избегает), — это что возвращается реальная, непустая
+// иконка.
 
 TEST(IconFactoryTest, PlusIconIsNotNull) {
     const QIcon icon = ui_icons::plusIcon(QColor("#ffffff"));

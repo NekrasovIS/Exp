@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace user_service {
 
@@ -13,7 +14,7 @@ namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
 
-// Both endpoints take the same {"login", "password"} shape.
+// Оба эндпоинта принимают одинаковую форму {"login", "password"}.
 struct Credentials {
     std::string login;
     std::string password;
@@ -38,7 +39,20 @@ nlohmann::json toJson(const Profile& profile) {
                            {"avatar_url", profile.avatarUrl.has_value() ? nlohmann::json(*profile.avatarUrl)
                                                                          : nlohmann::json(nullptr)},
                            {"public_key", profile.publicKey.has_value() ? nlohmann::json(*profile.publicKey)
-                                                                         : nlohmann::json(nullptr)}};
+                                                                         : nlohmann::json(nullptr)},
+                           {"email",
+                            profile.email.has_value() ? nlohmann::json(*profile.email) : nlohmann::json(nullptr)}};
+}
+
+std::optional<std::string> parseIdentifier(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("identifier") || !json["identifier"].is_string()) {
+        return std::nullopt;
+    }
+    return json["identifier"].get<std::string>();
 }
 }  // namespace
 
@@ -67,6 +81,9 @@ void HttpServer::registerRoutes() {
     });
     server_.Patch("/users/me", [this](const httplib::Request& request, httplib::Response& response) {
         handleUpdateOwnProfile(request, response);
+    });
+    server_.Post("/users/resolve-otp-identifier", [this](const httplib::Request& request, httplib::Response& response) {
+        handleResolveOtpIdentifier(request, response);
     });
 }
 
@@ -130,13 +147,14 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
         response.set_content(nlohmann::json{{"error", "malformed JSON"}}.dump(), kJsonContentType);
         return;
     }
-    // Partial update: a field missing from the body keeps its current
-    // value rather than being cleared — fetch-then-merge, since
-    // UserRepository::updateProfile() always writes all three columns.
+    // Частичное обновление: поле, отсутствующее в теле запроса, сохраняет своё
+    // текущее значение, а не очищается — сначала читаем, затем сливаем, поскольку
+    // UserRepository::updateProfile() всегда записывает все три столбца.
     const std::optional<Profile> current = userService_.getProfile(*login);
     ProfileUpdate update{.displayName = current.has_value() ? current->displayName : std::nullopt,
                           .avatarUrl = current.has_value() ? current->avatarUrl : std::nullopt,
-                          .publicKey = current.has_value() ? current->publicKey : std::nullopt};
+                          .publicKey = current.has_value() ? current->publicKey : std::nullopt,
+                          .email = current.has_value() ? current->email : std::nullopt};
     if (body.contains("display_name") && body["display_name"].is_string()) {
         update.displayName = body["display_name"].get<std::string>();
     }
@@ -146,18 +164,49 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
     if (body.contains("public_key") && body["public_key"].is_string()) {
         update.publicKey = body["public_key"].get<std::string>();
     }
+    if (body.contains("email") && body["email"].is_string()) {
+        update.email = body["email"].get<std::string>();
+    }
 
-    if (!userService_.updateProfile(*login, update)) {
-        response.status = 404;
-        response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
-        return;
+    switch (userService_.updateProfile(*login, update)) {
+        using enum UpdateProfileResult;
+        case kNoSuchUser:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
+            return;
+        case kEmailTaken:
+            response.status = 409;
+            response.set_content(nlohmann::json{{"error", "email already in use"}}.dump(), kJsonContentType);
+            return;
+        case kUpdated:
+            break;
     }
     response.set_content(
         toJson(Profile{.login = *login,
                         .displayName = update.displayName,
                         .avatarUrl = update.avatarUrl,
-                        .publicKey = update.publicKey})
+                        .publicKey = update.publicKey,
+                        .email = update.email})
             .dump(),
+        kJsonContentType);
+}
+
+void HttpServer::handleResolveOtpIdentifier(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> identifier = parseIdentifier(request.body);
+    if (!identifier.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected an 'identifier' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::pair<std::string, std::string>> resolved =
+        userService_.resolveOtpIdentifier(*identifier);
+    if (!resolved.has_value()) {
+        response.set_content(nlohmann::json{{"found", false}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(
+        nlohmann::json{{"found", true}, {"login", resolved->first}, {"email", resolved->second}}.dump(),
         kJsonContentType);
 }
 

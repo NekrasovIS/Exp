@@ -25,9 +25,10 @@ UserProfile parseProfile(const QByteArray& jsonBytes) {
                         .email = object.value("email").toString()};
 }
 
-// user-service reports the actual failure reason (e.g. "no such user")
-// in the response body — falling back to reply->errorString() alone
-// only ever shows a generic "server replied: Not Found".
+// user-service сообщает настоящую причину сбоя (например, «нет такого
+// пользователя») в теле ответа — откат к одному лишь
+// reply->errorString() всегда показывает лишь общее «server replied:
+// Not Found».
 QString extractErrorMessage(QNetworkReply* reply) {
     const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
     const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();

@@ -1,8 +1,11 @@
 #include "ui/ChatMessageRow.h"
 
+#include <QAction>
 #include <QFontMetricsF>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
@@ -47,6 +50,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     rootLayout->setSpacing(spacing);
 
     bubble_ = new ChatBubble(isOwnMessage, this);
+    bubble_->setObjectName(QStringLiteral("chatMessageBubble"));
     auto* bubbleLayout = new QVBoxLayout(bubble_);
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
@@ -54,13 +58,13 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bodyLabel_ = new QLabel(message.body, bubble_);
     bodyLabel_->setObjectName(QStringLiteral("chatMessageBody"));
     bodyLabel_->setWordWrap(true);
-    // Issue #94: render **bold**/*italic*/`code`/links/lists via Qt's
-    // own markdown-to-richtext conversion rather than a hand-rolled
-    // parser. QLabel doesn't wire up network image loading for rich
-    // text on its own, so a message body isn't a vector for fetching
-    // attacker-controlled URLs (e.g. a tracking-pixel image) — links
-    // only ever open on an explicit click (setOpenExternalLinks()),
-    // never automatically.
+    // Issue #94: рендерим **bold**/*italic*/`code`/ссылки/списки через
+    // встроенное в Qt преобразование markdown в rich text, а не через
+    // самописный парсер. QLabel сам по себе не подключает загрузку
+    // изображений по сети для rich text, поэтому тело сообщения не
+    // становится вектором для запроса URL, контролируемых атакующим
+    // (например, изображения-трекера) — ссылки открываются только по
+    // явному клику (setOpenExternalLinks()), никогда автоматически.
     bodyLabel_->setTextFormat(Qt::MarkdownText);
     bodyLabel_->setOpenExternalLinks(true);
     bodyLabel_->setTextInteractionFlags(Qt::TextBrowserInteraction);
@@ -106,25 +110,29 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
 
     if (isOwnMessage) {
-        // Available on every own-message row regardless of showHeader —
-        // grouped (consecutive) messages don't repeat their header, but
-        // each individual message still needs its own way to target it
-        // for editing/deleting (issue #107).
-        auto* controlsRow = new QHBoxLayout;
-        controlsRow->setSpacing(spacing);
-        controlsRow->addStretch(1);
-        auto* editButton = new QPushButton(tr("Edit"), bubble_);
-        editButton->setObjectName(QStringLiteral("editMessageButton"));
-        editButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
-        connect(editButton, &QPushButton::clicked, this,
-                [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
-        auto* deleteButton = new QPushButton(tr("Delete"), bubble_);
-        deleteButton->setObjectName(QStringLiteral("deleteMessageButton"));
-        deleteButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
-        connect(deleteButton, &QPushButton::clicked, this, [this]() { emit deleteRequested(messageId_); });
-        controlsRow->addWidget(editButton);
-        controlsRow->addWidget(deleteButton);
-        bubbleLayout->addLayout(controlsRow);
+        // Контекстное меню по правому клику вместо всегда видимых кнопок
+        // (issue #150) — доступно на каждой строке собственного сообщения
+        // независимо от showHeader, поскольку сгруппированные
+        // (последовательные) сообщения не повторяют заголовок, но
+        // каждому отдельному сообщению всё равно нужен свой способ
+        // адресации для редактирования/удаления (issue #107). Построено
+        // через popup() (неблокирующий), а не exec(), чтобы тест мог
+        // напрямую вызвать соответствующий QAction, не прокручивая
+        // модальный event loop.
+        bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(bubble_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+            auto* menu = new QMenu(bubble_);
+            menu->setAttribute(Qt::WA_DeleteOnClose);
+            menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
+            QAction* editAction = menu->addAction(tr("Edit"));
+            editAction->setObjectName(QStringLiteral("editMessageAction"));
+            connect(editAction, &QAction::triggered, this,
+                    [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+            QAction* deleteAction = menu->addAction(tr("Delete"));
+            deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
+            connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
+            menu->popup(bubble_->mapToGlobal(pos));
+        });
 
         rootLayout->addStretch(1);
         rootLayout->addWidget(bubble_);

@@ -19,6 +19,8 @@ class MainWindow {
   -wrapPendingEncryptedChannelKeyForMember(login: QString, publicKeyBase64: QString)
   -decryptForDisplay(ciphertext: QString) : QString
   -showToast(text: QString, variant: ToastVariant)
+  -onAccountSettingsClicked()
+  -signOut()
 }
 
 class CommunitiesPanel {
@@ -46,14 +48,26 @@ class ChannelsPanel {
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +refreshButton() : QPushButton*
+  +filterEdit() : QLineEdit*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
+  -applyFilter()
   .. signals ..
   +createRequested(name: QString, isEncrypted: bool)
   +renameRequested(id: int64, newName: QString)
   +deleteRequested(id: int64)
   +channelSelected(id: int64, name: QString)
 }
+note right of ChannelsPanel
+  Issue #152: поле фильтра сужает
+  listWidget() по имени (без учёта
+  регистра); зашифрованные каналы
+  получают тот же значок замка, что и
+  заголовок ChatView (issue #138), прямо
+  в строке, но channelSelected()/rename
+  всегда используют настоящее имя, а не
+  отображаемый текст с префиксом.
+end note
 
 class ChatView {
   +showPlaceholder()
@@ -89,9 +103,11 @@ class ChatView {
   +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
+  +toggleChatVisibilityButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
   -updateLocalVideoVisibility()
+  -onToggleChatVisibilityClicked()
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -105,6 +121,19 @@ class ChatView {
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
 }
+note right of ChatView
+  Issue #153: videoStrip_ и новый chatPanel_
+  (история + строка ввода) сидят в QSplitter
+  (chatSplitter_) вместо фиксированного
+  QVBoxLayout — во время звонка область видео
+  получает большую часть места
+  (setCallState(true, ...)), сворачивается
+  обратно во весь чат через
+  toggleChatVisibilityButton_. Видео-плитки
+  переключены с фиксированного размера на
+  минимальный + Expanding QSizePolicy, чтобы
+  реально расти в дополнительное пространство.
+end note
 
 struct ChatMessage {
   +author: QString
@@ -171,6 +200,11 @@ class ChatBubble {
 ChatView *-- ChatMessageRow : creates one per message
 ChatMessageRow ..> ChatMessage : renders
 ChatMessageRow *-- ChatBubble : owns (own messages: green\ngradient, right-aligned;\nothers: neutral, left-aligned)
+note right of ChatMessageRow
+  Own messages: right-click the bubble for a
+  context menu (Edit/Delete) instead of
+  always-visible buttons (issue #150).
+end note
 
 package "devicehub::chat_message_grouping" <<Rectangle>> {
   class ChatMessageGrouping << (N,orchid) namespace >> {
@@ -240,7 +274,19 @@ class ModeratorsDialog {
 class FooterBar {
   +setProfileText(text: QString)
   +settingsButton() : QPushButton*
+  +avatarLabel() : QLabel*
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
+  .. signals ..
+  +accountSettingsRequested()
 }
+note right of FooterBar
+  Clicking the avatar opens MainWindow's
+  account settings menu (Edit Profile /
+  Sign Out) instead of it living only in
+  the top-right AccountMenu popup (issue #151).
+end note
+MainWindow ..> FooterBar : accountSettingsRequested() >
+MainWindow ..> AccountMenu : editProfileButton()/registerButton()\nrequestTokenButton() >
 
 enum ToastVariant {
   kSuccess

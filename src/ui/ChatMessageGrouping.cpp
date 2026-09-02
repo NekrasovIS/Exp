@@ -12,8 +12,8 @@ QDateTime parseSentAt(const QString& raw) {
     if (const QDateTime isoParsed = QDateTime::fromString(raw, Qt::ISODateWithMs); isoParsed.isValid()) {
         return isoParsed;
     }
-    // chat-service serializes Postgres timestamps space-separated
-    // ("YYYY-MM-DD HH:MM:SS.ffffff") rather than with the ISO 'T'.
+    // chat-service сериализует метки времени Postgres через пробел
+    // ("YYYY-MM-DD HH:MM:SS.ffffff"), а не через ISO-разделитель 'T'.
     QString normalized = raw;
     normalized.replace(QLatin1Char(' '), QLatin1Char('T'));
     return QDateTime::fromString(normalized, Qt::ISODateWithMs);

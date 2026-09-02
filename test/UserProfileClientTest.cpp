@@ -11,9 +11,9 @@
 #include <cstdlib>
 #include <utility>
 
-// Requires a live auth-service + user-service (issue #110's profile
-// routes live on user-service). Skips itself rather than failing when
-// the stack isn't running — same pattern as ChatRestClientTest.cpp.
+// Требует запущенных auth-service + user-service (маршруты профиля из
+// issue #110 находятся в user-service). Пропускает себя вместо падения,
+// если стек не запущен — тот же паттерн, что и в ChatRestClientTest.cpp.
 
 namespace devicehub {
 namespace {
@@ -35,9 +35,9 @@ QString uniqueLogin(const QString& prefix) {
     return prefix + QStringLiteral("-") + QString::number(QDateTime::currentMSecsSinceEpoch());
 }
 
-// Registers a brand-new user against a live auth-service and returns
-// {token, login}, or two empty strings if the stack isn't reachable
-// within the timeout.
+// Регистрирует нового пользователя на живом auth-service и возвращает
+// {token, login}, либо две пустые строки, если стек недоступен в течение
+// тайм-аута.
 std::pair<QString, QString> registerAndGetTokenAndLogin(const QString& loginPrefix) {
     AuthClient authClient(authServiceUrl());
     const QString login = uniqueLogin(loginPrefix);
@@ -111,10 +111,10 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
 }
 
 TEST(UserProfileClientTest, PublishPublicKeyRoundTripsThroughFetchProfile) {
-    // issue #136 (E2E encryption Phase 1): publishing a key is a
-    // separate call from updateOwnProfile() — this confirms it goes to
-    // the same underlying profile without disturbing display_name/
-    // avatar_url (fetch-then-merge on the server side).
+    // issue #136 (сквозное шифрование, фаза 1): публикация ключа — отдельный
+    // вызов от updateOwnProfile(); этот тест подтверждает, что он попадает в
+    // тот же самый профиль, не затрагивая display_name/avatar_url (на
+    // сервере это fetch, затем слияние — fetch-then-merge).
     const auto [token, login] = registerAndGetTokenAndLogin(QStringLiteral("user-profile-client-pubkey"));
     if (token.isEmpty()) {
         GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
