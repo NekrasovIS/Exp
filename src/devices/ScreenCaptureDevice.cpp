@@ -1,49 +1,47 @@
 #include "devices/ScreenCaptureDevice.h"
 
-#include <QScreenCapture>
+#include "devices/IScreenCaptureBackend.h"
+
+#if defined(Q_OS_WIN)
+#include "devices/WindowsScreenCaptureBackend.h"
+#endif
 
 namespace devicehub {
 
 ScreenCaptureDevice::ScreenCaptureDevice(QObject* parent) : QObject(parent) {
-    captureSession_.setVideoSink(&videoSink_);
-    connect(&videoSink_, &QVideoSink::videoFrameChanged, this, &ScreenCaptureDevice::frameAvailable);
+#if defined(Q_OS_WIN)
+    backend_ = std::make_unique<WindowsScreenCaptureBackend>(this);
+#endif
+    if (backend_) {
+        connect(backend_.get(), &IScreenCaptureBackend::frameAvailable, this, &ScreenCaptureDevice::frameAvailable);
+        connect(backend_.get(), &IScreenCaptureBackend::errorOccurred, this, &ScreenCaptureDevice::errorOccurred);
+    }
 }
 
 ScreenCaptureDevice::~ScreenCaptureDevice() = default;
 
 void ScreenCaptureDevice::setScreen(QScreen* screen) {
-    const bool wasActive = isActive();
-
-    screenCapture_ = std::make_unique<QScreenCapture>();
-    screenCapture_->setScreen(screen);
-    captureSession_.setScreenCapture(screenCapture_.get());
-
-    connect(screenCapture_.get(), &QScreenCapture::errorOccurred, this,
-            [this](QScreenCapture::Error /*error*/, const QString& errorString) { emit errorOccurred(errorString); });
-
-    if (wasActive) {
-        start();
+    if (backend_) {
+        backend_->setScreen(screen);
     }
 }
 
 void ScreenCaptureDevice::start() {
-    if (screenCapture_) {
-        screenCapture_->start();
+    if (backend_) {
+        backend_->start();
+    } else {
+        emit errorOccurred(tr("Screen capture is not implemented on this platform."));
     }
 }
 
 void ScreenCaptureDevice::stop() {
-    if (screenCapture_) {
-        screenCapture_->stop();
+    if (backend_) {
+        backend_->stop();
     }
 }
 
 bool ScreenCaptureDevice::isActive() const {
-    return screenCapture_ && screenCapture_->isActive();
-}
-
-QMediaCaptureSession& ScreenCaptureDevice::captureSession() {
-    return captureSession_;
+    return backend_ && backend_->isActive();
 }
 
 }  // namespace devicehub
