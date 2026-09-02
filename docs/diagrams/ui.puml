@@ -48,14 +48,26 @@ class ChannelsPanel {
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +refreshButton() : QPushButton*
+  +filterEdit() : QLineEdit*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
+  -applyFilter()
   .. signals ..
   +createRequested(name: QString, isEncrypted: bool)
   +renameRequested(id: int64, newName: QString)
   +deleteRequested(id: int64)
   +channelSelected(id: int64, name: QString)
 }
+note right of ChannelsPanel
+  Issue #152: поле фильтра сужает
+  listWidget() по имени (без учёта
+  регистра); зашифрованные каналы
+  получают тот же значок замка, что и
+  заголовок ChatView (issue #138), прямо
+  в строке, но channelSelected()/rename
+  всегда используют настоящее имя, а не
+  отображаемый текст с префиксом.
+end note
 
 class ChatView {
   +showPlaceholder()
