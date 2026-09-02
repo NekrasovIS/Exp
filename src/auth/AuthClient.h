@@ -7,20 +7,20 @@
 namespace devicehub {
 
 /**
- * @brief Talks to auth-service over HTTP: requests a token, then can ask
- *        the same service to verify one.
+ * @brief Общается с auth-service по HTTP: запрашивает токен, а затем может
+ *        попросить тот же сервис проверить его.
  *
- * Async via signals, like the classes in devices/ — never blocks the GUI
- * thread on a network round trip.
+ * Асинхронно через сигналы, как и классы в devices/ — никогда не блокирует
+ * GUI-поток на сетевом round trip.
  *
- * Login/register/refresh (issue #105) all report their access token the
- * same way, via tokenReceived(token, refreshToken, expiresAt) — a
- * uniform signal means MainWindow doesn't need separate handling for
- * "freshly logged in" vs. "silently refreshed". refreshAccessToken()
- * doesn't get back (or need) a new refresh token — refresh tokens don't
- * rotate on this service, see TokenService's doc comment — so it
- * re-emits whatever refresh token was passed in unchanged, alongside
- * the freshly issued access token/expiry.
+ * Login/register/refresh (issue #105) — все отдают свой access-токен
+ * одинаково, через tokenReceived(token, refreshToken, expiresAt) —
+ * единообразный сигнал избавляет MainWindow от отдельной обработки
+ * «только что залогинился» против «тихо обновил токен». refreshAccessToken()
+ * не получает обратно (и ему не нужен) новый refresh-токен — refresh-токены
+ * на этом сервисе не ротируются, см. doc-комментарий TokenService — поэтому
+ * он повторно испускает без изменений тот refresh-токен, что был передан на
+ * вход, вместе со свежевыпущенным access-токеном/сроком действия.
  */
 class AuthClient : public QObject {
     Q_OBJECT
@@ -28,41 +28,41 @@ class AuthClient : public QObject {
 public:
     explicit AuthClient(QUrl baseUrl, QObject* parent = nullptr);
 
-    /// Requests a new token for (@p login, @p password) from
-    /// POST {baseUrl}/auth/token — auth-service checks these against
-    /// user-service before issuing anything.
+    /// Запрашивает новый токен для (@p login, @p password) через
+    /// POST {baseUrl}/auth/token — auth-service сверяет их с user-service
+    /// перед тем как что-либо выпустить.
     void requestToken(const QString& login, const QString& password);
 
-    /// Asks the service to verify @p token via POST {baseUrl}/auth/verify.
+    /// Просит сервис проверить @p token через POST {baseUrl}/auth/verify.
     void verifyToken(const QString& token);
 
-    /// Registers a new account via POST {baseUrl}/auth/register —
-    /// auth-service forwards to user-service and, on success, issues a
-    /// token immediately (auto-login), reported via tokenReceived().
+    /// Регистрирует новый аккаунт через POST {baseUrl}/auth/register —
+    /// auth-service перенаправляет запрос в user-service и при успехе сразу
+    /// выпускает токен (auto-login), о чём сообщается через tokenReceived().
     void registerUser(const QString& login, const QString& password);
 
-    /// Exchanges @p refreshToken for a fresh access token via
-    /// POST {baseUrl}/auth/refresh — lets the caller stay signed in
-    /// past the access token's short TTL without re-entering
-    /// credentials. Reports the result via tokenReceived(), same as
+    /// Обменивает @p refreshToken на свежий access-токен через
+    /// POST {baseUrl}/auth/refresh — позволяет вызывающему коду оставаться
+    /// авторизованным дольше короткого TTL access-токена без повторного
+    /// ввода учётных данных. Сообщает результат через tokenReceived(), как
     /// requestToken()/registerUser().
     void refreshAccessToken(const QString& refreshToken);
 
 signals:
-    /// Emitted when a new access token was issued successfully — by
-    /// requestToken(), registerUser() (auto-login), or
-    /// refreshAccessToken(). @p expiresAt is Unix seconds (UTC).
+    /// Испускается при успешном выпуске нового access-токена — из
+    /// requestToken(), registerUser() (auto-login) или
+    /// refreshAccessToken(). @p expiresAt — Unix-секунды (UTC).
     void tokenReceived(const QString& token, const QString& refreshToken, qint64 expiresAt);
 
-    /// Emitted with the result of a verifyToken() call.
+    /// Испускается с результатом вызова verifyToken().
     void tokenVerified(bool valid, const QString& subject);
 
-    /// Emitted with the result of a registerUser() call. On success,
-    /// tokenReceived() also fires with the auto-issued token.
+    /// Испускается с результатом вызова registerUser(). При успехе также
+    /// срабатывает tokenReceived() с автоматически выпущенным токеном.
     void registrationCompleted(bool registered);
 
-    /// Emitted on any network or protocol error for any of the calls
-    /// above.
+    /// Испускается при любой сетевой или протокольной ошибке для любого из
+    /// вызовов выше.
     void errorOccurred(const QString& message);
 
 private:

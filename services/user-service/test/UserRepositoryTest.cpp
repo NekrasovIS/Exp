@@ -9,9 +9,9 @@
 #include <string>
 #include <utility>
 
-// Requires a live Postgres (see docker-compose.yml) reachable at
-// USER_SERVICE_DATABASE_URL (default matches docker-compose.yml).
-// Skips itself rather than failing when it isn't running.
+// Требует работающий Postgres (см. docker-compose.yml), доступный по
+// USER_SERVICE_DATABASE_URL (значение по умолчанию совпадает с docker-compose.yml).
+// Пропускает себя вместо падения, если он не запущен.
 
 namespace user_service {
 namespace {

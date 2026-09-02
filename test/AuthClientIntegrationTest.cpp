@@ -14,13 +14,13 @@
 
 #include <cstdlib>
 
-// Requires a live auth-service, user-service, and Postgres (see
+// Требует запущенных auth-service, user-service и Postgres (см.
 // services/auth-service, services/user-service, docker-compose.yml).
-// Reachable at AUTH_SERVICE_URL / USER_SERVICE_URL (defaults
-// http://127.0.0.1:8080 / http://127.0.0.1:8081). Skips itself rather
-// than failing when they're not running — CI doesn't currently
-// orchestrate all three together, so this is a manual/local end-to-end
-// check, not part of the automated suite's guarantees.
+// Доступны по AUTH_SERVICE_URL / USER_SERVICE_URL (по умолчанию
+// http://127.0.0.1:8080 / http://127.0.0.1:8081). Пропускает себя вместо
+// падения, если они не запущены — CI сейчас не оркестрирует все три
+// вместе, поэтому это ручная/локальная сквозная (end-to-end) проверка, а
+// не часть гарантий автоматического набора тестов.
 
 namespace devicehub {
 namespace {
@@ -54,8 +54,9 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     const QUrl userBaseUrl(userUrlEnv != nullptr ? QString::fromLocal8Bit(userUrlEnv)
                                                   : QStringLiteral("http://127.0.0.1:8081"));
 
-    // Unique per run so this never collides with a leftover row from a
-    // previous run against the same Postgres instance.
+    // Уникально при каждом запуске, чтобы никогда не столкнуться с
+    // оставшейся строкой от предыдущего запуска против того же экземпляра
+    // Postgres.
     const QString login = QStringLiteral("integration-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
     const QString password = QStringLiteral("integration-test-password");
 
@@ -110,9 +111,9 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     EXPECT_EQ(subject, login);
     ASSERT_FALSE(receivedRefreshToken.isEmpty());
 
-    // issue #105: the refresh token from that same login exchanges for
-    // a brand new (but still verifiable) access token, no credentials
-    // needed a second time.
+    // issue #105: refresh-токен от того же логина обменивается на совершенно
+    // новый (но по-прежнему проверяемый) access-токен, без повторного ввода
+    // учётных данных.
     QString refreshedToken;
     {
         QEventLoop loop;
@@ -280,7 +281,7 @@ TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegister
 
     AuthClient client(authBaseUrl);
 
-    // First registration — establishes the login.
+    // Первая регистрация — закрепляет логин.
     bool firstRegistered = false;
     bool firstFired = false;
     {
@@ -300,8 +301,9 @@ TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegister
     }
     ASSERT_TRUE(firstRegistered);
 
-    // Second registration of the same login must be reported as failed,
-    // and must NOT auto-issue a token the way a fresh registration does.
+    // Повторная регистрация того же логина должна сообщаться как неудачная
+    // и НЕ должна автоматически выдавать токен, как это делает первая
+    // (новая) регистрация.
     bool secondRegistered = true;
     bool tokenReceivedOnDuplicate = false;
     QEventLoop loop;

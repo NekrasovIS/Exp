@@ -14,7 +14,7 @@ namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
 
-// Both endpoints take the same {"login", "password"} shape.
+// Оба эндпоинта принимают одинаковую форму {"login", "password"}.
 struct Credentials {
     std::string login;
     std::string password;
@@ -147,9 +147,9 @@ void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib
         response.set_content(nlohmann::json{{"error", "malformed JSON"}}.dump(), kJsonContentType);
         return;
     }
-    // Partial update: a field missing from the body keeps its current
-    // value rather than being cleared — fetch-then-merge, since
-    // UserRepository::updateProfile() always writes all three columns.
+    // Частичное обновление: поле, отсутствующее в теле запроса, сохраняет своё
+    // текущее значение, а не очищается — сначала читаем, затем сливаем, поскольку
+    // UserRepository::updateProfile() всегда записывает все три столбца.
     const std::optional<Profile> current = userService_.getProfile(*login);
     ProfileUpdate update{.displayName = current.has_value() ? current->displayName : std::nullopt,
                           .avatarUrl = current.has_value() ? current->avatarUrl : std::nullopt,

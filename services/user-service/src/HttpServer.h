@@ -31,10 +31,10 @@ class HttpServer {
 public:
     HttpServer(UserService& userService, const AuthServiceClient& authServiceClient);
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокирует выполнение, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:

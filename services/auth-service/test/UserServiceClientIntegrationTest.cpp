@@ -10,11 +10,11 @@
 
 #include "TokenService.h"
 
-// Requires a live user-service + Postgres (see services/user-service,
-// docker-compose.yml) reachable at USER_SERVICE_HOST/USER_SERVICE_PORT
-// (defaults 127.0.0.1:8081). Skips itself rather than failing when it
-// isn't running — CI doesn't currently orchestrate both services
-// together, so this is a manual/local end-to-end check.
+// Требует работающего user-service + Postgres (см. services/user-service,
+// docker-compose.yml), доступного по USER_SERVICE_HOST/USER_SERVICE_PORT
+// (по умолчанию 127.0.0.1:8081). Самоотключается (skip), а не падает,
+// когда он не запущен — CI сейчас не оркестрирует оба сервиса вместе,
+// так что это ручная/локальная сквозная (end-to-end) проверка.
 
 namespace auth_service {
 namespace {
@@ -62,9 +62,10 @@ TEST(UserServiceClientIntegrationTest, RegisterUserSucceedsOnceThenRejectsDuplic
                 .count());
     const std::string password = "integration-test-password";
 
-    // Confirms reachability the same way VerifiesRegisteredUserAndRejectsWrongPassword
-    // does: a real registration through the raw client, skipping if the
-    // service isn't reachable rather than failing.
+    // Подтверждает доступность так же, как это делает
+    // VerifiesRegisteredUserAndRejectsWrongPassword: реальная
+    // регистрация через "сырой" клиент, с самоотключением (skip), если
+    // сервис недоступен, а не с падением теста.
     httplib::Client setupClient(host, port);
     const nlohmann::json probeBody{{"login", loginPrefix + "-probe"}, {"password", password}};
     const httplib::Result probeResult = setupClient.Post("/users/register", probeBody.dump(), "application/json");
@@ -97,9 +98,10 @@ TEST(UserServiceClientIntegrationTest, VerifyCredentialsRejectsNonexistentLogin)
 }
 
 TEST(UserServiceClientIntegrationTest, FailsClosedWhenUserServiceIsUnreachable) {
-    // No skip logic here on purpose — this deliberately targets an
-    // unused loopback port so it's meaningful whether or not a real
-    // user-service happens to be running elsewhere.
+    // Здесь намеренно нет логики самоотключения (skip) — этот тест
+    // сознательно нацелен на неиспользуемый loopback-порт, так что
+    // результат осмыслен независимо от того, запущен ли где-то ещё
+    // реальный user-service.
     const UserServiceClient client("127.0.0.1", 1);
 
     EXPECT_FALSE(client.verifyCredentials("alice", "password"));

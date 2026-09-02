@@ -14,11 +14,11 @@
 #include "UserRepository.h"
 #include "UserService.h"
 
-// Route-level tests for HttpServer, hitting a real httplib::Server
-// instance over loopback HTTP. Requires a live Postgres (see
-// docker-compose.yml) reachable at USER_SERVICE_DATABASE_URL, same as
-// UserServiceIntegrationTest/UserRepositoryTest — skips itself rather
-// than fail when it isn't running.
+// Тесты уровня маршрутов для HttpServer, обращающиеся к реальному экземпляру
+// httplib::Server через loopback HTTP. Требуют работающий Postgres (см.
+// docker-compose.yml), доступный по USER_SERVICE_DATABASE_URL, так же как
+// UserServiceIntegrationTest/UserRepositoryTest — пропускают себя вместо
+// падения, если он не запущен.
 
 namespace user_service {
 namespace {
@@ -43,17 +43,18 @@ std::string uniqueLogin(const std::string& prefix) {
 constexpr const char* kTestHost = "127.0.0.1";
 constexpr int kTestPort = 18081;
 
-// Real AuthServiceClient pointed at whatever auth-service is configured
-// for this test run (same env vars as AuthServiceClientTest.cpp) —
-// unauthenticated routes (register/verify-credentials) never invoke it,
-// so it's safe to construct even when auth-service isn't reachable.
+// Реальный AuthServiceClient, указывающий на тот auth-service, что настроен
+// для этого запуска тестов (те же переменные окружения, что и в
+// AuthServiceClientTest.cpp) — неаутентифицированные маршруты
+// (register/verify-credentials) никогда его не вызывают, поэтому его
+// безопасно создавать, даже если auth-service недоступен.
 AuthServiceClient testAuthServiceClient() {
     return AuthServiceClient(envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1"),
                               std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080")));
 }
 
-// Starts a real HttpServer on a background thread for the lifetime of
-// the fixture and stops it on destruction.
+// Запускает реальный HttpServer в фоновом потоке на время жизни фикстуры
+// и останавливает его в деструкторе.
 class ScopedServer {
 public:
     ScopedServer(UserService& userService, const AuthServiceClient& authServiceClient)
@@ -113,9 +114,9 @@ TEST(HttpServerTest, RegisterRouteCreatesAccountWith201) {
     UserService userService(repository);
 
     const std::string login = uniqueLogin("http-server-register-test");
-    // Reachability probe: registering the throwaway login below will
-    // throw (not just fail) if Postgres isn't up, since UserRepository
-    // opens a real connection per call.
+    // Проверка доступности: регистрация одноразового логина ниже выбросит
+    // исключение (а не просто вернёт неудачу), если Postgres не поднят,
+    // поскольку UserRepository открывает реальное соединение на каждый вызов.
     try {
         static_cast<void>(userService.registerUser("http-server-test-reachability-probe", "irrelevant"));
     } catch (const std::exception& error) {
@@ -240,10 +241,10 @@ TEST(HttpServerTest, VerifyCredentialsRouteReturnsFalseForWrongPassword) {
     EXPECT_FALSE(body["valid"].get<bool>());
 }
 
-// Registers a brand-new user directly against a live auth-service (not
-// this test's ScopedServer) and returns its auto-issued token — the
-// profile routes need a token auth-service itself will actually verify.
-// Empty string means auth-service isn't reachable.
+// Регистрирует совершенно нового пользователя напрямую в живом auth-service
+// (не в ScopedServer этого теста) и возвращает автоматически выданный токен —
+// маршрутам профиля нужен токен, который auth-service реально сможет
+// проверить. Пустая строка означает, что auth-service недоступен.
 std::string registerViaAuthServiceAndGetToken(const std::string& loginPrefix) {
     const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
     const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
@@ -287,7 +288,7 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     httplib::Client client(kTestHost, kTestPort);
     httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
 
-    // Full update: all three fields.
+    // Полное обновление: все три поля.
     const httplib::Result patchResult = client.Patch(
         "/users/me", authHeader,
         nlohmann::json{{"display_name", "Alice"},
@@ -307,9 +308,9 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     EXPECT_EQ(profile["avatar_url"].get<std::string>(), "https://example.test/alice.png");
     EXPECT_EQ(profile["public_key"].get<std::string>(), "base64-x25519-public-key");
 
-    // Partial update: display_name only — avatar_url/public_key must
-    // survive unchanged (issue #136's key shouldn't be droppable by an
-    // unrelated profile edit).
+    // Частичное обновление: только display_name — avatar_url/public_key
+    // должны сохраниться без изменений (ключ из issue #136 не должен
+    // теряться из-за не связанного с ним редактирования профиля).
     const httplib::Result partialPatchResult =
         client.Patch("/users/me", authHeader, nlohmann::json{{"display_name", "Alice B."}}.dump(), "application/json");
     ASSERT_TRUE(partialPatchResult);

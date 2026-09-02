@@ -13,15 +13,17 @@
 #include "TokenService.h"
 #include "UserServiceClient.h"
 
-// Route-level tests for HttpServer, hitting a real httplib::Server
-// instance over loopback HTTP (not calling the handler methods
-// directly — they're private, and the point is to verify the actual
-// request/response contract). Tests that only exercise validation
-// (missing fields, malformed JSON) or token verification (pure local
-// logic in TokenService) need no other service running. Tests that
-// reach UserServiceClient (valid-credentials /auth/token, /auth/register)
-// need a live user-service + Postgres, same as UserServiceClientIntegrationTest,
-// and skip themselves rather than fail when it isn't reachable.
+// Тесты уровня маршрутов для HttpServer, обращающиеся к реальному
+// экземпляру httplib::Server по loopback-HTTP (а не вызывающие методы
+// обработчиков напрямую — они приватные, и суть в том, чтобы проверить
+// реальный контракт запрос/ответ). Тестам, которые проверяют только
+// валидацию (отсутствующие поля, некорректный JSON) или проверку
+// токена (чистая локальная логика в TokenService), не требуется
+// запущенный другой сервис. Тестам, которые обращаются к
+// UserServiceClient (валидные учётные данные для /auth/token,
+// /auth/register), нужен работающий user-service + Postgres, так же
+// как и UserServiceClientIntegrationTest, и они самоотключаются
+// (skip), а не падают, когда сервис недоступен.
 
 namespace auth_service {
 namespace {
@@ -34,9 +36,10 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
 constexpr const char* kTestHost = "127.0.0.1";
 constexpr int kTestPort = 18080;
 
-// Starts a real HttpServer on a background thread for the lifetime of
-// the fixture and stops it on destruction, so each TEST gets a fresh
-// server without repeating the thread/readiness boilerplate.
+// Запускает реальный HttpServer в фоновом потоке на время жизни
+// фикстуры и останавливает его при уничтожении, так что каждый TEST
+// получает свежий сервер без повторения шаблонного кода запуска потока
+// и ожидания готовности.
 class ScopedServer {
 public:
     ScopedServer(const TokenService& tokenService, const UserServiceClient& userServiceClient)
@@ -99,9 +102,9 @@ public:
     mutable std::string lastCode;
 };
 
-// True if user-service is reachable at USER_SERVICE_HOST/PORT (defaults
-// 127.0.0.1:8081), probed via a throwaway registration the same way
-// UserServiceClientIntegrationTest does.
+// True, если user-service доступен по USER_SERVICE_HOST/PORT (по
+// умолчанию 127.0.0.1:8081), проверяется через одноразовую
+// регистрацию, так же как это делает UserServiceClientIntegrationTest.
 bool userServiceReachable(const std::string& host, int port) {
     httplib::Client client(host, port);
     const nlohmann::json probeBody{{"login", "http-server-test-probe"}, {"password", "irrelevant"}};
@@ -117,7 +120,7 @@ std::string uniqueLogin(const std::string& prefix) {
 
 TEST(HttpServerTest, TokenRouteRejectsMissingFieldsWith400) {
     const TokenService tokenService("test-secret");
-    const UserServiceClient userServiceClient("127.0.0.1", 1);  // unreachable, must not be hit
+    const UserServiceClient userServiceClient("127.0.0.1", 1);  // недоступен, не должен вызываться
     const ScopedServer server(tokenService, userServiceClient);
 
     httplib::Client client(kTestHost, kTestPort);
