@@ -122,6 +122,20 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     searchButton_->setObjectName(QStringLiteral("searchButton"));
     connect(searchButton_, &QPushButton::clicked, this, &ChatView::openSearchRequested);
 
+    // Иконка вместо текстовой кнопки (issue #184) — тот же плоский
+    // иконочный стиль, что и у композера/FooterBar. ChatView не хранит
+    // открыта ли сейчас MemberListPanel (ей не владеет), поэтому кнопка
+    // просто сигнализирует клик каждый раз, без переключения своего
+    // текста/вида.
+    memberListToggleButton_ = new QPushButton(channelPage);
+    memberListToggleButton_->setObjectName(QStringLiteral("memberListToggleButton"));
+    memberListToggleButton_->setToolTip(tr("Members"));
+    memberListToggleButton_->setProperty("flatIconButton", true);
+    memberListToggleButton_->setIcon(ui_icons::membersIcon(QColor(ui_theme::kMutedForeground)));
+    memberListToggleButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    memberListToggleButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(memberListToggleButton_, &QPushButton::clicked, this, &ChatView::memberListToggleRequested);
+
     // Видна только во время звонка (issue #153) — позволяет области
     // видео занять окно, не теряя доступ к чату насовсем.
     toggleChatVisibilityButton_ = new QPushButton(tr("Hide Chat"), channelPage);
@@ -138,6 +152,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     headerRow->addWidget(screenShareToggleButton_);
     headerRow->addWidget(toggleChatVisibilityButton_);
     headerRow->addWidget(searchButton_);
+    headerRow->addWidget(memberListToggleButton_);
 
     callParticipantsLabel_ = new QLabel(channelPage);
     callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));

@@ -33,4 +33,10 @@ QIcon sendIcon(const QColor& fillColor);
 /// эмодзи "⚙" в тексте кнопки.
 QIcon settingsIcon(const QColor& fillColor);
 
+/// Значок "участники" (два перекрывающихся силуэта человека) — рисуется
+/// вручную по той же причине, что и остальные значки в этом файле.
+/// Используется кнопкой сворачивания/разворачивания MemberListPanel в
+/// шапке ChatView (issue #184).
+QIcon membersIcon(const QColor& fillColor);
+
 }  // namespace devicehub::ui_icons

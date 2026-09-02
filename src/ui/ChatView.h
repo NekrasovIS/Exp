@@ -170,6 +170,11 @@ public:
     /// того, чтобы чат всегда занимал одну и ту же фиксированную долю
     /// окна.
     [[nodiscard]] QPushButton* toggleChatVisibilityButton() const { return toggleChatVisibilityButton_; }
+    /// Иконка "участники" в правом углу шапки (issue #184) — переключает
+    /// видимость MemberListPanel, которой ChatView не владеет сама,
+    /// поэтому только сигнализирует запрос, а не хранит состояние
+    /// открыт/свёрнут самостоятельно.
+    [[nodiscard]] QPushButton* memberListToggleButton() const { return memberListToggleButton_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -198,6 +203,11 @@ signals:
     /// Клик по "Search" (issue #118) — MainWindow показывает/поднимает
     /// свой SearchDialog.
     void openSearchRequested();
+
+    /// Клик по иконке "участники" (issue #184) — MainWindow переключает
+    /// видимость своей MemberListPanel; сама ChatView этой панелью не
+    /// владеет и не знает, открыта она сейчас или нет.
+    void memberListToggleRequested();
 
     /// Пользователь печатает в поле сообщения — с ограничением частоты
     /// (не чаще одного раза за окно охлаждения), а не при каждом
@@ -270,6 +280,7 @@ private:
     bool screenShareActive_ = false;
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
+    QPushButton* memberListToggleButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
     /// Область видео (сверху) и chatPanel_ (снизу) — во время звонка
     /// область видео получает большую часть пространства, а chatPanel_
