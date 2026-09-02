@@ -5,11 +5,11 @@
 namespace devicehub {
 namespace {
 
-// ChatBubble's real behavior is its paintEvent() fill (gradient for
-// own messages, neutral for others) — a rendering concern this
-// project's tests don't verify (no pixel sampling). These are
-// construction-only smoke tests confirming both variants build
-// without crashing.
+// Реальное поведение ChatBubble — это заливка в paintEvent() (градиент для
+// собственных сообщений, нейтральная заливка для чужих) — вопрос рендеринга,
+// который тесты этого проекта не проверяют (нет сэмплирования пикселей). Это
+// просто smoke-тесты на конструирование, подтверждающие, что оба варианта
+// собираются без падения.
 
 TEST(ChatBubbleTest, ConstructsForOwnMessage) {
     ChatBubble bubble(/*isOwnMessage=*/true);

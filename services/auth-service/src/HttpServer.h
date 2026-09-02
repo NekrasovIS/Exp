@@ -12,42 +12,43 @@
 namespace auth_service {
 
 /**
- * @brief REST front-end for TokenService: POST /auth/token,
+ * @brief REST-обёртка над TokenService: POST /auth/token,
  *        POST /auth/verify, POST /auth/register, POST /auth/refresh.
  *
- * POST /auth/token requires valid {"login", "password"} — checked
- * against user-service via UserServiceClient — before a token is issued.
- * POST /auth/register forwards to user-service's own registration and,
- * on success, immediately issues a token too (auto-login) so the client
- * doesn't need a second round trip. Both also return a long-lived
- * refresh_token (issue #105) alongside the access token; POST
- * /auth/refresh exchanges a still-valid refresh token for a fresh
- * access token via {"refresh_token"} — without the user re-entering
- * credentials — same response shape as /auth/token. Thin wrapper around
- * httplib::Server otherwise — all token logic lives in TokenService,
- * this class only translates HTTP requests/responses.
+ * POST /auth/token требует валидные {"login", "password"} — они
+ * проверяются через user-service с помощью UserServiceClient — прежде
+ * чем выдать токен. POST /auth/register перенаправляет запрос в
+ * собственную регистрацию user-service и, в случае успеха, сразу же
+ * выдаёт токен (авто-логин), чтобы клиенту не требовался второй запрос.
+ * Оба метода также возвращают долгоживущий refresh_token (issue #105)
+ * вместе с access-токеном; POST /auth/refresh обменивает ещё
+ * действительный refresh-токен на свежий access-токен через
+ * {"refresh_token"} — без повторного ввода учётных данных пользователем
+ * — с тем же форматом ответа, что и /auth/token. В остальном — тонкая
+ * обёртка над httplib::Server: вся логика токенов находится в
+ * TokenService, этот класс лишь транслирует HTTP-запросы/ответы.
  *
- * /auth/token and /auth/register (both credential-checking) are rate
- * limited per client address (issue #102) — /auth/verify and
- * /auth/refresh aren't: /auth/verify is called legitimately by
- * chat-service on every single request it handles, and /auth/refresh
- * requires an already-valid signed refresh token rather than a
- * guessable credential, so neither should trip the limiter meant for
- * brute-force guarding.
+ * /auth/token и /auth/register (оба проверяют учётные данные)
+ * ограничены по частоте запросов на клиентский адрес (issue #102) —
+ * /auth/verify и /auth/refresh не ограничены: /auth/verify легитимно
+ * вызывается chat-service на каждый обрабатываемый им запрос, а
+ * /auth/refresh требует уже валидного подписанного refresh-токена, а не
+ * угадываемых учётных данных, поэтому ни один из них не должен
+ * попадать под лимитер, предназначенный для защиты от brute-force.
  */
 class HttpServer {
 public:
-    /// @p rateLimitMaxRequests/@p rateLimitWindow configure the
-    /// /auth/token + /auth/register limiter — defaults are a real
-    /// production limit; tests pass a tiny window to trip it fast and
-    /// deterministically instead of waiting on a real clock.
+    /// @p rateLimitMaxRequests/@p rateLimitWindow настраивают лимитер
+    /// для /auth/token + /auth/register — значения по умолчанию — это
+    /// реальный продакшн-лимит; тесты передают крошечное окно, чтобы
+    /// сработать быстро и детерминированно, не дожидаясь реальных часов.
     HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
                int rateLimitMaxRequests = 10, std::chrono::milliseconds rateLimitWindow = std::chrono::seconds{60});
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокирует поток, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:

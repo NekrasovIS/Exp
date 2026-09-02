@@ -43,11 +43,12 @@ TEST(IdentityKeyStoreTest, DifferentLoginsGetDifferentKeyPairs) {
 }
 
 TEST(IdentityKeyStoreTest, PublicKeyIsDerivedFromTheStoredSecretKeyOnLoad) {
-    // Plants a known secret key file directly (bypassing generation) and
-    // checks the loaded public key matches independently computing it via
-    // libsodium's own base-point multiplication — confirms
-    // IdentityKeyStore::loadIfExists() actually derives from what's on
-    // disk rather than, say, silently regenerating a fresh keypair.
+    // Напрямую подкладывает файл с заранее известным секретным ключом (в обход
+    // генерации) и проверяет, что загруженный публичный ключ совпадает с
+    // независимо вычисленным через собственное умножение базовой точки
+    // libsodium — подтверждает, что IdentityKeyStore::loadIfExists()
+    // действительно выводит ключ из того, что лежит на диске, а не, скажем,
+    // молча генерирует новую пару ключей.
     ASSERT_GE(sodium_init(), 0);
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());

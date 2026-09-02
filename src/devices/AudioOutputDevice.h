@@ -13,14 +13,15 @@ class QIODevice;
 namespace devicehub {
 
 /**
- * @brief Plays a test tone, or streamed PCM (e.g. a live call), through
- *        a chosen audio output device.
+ * @brief Воспроизводит тестовый тон или потоковый PCM (например, живой
+ *        звонок) через выбранное устройство аудиовывода.
  *
- * playTestTone() generates a short sine wave in memory and streams it
- * through QAudioSink. startStreaming()/writeAudio() instead put the
- * sink in push mode for a caller (e.g. CallManager) that has its own
- * ongoing PCM to deliver, with no fixed end. One QAudioSink at a time —
- * starting either stops whatever was playing before it.
+ * playTestTone() генерирует короткую синусоиду в памяти и стримит её
+ * через QAudioSink. startStreaming()/writeAudio() вместо этого переводят
+ * sink в режим push для вызывающего кода (например, CallManager), у
+ * которого есть собственный непрерывный PCM для доставки, без
+ * фиксированного конца. Одновременно только один QAudioSink — запуск
+ * любого из них останавливает то, что воспроизводилось до него.
  */
 class AudioOutputDevice : public QObject {
     Q_OBJECT
@@ -29,51 +30,57 @@ public:
     explicit AudioOutputDevice(QObject* parent = nullptr);
     ~AudioOutputDevice() override;
 
-    /// Starts playing a sine test tone on @p device at @p frequencyHz.
+    /// Начинает воспроизведение синусоидального тестового тона на
+    /// @p device на частоте @p frequencyHz.
     void playTestTone(const QAudioDevice& device, double frequencyHz = 440.0);
 
-    /// Starts push-mode playback on @p device for streaming audio
-    /// delivered via writeAudio() as it arrives, instead of a fixed
-    /// in-memory buffer. @p format must already be exactly what the
-    /// caller will write — no resampling happens here. Returns false
-    /// (and emits errorOccurred()) if @p device doesn't support it.
-    /// Uses a larger-than-default QAudioSink buffer (~500ms) since the
-    /// caller (e.g. CallManager) delivers chunks from another thread
-    /// via a queued cross-thread call, not a tight low-latency
-    /// callback — without the extra headroom, GUI event-loop
-    /// scheduling jitter causes audible underrun crackling.
+    /// Начинает воспроизведение в режиме push на @p device для
+    /// потокового аудио, доставляемого через writeAudio() по мере
+    /// поступления, вместо фиксированного буфера в памяти. @p format
+    /// уже должен быть ровно тем, что будет записывать вызывающий код —
+    /// ресемплинг здесь не выполняется. Возвращает false (и испускает
+    /// errorOccurred()), если @p device его не поддерживает. Использует
+    /// буфер QAudioSink больше стандартного (~500 мс), поскольку
+    /// вызывающий код (например, CallManager) доставляет чанки из
+    /// другого потока через межпотоковый вызов через очередь, а не через
+    /// плотный низколатентный колбэк — без этого запаса дрожание
+    /// планирования GUI event-loop приводит к слышимому потрескиванию
+    /// от underrun.
     bool startStreaming(const QAudioDevice& device, const QAudioFormat& format);
 
-    /// Writes @p pcm to the sink started by startStreaming(). No-op if
-    /// streaming hasn't been started.
+    /// Записывает @p pcm в sink, запущенный startStreaming(). Ничего не
+    /// делает, если стриминг не был запущен.
     void writeAudio(const QByteArray& pcm);
 
-    /// Stops playback if in progress.
+    /// Останавливает воспроизведение, если оно выполняется.
     void stop();
 
-    /// @return True while a test tone or a stream is actively playing.
+    /// @return True, пока активно воспроизводится тестовый тон или поток.
     [[nodiscard]] bool isPlaying() const;
 
-    /// The buffer duration startStreaming() sizes its QAudioSink to.
-    /// Streamed audio (a live call) arrives in small chunks from
-    /// another thread, hopping through a queued cross-thread call
-    /// before it reaches writeAudio() — unlike a tight low-latency
-    /// playback callback, that hop is subject to Qt GUI event-loop
-    /// scheduling jitter, and the feeding thread itself is a
-    /// normal-priority std::jthread with no real-time scheduling
-    /// guarantee. QAudioSink's own default buffer is sized for the
-    /// low-latency case and underruns easily under that jitter,
-    /// audible as crackling; this is generous but a voice call
-    /// tolerates the added latency far better than audible glitches.
-    /// Exposed so a caller that also feeds WebRTC's echo canceller
-    /// (e.g. CallManager, via CallAudioDeviceModule::setTotalDelayMs())
-    /// can report accurate playout delay instead of guessing.
+    /// Длительность буфера, под которую startStreaming() подгоняет
+    /// размер своего QAudioSink. Потоковое аудио (живой звонок)
+    /// приходит небольшими чанками из другого потока, проходя через
+    /// межпотоковый вызов через очередь, прежде чем достичь
+    /// writeAudio() — в отличие от плотного низколатентного колбэка
+    /// воспроизведения, этот переход подвержен дрожанию планирования
+    /// GUI event-loop Qt, а сам питающий поток — это std::jthread с
+    /// обычным приоритетом без гарантий планирования реального времени.
+    /// Стандартный буфер самого QAudioSink рассчитан на низколатентный
+    /// случай и легко переживает underrun под таким дрожанием, слышимый
+    /// как потрескивание; это значение щедрое, но голосовой звонок
+    /// переносит добавленную задержку намного лучше, чем слышимые
+    /// артефакты. Открыто наружу, чтобы вызывающий код, который также
+    /// питает эхоподавитель WebRTC (например, CallManager через
+    /// CallAudioDeviceModule::setTotalDelayMs()), мог сообщать точную
+    /// задержку воспроизведения вместо угадывания.
     [[nodiscard]] static constexpr int streamingBufferDurationMs() { return 500; }
 
 signals:
-    /// Emitted when test-tone playback finishes (buffer drained or
-    /// stopped) — not emitted for startStreaming() sessions, where an
-    /// idle sink between writes is normal, not "done".
+    /// Испускается, когда воспроизведение тестового тона завершается
+    /// (буфер исчерпан или остановлен) — не испускается для сессий
+    /// startStreaming(), где простаивающий между записями sink —
+    /// нормальное состояние, а не «завершено».
     void finished();
 
     void errorOccurred(const QString& message);

@@ -31,8 +31,8 @@ void CallVideoTrackSource::pushFrame(const QVideoFrame& frame) {
     int cropY = 0;
     if (!AdaptFrame(image.width(), image.height(), timestampUs, &adaptedWidth, &adaptedHeight, &cropWidth,
                      &cropHeight, &cropX, &cropY)) {
-        // No interested sinks, or the adapter wants this particular
-        // frame dropped (e.g. to hold to a target framerate).
+        // Нет заинтересованных sink'ов, либо адаптер хочет отбросить
+        // именно этот кадр (например, чтобы удержать целевой framerate).
         return;
     }
 
