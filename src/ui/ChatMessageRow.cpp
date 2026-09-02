@@ -120,6 +120,14 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         // через popup() (неблокирующий), а не exec(), чтобы тест мог
         // напрямую вызвать соответствующий QAction, не прокручивая
         // модальный event loop.
+        // bodyLabel_ включает Qt::TextBrowserInteraction (выше), из-за
+        // чего QLabel сам обрабатывает правый клик и показывает
+        // встроенное текстовое меню (Copy/Copy Link/Select All),
+        // поглощая событие раньше, чем оно доходит до bubble_ — снаружи
+        // это выглядело так, будто кастомное меню Edit/Delete вообще не
+        // подключено. Отключаем контекстное меню у самого label'а, чтобы
+        // событие всплывало к bubble_.
+        bodyLabel_->setContextMenuPolicy(Qt::NoContextMenu);
         bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(bubble_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
             auto* menu = new QMenu(bubble_);
