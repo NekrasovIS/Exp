@@ -7,9 +7,11 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setStyleSheet(devicehub::ui_theme::discordDarkStyleSheet());
 
+    // MainWindow сам управляет своей видимостью (issue #156) — окно
+    // авторизации показывается первым, а сам интерфейс (и его размер
+    // 1280x800 из MainWindow::buildUi()) — только после успешного
+    // входа/регистрации.
     devicehub::MainWindow window;
-    window.resize(480, 800);
-    window.show();
 
     return QApplication::exec();
 }

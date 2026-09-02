@@ -25,7 +25,6 @@ class QTimer;
 
 namespace devicehub {
 
-class AccountMenu;
 class ChannelsPanel;
 class ChatView;
 class CommunitiesPanel;
@@ -39,8 +38,14 @@ class SettingsDialog;
 
 /**
  * @brief Оболочка главного окна: боковая панель сообществ/каналов
- *        слева, чат открытого канала в основной области, меню аккаунта
- *        справа сверху и подвал с профилем и точкой входа в настройки.
+ *        слева, чат открытого канала в основной области, подвал с
+ *        профилем и точкой входа в настройки.
+ *
+ * Интерфейс скрыт, пока пользователь не авторизован — единственное
+ * видимое окно при запуске это LoginWindow (issue #156); само
+ * MainWindow показывается только после успешного входа/регистрации, а
+ * закрытие LoginWindow без авторизации завершает приложение (см.
+ * main.cpp и обработчик LoginWindow::rejected() в конструкторе).
  *
  * Чистое представление/связующая логика — весь доступ к устройствам и
  * сети делегирован классам devicehub::* в src/devices, src/auth и
@@ -61,8 +66,6 @@ private:
     void onToggleMicClicked();
     void onToggleCameraClicked();
     void onToggleScreenCaptureClicked();
-    void onRequestTokenClicked();
-    void onRegisterClicked();
     void onSendChatMessageClicked();
     /// Клик по "Attach" (issue #116) — открывает выбор файла, затем
     /// загружает выбранный файл; сама отправка происходит после того,
@@ -78,10 +81,12 @@ private:
     void onRequestOtpCodeClicked(const QString& identifier);
     /// LoginWindow::verifyCodeRequested() — issue #156.
     void onVerifyOtpCodeClicked(const QString& identifier, const QString& code);
+    /// LoginWindow::passwordSignInRequested() — issue #156.
+    void onPasswordSignInClicked(const QString& login, const QString& password);
+    /// LoginWindow::registerRequested() — issue #156.
+    void onRegisterClicked(const QString& login, const QString& password);
     /// Клик по аватару в футере (issue #151) — показывает небольшое меню
-    /// (Edit Profile / Sign Out), привязанное к аватару, а не только к
-    /// действиям аккаунта из всплывающего AccountMenu в правом верхнем
-    /// углу.
+    /// (Edit Profile / Sign Out), привязанное к аватару.
     void onAccountSettingsClicked();
     /// Очищает локальное состояние авторизации и возвращает UI в
     /// состояние "не авторизован" — эндпоинта отзыва токена на сервере
@@ -205,7 +210,6 @@ private:
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
     ChatView* chatView_ = nullptr;
-    AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
     ModeratorsDialog* moderatorsDialog_ = nullptr;

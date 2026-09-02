@@ -12,18 +12,18 @@ struct UserProfile;
 struct ProfileEdits;
 
 /**
- * @brief Диалог редактирования профиля, открываемый кнопкой "Edit
- *        Profile" у AccountMenu (issue #110): отображаемое имя, URL
- *        аватара, email (issue #156) и Telegram chat_id (issue #174) —
- *        любой из последних двух включает вход по одноразовому коду
- *        через этот канал.
+ * @brief Диалог редактирования профиля, открываемый пунктом "Edit
+ *        Profile..." в меню по клику на аватар в футере (issue #110/
+ *        #151): отображаемое имя, URL аватара, email (issue #156) и
+ *        Telegram chat_id (issue #174) — любой из последних двух
+ *        включает вход по одноразовому коду через этот канал.
  *
  * Чистое представление — MainWindow владеет UserProfileClient и всей
  * связующей логикой: он вызывает setProfile() для предзаполнения полей
  * (синхронизируется с каждым UserProfileClient::profileReceived()/
  * profileUpdated(), а не только при открытии) и слушает saveRequested(),
  * чтобы фактически отправить изменение — тот же паттерн "тупого
- * виджета", что и у SettingsDialog/AccountMenu.
+ * виджета", что и у SettingsDialog.
  */
 class ProfileDialog : public QDialog {
     Q_OBJECT
