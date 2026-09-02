@@ -40,13 +40,93 @@ QString discordDarkStyleSheet() {
             border-right: 1px solid #2a2d31;
         }
 
+        /* Тот же тон, что и у sidebar/ChannelsPanel (#202327) — оба
+           боковых списка (каналы слева, участники справа) читаются как
+           одна пара, отдельная от самой тёмной иконочной полосы
+           сообществ (#17191c) и от основного содержимого (#1c1e21). */
         devicehub--MemberListPanel {
-            background-color: #17191c;
+            background-color: #202327;
             border-left: 1px solid #2a2d31;
         }
 
         devicehub--ChannelsPanel, devicehub--ChatView {
             background-color: transparent;
+        }
+
+        /* QListWidget не имел вообще никакого стиля — список участников
+           показывал стандартный светло-серый фон Qt/Windows, а выбранная
+           строка/иконка подсвечивалась стандартным синим Windows —
+           резко выбивалось из тёмной темы. Скруглённая полупрозрачная
+           подсветка вместо этого работает одинаково и для строк
+           текстовых списков (каналы, участники), и для круглых иконок
+           сообществ (просвечивает как скруглённый квадрат позади круга —
+           тот же приём, что и hover-подсветка сервера в Discord).
+           padding — только у текстовых списков по имени объекта, чтобы
+           не сдвигать точно подобранную сетку иконок сообществ. */
+        QListWidget {
+            background: transparent;
+            border: none;
+            outline: 0;
+        }
+
+        QListWidget::item {
+            border-radius: 8px;
+        }
+
+        QListWidget::item:hover {
+            background-color: rgba(255, 255, 255, 15);
+        }
+
+        QListWidget::item:selected {
+            background-color: rgba(255, 255, 255, 25);
+        }
+
+        QListWidget::item:selected:hover {
+            background-color: rgba(255, 255, 255, 30);
+        }
+
+        QListWidget#channelList::item, QListWidget#memberList::item {
+            padding: 6px 8px;
+        }
+
+        /* QMenu (правый клик по сообществу/каналу, аккаунт в футере) не
+           имел вообще никакого стиля — показывал стандартное светлое
+           меню Windows. */
+        QMenu {
+            background-color: #202327;
+            color: #e3e6e8;
+            border: 1px solid #2a2d31;
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        QMenu::item {
+            padding: 6px 24px 6px 12px;
+            border-radius: 6px;
+        }
+
+        QMenu::item:selected {
+            background-color: #383c41;
+        }
+
+        QMenu::item:disabled {
+            color: #8b939c;
+        }
+
+        QMenu::separator {
+            height: 1px;
+            background-color: #2a2d31;
+            margin: 4px 8px;
+        }
+
+        /* QToolTip (например, у иконочных кнопок композера/сайдбара)
+           был таким же нестилизованным светлым системным всплытием. */
+        QToolTip {
+            background-color: #202327;
+            color: #e3e6e8;
+            border: 1px solid #2a2d31;
+            border-radius: 4px;
+            padding: 4px 8px;
         }
 
         QLabel {
