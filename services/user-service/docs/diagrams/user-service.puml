@@ -23,29 +23,58 @@ struct Profile {
   +displayName: optional<string>
   +avatarUrl: optional<string>
   +publicKey: optional<string>
+  +email: optional<string>
+  +telegramChatId: optional<string>
 }
 
 struct ProfileUpdate {
   +displayName: optional<string>
   +avatarUrl: optional<string>
   +publicKey: optional<string>
+  +email: optional<string>
+  +telegramChatId: optional<string>
+}
+
+enum UpdateProfileResult {
+  kUpdated
+  kNoSuchUser
+  kEmailTaken
+  kTelegramChatIdTaken
+}
+note bottom of UpdateProfileResult
+  issue #156/#174: обычный bool не различает
+  "нет такого пользователя" и "email/
+  telegram_chat_id заняты другим аккаунтом"
+  (partial unique index на обеих колонках) —
+  вызывающей стороне нужно реагировать
+  по-разному (404 vs. 409).
+end note
+
+struct OtpIdentity {
+  +login: string
+  +email: optional<string>
+  +telegramChatId: optional<string>
 }
 
 class UserRepository {
   +createUser(login: string, passwordHash: string) : bool
   +findPasswordHash(login: string) : optional<string>
   +findProfile(login: string) : optional<Profile>
-  +updateProfile(login: string, update: ProfileUpdate) : bool
+  +updateProfile(login: string, update: ProfileUpdate) : UpdateProfileResult
+  +resolveOtpIdentifier(identifier: string) : optional<OtpIdentity>
 }
 UserRepository ..> PqxxConnection : opens per call
 UserRepository ..> Profile : creates
 UserRepository ..> ProfileUpdate : reads
+UserRepository ..> UpdateProfileResult : returns
+UserRepository ..> OtpIdentity : returns
 
 class UserService {
   +registerUser(login: string, password: string) : bool
   +verifyCredentials(login: string, password: string) : bool
   +getProfile(login: string) : optional<Profile>
-  +updateProfile(login: string, update: ProfileUpdate) : bool
+  +updateProfile(login: string, update: ProfileUpdate) : UpdateProfileResult
+  +resolveOtpIdentifier(identifier: string) : optional<OtpIdentity>
 }
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
@@ -70,6 +99,7 @@ class HttpServer {
   -handleVerifyCredentials(request, response)
   -handleGetProfile(request, response)
   -handleUpdateOwnProfile(request, response)
+  -handleResolveOtpIdentifier(request, response)
 }
 HttpServer --> UserService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
@@ -91,10 +121,18 @@ note right of HttpServer
                                         preserves the fields not sent,
                                         fetch-then-merge since
                                         UserRepository::updateProfile()
-                                        always writes all three columns
+                                        always writes all five columns
                                         — display_name/avatar_url/
-                                        public_key, the last added by
-                                        issue #136)
+                                        public_key (issue #136)/email
+                                        (issue #156)/telegram_chat_id
+                                        (issue #174))
+  POST  /users/resolve-otp-identifier -> handleResolveOtpIdentifier
+                                        (issue #156/#174, unauthenticated —
+                                        called by auth-service itself;
+                                        принимает login, email или
+                                        Telegram chat_id, отвечает
+                                        {found, login, email,
+                                        telegram_chat_id})
 end note
 
 note right of json_guard.json_guard

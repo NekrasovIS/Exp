@@ -8,25 +8,27 @@
 namespace user_service {
 
 /**
- * @brief Business logic for registration and login: hashes/verifies
- *        passwords (password_hash) and delegates storage to UserRepository.
+ * @brief Бизнес-логика регистрации и входа: хеширует/проверяет пароли
+ *        (password_hash) и делегирует хранение UserRepository.
  */
 class UserService {
 public:
     explicit UserService(UserRepository& repository);
 
-    /// @return True if @p login was free and the account was created.
+    /// @return True, если @p login был свободен и учётная запись создана.
     [[nodiscard]] bool registerUser(const std::string& login, const std::string& password);
 
-    /// @return True if @p login exists and @p password matches its hash.
+    /// @return True, если @p login существует и @p password соответствует его хешу.
     [[nodiscard]] bool verifyCredentials(const std::string& login, const std::string& password);
 
-    /// @return @p login's profile, or std::nullopt if no such user (issue #110).
+    /// @return Профиль @p login, или std::nullopt, если такого пользователя нет (issue #110).
     [[nodiscard]] std::optional<Profile> getProfile(const std::string& login);
 
-    /// Overwrites @p login's display_name/avatar_url/public_key. @return
-    /// False if no such user exists.
-    [[nodiscard]] bool updateProfile(const std::string& login, const ProfileUpdate& update);
+    /// Перезаписывает display_name/avatar_url/public_key/email для @p login.
+    [[nodiscard]] UpdateProfileResult updateProfile(const std::string& login, const ProfileUpdate& update);
+
+    /// См. UserRepository::resolveOtpIdentifier() (issue #156/#174).
+    [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier);
 
 private:
     UserRepository& repository_;

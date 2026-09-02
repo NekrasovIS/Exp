@@ -32,86 +32,94 @@ class QScreen;
 namespace devicehub {
 
 /**
- * @brief Mesh voice-call orchestration: one `webrtc::PeerConnection` per
- *        remote call participant, wired to ChatClient's call-signaling
- *        relay (issue #46, Phase 3).
+ * @brief Оркестрация mesh-голосовых звонков: один `webrtc::PeerConnection`
+ *        на каждого удалённого участника звонка, подключённый к релею
+ *        сигналинга звонков в ChatClient (issue #46, Phase 3).
  *
- * Owns the one `webrtc::PeerConnectionFactoryInterface` (built lazily, on
- * first joinCall()) and a `CallAudioDeviceModule` (issue #64) registered
- * as its audio device — every PeerConnection this class creates shares
- * that same factory/ADM, so incoming audio from every peer is mixed into
- * one playout stream by libwebrtc itself.
+ * Владеет единственным `webrtc::PeerConnectionFactoryInterface`
+ * (создаётся лениво, при первом joinCall()) и `CallAudioDeviceModule`
+ * (issue #64), зарегистрированным как её аудиоустройство — каждый
+ * PeerConnection, создаваемый этим классом, использует общую
+ * фабрику/ADM, поэтому входящее аудио от всех пиров микшируется в один
+ * поток воспроизведения самим libwebrtc.
  *
- * Mesh initiation rule (avoids simultaneous offers in one pairing): the
- * newly-joining peer always sends the offer to each participant already
- * in the roster; existing participants only ever answer. This class
- * follows that rule by offering to everyone in callRosterReceived()'s
- * list, and only ever answering in response to an incoming offer
- * (callSignalReceived()) — never on callPeerJoined(), which is purely
- * informational.
+ * Правило инициации mesh (избегает одновременных офферов в одной паре):
+ * только что присоединившийся пир всегда отправляет offer каждому
+ * участнику, уже присутствующему в ростере; уже присутствующие участники
+ * только отвечают. Этот класс следует этому правилу, отправляя offer
+ * всем в списке из callRosterReceived() и отвечая только в ответ на
+ * входящий offer (callSignalReceived()) — никогда в callPeerJoined(),
+ * который носит чисто информационный характер.
  *
- * PeerConnectionObserver and the SetLocal/RemoteDescription observer
- * callbacks fire on WebRTC's own signaling thread, never the Qt GUI
- * thread — every one of them immediately hops back via
- * QMetaObject::invokeMethod(this, ..., Qt::QueuedConnection) before
- * touching `peers_` or calling into ChatClient, so all of this class's
- * own state is only ever touched from the GUI thread it lives on.
+ * PeerConnectionObserver и колбэки observer'ов SetLocal/RemoteDescription
+ * срабатывают на собственном signaling-потоке WebRTC, никогда на
+ * GUI-потоке Qt — каждый из них немедленно перепрыгивает обратно через
+ * QMetaObject::invokeMethod(this, ..., Qt::QueuedConnection) прежде чем
+ * трогать `peers_` или вызывать что-либо в ChatClient, так что всё
+ * собственное состояние этого класса трогается только из того
+ * GUI-потока, в котором он живёт.
  *
- * Real microphone/speaker audio (issue #70): AudioInputDevice's
- * pcmDataAvailable() is forwarded into the ADM's pushCapturedAudio(),
- * and the ADM's playout sink writes into AudioOutputDevice's streaming
- * path — both set up in joinCall(), torn down in leaveCall(). Both
- * devices are single-owner-at-a-time (see their own doc comments): a
- * call and the Settings dialog's mic-test/test-tone controls share the
- * same AudioInputDevice/AudioOutputDevice instances, so starting one
- * while the other is active silently takes over the underlying
- * QAudioSource/QAudioSink. Accepted first-pass tradeoff, not solved
- * here — matches the existing settings-dialog device semantics.
+ * Настоящее аудио с микрофона/динамиков (issue #70): pcmDataAvailable()
+ * у AudioInputDevice перенаправляется в pushCapturedAudio() у ADM, а
+ * playout-sink у ADM пишет в потоковый путь AudioOutputDevice — обе
+ * настраиваются в joinCall(), разбираются в leaveCall(). Оба устройства
+ * поддерживают только одного владельца одновременно (см. их собственные
+ * doc-комментарии): звонок и элементы управления mic-test/test-tone в
+ * диалоге настроек делят одни и те же экземпляры
+ * AudioInputDevice/AudioOutputDevice, поэтому запуск одного, пока
+ * активен другой, молча перехватывает нижележащий
+ * QAudioSource/QAudioSink. Это принятый на первом этапе компромисс, не
+ * решённый здесь — соответствует уже существующей семантике устройств в
+ * диалоге настроек.
  *
- * Camera video (issue #72) is opt-in and separate from joinCall(). The
- * shared video track is created once, on the first ever enableVideo()
- * call, and attached to every PeerConnection that exists at that point
- * — the one case that adds a track to an already-negotiated
- * connection, so enableVideo() calls negotiateLocal() for each of them
- * right there, explicitly (same as ensurePeerConnection()/
- * onCallRosterReceived() already do for the initial audio track,
- * rather than reacting to WebRTC's own OnRenegotiationNeeded()
- * notification — see PeerObserver's doc comment on that method for
- * why: relying on both an explicit call and that notification for the
- * same track change raced the two against each other during live
- * testing, corrupting the exchange). A PeerConnection created later
- * (ensurePeerConnection()) picks up the track as part of its own
- * initial offer/answer instead. After that first attach,
- * enableVideo()/disableVideo() only ever toggle
- * VideoTrackInterface::set_enabled() — same mechanism setMuted() uses
- * for audio — and deliberately never remove the track again:
- * RemoveTrackOrError() hit a real fatal assertion inside WebRTC's own
- * codec-list handling during live testing of an earlier version of
- * this class (media/base/codec_list.cc, "Check failed: present_codec
- * == codec"), so this class avoids that path entirely rather than
- * relying on an internal WebRTC bug being fixed.
+ * Видео с камеры (issue #72) — опционально и отделено от joinCall().
+ * Общий видеотрек создаётся один раз, при самом первом вызове
+ * enableVideo(), и подключается ко всем PeerConnection, существующим на
+ * этот момент — единственный случай, добавляющий трек к уже
+ * согласованному соединению, поэтому enableVideo() явно вызывает
+ * negotiateLocal() для каждого из них тут же на месте (так же, как это
+ * уже делают ensurePeerConnection()/onCallRosterReceived() для
+ * изначального аудиотрека, вместо того чтобы реагировать на собственное
+ * уведомление WebRTC OnRenegotiationNeeded() — почему, см. doc-комментарий
+ * к этому методу у PeerObserver: опора одновременно и на явный вызов, и
+ * на это уведомление для одного и того же изменения трека приводила к
+ * гонке между ними при живом тестировании, повреждая обмен). Более
+ * поздний PeerConnection (ensurePeerConnection()) подхватывает трек уже
+ * как часть своего собственного изначального offer/answer. После этого
+ * первого подключения enableVideo()/disableVideo() лишь переключают
+ * VideoTrackInterface::set_enabled() — тот же механизм, что setMuted()
+ * использует для аудио — и намеренно никогда больше не удаляют трек:
+ * RemoveTrackOrError() приводил к реальному фатальному assert внутри
+ * обработки списка кодеков самого WebRTC при живом тестировании более
+ * ранней версии этого класса (media/base/codec_list.cc, "Check failed:
+ * present_codec == codec"), поэтому этот класс полностью избегает этого
+ * пути, вместо того чтобы полагаться на исправление внутреннего бага
+ * WebRTC.
  *
- * Screen share (issue #112) reuses camera video's exact track/track-
- * source/attach machinery — ensureLocalVideoTrack() factors out the
- * "create once, attach to every peer" block enableVideo() used to do
- * inline — rather than creating a second video track: enableVideo()
- * and enableScreenShare() are mutually exclusive (enabling one disables
- * the other first) and just point the one shared CallVideoTrackSource
- * at a different frame source (camera_ vs screenCapture_), flipping its
- * is_screencast() hint via setIsScreencast() to match. Simpler than a
- * second track (no extra renegotiation/attach bookkeeping per peer) at
- * the cost of not being able to send both at once — an accepted
- * first-pass scope limit, not a WebRTC constraint.
+ * Демонстрация экрана (issue #112) переиспользует ровно тот же
+ * механизм трека/источника трека/подключения, что и видео с камеры —
+ * ensureLocalVideoTrack() выносит блок «создать один раз, подключить ко
+ * всем пирам», который раньше enableVideo() делал прямо внутри себя —
+ * вместо создания второго видеотрека: enableVideo() и
+ * enableScreenShare() взаимно исключают друг друга (включение одного
+ * сначала выключает другое) и просто направляют один общий
+ * CallVideoTrackSource на другой источник кадров (camera_ против
+ * screenCapture_), переключая его подсказку is_screencast() через
+ * setIsScreencast() соответственно. Проще, чем второй трек (не нужен
+ * дополнительный учёт renegotiation/подключения на каждого пира), ценой
+ * невозможности отправлять оба одновременно — принятое на первом этапе
+ * ограничение по объёму, а не ограничение WebRTC.
  *
- * Receiving remote video (issue #91) is the mirror image of sending it:
- * PeerObserver::OnTrack() fires once a peer's video transceiver appears,
- * handleRemoteTrack() attaches a RemoteVideoSink to that track (guarded
- * by PeerConnectionEntry::remoteVideoSink so it only happens once per
- * peer), and RemoteVideoSink converts each incoming I420 frame back to a
- * QImage (the reverse of CallVideoTrackSource's ARGBToI420) and emits
- * remoteVideoFrameReceived() — hopping to the GUI thread first, since
- * OnFrame() fires on a WebRTC decode thread, same as every other
- * WebRTC-thread callback in this class.
+ * Приём удалённого видео (issue #91) — зеркальное отражение его
+ * отправки: PeerObserver::OnTrack() срабатывает, как только появляется
+ * видео-transceiver пира, handleRemoteTrack() подключает RemoteVideoSink
+ * к этому треку (защищено полем PeerConnectionEntry::remoteVideoSink,
+ * чтобы это происходило только один раз на пира), а RemoteVideoSink
+ * конвертирует каждый входящий I420-кадр обратно в QImage (обратная
+ * операция ARGBToI420 из CallVideoTrackSource) и испускает
+ * remoteVideoFrameReceived() — сначала перепрыгивая на GUI-поток,
+ * поскольку OnFrame() срабатывает на потоке декодирования WebRTC, как и
+ * любой другой колбэк с WebRTC-потока в этом классе.
  */
 class CallManager : public QObject {
     Q_OBJECT
@@ -121,45 +129,48 @@ public:
                 CameraDevice& camera, ScreenCaptureDevice& screenCapture, QObject* parent = nullptr);
     ~CallManager() override;
 
-    /// Sends call_join, starts capturing from @p inputDevice and
-    /// streaming remote audio to @p outputDevice, and starts offering
-    /// to whoever's already in the call once the roster reply arrives.
+    /// Отправляет call_join, начинает захват с @p inputDevice и
+    /// стриминг удалённого аудио на @p outputDevice, и начинает
+    /// отправлять offer всем, кто уже в звонке, как только придёт ответ
+    /// с ростером.
     void joinCall(const QAudioDevice& inputDevice, const QAudioDevice& outputDevice);
 
-    /// Sends call_leave and tears down every peer connection.
+    /// Отправляет call_leave и разбирает все соединения с пирами.
     void leaveCall();
 
     [[nodiscard]] bool inCall() const { return inCall_; }
 
-    /// Mutes/unmutes the local audio track for every peer at once — a
-    /// real per-track mute (webrtc::AudioTrackInterface::set_enabled),
-    /// not a UI-only toggle. Safe to call whether or not a call is
-    /// active; applied to localAudioTrack_ if/when it exists.
+    /// Заглушает/включает локальный аудиотрек сразу для всех пиров —
+    /// настоящий mute на уровне трека
+    /// (webrtc::AudioTrackInterface::set_enabled), а не переключатель
+    /// только в UI. Безопасно вызывать независимо от того, активен ли
+    /// звонок; применяется к localAudioTrack_, если/когда он существует.
     void setMuted(bool muted);
 
     [[nodiscard]] bool isMuted() const { return muted_; }
 
-    /// Starts capturing from @p device and sending it as a video track
-    /// to every current and future peer — added to existing
-    /// PeerConnections via renegotiation, to new ones as part of their
-    /// initial offer/answer. Safe to call whether or not a call is
-    /// active.
+    /// Начинает захват с @p device и отправку его как видеотрека
+    /// каждому текущему и будущему пиру — добавляется к существующим
+    /// PeerConnection через renegotiation, к новым — как часть их
+    /// изначального offer/answer. Безопасно вызывать независимо от
+    /// того, активен ли звонок.
     void enableVideo(const QCameraDevice& device);
 
-    /// Stops the camera and removes the video track from every peer.
+    /// Останавливает камеру и удаляет видеотрек у всех пиров.
     void disableVideo();
 
     [[nodiscard]] bool videoEnabled() const { return videoEnabled_; }
 
-    /// Starts capturing @p screen and sending it as the local video
-    /// track (issue #112) — shares the exact same track/track source
-    /// enableVideo() uses rather than a second one, so it's mutually
-    /// exclusive with camera video: enabling one disables the other.
-    /// Safe to call whether or not a call is active.
+    /// Начинает захват @p screen и отправку его как локального
+    /// видеотрека (issue #112) — использует ровно тот же трек/источник
+    /// трека, что и enableVideo(), а не второй, поэтому взаимно
+    /// исключает видео с камеры: включение одного выключает другое.
+    /// Безопасно вызывать независимо от того, активен ли звонок.
     void enableScreenShare(QScreen* screen);
 
-    /// Stops screen capture and disables the shared video track (unless
-    /// camera video is what's actually active — see enableVideo()).
+    /// Останавливает захват экрана и выключает общий видеотрек (если
+    /// только на самом деле не активно видео с камеры — см.
+    /// enableVideo()).
     void disableScreenShare();
 
     [[nodiscard]] bool screenShareEnabled() const { return screenShareEnabled_; }
@@ -169,11 +180,12 @@ signals:
     void participantLeft(const QString& login);
     void callError(const QString& message);
 
-    /// A decoded frame from a remote participant's incoming video track
-    /// (issue #91) — never emitted for a peer that hasn't sent video.
+    /// Декодированный кадр из входящего видеотрека удалённого участника
+    /// (issue #91) — никогда не испускается для пира, не отправлявшего
+    /// видео.
     void remoteVideoFrameReceived(const QString& peerLogin, const QImage& frame);
-    /// The given peer's video track is gone (they left the call) — the
-    /// UI should drop that participant's video tile.
+    /// Видеотрек данного пира пропал (он покинул звонок) — UI должен
+    /// убрать видео-плитку этого участника.
     void remoteVideoTrackRemoved(const QString& peerLogin);
 
 private:
@@ -189,15 +201,15 @@ private:
     struct PeerConnectionEntry {
         webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection;
         std::unique_ptr<PeerObserver> observer;
-        /// Non-null once localVideoTrack_ has been attached to this
-        /// peer — guards attachVideoTrack() against adding it twice.
-        /// The track is never removed again once attached (see
-        /// enableVideo()'s doc comment), so this never goes back to
-        /// null.
+        /// Не null, как только localVideoTrack_ подключён к этому
+        /// пиру — защищает attachVideoTrack() от повторного добавления.
+        /// Трек, будучи подключённым, больше никогда не удаляется (см.
+        /// doc-комментарий enableVideo()), поэтому обратно в null это
+        /// поле не возвращается.
         webrtc::scoped_refptr<webrtc::RtpSenderInterface> videoSender;
-        /// Non-null once a remote video track has been seen for this
-        /// peer (PeerObserver::OnTrack() -> handleRemoteTrack()) —
-        /// guards against attaching the receive-side sink twice.
+        /// Не null, как только для этого пира замечен удалённый
+        /// видеотрек (PeerObserver::OnTrack() -> handleRemoteTrack()) —
+        /// защищает от повторного подключения приёмного sink'а.
         std::unique_ptr<RemoteVideoSink> remoteVideoSink;
     };
 
@@ -210,46 +222,47 @@ private:
     PeerConnectionEntry* ensurePeerConnection(const QString& peerLogin);
     void closePeerConnection(const QString& peerLogin);
 
-    /// Kicks off local-description (re)negotiation for `peerLogin`'s
-    /// PeerConnection — creates and sets an offer or an answer,
-    /// whichever the connection's current signaling state calls for.
+    /// Запускает (пере)согласование local-description для
+    /// PeerConnection пира `peerLogin` — создаёт и устанавливает offer
+    /// или answer, в зависимости от того, чего требует текущее
+    /// signaling-состояние соединения.
     void negotiateLocal(const QString& peerLogin);
 
     void handleLocalDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
     void handleRemoteDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
     void handleLocalIceCandidate(const QString& peerLogin, const QJsonObject& payload);
 
-    /// A new (or renegotiated) transceiver appeared on `peerLogin`'s
-    /// connection — if it carries a video track and this peer doesn't
-    /// already have a receive-side sink, attaches one so frames start
-    /// flowing to remoteVideoFrameReceived().
+    /// На соединении пира `peerLogin` появился новый (или
+    /// пересогласованный) transceiver — если он несёт видеотрек и у
+    /// этого пира ещё нет приёмного sink'а, подключает его, чтобы кадры
+    /// начали поступать в remoteVideoFrameReceived().
     void handleRemoteTrack(const QString& peerLogin, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
     void handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
 
-    /// Forwards a captured buffer from audioInput_ into the ADM, while a
-    /// call is active.
+    /// Перенаправляет захваченный буфер из audioInput_ в ADM, пока
+    /// звонок активен.
     void onCapturedPcm(const QByteArray& data, const QAudioFormat& format);
 
-    /// Forwards a captured frame from camera_ into videoTrackSource_,
-    /// while video is enabled.
+    /// Перенаправляет захваченный кадр из camera_ в videoTrackSource_,
+    /// пока видео включено.
     void onCameraFrame(const QVideoFrame& frame);
 
-    /// Forwards a captured frame from screenCapture_ into
-    /// videoTrackSource_, while screen share is enabled.
+    /// Перенаправляет захваченный кадр из screenCapture_ в
+    /// videoTrackSource_, пока активна демонстрация экрана.
     void onScreenShareFrame(const QVideoFrame& frame);
 
-    /// Creates videoTrackSource_/localVideoTrack_ and attaches them to
-    /// every existing peer if this is the first time either enableVideo()
-    /// or enableScreenShare() has ever been called — a no-op otherwise
-    /// (see enableVideo()'s doc comment for why the track, once created,
-    /// is shared and never removed again).
+    /// Создаёт videoTrackSource_/localVideoTrack_ и подключает их ко
+    /// всем существующим пирам, если это первый вызов enableVideo() или
+    /// enableScreenShare() за всё время — иначе ничего не делает (см.
+    /// doc-комментарий enableVideo() о том, почему трек, будучи создан,
+    /// общий и больше никогда не удаляется).
     void ensureLocalVideoTrack();
 
-    /// Adds localVideoTrack_ to `entry`'s connection if it exists and
-    /// isn't already attached — independent of whether video is
-    /// currently enabled (see enableVideo()'s doc comment for why the
-    /// track, once created, is never removed again, only toggled via
-    /// set_enabled()).
+    /// Добавляет localVideoTrack_ к соединению `entry`, если оно
+    /// существует и ещё не подключено — независимо от того, включено
+    /// ли видео сейчас (см. doc-комментарий enableVideo() о том, почему
+    /// трек, будучи создан, больше никогда не удаляется, а только
+    /// переключается через set_enabled()).
     void attachVideoTrack(PeerConnectionEntry& entry);
 
     ChatClient& chatClient_;

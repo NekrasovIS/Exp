@@ -62,7 +62,7 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     addButton_->setObjectName(QStringLiteral("createCommunityButton"));
     addButton_->setToolTip(tr("Create community"));
     addButton_->setProperty("accent", true);
-    addButton_->setIcon(ui_icons::plusIcon(QColor("#ffffff")));
+    addButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kAccentForeground)));
     addButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
     addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addButton_->setProperty("iconOnly", true);

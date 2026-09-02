@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPoint>
@@ -25,6 +26,12 @@ namespace devicehub {
 namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
+/// Обычное имя канала, хранится отдельно от отображаемого text()
+/// элемента — чтобы префикс "\U0001F512 ", который setChannels()
+/// добавляет для зашифрованных каналов (issue #152), никогда не попадал
+/// в channelSelected()/подстановку при переименовании: там нужно
+/// настоящее имя, а не то, что нарисовано на экране.
+constexpr int kNameRole = Qt::UserRole + 2;
 constexpr int kIconButtonSize = 28;
 constexpr int kIconSize = 14;
 constexpr int kListPageIndex = 0;
@@ -56,7 +63,7 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     addButton_->setObjectName(QStringLiteral("createChannelButton"));
     addButton_->setToolTip(tr("Create channel"));
     addButton_->setProperty("accent", true);
-    addButton_->setIcon(ui_icons::plusIcon(QColor("#ffffff")));
+    addButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kAccentForeground)));
     addButton_->setIconSize(QSize(kIconSize, kIconSize));
     addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addButton_->setProperty("iconOnly", true);
@@ -65,6 +72,11 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     header->addStretch();
     header->addWidget(refreshButton_);
     header->addWidget(addButton_);
+
+    filterEdit_ = new QLineEdit(this);
+    filterEdit_->setObjectName(QStringLiteral("channelFilterEdit"));
+    filterEdit_->setPlaceholderText(tr("Filter channels…"));
+    filterEdit_->setClearButtonEnabled(true);
 
     listWidget_ = new QListWidget(this);
     listWidget_->setObjectName(QStringLiteral("channelList"));
@@ -97,23 +109,33 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     listStack_->setCurrentIndex(kEmptyStatePageIndex);
 
     layout->addLayout(header);
+    layout->addWidget(filterEdit_);
     layout->addWidget(listStack_, /*stretch=*/1);
 
     connect(addButton_, &QPushButton::clicked, this, &ChannelsPanel::showAddDialog);
+    connect(filterEdit_, &QLineEdit::textChanged, this, &ChannelsPanel::applyFilter);
     connect(listWidget_, &QListWidget::customContextMenuRequested, this, &ChannelsPanel::showContextMenu);
     connect(listWidget_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
-        emit channelSelected(item->data(kIdRole).toLongLong(), item->text());
+        emit channelSelected(item->data(kIdRole).toLongLong(), item->data(kNameRole).toString());
     });
 }
 
 void ChannelsPanel::setChannels(const QList<ChatItem>& channels) {
     listWidget_->clear();
     for (const ChatItem& channel : channels) {
-        auto* item = new QListWidgetItem(channel.name, listWidget_);
+        // Зашифрованные каналы получают тот же значок замка, что и
+        // заголовок ChatView (issue #138), прямо в строке списка, а не
+        // только после открытия канала (issue #152) — только в text(),
+        // kNameRole хранит настоящее имя для channelSelected()/rename.
+        const QString displayName =
+            channel.isEncrypted ? QStringLiteral("\U0001F512 ") + channel.name : channel.name;
+        auto* item = new QListWidgetItem(displayName, listWidget_);
         item->setData(kIdRole, channel.id);
         item->setData(kOwnerRole, channel.ownerLogin);
+        item->setData(kNameRole, channel.name);
     }
     listStack_->setCurrentIndex(channels.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
+    applyFilter();
 }
 
 void ChannelsPanel::selectChannelId(qint64 id) {
@@ -130,9 +152,9 @@ void ChannelsPanel::setCurrentUserLogin(const QString& login) {
 }
 
 void ChannelsPanel::showAddDialog() {
-    // A plain QInputDialog::getText() (the previous implementation) has
-    // no room for a second control, so an "encrypted" checkbox (issue
-    // #138) needs a small dedicated dialog instead.
+    // У обычного QInputDialog::getText() (прежняя реализация) нет места
+    // для второго элемента управления, поэтому для чекбокса "encrypted"
+    // (issue #138) вместо него нужен небольшой отдельный диалог.
     QDialog dialog(this);
     dialog.setWindowTitle(tr("New channel"));
 
@@ -166,6 +188,7 @@ void ChannelsPanel::showContextMenu(const QPoint& pos) {
     }
 
     const qint64 id = item->data(kIdRole).toLongLong();
+    const QString name = item->data(kNameRole).toString();
     const bool isOwner = !currentUserLogin_.isEmpty() && item->data(kOwnerRole).toString() == currentUserLogin_;
     if (!isOwner) {
         return;
@@ -179,16 +202,24 @@ void ChannelsPanel::showContextMenu(const QPoint& pos) {
     if (chosen == renameAction) {
         bool ok = false;
         const QString newName =
-            QInputDialog::getText(this, tr("Rename channel"), tr("New name:"), QLineEdit::Normal, item->text(), &ok);
+            QInputDialog::getText(this, tr("Rename channel"), tr("New name:"), QLineEdit::Normal, name, &ok);
         if (ok && !newName.trimmed().isEmpty()) {
             emit renameRequested(id, newName.trimmed());
         }
     } else if (chosen == deleteAction) {
         if (QMessageBox::question(this, tr("Delete channel"),
-                                   tr("Delete '%1' and all of its messages? This can't be undone.").arg(item->text())) ==
+                                   tr("Delete '%1' and all of its messages? This can't be undone.").arg(name)) ==
             QMessageBox::Yes) {
             emit deleteRequested(id);
         }
+    }
+}
+
+void ChannelsPanel::applyFilter() {
+    const QString filter = filterEdit_->text().trimmed();
+    for (int row = 0; row < listWidget_->count(); ++row) {
+        QListWidgetItem* item = listWidget_->item(row);
+        item->setHidden(!filter.isEmpty() && !item->data(kNameRole).toString().contains(filter, Qt::CaseInsensitive));
     }
 }
 

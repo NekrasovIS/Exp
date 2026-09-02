@@ -11,28 +11,30 @@
 namespace user_service {
 
 /**
- * @brief REST front-end for UserService: POST /users/register,
- *        POST /users/verify-credentials (both unauthenticated — called by
- *        auth-service itself, not directly by end-user clients), plus
- *        GET /users/{login}/profile and PATCH /users/me (issue #110),
- *        which require a valid `Authorization: Bearer <token>` header,
- *        checked against auth-service via AuthServiceClient.
+ * @brief REST-фасад над UserService: POST /users/register,
+ *        POST /users/verify-credentials, POST /users/resolve-otp-identifier
+ *        (issue #156, все три без аутентификации — вызываются самим
+ *        auth-service, а не напрямую клиентами), плюс
+ *        GET /users/{login}/profile и PATCH /users/me (issue #110),
+ *        которым нужен валидный заголовок
+ *        `Authorization: Bearer <token>`, проверяемый через
+ *        AuthServiceClient у auth-service.
  *
- * PATCH /users/me always writes to the token's own subject — the login
- * in the URL/body, if any, is ignored, so a caller can never edit
- * another user's profile.
+ * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
+ * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
+ * сторона никогда не может отредактировать чужой профиль.
  *
- * Thin wrapper around httplib::Server — all account logic lives in
- * UserService, this class only translates HTTP requests/responses.
+ * Тонкая обёртка над httplib::Server — вся бизнес-логика аккаунтов
+ * живёт в UserService, этот класс только переводит HTTP-запросы/ответы.
  */
 class HttpServer {
 public:
     HttpServer(UserService& userService, const AuthServiceClient& authServiceClient);
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокирует выполнение, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:
@@ -43,6 +45,7 @@ private:
     void handleVerifyCredentials(const httplib::Request& request, httplib::Response& response);
     void handleGetProfile(const httplib::Request& request, httplib::Response& response);
     void handleUpdateOwnProfile(const httplib::Request& request, httplib::Response& response);
+    void handleResolveOtpIdentifier(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

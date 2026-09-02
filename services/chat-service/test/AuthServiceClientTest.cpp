@@ -8,10 +8,10 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
-// Requires a live auth-service reachable at AUTH_SERVICE_HOST/PORT
-// (defaults 127.0.0.1:8080), same as WebSocketServerTest.cpp — skips
-// itself rather than failing when it isn't running. The unreachable-
-// service case needs no live service and always runs.
+// Требует работающий auth-service, доступный по AUTH_SERVICE_HOST/PORT
+// (по умолчанию 127.0.0.1:8080), как и WebSocketServerTest.cpp —
+// пропускает себя, а не падает, если он не запущен. Случай недоступного
+// сервиса не требует работающего сервиса и выполняется всегда.
 
 namespace chat_service {
 namespace {
@@ -69,7 +69,7 @@ TEST(AuthServiceClientTest, VerifyTokenReturnsNulloptForInvalidToken) {
 }
 
 TEST(AuthServiceClientTest, VerifyTokenFailsClosedWhenAuthServiceIsUnreachable) {
-    // No skip logic on purpose — targets an unused loopback port.
+    // Логики пропуска намеренно нет — цель тут неиспользуемый loopback-порт.
     const AuthServiceClient client("127.0.0.1", 1);
 
     EXPECT_FALSE(client.verifyToken("any-token").has_value());

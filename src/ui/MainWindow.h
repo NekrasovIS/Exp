@@ -31,20 +31,21 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class FooterBar;
+class LoginWindow;
 class ModeratorsDialog;
 class ProfileDialog;
 class SearchDialog;
 class SettingsDialog;
 
 /**
- * @brief Main window shell: communities/channels sidebar on the left,
- *        the open channel's chat in the main area, an account menu
- *        top-right, and a footer with the profile and settings entry
- *        point.
+ * @brief Оболочка главного окна: боковая панель сообществ/каналов
+ *        слева, чат открытого канала в основной области, меню аккаунта
+ *        справа сверху и подвал с профилем и точкой входа в настройки.
  *
- * Pure presentation/wiring — all device and network access is delegated
- * to the devicehub::* classes in src/devices, src/auth and src/chat; all
- * widget construction is delegated to the panel classes in src/ui.
+ * Чистое представление/связующая логика — весь доступ к устройствам и
+ * сети делегирован классам devicehub::* в src/devices, src/auth и
+ * src/chat; всё конструирование виджетов делегировано классам панелей
+ * в src/ui.
  */
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -63,51 +64,72 @@ private:
     void onRequestTokenClicked();
     void onRegisterClicked();
     void onSendChatMessageClicked();
-    /// "Attach" clicked (issue #116) — opens a file picker, then uploads
-    /// the chosen file; the actual send happens once
-    /// ChatRestClient::attachmentUploaded() fires (see MainWindow.cpp).
+    /// Клик по "Attach" (issue #116) — открывает выбор файла, затем
+    /// загружает выбранный файл; сама отправка происходит после того,
+    /// как сработает ChatRestClient::attachmentUploaded() (см.
+    /// MainWindow.cpp).
     void onAttachFileClicked();
     void onCallToggleClicked();
     void onMuteToggleClicked();
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+    /// LoginWindow::requestCodeRequested() — issue #156.
+    void onRequestOtpCodeClicked(const QString& identifier);
+    /// LoginWindow::verifyCodeRequested() — issue #156.
+    void onVerifyOtpCodeClicked(const QString& identifier, const QString& code);
+    /// Клик по аватару в футере (issue #151) — показывает небольшое меню
+    /// (Edit Profile / Sign Out), привязанное к аватару, а не только к
+    /// действиям аккаунта из всплывающего AccountMenu в правом верхнем
+    /// углу.
+    void onAccountSettingsClicked();
+    /// Очищает локальное состояние авторизации и возвращает UI в
+    /// состояние "не авторизован" — эндпоинта отзыва токена на сервере
+    /// пока не существует, поэтому это выход только на стороне клиента.
+    void signOut();
 
-    /// Re-lists communities from chat-service (no-op, with a status bar
-    /// message, if not signed in yet).
+    /// Заново запрашивает список сообществ у chat-service (ничего не
+    /// делает, кроме сообщения в статус-баре, если вход ещё не
+    /// выполнен).
     void refreshCommunities();
-    /// Re-lists channels for selectedCommunityId_ (no-op, with a status
-    /// bar message, if no community is selected).
+    /// Заново запрашивает список каналов для selectedCommunityId_
+    /// (ничего не делает, кроме сообщения в статус-баре, если сообщество
+    /// не выбрано).
     void refreshChannelsForSelectedCommunity();
-    /// Switches ChatView to @p id/@p name, (re)connecting ChatClient. For
-    /// an encrypted channel (issue #138) with no cached key yet, this
-    /// fetches/unwraps the key first and defers subscribing/loading
-    /// history to finishOpeningChannel() so nothing tries to decrypt
-    /// before the key is available.
+    /// Переключает ChatView на @p id/@p name, (пере)подключая
+    /// ChatClient. Для зашифрованного канала (issue #138), для которого
+    /// ключ ещё не закэширован, сначала запрашивает/разворачивает ключ
+    /// и откладывает подписку/загрузку истории до
+    /// finishOpeningChannel(), чтобы ничто не пыталось расшифровывать
+    /// до того, как ключ станет доступен.
     void openChannel(qint64 id, const QString& name);
-    /// Second half of openChannel() — subscribes ChatClient and loads
-    /// history. Called immediately for a plaintext channel or one whose
-    /// key is already cached; otherwise called from the
-    /// myChannelKeyFetched()/myChannelKeyNotFound() handlers.
+    /// Вторая половина openChannel() — подписывает ChatClient и
+    /// загружает историю. Вызывается сразу для незашифрованного канала
+    /// или канала, чей ключ уже закэширован; иначе вызывается из
+    /// обработчиков myChannelKeyFetched()/myChannelKeyNotFound().
     void finishOpeningChannel(qint64 id);
-    /// Drops the current channel selection/connection and shows
-    /// ChatView's placeholder again.
+    /// Сбрасывает текущий выбор/подключение канала и снова показывает
+    /// заглушку ChatView.
     void closeChatView();
-    /// One step of the pending encrypted-channel-creation flow (issue
-    /// #138): if @p login is in pendingEncryptedSetup_->pendingMemberLogins,
-    /// wraps the pending channel key for @p publicKeyBase64 (unless
-    /// empty — that member hasn't published a key yet, so they're
-    /// skipped with a toast) and publishes it via setChannelKey().
-    /// A no-op if @p login isn't currently pending (i.e. this is an
-    /// unrelated profileReceived(), e.g. the signed-in user's own).
+    /// Один шаг отложенного сценария создания зашифрованного канала
+    /// (issue #138): если @p login есть в
+    /// pendingEncryptedSetup_->pendingMemberLogins, оборачивает
+    /// отложенный ключ канала для @p publicKeyBase64 (если он не пуст —
+    /// пустой означает, что этот участник ещё не опубликовал ключ,
+    /// поэтому он пропускается с показом toast) и публикует его через
+    /// setChannelKey(). Ничего не делает, если @p login сейчас не
+    /// ожидается (то есть это не связанный с этим profileReceived(),
+    /// например, собственный профиль вошедшего пользователя).
     void wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64);
-    /// Decrypts @p ciphertext with channelKeys_[selectedChannelId_] for
-    /// display — a placeholder string (never the raw ciphertext) if no
-    /// key is cached yet or decryption fails, so a decrypt failure reads
-    /// as "can't decrypt" rather than showing garbled bytes.
+    /// Расшифровывает @p ciphertext ключом channelKeys_[selectedChannelId_]
+    /// для отображения — строка-заглушка (никогда не исходный
+    /// шифротекст), если ключ ещё не закэширован или расшифровка не
+    /// удалась, так что сбой расшифровки читается как "не удаётся
+    /// расшифровать", а не показывает нечитаемые байты.
     [[nodiscard]] QString decryptForDisplay(const QString& ciphertext) const;
-    /// CRUD feedback (create/rename/delete/join, errors) goes through
-    /// this toast rather than statusBar() — much easier to notice.
+    /// Обратная связь по CRUD-операциям (создание/переименование/
+    /// удаление/присоединение, ошибки) идёт через этот toast, а не
+    /// через statusBar() — так гораздо легче заметить.
     void showToast(const QString& text, ToastBanner::Variant variant);
 
     DeviceEnumerator enumerator_;
@@ -120,14 +142,15 @@ private:
     CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_, screenCapture_};
     ChatRestClient chatRestClient_;
     UserProfileClient userProfileClient_;
-    /// Constructed once currentUserLogin_ is known (issue #136) — no
-    /// default constructor, since a keypair is meaningless without a
-    /// login to scope its storage file to.
+    /// Конструируется, как только становится известен currentUserLogin_
+    /// (issue #136) — без конструктора по умолчанию, поскольку пара
+    /// ключей бессмысленна без логина, к которому привязывается файл
+    /// её хранения.
     std::optional<IdentityKeyStore> identityKeyStore_;
     QString lastToken_;
-    /// Long-lived token (issue #105) that refreshTimer_ redeems for a
-    /// fresh lastToken_ shortly before it expires — empty when not
-    /// signed in.
+    /// Долгоживущий токен (issue #105), который refreshTimer_
+    /// обменивает на свежий lastToken_ незадолго до истечения срока
+    /// действия — пуст, когда вход не выполнен.
     QString refreshToken_;
     QTimer* refreshTimer_ = nullptr;
     QString currentUserLogin_;
@@ -139,37 +162,42 @@ private:
     qint64 selectedChannelId_ = -1;
     qint64 pendingCommunitySelection_ = -1;
     qint64 pendingChannelSelection_ = -1;
-    /// Id of the oldest message ChatView currently has for the open
-    /// channel, or -1 if none loaded yet — the beforeId cursor for the
-    /// next "Load older messages" fetch. Reset on every channel switch.
+    /// Id самого старого сообщения, которое ChatView сейчас показывает
+    /// для открытого канала, или -1, если ещё ничего не загружено —
+    /// курсор beforeId для следующей загрузки "Load older messages".
+    /// Сбрасывается при каждом переключении канала.
     qint64 oldestMessageId_ = -1;
-    /// Filename to suggest in the save dialog once the matching
-    /// ChatRestClient::attachmentDownloaded() reply arrives (issue #116)
-    /// — keyed by attachment id since downloads can be in flight for more
-    /// than one message at a time.
+    /// Имя файла, предлагаемое в диалоге сохранения, когда придёт
+    /// соответствующий ответ ChatRestClient::attachmentDownloaded()
+    /// (issue #116) — ключом служит id вложения, поскольку загрузки
+    /// могут выполняться одновременно для нескольких сообщений.
     QHash<qint64, QString> pendingDownloadFilenames_;
 
-    /// Resolved (unwrapped) raw symmetric keys for encrypted channels
-    /// (issue #138), keyed by channel id — session-only, never persisted.
-    /// A missing entry for an encrypted channel means either the key
-    /// hasn't been fetched/unwrapped yet, or none has been wrapped for
-    /// this login (see myChannelKeyNotFound()).
+    /// Разрешённые (развёрнутые) исходные симметричные ключи для
+    /// зашифрованных каналов (issue #138), ключ — id канала — живут
+    /// только в рамках сессии, никогда не сохраняются на диск.
+    /// Отсутствие записи для зашифрованного канала означает либо что
+    /// ключ ещё не запрошен/развёрнут, либо что для этого логина он не
+    /// был обёрнут (см. myChannelKeyNotFound()).
     QHash<qint64, QByteArray> channelKeys_;
-    /// True while selectedChannelId_ refers to an encrypted channel —
-    /// gates encrypt-before-send/decrypt-before-display and disables
-    /// Attach/Search (unsupported for encrypted channels this phase).
+    /// True, пока selectedChannelId_ указывает на зашифрованный канал —
+    /// управляет шифрованием перед отправкой/расшифровкой перед
+    /// показом и отключает Attach/Search (не поддерживаются для
+    /// зашифрованных каналов на этом этапе).
     bool currentChannelEncrypted_ = false;
 
-    /// State for the multi-step "create an encrypted channel" flow:
-    /// generate a key, then wrap+publish it for every community member
-    /// who has already published a public key (issue #136). Valid only
-    /// between channelCreated() for an encrypted channel and the last
-    /// setChannelKey() call completing.
+    /// Состояние для многошагового сценария "создать зашифрованный
+    /// канал": сгенерировать ключ, затем обернуть и опубликовать его
+    /// для каждого участника сообщества, кто уже опубликовал открытый
+    /// ключ (issue #136). Валидно только между channelCreated() для
+    /// зашифрованного канала и завершением последнего вызова
+    /// setChannelKey().
     struct PendingEncryptedChannelSetup {
         qint64 channelId = -1;
         QByteArray channelKey;
-        /// Logins still waiting on a fetchProfile() reply to learn their
-        /// public key before they can be wrapped for.
+        /// Логины, которые ещё ждут ответа fetchProfile(), чтобы узнать
+        /// свой открытый ключ, прежде чем для них можно будет обернуть
+        /// ключ канала.
         QSet<QString> pendingMemberLogins;
     };
     std::optional<PendingEncryptedChannelSetup> pendingEncryptedSetup_;
@@ -183,6 +211,7 @@ private:
     ModeratorsDialog* moderatorsDialog_ = nullptr;
     ProfileDialog* profileDialog_ = nullptr;
     SearchDialog* searchDialog_ = nullptr;
+    LoginWindow* loginWindow_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;
 };

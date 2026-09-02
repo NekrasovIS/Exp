@@ -6,27 +6,50 @@
 
 namespace devicehub {
 
-/// A user's profile as returned by user-service's REST API — displayName/
-/// avatarUrl are empty strings when unset (unlike the server-side struct,
-/// no null/unset distinction needed on the client: an empty field means
-/// "fall back to login" everywhere it's displayed).
+/// Профиль пользователя, как его возвращает REST API user-service —
+/// displayName/avatarUrl являются пустыми строками, если не заданы (в
+/// отличие от серверной структуры, на клиенте не нужно различать
+/// null/не задано: пустое поле везде, где оно отображается, означает
+/// «показать логин вместо этого»).
 struct UserProfile {
     QString login;
     QString displayName;
     QString avatarUrl;
-    /// Base64-encoded X25519 public key (issue #136), empty if the user
-    /// hasn't published one yet.
+    /// Публичный ключ X25519 в base64 (issue #136), пуст, если
+    /// пользователь ещё не опубликовал его.
     QString publicKey;
+    /// Issue #156: пуст, пока пользователь не задаст — нужен, прежде
+    /// чем можно будет использовать вход по одноразовому коду, иначе не
+    /// используется на клиенте.
+    QString email;
+    /// Issue #174: empty until the user links their Telegram — an
+    /// alternative one-time-code delivery channel, preferred over email
+    /// server-side when both are set.
+    QString telegramChatId;
+};
+
+/// Поля, которые может изменить updateOwnProfile() — сгруппированы
+/// согласно правилу CLAUDE.md "предпочитать меньшее количество
+/// аргументов функций" (displayName/avatarUrl/email/telegramChatId —
+/// четыре однотипных QString подряд, легко перепутать местами при
+/// вызове), вместо того чтобы дальше расширять список параметров самого
+/// updateOwnProfile().
+struct ProfileEdits {
+    QString displayName;
+    QString avatarUrl;
+    QString email;
+    QString telegramChatId;
 };
 
 /**
- * @brief REST client for user-service's profile endpoints:
+ * @brief REST-клиент для эндпоинтов профиля user-service:
  *        GET /users/{login}/profile, PATCH /users/me (issue #110).
  *
- * Deliberately separate from AuthClient (auth-service) and ChatRestClient
- * (chat-service) — user-service owns account/profile data, a different
- * service with its own base URL. Async via signals, like the other REST
- * clients — never blocks the GUI thread on a network round trip.
+ * Намеренно отделён от AuthClient (auth-service) и ChatRestClient
+ * (chat-service) — user-service владеет данными аккаунта/профиля, это
+ * другой сервис со своим собственным базовым URL. Асинхронно через
+ * сигналы, как и другие REST-клиенты — никогда не блокирует GUI-поток
+ * на сетевом round trip.
  */
 class UserProfileClient : public QObject {
     Q_OBJECT
@@ -34,17 +57,19 @@ class UserProfileClient : public QObject {
 public:
     explicit UserProfileClient(QUrl baseUrl, QObject* parent = nullptr);
 
-    /// Fetches @p login's profile.
+    /// Получает профиль @p login.
     void fetchProfile(const QString& token, const QString& login);
 
-    /// Updates the caller's own profile (login comes from @p token
-    /// server-side — never spoofable via this call).
-    void updateOwnProfile(const QString& token, const QString& displayName, const QString& avatarUrl);
+    /// Обновляет собственный профиль вызывающего (логин берётся из
+    /// @p token на стороне сервера — через этот вызов его никогда
+    /// нельзя подделать).
+    void updateOwnProfile(const QString& token, const ProfileEdits& edits);
 
-    /// Publishes the caller's X25519 public key (issue #136) — a separate
-    /// method from updateOwnProfile() rather than a third parameter on it:
-    /// this is driven by IdentityKeyStore at login time, a different
-    /// caller/trigger than the user-initiated profile-edit flow.
+    /// Публикует публичный ключ X25519 вызывающего (issue #136) —
+    /// отдельный метод, а не третий параметр у updateOwnProfile(): это
+    /// вызывается из IdentityKeyStore при входе в систему, а это другой
+    /// вызывающий код/триггер, чем инициированный пользователем поток
+    /// редактирования профиля.
     void publishPublicKey(const QString& token, const QString& publicKey);
 
 signals:

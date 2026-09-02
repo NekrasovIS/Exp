@@ -11,17 +11,19 @@ class QPushButton;
 namespace devicehub {
 
 /**
- * @brief Narrow icon rail on the far left of the sidebar: one avatar
- *        badge per community (first letter, green gradient), a
- *        refresh button on top and a "+" button pinned to the bottom
- *        to create one; right-click for join/rename/delete.
+ * @brief Узкая иконочная полоса в самом левом краю боковой панели:
+ *        по одному значку-аватару на сообщество (первая буква, зелёный
+ *        градиент), кнопка обновления сверху и кнопка "+" внизу для
+ *        создания нового; правый клик — для присоединения/
+ *        переименования/удаления.
  *
- * Pure presentation — owns no network state. MainWindow feeds it the
- * current community list and the signed-in user's login (so it can
- * decide whether to offer rename/delete for a given item — those are
- * owner-only server-side too, this just avoids showing actions that
- * would only come back as a 403) and reacts to the request signals by
- * calling ChatRestClient itself.
+ * Чистое представление — не владеет никаким сетевым состоянием.
+ * MainWindow передаёт ей текущий список сообществ и логин вошедшего
+ * пользователя (чтобы решить, предлагать ли переименование/удаление
+ * для конкретного элемента — на сервере это тоже разрешено только
+ * владельцу, здесь это просто избавляет от показа действий, которые
+ * всё равно вернут только 403) и реагирует на сигналы запросов, сама
+ * вызывая ChatRestClient.
  */
 class CommunitiesPanel : public QWidget {
     Q_OBJECT
@@ -29,16 +31,17 @@ class CommunitiesPanel : public QWidget {
 public:
     explicit CommunitiesPanel(QWidget* parent = nullptr);
 
-    /// Replaces the list contents.
+    /// Заменяет содержимое списка.
     void setCommunities(const QList<ChatItem>& communities);
 
-    /// Selects the item with @p id, if present, without emitting
-    /// communitySelected() — used to reflect a selection MainWindow
-    /// already decided on (e.g. auto-selecting a freshly created
-    /// community) without re-triggering the same request.
+    /// Выбирает элемент с @p id, если он есть, не порождая при этом
+    /// communitySelected() — используется, чтобы отразить выбор,
+    /// который MainWindow уже сделал сам (например, автовыбор только
+    /// что созданного сообщества), не вызывая повторно тот же запрос.
     void selectCommunityId(qint64 id);
 
-    /// Needed to decide whether to offer rename/delete for an item.
+    /// Нужно, чтобы решить, предлагать ли переименование/удаление
+    /// для элемента.
     void setCurrentUserLogin(const QString& login);
 
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
@@ -50,8 +53,9 @@ signals:
     void renameRequested(qint64 id, const QString& newName);
     void deleteRequested(qint64 id);
     void joinRequested(qint64 id);
-    /// "Manage Moderators…" clicked (owner-only, issue #114) — @p name
-    /// lets MainWindow title the dialog without a separate lookup.
+    /// Клик по "Manage Moderators…" (только для владельца, issue #114)
+    /// — @p name позволяет MainWindow озаглавить диалог без отдельного
+    /// поиска.
     void manageModeratorsRequested(qint64 id, const QString& name);
     void communitySelected(qint64 id);
 

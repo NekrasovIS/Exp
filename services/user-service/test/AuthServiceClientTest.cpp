@@ -8,10 +8,10 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
-// Requires a live auth-service reachable at AUTH_SERVICE_HOST/PORT
-// (defaults 127.0.0.1:8080) — skips itself rather than failing when it
-// isn't running. The unreachable-service case needs no live service and
-// always runs.
+// Требует работающий auth-service, доступный по AUTH_SERVICE_HOST/PORT
+// (по умолчанию 127.0.0.1:8080) — пропускает сам себя вместо падения, если
+// он не запущен. Сценарий с недоступным сервисом не требует живого сервиса
+// и выполняется всегда.
 
 namespace user_service {
 namespace {
@@ -69,7 +69,7 @@ TEST(AuthServiceClientTest, VerifyTokenReturnsNulloptForInvalidToken) {
 }
 
 TEST(AuthServiceClientTest, VerifyTokenFailsClosedWhenAuthServiceIsUnreachable) {
-    // No skip logic on purpose — targets an unused loopback port.
+    // Логики пропуска намеренно нет — обращается к неиспользуемому loopback-порту.
     const AuthServiceClient client("127.0.0.1", 1);
 
     EXPECT_FALSE(client.verifyToken("any-token").has_value());
