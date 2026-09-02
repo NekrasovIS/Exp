@@ -38,6 +38,38 @@ else()
     )
 endif()
 
+# Sanitizer builds (issue #145) — see chat-service/CMakeLists.txt's copy
+# of this same block for the full rationale.
+option(DEVICEHUB_ENABLE_ASAN_UBSAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
+option(DEVICEHUB_ENABLE_TSAN "Build with ThreadSanitizer (GCC/Clang only; incompatible with DEVICEHUB_ENABLE_ASAN_UBSAN)" OFF)
+if(DEVICEHUB_ENABLE_ASAN_UBSAN AND DEVICEHUB_ENABLE_TSAN)
+    message(FATAL_ERROR "DEVICEHUB_ENABLE_ASAN_UBSAN and DEVICEHUB_ENABLE_TSAN cannot be combined in one build")
+endif()
+if(DEVICEHUB_ENABLE_ASAN_UBSAN OR DEVICEHUB_ENABLE_TSAN)
+    if(MSVC)
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_ASAN_UBSAN/DEVICEHUB_ENABLE_TSAN require GCC or Clang, not MSVC")
+    endif()
+endif()
+if(DEVICEHUB_ENABLE_ASAN_UBSAN)
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+if(DEVICEHUB_ENABLE_TSAN)
+    add_compile_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread)
+endif()
+
+# Source-based code coverage (issue #146) — see chat-service/CMakeLists.txt's
+# copy of this same block for the full rationale.
+option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_COVERAGE requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 find_package(httplib CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -84,3 +116,18 @@ target_link_libraries(auth_service_tests PRIVATE
 )
 include(GoogleTest)
 gtest_discover_tests(auth_service_tests)
+
+# Real coverage-guided fuzzing (issue #121/#132/#133) — off by default,
+# Clang-only; see chat-service/CMakeLists.txt's copy of this same block
+# for the full rationale (MSVC's cl.exe doesn't support -fsanitize=fuzzer).
+option(DEVICEHUB_ENABLE_FUZZING "Build libFuzzer targets (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_FUZZING requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+
+    add_executable(token_verify_fuzz fuzz/TokenVerifyFuzz.cpp)
+    target_link_libraries(token_verify_fuzz PRIVATE auth_service_core)
+    target_compile_options(token_verify_fuzz PRIVATE -fsanitize=fuzzer,address)
+    target_link_options(token_verify_fuzz PRIVATE -fsanitize=fuzzer,address)
+endif()

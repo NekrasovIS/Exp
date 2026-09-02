@@ -70,6 +70,13 @@ void IdentityKeyStore::generateAndPersist() {
     QDir().mkpath(storageDir_);
     QFile file(keyFilePath());
     file.open(QIODevice::WriteOnly | QIODevice::Truncate);
+    // secretKey_/publicKey_ — unsigned char[] из libsodium; QFile::write()/
+    // конструктор QByteArray из Qt принимают char* — reinterpret_cast
+    // здесь стандартный способ перейти через эту границу типов
+    // указателей (та же логика применима к publicKeyBase64()/
+    // secretKeyBytes() ниже), всегда в паре с sizeof(), поэтому чтение
+    // через переинтерпретированный указатель никогда не выйдет за
+    // границы массива.
     file.write(reinterpret_cast<const char*>(secretKey_), sizeof(secretKey_));
     file.close();
     // Только best-effort: кроссплатформенные биты прав доступа Qt не
