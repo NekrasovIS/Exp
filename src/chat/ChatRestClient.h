@@ -94,6 +94,16 @@ public:
     /// умолчанию, для изначальной загрузки истории).
     void listMessages(const QString& token, qint64 channelId, int limit, qint64 beforeId = -1);
 
+    /// Запрашивает единственное последнее сообщение канала @p channelId
+    /// (limit=1) — для превью в списке каналов (issue #152), не для
+    /// подгрузки истории открытого канала. Отдельный сигнал
+    /// (latestMessageFetched(), не messagesListed()) — иначе фоновый
+    /// запрос превью и реальная подгрузка истории для одного и того же
+    /// канала, оказавшись в полёте одновременно (пользователь кликнул
+    /// канал сразу после обновления списка), были бы неотличимы друг от
+    /// друга по одному только channelId в ответе.
+    void fetchLatestMessage(const QString& token, qint64 channelId);
+
     /// Загружает @p data (сырые байты, на проводе в виде base64) как
     /// новое вложение в @p channelId (issue #116); вызывает
     /// attachmentUploaded() с id, который затем передаётся в
@@ -131,6 +141,10 @@ signals:
     /// (от самых старых к самым новым), возможно пуст, если больше нет
     /// истории.
     void messagesListed(qint64 channelId, const QList<ChatMessageInfo>& messages);
+
+    /// Ответ на fetchLatestMessage() — @p messages пуст, если в канале
+    /// ещё нет ни одного сообщения, иначе ровно один элемент.
+    void latestMessageFetched(qint64 channelId, const QList<ChatMessageInfo>& messages);
 
     /// Ответ на uploadAttachment().
     void attachmentUploaded(qint64 id, const QString& filename);

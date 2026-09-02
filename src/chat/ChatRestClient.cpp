@@ -34,6 +34,26 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
     return items;
 }
 
+QList<ChatMessageInfo> parseMessageList(const QByteArray& jsonBytes) {
+    QList<ChatMessageInfo> messages;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBytes);
+    if (!document.isArray()) {
+        return messages;
+    }
+    for (const QJsonValue& value : document.array()) {
+        const QJsonObject object = value.toObject();
+        const QJsonValue attachmentIdValue = object.value("attachment_id");
+        messages.push_back(ChatMessageInfo{
+            .id = object.value("id").toVariant().toLongLong(),
+            .author = object.value("author").toString(),
+            .body = object.value("body").toString(),
+            .sentAt = object.value("sent_at").toString(),
+            .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
+            .attachmentFilename = object.value("attachment_filename").toString()});
+    }
+    return messages;
+}
+
 // chat-service сообщает настоящую причину сбоя (например, «нет такого
 // сообщества, или имя канала уже занято») в теле ответа — откат к одному
 // лишь reply->errorString() всегда показывает лишь общее «server replied:
@@ -173,22 +193,26 @@ void ChatRestClient::listMessages(const QString& token, qint64 channelId, int li
             emit errorOccurred(extractErrorMessage(reply));
             return;
         }
-        QList<ChatMessageInfo> messages;
-        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
-        if (document.isArray()) {
-            for (const QJsonValue& value : document.array()) {
-                const QJsonObject object = value.toObject();
-                const QJsonValue attachmentIdValue = object.value("attachment_id");
-                messages.push_back(ChatMessageInfo{
-                    .id = object.value("id").toVariant().toLongLong(),
-                    .author = object.value("author").toString(),
-                    .body = object.value("body").toString(),
-                    .sentAt = object.value("sent_at").toString(),
-                    .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
-                    .attachmentFilename = object.value("attachment_filename").toString()});
-            }
+        emit messagesListed(channelId, parseMessageList(reply->readAll()));
+    });
+}
+
+void ChatRestClient::fetchLatestMessage(const QString& token, qint64 channelId) {
+    QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/messages").arg(channelId)));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("1"));
+    url.setQuery(query);
+
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            // Фоновый запрос превью для сайдбара — не поднимаем toast за
+            // отдельно взятый канал, только реальные операции пользователя
+            // (listMessages() открытого канала и т.п.) сообщают об ошибках.
+            return;
         }
-        emit messagesListed(channelId, messages);
+        emit latestMessageFetched(channelId, parseMessageList(reply->readAll()));
     });
 }
 
