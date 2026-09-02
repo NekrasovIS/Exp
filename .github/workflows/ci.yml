@@ -96,3 +96,184 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
         run: ctest --output-on-failure
+
+  coverage:
+    # Source-based code coverage (issue #146) — Clang-only (LLVM's
+    # -fprofile-instr-generate/-fcoverage-mapping), same Linux-runner
+    # pattern already proven for the fuzz/services jobs below. Root
+    # DeviceHub isn't included here — it would need its own Linux/Clang
+    # build of Qt6+WebRTC from vcpkg, a much bigger lift than these three
+    # services; can be added later if that's worth doing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: auth-service
+            test_binary: auth_service_tests
+          - service: user-service
+            test_binary: user_service_tests
+          - service: chat-service
+            test_binary: chat_service_tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Clang and LLVM coverage tools
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+
+      - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
+        run: sudo apt-get install -y autoconf autoconf-archive automake libtool
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      - name: Start Postgres (docker compose)
+        run: docker compose up -d --wait
+
+      - name: Configure
+        run: >
+          cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-coverage
+          -DCMAKE_CXX_COMPILER=clang++ -DDEVICEHUB_ENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build services/${{ matrix.service }}/build-coverage --parallel
+
+      - name: Test (with coverage profiling)
+        working-directory: services/${{ matrix.service }}/build-coverage
+        # ctest via gtest_discover_tests launches the test binary once per
+        # discovered TEST(); "%p" substitutes each run's own PID so the
+        # per-process .profraw files never collide with each other.
+        run: LLVM_PROFILE_FILE="%p.profraw" ctest --output-on-failure
+
+      - name: Generate coverage report
+        working-directory: services/${{ matrix.service }}/build-coverage
+        run: |
+          llvm-profdata merge -sparse *.profraw -o coverage.profdata
+          llvm-cov report ./${{ matrix.test_binary }} \
+            -instr-profile=coverage.profdata \
+            -ignore-filename-regex='(/test/|/vcpkg_installed/)'
+          llvm-cov show ./${{ matrix.test_binary }} \
+            -instr-profile=coverage.profdata \
+            -ignore-filename-regex='(/test/|/vcpkg_installed/)' \
+            -format=html -output-dir=coverage-html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: services/${{ matrix.service }}/build-coverage/coverage-html
+
+  services:
+    # Separate job on Linux rather than folding into build-and-test above:
+    # GitHub-hosted macOS runners don't support the `services:`/`container:`
+    # Docker features these three microservices' Postgres-backed tests need
+    # (issue #134 — previously none of them ran in CI at all).
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, user-service, chat-service]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      # user-service and chat-service need a live Postgres for most of
+      # their tests; auth-service doesn't use one, but starting it
+      # unconditionally keeps this step identical across the matrix. Tests
+      # that also need a live auth-service/user-service (not just Postgres)
+      # skip themselves (GTEST_SKIP) rather than failing — see each test
+      # file's own "Requires a live ..." comment — so this alone doesn't
+      # give full cross-service integration coverage, only each service's
+      # own business logic against a real database.
+      - name: Start Postgres (docker compose)
+        run: docker compose up -d --wait
+
+      # Same class of dependency as build-and-test's own autotools step
+      # above (there for libb2, here for user-service's libsodium) —
+      # vcpkg builds these ports from their upstream autotools build
+      # system rather than vendoring a CMake port for them.
+      - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
+
+      - name: Configure
+        run: cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build
+
+      - name: Build
+        run: cmake --build services/${{ matrix.service }}/build --parallel
+
+      - name: Test
+        run: ctest --test-dir services/${{ matrix.service }}/build --output-on-failure
+
+  fuzz:
+    # Real coverage-guided fuzzing (issue #121/#132/#133) — replaces the
+    # "clang-cl unavailable on this Windows dev machine" blocker with
+    # ubuntu-latest, which ships Clang (and its bundled libFuzzer runtime)
+    # out of the box. A bounded smoke run (-max_total_time), not a full
+    # scheduled fuzzing campaign — this catches regressions on every
+    # push/PR; long-running exploratory fuzzing is a separate concern.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: chat-service
+            targets: base64_fuzz json_guard_fuzz
+          - service: auth-service
+            targets: token_verify_fuzz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      - name: Configure
+        run: >
+          cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-fuzz
+          -DCMAKE_CXX_COMPILER=clang++ -DDEVICEHUB_ENABLE_FUZZING=ON
+
+      - name: Build fuzz targets
+        run: cmake --build services/${{ matrix.service }}/build-fuzz --target ${{ matrix.targets }} --parallel
+
+      - name: Run fuzz targets (bounded smoke run)
+        run: |
+          for target in ${{ matrix.targets }}; do
+            echo "::group::$target"
+            ./services/${{ matrix.service }}/build-fuzz/$target -max_total_time=30
+            echo "::endgroup::"
+          done
