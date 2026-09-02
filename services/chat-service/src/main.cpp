@@ -18,7 +18,7 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
 }  // namespace
 
 int main() {
-    // Matches docker-compose.yml's default local Postgres for chat-service.
+    // Соответствует локальному Postgres по умолчанию для chat-service из docker-compose.yml.
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
     const std::string host = envOrDefault("CHAT_SERVICE_HOST", "127.0.0.1");

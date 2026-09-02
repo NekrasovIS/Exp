@@ -28,10 +28,10 @@ ChatMessage sampleMessageWithAttachment() {
 TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
-    // Avatar (unnamed QLabel) + author (property "chatAuthor") + time
-    // ("mutedDescription") + body = 4 QLabels; own messages never get
-    // an author label (see NonOwnMessageWithHeader below), which is
-    // what distinguishes this count from the own-message case.
+    // Аватар (безымянный QLabel) + автор (свойство "chatAuthor") + время
+    // ("mutedDescription") + текст = 4 QLabel; у собственных сообщений
+    // никогда нет метки автора (см. NonOwnMessageWithHeader ниже) — именно
+    // это отличает данный счётчик от случая собственного сообщения.
     EXPECT_EQ(row.findChildren<QLabel*>().size(), 4);
     int authorLabelCount = 0;
     for (const QLabel* label : row.findChildren<QLabel*>()) {
@@ -45,7 +45,7 @@ TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
 TEST(ChatMessageRowTest, OwnMessageWithHeaderHasNoAuthorLabel) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
 
-    // Time + body only — own messages skip the avatar and author label.
+    // Только время + текст — у собственных сообщений нет аватара и метки автора.
     EXPECT_EQ(row.findChildren<QLabel*>().size(), 2);
     for (const QLabel* label : row.findChildren<QLabel*>()) {
         EXPECT_FALSE(label->property("chatAuthor").toBool());

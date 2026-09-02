@@ -22,7 +22,7 @@ TEST(RateLimiterTest, TracksEachKeyIndependently) {
 
     EXPECT_TRUE(limiter.allow("1.2.3.4"));
     EXPECT_FALSE(limiter.allow("1.2.3.4"));
-    // A different key has its own, untouched budget.
+    // У другого ключа свой, ещё не тронутый лимит.
     EXPECT_TRUE(limiter.allow("5.6.7.8"));
 }
 

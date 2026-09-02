@@ -9,7 +9,7 @@
 namespace chat_service::base64 {
 namespace {
 
-// RFC 4648 §10's own test vectors — cover 0/1/2 padding characters.
+// Собственные тестовые векторы RFC 4648 §10 — покрывают 0/1/2 символа паддинга.
 TEST(Base64Test, DecodesEmptyStringAsEmpty) {
     const std::optional<std::string> decoded = decode("");
     ASSERT_TRUE(decoded.has_value());
@@ -26,7 +26,7 @@ TEST(Base64Test, DecodesRfc4648TestVectors) {
 }
 
 TEST(Base64Test, DecodesArbitraryBytesIncludingHighAndLowValues) {
-    // Precomputed: base64 of bytes {0x00, 0x01, 0x02, 0xFF, 0x7F, 0x80}.
+    // Вычислено заранее: base64 от байтов {0x00, 0x01, 0x02, 0xFF, 0x7F, 0x80}.
     const std::optional<std::string> decoded = decode("AAEC/3+A");
     ASSERT_TRUE(decoded.has_value());
     ASSERT_EQ(decoded->size(), 6U);
@@ -47,14 +47,15 @@ TEST(Base64Test, RejectsInvalidAlphabetCharacter) {
     EXPECT_FALSE(decode("not!valid$$$base64").has_value());
 }
 
-// Interim stand-in for real coverage-guided fuzzing (issue #121 — libFuzzer
-// needs clang-cl, unavailable in this environment's MSVC toolchain): throws
-// thousands of random byte strings — attacker-controlled `data_base64` from
-// POST /channels/{id}/attachments is exactly this kind of untrusted input —
-// at decode() with a fixed seed for reproducibility. The only property
-// checked is that decode() never crashes/UB's on arbitrary bytes, including
-// embedded NUL and the full 0-255 range; a valid-or-nullopt return is
-// correct either way, so there's nothing else to assert against.
+// Временная замена настоящему fuzzing'у, управляемому покрытием (issue #121
+// — libFuzzer требует clang-cl, недоступный в тулчейне MSVC этого
+// окружения): бросает тысячи случайных байтовых строк — контролируемый
+// атакующим `data_base64` из POST /channels/{id}/attachments это именно
+// такой недоверенный ввод — в decode() с фиксированным seed для
+// воспроизводимости. Единственное проверяемое свойство — что decode()
+// никогда не падает и не приводит к UB на произвольных байтах, включая
+// встроенный NUL и весь диапазон 0-255; возврат valid-или-nullopt в
+// любом случае корректен, так что больше проверять нечего.
 TEST(Base64Test, DoesNotCrashOnRandomByteStrings) {
     std::mt19937 rng(0xB4501234U);
     std::uniform_int_distribution<int> lengthDist(0, 256);
@@ -67,8 +68,8 @@ TEST(Base64Test, DoesNotCrashOnRandomByteStrings) {
         for (int i = 0; i < length; ++i) {
             input.push_back(static_cast<char>(static_cast<std::uint8_t>(byteDist(rng))));
         }
-        // Not asserting on the result — decode() may accept or reject any
-        // given random string; surviving without crashing is the test.
+        // Результат не проверяется — decode() может принять или отвергнуть
+        // любую данную случайную строку; тест — просто пережить это без падения.
         static_cast<void>(decode(input));
     }
 }

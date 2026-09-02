@@ -7,21 +7,23 @@ class QString;
 
 namespace devicehub::ui_icons {
 
-/// Hand-drawn "+" icon (two crossing strokes), painted directly rather
-/// than loaded from an SVG resource — vcpkg's static Qt6 build doesn't
-/// wire up the SVG icon-engine plugin without extra qt_import_plugins
-/// setup (same class of gap as the camera permission plugin), so a
-/// QPainter-drawn glyph avoids that dependency entirely.
+/// Нарисованная вручную иконка "+" (два пересекающихся штриха),
+/// рисуется напрямую, а не загружается из SVG-ресурса — статическая
+/// сборка Qt6 через vcpkg не подключает плагин SVG icon-engine без
+/// дополнительной настройки qt_import_plugins (тот же класс пробела,
+/// что и у плагина разрешений камеры), поэтому глиф, нарисованный
+/// QPainter, полностью обходит эту зависимость.
 QIcon plusIcon(const QColor& strokeColor);
 
-/// Refresh icon via Qt's built-in QStyle::SP_BrowserReload — itself
-/// painted by QCommonStyle rather than loaded from a resource, so it's
-/// exempt from the same SVG-plugin gap without us hand-drawing arcs.
+/// Иконка обновления через встроенный в Qt QStyle::SP_BrowserReload —
+/// сама рисуется QCommonStyle, а не загружается из ресурса, поэтому не
+/// подвержена тому же пробелу с SVG-плагином без ручной отрисовки дуг.
 QIcon refreshIcon();
 
-/// Rounded-square, green-gradient "avatar" badge with @p label (the
-/// community's first letter) centered in white — used by
-/// CommunitiesPanel's icon rail in place of a text row.
+/// Значок-"аватар" со скруглённым квадратом и зелёным градиентом с
+/// @p label (первая буква сообщества) по центру белым цветом —
+/// используется иконочной полосой CommunitiesPanel вместо текстовой
+/// строки.
 QIcon communityAvatarIcon(const QString& label);
 
 }  // namespace devicehub::ui_icons

@@ -5,11 +5,11 @@
 namespace chat_service {
 
 /**
- * @brief Business logic for communities/channels/messages.
+ * @brief Бизнес-логика для сообществ/каналов/сообщений.
  *
- * Delegates storage to ChatRepository; callers must already be
- * authenticated (see AuthServiceClient) — this class only knows about
- * a "login" string, not tokens.
+ * Делегирует хранение ChatRepository; вызывающая сторона уже должна быть
+ * аутентифицирована (см. AuthServiceClient) — этот класс знает только
+ * строку "login", а не токены.
  */
 class ChatService {
 public:

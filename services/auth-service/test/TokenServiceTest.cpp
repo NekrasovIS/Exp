@@ -54,9 +54,9 @@ TEST(TokenServiceTest, ExpiredTokenIsRejected) {
 }
 
 TEST(TokenServiceTest, ValidSignatureButPayloadIsNotValidJsonIsRejected) {
-    // Correctly signed (same secret + real HMAC), but the payload
-    // segment doesn't decode to valid JSON — covers the parse-failure
-    // branch in verifyToken() distinct from a signature mismatch.
+    // Корректно подписан (тот же секрет + настоящий HMAC), но сегмент
+    // полезной нагрузки не декодируется в валидный JSON — покрывает
+    // ветку ошибки разбора в verifyToken(), отличную от несовпадения подписи.
     const std::string secret = "test-secret";
     const TokenService service(secret);
 

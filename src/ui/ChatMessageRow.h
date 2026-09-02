@@ -12,13 +12,14 @@ namespace devicehub {
 
 class ChatBubble;
 
-/// A chat message as received from ChatClient::messageReceived() —
-/// sentAt is the raw server timestamp string (Postgres-serialized,
-/// e.g. "2026-08-05 09:14:23.123456"). id and editedAt (issue #107)
-/// are needed to target/label a specific message for editing/deleting;
-/// editedAt is unset for a message that's never been edited. attachmentId
-/// is -1 and attachmentFilename empty when the message has no attachment
-/// (issue #116).
+/// Сообщение чата в том виде, в каком оно приходит из
+/// ChatClient::messageReceived() — sentAt это исходная строка метки
+/// времени сервера (сериализация Postgres, например
+/// "2026-08-05 09:14:23.123456"). id и editedAt (issue #107) нужны,
+/// чтобы адресовать/подписать конкретное сообщение для редактирования/
+/// удаления; editedAt не задан для сообщения, которое никогда не
+/// редактировалось. attachmentId равен -1, а attachmentFilename пуст,
+/// когда у сообщения нет вложения (issue #116).
 struct ChatMessage {
     qint64 id = 0;
     QString author;
@@ -30,23 +31,23 @@ struct ChatMessage {
 };
 
 /**
- * @brief One row in ChatView's message list, bubble-styled (iMessage/
- *        Slack-like).
+ * @brief Одна строка в списке сообщений ChatView, оформленная в виде
+ *        пузыря (в стиле iMessage/Slack).
  *
- * Own messages (@p isOwnMessage true) are right-aligned in a green-
- * gradient ChatBubble with no avatar. Others' messages are left-
- * aligned in a neutral ChatBubble; full form (@p showHeader true) adds
- * an avatar circle plus author and time above the body, grouped form
- * (for a consecutive message from the same author, see
- * chat_message_grouping::shouldGroupWithPrevious()) omits them so
- * consecutive messages don't repeat their header.
+ * Собственные сообщения (@p isOwnMessage true) выравниваются по правому
+ * краю в ChatBubble с зелёным градиентом, без аватара. Чужие сообщения
+ * выравниваются по левому краю в нейтральном ChatBubble; полная форма
+ * (@p showHeader true) добавляет кружок аватара плюс автора и время над
+ * текстом, сгруппированная форма (для последовательного сообщения от
+ * того же автора, см. chat_message_grouping::shouldGroupWithPrevious())
+ * их опускает, чтобы последовательные сообщения не повторяли заголовок.
  *
- * Every size here (avatar diameter, spacing, bubble padding/radius) is
- * derived from the current font's metrics rather than a fixed pixel
- * constant, and the bubble's maximum width is recomputed as a
- * percentage of the row's own width in resizeEvent() rather than
- * hardcoded — so the whole row scales with font size and available
- * space instead of being pinned to specific pixel numbers.
+ * Каждый размер здесь (диаметр аватара, отступы, padding/радиус пузыря)
+ * выводится из метрик текущего шрифта, а не из фиксированной пиксельной
+ * константы, а максимальная ширина пузыря пересчитывается как процент
+ * от собственной ширины строки в resizeEvent(), а не задаётся жёстко —
+ * так вся строка масштабируется вместе с размером шрифта и доступным
+ * пространством, а не привязана к конкретным пиксельным числам.
  */
 class ChatMessageRow : public QWidget {
     Q_OBJECT
@@ -56,24 +57,25 @@ public:
 
     [[nodiscard]] qint64 messageId() const { return messageId_; }
 
-    /// Updates the displayed body text and appends an "(edited)" marker
-    /// next to the timestamp, if this row has one shown (showHeader) —
-    /// issue #107, called when ChatClient::messageEdited() fires for
-    /// this row's message.
+    /// Обновляет отображаемый текст сообщения и добавляет метку
+    /// "(edited)" рядом с меткой времени, если она у этой строки
+    /// показана (showHeader) — issue #107, вызывается, когда
+    /// ChatClient::messageEdited() срабатывает для сообщения этой строки.
     void updateBody(const QString& newBody);
 
 signals:
-    /// "Edit" chosen from the right-click context menu (own messages
-    /// only, issue #107/#150) — @p currentBody lets the caller pre-fill
-    /// an edit box without looking the message back up by id.
+    /// Выбор "Edit" в контекстном меню по правому клику (только для
+    /// собственных сообщений, issue #107/#150) — @p currentBody
+    /// позволяет вызывающему коду заранее заполнить поле редактирования,
+    /// не разыскивая сообщение по id.
     void editRequested(qint64 id, const QString& currentBody);
 
-    /// "Delete" chosen from the right-click context menu (own messages
-    /// only, issue #150).
+    /// Выбор "Delete" в контекстном меню по правому клику (только для
+    /// собственных сообщений, issue #150).
     void deleteRequested(qint64 id);
 
-    /// "Download" clicked on a message with an attachment (issue #116,
-    /// any message, not just own).
+    /// Клик по "Download" на сообщении с вложением (issue #116, любое
+    /// сообщение, не только собственное).
     void downloadRequested(qint64 attachmentId, const QString& filename);
 
 protected:
@@ -82,8 +84,9 @@ protected:
 private:
     ChatBubble* bubble_ = nullptr;
     QLabel* bodyLabel_ = nullptr;
-    /// Null when constructed with showHeader false — grouped rows
-    /// don't show a timestamp at all, see class doc comment.
+    /// Null, если сконструировано с showHeader false — сгруппированные
+    /// строки вообще не показывают метку времени, см. doc-комментарий
+    /// класса.
     QLabel* timeLabel_ = nullptr;
     QString formattedSentAt_;
     qint64 messageId_ = 0;

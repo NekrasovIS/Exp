@@ -34,10 +34,10 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
     return items;
 }
 
-// chat-service reports the actual failure reason (e.g. "no such community,
-// or channel name already taken") in the response body — falling back to
-// reply->errorString() alone only ever shows a generic "server replied:
-// Not Found", which hides why the request actually failed.
+// chat-service сообщает настоящую причину сбоя (например, «нет такого
+// сообщества, или имя канала уже занято») в теле ответа — откат к одному
+// лишь reply->errorString() всегда показывает лишь общее «server replied:
+// Not Found», что скрывает, почему запрос на самом деле не удался.
 QString extractErrorMessage(QNetworkReply* reply) {
     const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
     const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
@@ -284,10 +284,10 @@ void ChatRestClient::promoteModerator(const QString& token, qint64 communityId, 
 }
 
 void ChatRestClient::demoteModerator(const QString& token, qint64 communityId, const QString& targetLogin) {
-    // Percent-encode the login into its own path segment — logins aren't
-    // charset-restricted server-side, and this is the first place one
-    // gets embedded directly in a URL path rather than a query param or
-    // JSON body.
+    // Percent-кодируем логин в его собственный сегмент пути — логины на
+    // стороне сервера не ограничены по набору символов, и это первое
+    // место, где логин встраивается прямо в путь URL, а не в query-параметр
+    // или тело JSON.
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/moderators/%2")
                                                  .arg(communityId)
                                                  .arg(QString::fromUtf8(QUrl::toPercentEncoding(targetLogin)))));
@@ -367,8 +367,9 @@ void ChatRestClient::fetchMyChannelKey(const QString& token, qint64 channelId) {
     connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
         reply->deleteLater();
         if (reply->error() == QNetworkReply::ContentNotFoundError) {
-            // Expected state (no key wrapped for this login yet) — not
-            // an error worth surfacing through errorOccurred().
+            // Ожидаемое состояние (для этого логина ещё не запечатан
+            // ключ) — не ошибка, о которой стоит сообщать через
+            // errorOccurred().
             emit myChannelKeyNotFound(channelId);
             return;
         }
