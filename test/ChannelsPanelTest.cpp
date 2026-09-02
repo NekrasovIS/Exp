@@ -234,5 +234,12 @@ TEST(ChannelsPanelTest, ANewerMessageArrivingAfterTheChannelWasReadIsMarkedUnrea
     EXPECT_TRUE(panel.listWidget()->item(0)->font().bold());
 }
 
+TEST(ChannelsPanelTest, RefreshButtonExists) {
+    ChannelsPanel panel;
+
+    ASSERT_NE(panel.refreshButton(), nullptr);
+    EXPECT_TRUE(panel.refreshButton()->isEnabled());
+}
+
 }  // namespace
 }  // namespace devicehub
