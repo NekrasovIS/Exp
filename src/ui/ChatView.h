@@ -287,6 +287,10 @@ private:
     QVideoWidget* localVideoWidget_ = nullptr;
     QHash<QString, QLabel*> remoteVideoTiles_;
     QLabel* typingIndicatorLabel_ = nullptr;
+    /// Виден только пока editingMessageId_ >= 0 — единственный оставшийся
+    /// индикатор режима редактирования с тех пор, как sendButton_ стал
+    /// иконкой без текста (issue: визуальный проход по мотивам Discord).
+    QLabel* editingIndicatorLabel_ = nullptr;
     QTimer* typingIndicatorHideTimer_ = nullptr;
     QTimer* typingThrottleTimer_ = nullptr;
     bool hasLastMessage_ = false;

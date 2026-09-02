@@ -8,8 +8,10 @@ class MainWindow {
   -onToggleMicClicked()
   -onToggleCameraClicked()
   -onToggleScreenCaptureClicked()
-  -onRequestTokenClicked()
-  -onRegisterClicked()
+  -onRequestOtpCodeClicked(identifier: QString)
+  -onVerifyOtpCodeClicked(identifier: QString, code: QString)
+  -onPasswordSignInClicked(login: QString, password: QString)
+  -onRegisterClicked(login: QString, password: QString)
   -onSendChatMessageClicked()
   -refreshCommunities()
   -refreshChannelsForSelectedCommunity()
@@ -67,7 +69,34 @@ note right of ChannelsPanel
   в строке, но channelSelected()/rename
   всегда используют настоящее имя, а не
   отображаемый текст с префиксом.
+
+  Discord-inspired layout pass: заголовок
+  "CHANNELS" заглавными (тот же паттерн
+  QLabel[sectionTitle="true"], что и
+  MemberListPanel), каждый канал получает
+  префикс "#" в отображаемом тексте — тоже
+  только косметика, kNameRole/rename её
+  не видят.
 end note
+
+class MemberListPanel {
+  +setMembers(logins: QStringList)
+  +titleLabel() : QLabel*
+  +listWidget() : QListWidget*
+}
+note right of MemberListPanel
+  Элемент раскладки Discord, которого раньше
+  не было вовсе: список участников выбранного
+  сообщества справа от ChatView (240px, тот
+  же аватар-круг, что и у CommunitiesPanel).
+  Заполняется через тот же REST-вызов
+  ChatRestClient::listMembers(), что уже
+  использовался для заворачивания ключей
+  зашифрованных каналов (issue #138) — теперь
+  ещё и для этой панели, независимо от того,
+  идёт ли сейчас настройка шифрования.
+end note
+MemberListPanel ..> IconFactory : communityAvatarIcon() (первая\nбуква логина) >
 
 class ChatView {
   +showPlaceholder()
@@ -133,6 +162,18 @@ note right of ChatView
   переключены с фиксированного размера на
   минимальный + Expanding QSizePolicy, чтобы
   реально расти в дополнительное пространство.
+
+  Discord-inspired layout pass: messageEdit_/
+  attachButton_/sendButton_ теперь дети общего
+  QWidget#chatComposer (скруглённая "таблетка",
+  без своего фона/рамки у детей — см.
+  Theme.cpp), а не три раздельных прямоугольных
+  элемента подряд. sendButton_/attachButton_
+  стали иконками (IconFactory::sendIcon()/
+  plusIcon()) без подписи — у sendButton_
+  поэтому больше нет setText("Update") на время
+  редактирования сообщения, вместо этого виден
+  editingIndicatorLabel_ ("Editing message").
 end note
 
 struct ChatMessage {
@@ -173,13 +214,18 @@ class LoginWindow {
   +verifyCodeRequested(identifier: QString, code: QString)
 }
 note bottom of LoginWindow
-  issue #156: показывается MainWindow при
-  запуске (нет персистентности токена между
+  issue #156: единственное видимое окно при
+  запуске, пока пользователь не авторизован
+  (нет персистентности токена между
   перезапусками — сигнал = "всегда показывать
-  при старте"), скрывается на первом
-  tokenVerified(true, ...). Пароль в
-  AccountMenu (правый верхний угол) продолжает
-  работать как раньше, тоже закрывает это окно.
+  при старте"); MainWindow скрыт, пока это окно
+  не скроется на первом tokenVerified(true, ...).
+  Закрытие без входа завершает приложение
+  (QDialog::rejected -> QCoreApplication::quit).
+  Второй шаг (passwordSignInButton()/
+  registerButton()) заменил собой AccountMenu,
+  который раньше жил в правом верхнем углу
+  MainWindow — теперь удалён целиком.
 end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
@@ -214,18 +260,6 @@ package "devicehub::chat_message_grouping" <<Rectangle>> {
 }
 ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious() >
 ChatMessageRow ..> ChatMessageGrouping : parseSentAt() (time label) >
-
-class AccountMenu {
-  +loginEdit() : QLineEdit*
-  +passwordEdit() : QLineEdit*
-  +requestTokenButton() : QPushButton*
-  +registerButton() : QPushButton*
-  +editProfileButton() : QPushButton*
-  +statusLabel() : QLabel*
-  +toggleButton() : QPushButton*
-  +setEditProfileEnabled(enabled: bool)
-  -togglePopup()
-}
 
 class ProfileDialog {
   +setProfile(profile: UserProfile)
@@ -283,11 +317,12 @@ class FooterBar {
 note right of FooterBar
   Clicking the avatar opens MainWindow's
   account settings menu (Edit Profile /
-  Sign Out) instead of it living only in
-  the top-right AccountMenu popup (issue #151).
+  Sign Out) — issue #151. This is the only
+  account-settings entry point left in the
+  app now that AccountMenu (former top-right
+  popup) has been removed entirely (issue #156).
 end note
 MainWindow ..> FooterBar : accountSettingsRequested() >
-MainWindow ..> AccountMenu : editProfileButton()/registerButton()\nrequestTokenButton() >
 
 enum ToastVariant {
   kSuccess
@@ -320,6 +355,7 @@ package "devicehub::ui_icons" <<Rectangle>> {
     +plusIcon(strokeColor: QColor) : QIcon
     +refreshIcon() : QIcon
     +communityAvatarIcon(label: QString) : QIcon
+    +sendIcon(fillColor: QColor) : QIcon
   }
 }
 
@@ -348,8 +384,8 @@ package "src/user" {
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- ChatView : owns (main content area)
-MainWindow *-- AccountMenu : owns (top-right)
-MainWindow *-- ProfileDialog : owns (opened from\nAccountMenu, issue #110)
+MainWindow *-- MemberListPanel : owns (right of ChatView,\nDiscord-inspired layout pass)
+MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
 MainWindow *-- ModeratorsDialog : owns (opened from\nCommunitiesPanel, issue #114)
@@ -378,10 +414,9 @@ MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
 MainWindow ..> UserProfileClient : profileReceived()/Updated()\nerrorOccurred() (issue #110) >
-MainWindow ..> AccountMenu : setEditProfileEnabled() >
 MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
 MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
-AccountMenu ..> MainWindow : editProfileButton().clicked() >
+MainWindow ..> MemberListPanel : setMembers() (from\nChatRestClient::membersListed()) >
 ProfileDialog ..> MainWindow : saveRequested() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
@@ -420,7 +455,7 @@ note right of MainWindow
   low-level Qt Multimedia API напрямую.
 
   Панели (CommunitiesPanel/ChannelsPanel/
-  ChatView/AccountMenu/SettingsDialog/
+  ChatView/MemberListPanel/SettingsDialog/
   FooterBar) — чистое представление:
   строят свои контролы и шлют
   request-сигналы. MainWindow остаётся

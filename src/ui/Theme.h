@@ -23,6 +23,12 @@ constexpr const char* kAccentGradientStart = "#34d399";
 constexpr const char* kAccentGradientEnd = "#059669";
 constexpr const char* kAccentForeground = "#ffffff";
 constexpr const char* kBubbleOtherBackground = "#2a2d31";
+/// Приглушённый серый, уже используемый в QSS для служебного текста
+/// (issue: визуальный проход по мотивам Discord) — вынесен как константа,
+/// чтобы QPainter-рисование (IconFactory) могло взять тот же цвет, что и
+/// QLabel[sectionTitle="true"]/mutedDescription в QSS ниже, вместо своего
+/// hex-литерала.
+constexpr const char* kMutedForeground = "#8b939c";
 
 /// Таблица стилей Qt (QSS), реализующая тёмную тему с зелёным
 /// градиентным акцентом на основных действиях: три слоя тёмных фонов,

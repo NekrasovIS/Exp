@@ -1,5 +1,6 @@
 #include "ui/ChatView.h"
 
+#include <QColor>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
@@ -10,6 +11,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSize>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -20,6 +22,7 @@
 #include <utility>
 
 #include "ui/ChatMessageGrouping.h"
+#include "ui/IconFactory.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -30,6 +33,8 @@ constexpr int kChannelPageIndex = 1;
 constexpr int kVideoTileSize = 160;
 constexpr int kTypingIndicatorHideMs = 3000;
 constexpr int kTypingThrottleMs = 2000;
+constexpr int kComposerIconButtonSize = 32;
+constexpr int kComposerIconGlyphSize = 18;
 /// Насколько близко к низу (в пикселях) всё ещё считается "внизу" для
 /// stickToBottom_ — небольшой запас, а не требование точного
 /// максимального значения, которое округление layout'а может промахнуть
@@ -214,10 +219,30 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     typingThrottleTimer_->setSingleShot(true);
     typingThrottleTimer_->setInterval(kTypingThrottleMs);
 
-    auto* sendRow = new QHBoxLayout;
-    sendRow->setSpacing(ui_theme::kSpacingSm);
-    messageEdit_ = new QLineEdit(channelPage);
+    // Виден только в режиме редактирования (issue: визуальный проход по
+    // мотивам Discord — иконка "Send" теперь не может сама по себе
+    // сказать "Update", как раньше умел её текст, см. connectMessageRow()/
+    // cancelEditingMessage() ниже).
+    editingIndicatorLabel_ = new QLabel(tr("Editing message"), channelPage);
+    editingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    editingIndicatorLabel_->setVisible(false);
+
+    // Композер как единая "таблетка" (issue: визуальный проход по
+    // мотивам Discord) — messageEdit_/attachButton_/sendButton_ рисуются
+    // без собственного фона/рамки (см. Theme.cpp) и сливаются в один
+    // скруглённый контейнер вместо трёх раздельных прямоугольных
+    // элементов управления в ряд.
+    auto* composer = new QWidget(channelPage);
+    composer->setObjectName(QStringLiteral("chatComposer"));
+    composer->setAttribute(Qt::WA_StyledBackground, true);
+    auto* composerLayout = new QHBoxLayout(composer);
+    composerLayout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
+                                        ui_theme::kSpacingSm);
+    composerLayout->setSpacing(ui_theme::kSpacingSm);
+
+    messageEdit_ = new QLineEdit(composer);
     messageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
+    messageEdit_->setProperty("composerInput", true);
     messageEdit_->setPlaceholderText(tr("Message"));
     connect(messageEdit_, &QLineEdit::textEdited, this, [this]() {
         if (typingThrottleTimer_->isActive()) {
@@ -227,17 +252,26 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
         emit typingRequested();
     });
 
-    attachButton_ = new QPushButton(tr("Attach"), channelPage);
+    attachButton_ = new QPushButton(composer);
     attachButton_->setObjectName(QStringLiteral("attachFileButton"));
+    attachButton_->setToolTip(tr("Attach"));
+    attachButton_->setProperty("composerIcon", true);
+    attachButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kMutedForeground)));
+    attachButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    attachButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(attachButton_, &QPushButton::clicked, this, &ChatView::attachFileRequested);
 
-    sendButton_ = new QPushButton(tr("Send"), channelPage);
+    sendButton_ = new QPushButton(composer);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
-    sendButton_->setProperty("accent", true);
+    sendButton_->setToolTip(tr("Send"));
+    sendButton_->setProperty("composerIcon", true);
+    sendButton_->setIcon(ui_icons::sendIcon(QColor(ui_theme::kAccentGradientStart)));
+    sendButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    sendButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
 
-    sendRow->addWidget(messageEdit_, /*stretch=*/1);
-    sendRow->addWidget(attachButton_);
-    sendRow->addWidget(sendButton_);
+    composerLayout->addWidget(attachButton_);
+    composerLayout->addWidget(messageEdit_, /*stretch=*/1);
+    composerLayout->addWidget(sendButton_);
 
     // История сообщений + строка ввода, сгруппированы в один виджет,
     // чтобы быть одним дочерним элементом QSplitter вместе с videoStrip_
@@ -252,7 +286,8 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     chatPanelLayout->addWidget(loadOlderButton_, /*stretch=*/0, Qt::AlignHCenter);
     chatPanelLayout->addWidget(scrollArea_, /*stretch=*/1);
     chatPanelLayout->addWidget(typingIndicatorLabel_);
-    chatPanelLayout->addLayout(sendRow);
+    chatPanelLayout->addWidget(editingIndicatorLabel_);
+    chatPanelLayout->addWidget(composer);
 
     chatSplitter_ = new QSplitter(Qt::Vertical, channelPage);
     chatSplitter_->setObjectName(QStringLiteral("chatSplitter"));
@@ -376,7 +411,7 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
         editingMessageId_ = id;
         messageEdit_->setText(currentBody);
         messageEdit_->setFocus();
-        sendButton_->setText(tr("Update"));
+        editingIndicatorLabel_->setVisible(true);
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
@@ -411,7 +446,7 @@ void ChatView::removeMessage(qint64 id) {
 void ChatView::cancelEditingMessage() {
     editingMessageId_ = -1;
     messageEdit_->clear();
-    sendButton_->setText(tr("Send"));
+    editingIndicatorLabel_->setVisible(false);
 }
 
 void ChatView::appendSystemLine(const QString& text) {

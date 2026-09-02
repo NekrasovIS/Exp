@@ -20,11 +20,15 @@ namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
 constexpr int kNameRole = Qt::UserRole + 2;
-constexpr int kRailWidth = 64;
-constexpr int kIconButtonSize = 28;
-constexpr int kIconButtonIconSize = 14;
-constexpr int kAvatarIconSize = 32;
-constexpr int kAvatarGridSize = 48;
+// Метрики ближе к иконочной полосе серверов Discord (issue: визуальный
+// проход по мотивам Discord — расположение/размеры, не цвета) — более
+// широкая полоса с более крупными круглыми аватарами вместо прежней
+// тесной раскладки.
+constexpr int kRailWidth = 72;
+constexpr int kIconButtonSize = 32;
+constexpr int kIconButtonIconSize = 16;
+constexpr int kAvatarIconSize = 44;
+constexpr int kAvatarGridSize = 56;
 }  // namespace
 
 CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {

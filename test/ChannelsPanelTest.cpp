@@ -27,8 +27,8 @@ TEST(ChannelsPanelTest, SetChannelsPopulatesTheListWidget) {
     panel.setChannels(sampleChannels());
 
     ASSERT_EQ(panel.listWidget()->count(), 2);
-    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("general"));
-    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("random"));
+    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("# general"));
+    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("# random"));
 }
 
 TEST(ChannelsPanelTest, SetChannelsReplacesPreviousContents) {
@@ -38,7 +38,7 @@ TEST(ChannelsPanelTest, SetChannelsReplacesPreviousContents) {
     panel.setChannels({ChatItem{.id = 12, .name = "announcements", .ownerLogin = "carol"}});
 
     ASSERT_EQ(panel.listWidget()->count(), 1);
-    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("announcements"));
+    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("# announcements"));
 }
 
 TEST(ChannelsPanelTest, SetChannelsWithEmptyListLeavesNoRows) {
@@ -110,7 +110,7 @@ TEST(ChannelsPanelTest, EncryptedChannelShowsLockPrefixInTextButRawNameInSelecti
     panel.setChannels({ChatItem{.id = 20, .name = "secrets", .ownerLogin = "alice", .isEncrypted = true}});
     QSignalSpy spy(&panel, &ChannelsPanel::channelSelected);
 
-    EXPECT_TRUE(panel.listWidget()->item(0)->text().startsWith(QStringLiteral("\U0001F512")));
+    EXPECT_TRUE(panel.listWidget()->item(0)->text().startsWith(QStringLiteral("# \U0001F512")));
     EXPECT_TRUE(panel.listWidget()->item(0)->text().endsWith(QStringLiteral("secrets")));
 
     emit panel.listWidget()->itemClicked(panel.listWidget()->item(0));

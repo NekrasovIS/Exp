@@ -40,6 +40,11 @@ QString discordDarkStyleSheet() {
             border-right: 1px solid #2a2d31;
         }
 
+        devicehub--MemberListPanel {
+            background-color: #17191c;
+            border-left: 1px solid #2a2d31;
+        }
+
         devicehub--ChannelsPanel, devicehub--ChatView {
             background-color: transparent;
         }
@@ -135,6 +140,37 @@ QString discordDarkStyleSheet() {
 
         QComboBox::drop-down {
             border: none;
+        }
+
+        QWidget#chatComposer {
+            background-color: #17191c;
+            border: 1px solid #2a2d31;
+            border-radius: 22px;
+        }
+
+        QLineEdit[composerInput="true"] {
+            background: transparent;
+            border: none;
+            border-radius: 0;
+        }
+
+        QLineEdit[composerInput="true"]:focus {
+            border: none;
+        }
+
+        QPushButton[composerIcon="true"] {
+            background: transparent;
+            border: none;
+            border-radius: 16px;
+            padding: 0;
+        }
+
+        QPushButton[composerIcon="true"]:hover {
+            background-color: rgba(255, 255, 255, 20);
+        }
+
+        QPushButton[composerIcon="true"]:pressed {
+            background-color: rgba(255, 255, 255, 35);
         }
 
         QTabWidget::pane {

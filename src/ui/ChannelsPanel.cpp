@@ -48,7 +48,9 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
 
     auto* header = new QHBoxLayout;
     header->setSpacing(ui_theme::kSpacingSm);
-    auto* title = new QLabel(tr("Channels"), this);
+    // ЗАГЛАВНЫМИ, как заголовки категорий каналов в Discord (issue:
+    // визуальный проход по мотивам Discord).
+    auto* title = new QLabel(tr("CHANNELS"), this);
     title->setProperty("sectionTitle", true);
 
     refreshButton_ = new QPushButton(this);
@@ -123,12 +125,13 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
 void ChannelsPanel::setChannels(const QList<ChatItem>& channels) {
     listWidget_->clear();
     for (const ChatItem& channel : channels) {
-        // Зашифрованные каналы получают тот же значок замка, что и
-        // заголовок ChatView (issue #138), прямо в строке списка, а не
-        // только после открытия канала (issue #152) — только в text(),
-        // kNameRole хранит настоящее имя для channelSelected()/rename.
-        const QString displayName =
-            channel.isEncrypted ? QStringLiteral("\U0001F512 ") + channel.name : channel.name;
+        // "#" — тот же маркер текстового канала, что в Discord (issue:
+        // визуальный проход по мотивам Discord); зашифрованные каналы
+        // получают ещё и значок замка, тот же, что и заголовок ChatView
+        // (issue #138) — оба только в text(), kNameRole хранит настоящее
+        // имя для channelSelected()/rename.
+        const QString displayName = channel.isEncrypted ? QStringLiteral("# \U0001F512 ") + channel.name
+                                                          : QStringLiteral("# ") + channel.name;
         auto* item = new QListWidgetItem(displayName, listWidget_);
         item->setData(kIdRole, channel.id);
         item->setData(kOwnerRole, channel.ownerLogin);

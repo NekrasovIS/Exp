@@ -36,6 +36,7 @@
 #include "ui/DesktopNotifier.h"
 #include "ui/FooterBar.h"
 #include "ui/LoginWindow.h"
+#include "ui/MemberListPanel.h"
 #include "ui/ModeratorsDialog.h"
 #include "ui/ProfileDialog.h"
 #include "ui/SearchDialog.h"
@@ -325,6 +326,7 @@ MainWindow::MainWindow(QWidget* parent)
         selectedCommunityId_ = id;
         closeChatView();
         refreshChannelsForSelectedCommunity();
+        chatRestClient_.listMembers(lastToken_, id);
     });
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
@@ -425,7 +427,10 @@ MainWindow::MainWindow(QWidget* parent)
                 refreshChannelsForSelectedCommunity();
             });
     connect(&chatRestClient_, &ChatRestClient::membersListed, this,
-            [this](qint64 /*communityId*/, const QStringList& logins) {
+            [this](qint64 communityId, const QStringList& logins) {
+                if (communityId == selectedCommunityId_) {
+                    memberListPanel_->setMembers(logins);
+                }
                 if (!pendingEncryptedSetup_.has_value()) {
                     return;  // Не связано с текущим созданием зашифрованного канала.
                 }
@@ -592,7 +597,10 @@ void MainWindow::buildUi() {
     auto* sidebar = new QWidget(central);
     sidebar->setObjectName(QStringLiteral("sidebar"));
     sidebar->setAttribute(Qt::WA_StyledBackground, true);
-    sidebar->setFixedWidth(280);
+    // 72px иконочная полоса сообществ + 240px список каналов — те же
+    // пропорции, что и у сайдбара Discord (issue: визуальный проход по
+    // мотивам Discord — расположение/размеры, не цвета).
+    sidebar->setFixedWidth(312);
     auto* sidebarLayout = new QHBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
     sidebarLayout->setSpacing(0);
@@ -605,10 +613,17 @@ void MainWindow::buildUi() {
     toastBanner_ = new ToastBanner(chatView_);
     desktopNotifier_ = new DesktopNotifier(this, this);
 
+    // Список участников сообщества справа от чата — элемент раскладки
+    // Discord, которого раньше не было вовсе (issue: визуальный проход
+    // по мотивам Discord); та же 240px ширина, что и список каналов.
+    memberListPanel_ = new MemberListPanel(central);
+    memberListPanel_->setFixedWidth(240);
+
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
     middleLayout->addWidget(sidebar);
     middleLayout->addWidget(chatView_, /*stretch=*/1);
+    middleLayout->addWidget(memberListPanel_);
 
     footerBar_ = new FooterBar(central);
 
