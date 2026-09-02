@@ -36,6 +36,67 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  sanitizers:
+    # ASan+UBSan and ThreadSanitizer builds (issue #145). Advisory for
+    # now (continue-on-error), not a merge blocker — per issue #145, the
+    # sanitizer baseline needs to stabilize first; findings become their
+    # own tracked bugs rather than blocking whatever PR happens to
+    # surface them. Uses the runner's default GCC (sanitizers don't need
+    # LLVM-specific flags the way coverage/fuzzing do), so no extra
+    # compiler install step here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, user-service, chat-service]
+        sanitizer: [asan-ubsan, tsan]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      - name: Start Postgres (docker compose)
+        run: docker compose up -d --wait
+
+      - name: Configure (ASan+UBSan)
+        if: matrix.sanitizer == 'asan-ubsan'
+        run: >
+          cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-sanitizer
+          -DDEVICEHUB_ENABLE_ASAN_UBSAN=ON
+
+      - name: Configure (TSan)
+        if: matrix.sanitizer == 'tsan'
+        run: >
+          cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-sanitizer
+          -DDEVICEHUB_ENABLE_TSAN=ON
+
+      - name: Build
+        run: cmake --build services/${{ matrix.service }}/build-sanitizer --parallel
+
+      - name: Test
+        working-directory: services/${{ matrix.service }}/build-sanitizer
+        env:
+          ASAN_OPTIONS: halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: ctest --output-on-failure
+
   coverage:
     # Source-based code coverage (issue #146) — Clang-only (LLVM's
     # -fprofile-instr-generate/-fcoverage-mapping), same Linux-runner

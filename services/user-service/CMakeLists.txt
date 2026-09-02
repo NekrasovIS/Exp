@@ -58,6 +58,27 @@ else()
     )
 endif()
 
+# Sanitizer builds (issue #145) — see chat-service/CMakeLists.txt's copy
+# of this same block for the full rationale.
+option(DEVICEHUB_ENABLE_ASAN_UBSAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
+option(DEVICEHUB_ENABLE_TSAN "Build with ThreadSanitizer (GCC/Clang only; incompatible with DEVICEHUB_ENABLE_ASAN_UBSAN)" OFF)
+if(DEVICEHUB_ENABLE_ASAN_UBSAN AND DEVICEHUB_ENABLE_TSAN)
+    message(FATAL_ERROR "DEVICEHUB_ENABLE_ASAN_UBSAN and DEVICEHUB_ENABLE_TSAN cannot be combined in one build")
+endif()
+if(DEVICEHUB_ENABLE_ASAN_UBSAN OR DEVICEHUB_ENABLE_TSAN)
+    if(MSVC)
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_ASAN_UBSAN/DEVICEHUB_ENABLE_TSAN require GCC or Clang, not MSVC")
+    endif()
+endif()
+if(DEVICEHUB_ENABLE_ASAN_UBSAN)
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+if(DEVICEHUB_ENABLE_TSAN)
+    add_compile_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # Source-based code coverage (issue #146) — see chat-service/CMakeLists.txt's
 # copy of this same block for the full rationale.
 option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
