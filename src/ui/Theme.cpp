@@ -142,6 +142,63 @@ QString discordDarkStyleSheet() {
             border: none;
         }
 
+        /* Тонкий скроллбар без стрелок (issue: визуальный проход по
+           мотивам Discord) вместо толстого нативного Windows-скроллбара
+           — применяется глобально через QApplication::setStyleSheet(),
+           так что все прокручиваемые списки/области получают его сразу,
+           а не только та, ради которой его добавили. */
+        QScrollBar:vertical {
+            background: transparent;
+            width: 8px;
+            margin: 0px;
+        }
+
+        QScrollBar::handle:vertical {
+            background-color: #383c41;
+            border-radius: 4px;
+            min-height: 24px;
+        }
+
+        QScrollBar::handle:vertical:hover {
+            background-color: #464b51;
+        }
+
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+            background: none;
+            border: none;
+        }
+
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
+        }
+
+        QScrollBar:horizontal {
+            background: transparent;
+            height: 8px;
+            margin: 0px;
+        }
+
+        QScrollBar::handle:horizontal {
+            background-color: #383c41;
+            border-radius: 4px;
+            min-width: 24px;
+        }
+
+        QScrollBar::handle:horizontal:hover {
+            background-color: #464b51;
+        }
+
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+            background: none;
+            border: none;
+        }
+
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
+        }
+
         QWidget#chatComposer {
             background-color: #17191c;
             border: 1px solid #2a2d31;
