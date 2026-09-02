@@ -1,8 +1,11 @@
 #include "ui/ChatMessageRow.h"
 
+#include <QAction>
 #include <QFontMetricsF>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
@@ -47,6 +50,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     rootLayout->setSpacing(spacing);
 
     bubble_ = new ChatBubble(isOwnMessage, this);
+    bubble_->setObjectName(QStringLiteral("chatMessageBubble"));
     auto* bubbleLayout = new QVBoxLayout(bubble_);
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
@@ -106,26 +110,29 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
 
     if (isOwnMessage) {
-        // Доступно на каждой строке собственного сообщения независимо
-        // от showHeader — сгруппированные (последовательные) сообщения
-        // не повторяют заголовок, но каждому отдельному сообщению всё
-        // равно нужен свой способ адресации для редактирования/удаления
-        // (issue #107).
-        auto* controlsRow = new QHBoxLayout;
-        controlsRow->setSpacing(spacing);
-        controlsRow->addStretch(1);
-        auto* editButton = new QPushButton(tr("Edit"), bubble_);
-        editButton->setObjectName(QStringLiteral("editMessageButton"));
-        editButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
-        connect(editButton, &QPushButton::clicked, this,
-                [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
-        auto* deleteButton = new QPushButton(tr("Delete"), bubble_);
-        deleteButton->setObjectName(QStringLiteral("deleteMessageButton"));
-        deleteButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
-        connect(deleteButton, &QPushButton::clicked, this, [this]() { emit deleteRequested(messageId_); });
-        controlsRow->addWidget(editButton);
-        controlsRow->addWidget(deleteButton);
-        bubbleLayout->addLayout(controlsRow);
+        // Контекстное меню по правому клику вместо всегда видимых кнопок
+        // (issue #150) — доступно на каждой строке собственного сообщения
+        // независимо от showHeader, поскольку сгруппированные
+        // (последовательные) сообщения не повторяют заголовок, но
+        // каждому отдельному сообщению всё равно нужен свой способ
+        // адресации для редактирования/удаления (issue #107). Построено
+        // через popup() (неблокирующий), а не exec(), чтобы тест мог
+        // напрямую вызвать соответствующий QAction, не прокручивая
+        // модальный event loop.
+        bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(bubble_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+            auto* menu = new QMenu(bubble_);
+            menu->setAttribute(Qt::WA_DeleteOnClose);
+            menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
+            QAction* editAction = menu->addAction(tr("Edit"));
+            editAction->setObjectName(QStringLiteral("editMessageAction"));
+            connect(editAction, &QAction::triggered, this,
+                    [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+            QAction* deleteAction = menu->addAction(tr("Delete"));
+            deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
+            connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
+            menu->popup(bubble_->mapToGlobal(pos));
+        });
 
         rootLayout->addStretch(1);
         rootLayout->addWidget(bubble_);

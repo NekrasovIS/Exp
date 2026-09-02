@@ -143,6 +143,11 @@ class ChatBubble {
 ChatView *-- ChatMessageRow : creates one per message
 ChatMessageRow ..> ChatMessage : renders
 ChatMessageRow *-- ChatBubble : owns (own messages: green\ngradient, right-aligned;\nothers: neutral, left-aligned)
+note right of ChatMessageRow
+  Own messages: right-click the bubble for a
+  context menu (Edit/Delete) instead of
+  always-visible buttons (issue #150).
+end note
 
 package "devicehub::chat_message_grouping" <<Rectangle>> {
   class ChatMessageGrouping << (N,orchid) namespace >> {
