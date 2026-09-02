@@ -617,11 +617,33 @@ renegotiation/attach на каждого пира при переключени�
 что одновременно показать и камеру, и экран нельзя — осознанное
 упрощение первой версии, не ограничение самого WebRTC. `ScreenCaptureDevice`
 получил тот же рефакторинг, что раньше `CameraDevice` (issue #72):
-теперь сам владеет единственным `QMediaCaptureSession`-слотом и
-рассылает кадры через `frameAvailable()`, а не отдаёт `captureSession()`
-виджету напрямую — иначе превью в Settings и исходящее видео звонка не
-смогли бы делить один и тот же захват экрана. Кнопка «Share Screen» —
-тот же UI-паттерн, что и «Enable Video», рядом в шапке канала.
+владеет единственным источником кадров и рассылает их через
+`frameAvailable()` всем подписчикам сразу (превью в Settings и
+исходящее видео звонка), а не отдаёт захват какому-то одному виджету
+напрямую. Кнопка «Share Screen» — тот же UI-паттерн, что и «Enable
+Video», рядом в шапке канала.
+
+Источник кадров под этим фасадом (issue #154) — не Qt6 `QScreenCapture`,
+а прямой захват через Windows.Graphics.Capture (WinRT): в vcpkg-сборке
+Qt6 Multimedia для Windows backend захвата экрана не собран —
+`QScreenCapture::start()` возвращал `NotSupportedError` на любом
+экране, при этом камера через тот же `QMediaCaptureSession` работала
+нормально (диагностика — в issue). `ScreenCaptureDevice` теперь —
+кросс-платформенный фасад над `IScreenCaptureBackend` (выбор
+конкретной реализации — единственный `#ifdef` в его конструкторе, а не
+россыпь по бизнес-логике, см. «Кроссплатформенность» в CLAUDE.md).
+`WindowsScreenCaptureBackend` захватывает выбранный монитор через
+`Direct3D11CaptureFramePool::CreateFreeThreaded` (не требует message
+loop на стороне вызывающего потока), на каждый `FrameArrived` копирует
+GPU-текстуру в CPU-читаемую staging-текстуру (`CopyResource` +
+`Map`/`Unmap`), собирает из неё `QVideoFrame` (`Format_BGRA8888`) и —
+как и везде, где кадр или событие приходит не с GUI-потока — уходит на
+GUI-поток через `QMetaObject::invokeMethod(..., Qt::QueuedConnection)`
+до `emit frameAvailable()`. macOS/Linux-реализации пока не существуют
+(`backend_` остаётся `nullptr` вне `Q_OS_WIN`, `start()` в этом случае
+только эмитит `errorOccurred()`) — эта часть Qt-независима и в теории
+работала бы там, где Qt6 `QScreenCapture` действительно собран, но
+проверить это негде.
 
 Реальные end-to-end тесты требуют запущенных сервисов и Postgres и
 пропускают себя (`GTEST_SKIP`), если те недоступны — CI пока не

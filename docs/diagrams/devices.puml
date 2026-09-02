@@ -7,7 +7,6 @@ package "Qt Multimedia" {
   class QAudioSink
   class QAudioSource
   class QCamera
-  class QScreenCapture
   class QMediaCaptureSession
   class QVideoSink
   class QVideoFrame
@@ -15,6 +14,12 @@ package "Qt Multimedia" {
 
 package "Qt GUI" {
   class QScreen
+}
+
+package "Windows.Graphics.Capture (WinRT)" {
+  class "Direct3D11CaptureFramePool" as WgcFramePool
+  class "GraphicsCaptureSession" as WgcSession
+  class "ID3D11Device" as D3D11Device
 }
 
 package "libwebrtc" {
@@ -119,15 +124,54 @@ class ScreenCaptureDevice {
   +start()
   +stop()
   +isActive() : bool
-  +captureSession() : QMediaCaptureSession&
   .. signals ..
   +frameAvailable(frame: QVideoFrame)
   +errorOccurred(message: QString)
 }
-ScreenCaptureDevice --> "0..1" QScreenCapture : owns (unique_ptr)
-ScreenCaptureDevice *-- QMediaCaptureSession : owns
-ScreenCaptureDevice *-- QVideoSink : owns (issue #112 — mirrors\nCameraDevice, owns the one sink slot,\nre-emits via frameAvailable())
-ScreenCaptureDevice ..> QScreen : uses
+note right of ScreenCaptureDevice
+  Cross-platform facade (issue #154) — the
+  single #ifdef picking WindowsScreenCaptureBackend
+  lives in the constructor, nowhere else. Not
+  backed by Qt6 QScreenCapture: this Qt build's
+  Multimedia module has no screen-capture backend
+  for Windows (NotSupportedError on start()),
+  while QCamera via the same QMediaCaptureSession
+  works fine — Qt-build-specific, not a platform
+  limitation.
+end note
+ScreenCaptureDevice *-- IScreenCaptureBackend : owns (unique_ptr)
+
+interface IScreenCaptureBackend {
+  +setScreen(screen: QScreen*)
+  +start()
+  +stop()
+  +isActive() : bool
+  .. signals ..
+  +frameAvailable(frame: QVideoFrame)
+  +errorOccurred(message: QString)
+}
+
+class WindowsScreenCaptureBackend {
+  +setScreen(screen: QScreen*)
+  +start()
+  +stop()
+  +isActive() : bool
+}
+WindowsScreenCaptureBackend ..|> IScreenCaptureBackend
+WindowsScreenCaptureBackend ..> QScreen : uses (HMONITOR via\nQNativeInterface::QWindowsScreen)
+WindowsScreenCaptureBackend --> "0..1" WgcFramePool : owns (CreateFreeThreaded)
+WindowsScreenCaptureBackend --> "0..1" WgcSession : owns
+WindowsScreenCaptureBackend --> D3D11Device : owns
+note right of WindowsScreenCaptureBackend
+  FrameArrived fires on an OS thread-pool thread —
+  each frame is copied GPU texture -> CPU staging
+  texture -> QVideoFrame(Format_BGRA8888), then
+  hops to the GUI thread via QMetaObject::invokeMethod
+  (Qt::QueuedConnection) before emit frameAvailable(),
+  same idiom as CallManager's WebRTC callbacks.
+  All WinRT/D3D11 types stay behind a pimpl — the
+  header only exposes IScreenCaptureBackend's surface.
+end note
 
 class CallAudioDeviceModule {
   +pushCapturedAudio(samples: const int16_t*, frameCount: size_t, sampleRateHz: int, channels: size_t)

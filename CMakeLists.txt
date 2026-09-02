@@ -55,6 +55,7 @@ add_library(devicehub_core
     src/devices/AudioInputDevice.cpp
     src/devices/CameraDevice.h
     src/devices/CameraDevice.cpp
+    src/devices/IScreenCaptureBackend.h
     src/devices/ScreenCaptureDevice.h
     src/devices/ScreenCaptureDevice.cpp
     src/devices/CallAudioDeviceModule.h
@@ -125,6 +126,21 @@ target_link_libraries(devicehub_core PUBLIC
     unofficial-sodium::sodium
 )
 
+# Захват экрана на Windows идёт напрямую через Windows.Graphics.Capture
+# (WinRT), а не через Qt6 QScreenCapture — в этой сборке Qt6 Multimedia
+# (vcpkg) backend захвата экрана для Windows не собран, QScreenCapture
+# возвращает NotSupportedError на любом экране (issue #154). windowsapp
+# — активационные фабрики WinRT для классического (не UWP-упакованного)
+# desktop-приложения; d3d11 — устройство/текстуры для копирования
+# захваченного кадра в CPU-память.
+if(WIN32)
+    target_sources(devicehub_core PRIVATE
+        src/devices/WindowsScreenCaptureBackend.h
+        src/devices/WindowsScreenCaptureBackend.cpp
+    )
+    target_link_libraries(devicehub_core PUBLIC d3d11 windowsapp)
+endif()
+
 # WebRTC's own build disables RTTI, so classes it exports (e.g.
 # AdaptedVideoTrackSource, used by CallVideoTrackSource, issue #72) have a
 # vtable but no typeinfo in libwebrtc.a. Any RTTI-enabled code that defines
@@ -189,10 +205,13 @@ endif()
 # vcpkg's Qt6 on Windows is a dynamic (DLL) build, unlike the static
 # macOS build the comment above describes — its plugins are never found
 # at runtime unless copied next to the executable. Without this,
-# DeviceHub.exe doesn't even start (no "windows" platform plugin) and,
-# even patched around that, camera/screen capture silently produce no
-# frames instead of erroring (no "multimedia" backend plugin — this was
-# the real cause behind issue #154's "screen sharing doesn't work").
+# DeviceHub.exe doesn't even start (no "windows" platform plugin) and
+# camera capture silently produces no frames instead of erroring (no
+# "multimedia" backend plugin). Screen capture itself no longer goes
+# through this plugin at all — issue #154 turned out to be a missing
+# QScreenCapture backend in this Qt build, not just missing plugins, so
+# it was replaced with a direct Windows.Graphics.Capture implementation
+# (see ScreenCaptureDevice's doc comment).
 # See cmake/DeployQtPluginsWindows.cmake for why this is a hand-rolled
 # copy rather than windeployqt (not a project dependency here).
 if(WIN32)
@@ -250,6 +269,7 @@ add_executable(devicehub_tests
     test/CallAudioDeviceModuleTest.cpp
     test/CallManagerIntegrationTest.cpp
     test/CallVideoTrackSourceTest.cpp
+    test/ScreenCaptureDeviceTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core
