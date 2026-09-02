@@ -1,6 +1,5 @@
 #include "ui/IconFactory.h"
 
-#include <QApplication>
 #include <QColor>
 #include <QFont>
 #include <QLinearGradient>
@@ -8,7 +7,6 @@
 #include <QPainterPath>
 #include <QPen>
 #include <QPixmap>
-#include <QStyle>
 
 #include "ui/Theme.h"
 
@@ -31,10 +29,6 @@ QIcon plusIcon(const QColor& strokeColor) {
     return QIcon(pixmap);
 }
 
-QIcon refreshIcon() {
-    return qApp->style()->standardIcon(QStyle::SP_BrowserReload);
-}
-
 QIcon communityAvatarIcon(const QString& label) {
     constexpr int kSize = 40;
     constexpr qreal kDevicePixelRatio = 2.0;
@@ -51,8 +45,7 @@ QIcon communityAvatarIcon(const QString& label) {
     gradient.setColorAt(1, QColor(devicehub::ui_theme::kAccentGradientEnd));
     painter.setPen(Qt::NoPen);
     painter.setBrush(gradient);
-    // Круг, а не скруглённый квадрат — визуальный язык списка серверов
-    // Discord для аватара сообщества.
+    // Круг, а не скруглённый квадрат — аватар сообщества (issue #182).
     painter.drawEllipse(QRectF(0, 0, kSize, kSize));
 
     QFont font = painter.font();

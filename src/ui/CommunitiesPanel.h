@@ -13,9 +13,11 @@ namespace devicehub {
 /**
  * @brief Узкая иконочная полоса в самом левом краю боковой панели:
  *        по одному значку-аватару на сообщество (первая буква, зелёный
- *        градиент), кнопка обновления сверху и кнопка "+" внизу для
- *        создания нового; правый клик — для присоединения/
- *        переименования/удаления.
+ *        градиент) и кнопка "+" внизу для создания нового; правый клик —
+ *        для присоединения/переименования/удаления. Список обновляется
+ *        сам по мере поступления communityCreated()/communityDeleted()/
+ *        communityRenamed() (issue #182 — отдельная кнопка "Refresh"
+ *        была не нужна).
  *
  * Чистое представление — не владеет никаким сетевым состоянием.
  * MainWindow передаёт ей текущий список сообществ и логин вошедшего
@@ -46,7 +48,6 @@ public:
 
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
-    [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
 
 signals:
     void createRequested(const QString& name);
@@ -65,7 +66,6 @@ private:
 
     QListWidget* listWidget_ = nullptr;
     QPushButton* addButton_ = nullptr;
-    QPushButton* refreshButton_ = nullptr;
     QString currentUserLogin_;
 };
 

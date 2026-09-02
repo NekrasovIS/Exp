@@ -31,7 +31,6 @@ class CommunitiesPanel {
   +setCurrentUserLogin(login: QString)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
-  +refreshButton() : QPushButton*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   .. signals ..
@@ -49,7 +48,6 @@ class ChannelsPanel {
   +setCurrentUserLogin(login: QString)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
-  +refreshButton() : QPushButton*
   +filterEdit() : QLineEdit*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
@@ -70,7 +68,7 @@ note right of ChannelsPanel
   всегда используют настоящее имя, а не
   отображаемый текст с префиксом.
 
-  Discord-inspired layout pass: заголовок
+  Visual pass (issue #182): заголовок
   "CHANNELS" заглавными (тот же паттерн
   QLabel[sectionTitle="true"], что и
   MemberListPanel), каждый канал получает
@@ -85,8 +83,8 @@ class MemberListPanel {
   +listWidget() : QListWidget*
 }
 note right of MemberListPanel
-  Элемент раскладки Discord, которого раньше
-  не было вовсе: список участников выбранного
+  Новый элемент раскладки (issue #182), которого
+  раньше не было вовсе: список участников выбранного
   сообщества справа от ChatView (240px, тот
   же аватар-круг, что и у CommunitiesPanel).
   Заполняется через тот же REST-вызов
@@ -163,7 +161,7 @@ note right of ChatView
   минимальный + Expanding QSizePolicy, чтобы
   реально расти в дополнительное пространство.
 
-  Discord-inspired layout pass: messageEdit_/
+  Visual pass (issue #182): messageEdit_/
   attachButton_/sendButton_ теперь дети общего
   QWidget#chatComposer (скруглённая "таблетка",
   без своего фона/рамки у детей — см.
@@ -353,9 +351,9 @@ DesktopNotifier ..> NotificationPolicy : shouldNotify() >
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
-    +refreshIcon() : QIcon
     +communityAvatarIcon(label: QString) : QIcon
     +sendIcon(fillColor: QColor) : QIcon
+    +settingsIcon(fillColor: QColor) : QIcon
   }
 }
 
@@ -384,7 +382,7 @@ package "src/user" {
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- ChatView : owns (main content area)
-MainWindow *-- MemberListPanel : owns (right of ChatView,\nDiscord-inspired layout pass)
+MainWindow *-- MemberListPanel : owns (right of ChatView, issue #182)
 MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
@@ -424,8 +422,10 @@ CommunitiesPanel ..> MainWindow : manageModeratorsRequested() (issue #114) >
 ModeratorsDialog ..> MainWindow : promoteRequested()/demoteRequested() >
 MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestClient signals) >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
-CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
-ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
+CommunitiesPanel ..> IconFactory : plusIcon()/communityAvatarIcon() >
+ChannelsPanel ..> IconFactory : plusIcon() >
+FooterBar ..> IconFactory : settingsIcon() >
+ChatView ..> IconFactory : plusIcon()/sendIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
 MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >

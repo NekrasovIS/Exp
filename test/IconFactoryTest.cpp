@@ -20,12 +20,6 @@ TEST(IconFactoryTest, PlusIconIsNotNull) {
     EXPECT_FALSE(icon.availableSizes().isEmpty());
 }
 
-TEST(IconFactoryTest, RefreshIconIsNotNull) {
-    const QIcon icon = ui_icons::refreshIcon();
-
-    EXPECT_FALSE(icon.isNull());
-}
-
 TEST(IconFactoryTest, CommunityAvatarIconIsNotNull) {
     const QIcon icon = ui_icons::communityAvatarIcon(QStringLiteral("A"));
 

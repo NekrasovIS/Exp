@@ -42,10 +42,9 @@ FooterBar::FooterBar(QWidget* parent) : QWidget(parent) {
     profileLabel_ = new QLabel(tr("Not signed in"), this);
     profileLabel_->setObjectName(QStringLiteral("footerProfileLabel"));
 
-    // Иконка вместо текстовой подписи "⚙ Settings" (issue: визуальный
-    // проход по мотивам Discord) — тот же плоский иконочный стиль, что
-    // и у кнопок композера сообщения (attachFileButton/
-    // sendChatMessageButton).
+    // Иконка вместо текстовой подписи "⚙ Settings" (issue #182) — тот же
+    // плоский иконочный стиль, что и у кнопок композера сообщения
+    // (attachFileButton/sendChatMessageButton).
     settingsButton_ = new QPushButton(this);
     settingsButton_->setObjectName(QStringLiteral("footerSettingsButton"));
     settingsButton_->setToolTip(tr("Settings"));

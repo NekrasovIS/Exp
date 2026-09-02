@@ -219,16 +219,15 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     typingThrottleTimer_->setSingleShot(true);
     typingThrottleTimer_->setInterval(kTypingThrottleMs);
 
-    // Виден только в режиме редактирования (issue: визуальный проход по
-    // мотивам Discord — иконка "Send" теперь не может сама по себе
-    // сказать "Update", как раньше умел её текст, см. connectMessageRow()/
-    // cancelEditingMessage() ниже).
+    // Виден только в режиме редактирования (issue #182 — иконка "Send"
+    // теперь не может сама по себе сказать "Update", как раньше умел её
+    // текст, см. connectMessageRow()/cancelEditingMessage() ниже).
     editingIndicatorLabel_ = new QLabel(tr("Editing message"), channelPage);
     editingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
     editingIndicatorLabel_->setVisible(false);
 
-    // Композер как единая "таблетка" (issue: визуальный проход по
-    // мотивам Discord) — messageEdit_/attachButton_/sendButton_ рисуются
+    // Композер как единая "таблетка" (issue #182) —
+    // messageEdit_/attachButton_/sendButton_ рисуются
     // без собственного фона/рамки (см. Theme.cpp) и сливаются в один
     // скруглённый контейнер вместо трёх раздельных прямоугольных
     // элементов управления в ряд.

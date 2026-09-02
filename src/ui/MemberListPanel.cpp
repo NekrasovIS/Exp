@@ -46,8 +46,8 @@ void MemberListPanel::setMembers(const QStringList& logins) {
     std::sort(sorted.begin(), sorted.end(),
               [](const QString& a, const QString& b) { return a.compare(b, Qt::CaseInsensitive) < 0; });
 
-    // ЗАГЛАВНЫМИ с числом участников — тот же заголовок категории, что и
-    // у списка участников сервера в Discord.
+    // ЗАГЛАВНЫМИ с числом участников — заголовок раздела читается
+    // заметнее (issue #182).
     titleLabel_->setText(tr("MEMBERS — %1").arg(sorted.size()));
 
     listWidget_->clear();

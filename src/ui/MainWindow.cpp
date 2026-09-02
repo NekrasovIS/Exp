@@ -205,6 +205,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     connect(chatView_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
+    connect(chatView_->messageEdit(), &QLineEdit::returnPressed, chatView_->sendButton(), &QPushButton::click);
     connect(&chatClient_, &ChatClient::subscribed, this,
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
@@ -399,8 +400,15 @@ MainWindow::MainWindow(QWidget* parent)
                     moderatorsDialog_->setModerators(logins);
                 }
             });
-    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64) {
+    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 id) {
         showToast(tr("Joined community"), ToastBanner::Variant::kSuccess);
+        // Список участников не обновляется сам — без этого только что
+        // присоединившийся пользователь не появляется в MemberListPanel,
+        // пока кто-нибудь не переоткроет сообщество (см. также
+        // membersListed() ниже, тот же фильтр по selectedCommunityId_).
+        if (id == selectedCommunityId_) {
+            chatRestClient_.listMembers(lastToken_, id);
+        }
     });
     connect(&chatRestClient_, &ChatRestClient::channelCreated, this,
             [this](qint64 id, const QString& name, bool isEncrypted) {
@@ -597,9 +605,8 @@ void MainWindow::buildUi() {
     auto* sidebar = new QWidget(central);
     sidebar->setObjectName(QStringLiteral("sidebar"));
     sidebar->setAttribute(Qt::WA_StyledBackground, true);
-    // 72px иконочная полоса сообществ + 240px список каналов — те же
-    // пропорции, что и у сайдбара Discord (issue: визуальный проход по
-    // мотивам Discord — расположение/размеры, не цвета).
+    // 72px иконочная полоса сообществ + 240px список каналов
+    // (issue #182 — расположение/размеры, не цвета).
     sidebar->setFixedWidth(312);
     auto* sidebarLayout = new QHBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
@@ -613,9 +620,9 @@ void MainWindow::buildUi() {
     toastBanner_ = new ToastBanner(chatView_);
     desktopNotifier_ = new DesktopNotifier(this, this);
 
-    // Список участников сообщества справа от чата — элемент раскладки
-    // Discord, которого раньше не было вовсе (issue: визуальный проход
-    // по мотивам Discord); та же 240px ширина, что и список каналов.
+    // Список участников сообщества справа от чата — элемент раскладки,
+    // которого раньше не было вовсе (issue #182); та же 240px ширина,
+    // что и список каналов.
     memberListPanel_ = new MemberListPanel(central);
     memberListPanel_->setFixedWidth(240);
 
