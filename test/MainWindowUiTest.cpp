@@ -180,19 +180,22 @@ TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     ASSERT_NE(sendChatMessageButton, nullptr);
     ASSERT_NE(channelTitle, nullptr);
 
-    EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
+    // Иконка без подписи (issue #182 — композер сообщения теперь
+    // "таблетка" с иконочными кнопками), но подсказка остаётся текстовой
+    // для доступности/тестируемости.
+    EXPECT_EQ(sendChatMessageButton->toolTip(), QStringLiteral("Send"));
 }
 
 TEST(MainWindowUiTest, AttachFileButtonExists) {
-    // #116: кнопка "Attach" расположена рядом с Send в строке отправки
-    // ChatView — про сценарий «загрузить, затем автоматически отправить» см.
+    // #116: кнопка "Attach" расположена в композере сообщения ChatView —
+    // про сценарий «загрузить, затем автоматически отправить» см.
     // MainWindow::onAttachFileClicked().
     const MainWindow window;
 
     auto* attachFileButton = window.findChild<QPushButton*>("attachFileButton");
 
     ASSERT_NE(attachFileButton, nullptr);
-    EXPECT_EQ(attachFileButton->text(), QStringLiteral("Attach"));
+    EXPECT_EQ(attachFileButton->toolTip(), QStringLiteral("Attach"));
 }
 
 TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
@@ -253,17 +256,13 @@ TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
 
     auto* communityList = window.findChild<QListWidget*>("communityList");
     auto* createCommunityButton = window.findChild<QPushButton*>("createCommunityButton");
-    auto* refreshCommunitiesButton = window.findChild<QPushButton*>("refreshCommunitiesButton");
     auto* channelList = window.findChild<QListWidget*>("channelList");
     auto* createChannelButton = window.findChild<QPushButton*>("createChannelButton");
-    auto* refreshChannelsButton = window.findChild<QPushButton*>("refreshChannelsButton");
 
     ASSERT_NE(communityList, nullptr);
     ASSERT_NE(createCommunityButton, nullptr);
-    ASSERT_NE(refreshCommunitiesButton, nullptr);
     ASSERT_NE(channelList, nullptr);
     ASSERT_NE(createChannelButton, nullptr);
-    ASSERT_NE(refreshChannelsButton, nullptr);
 
     EXPECT_EQ(communityList->count(), 0);
     EXPECT_EQ(channelList->count(), 0);

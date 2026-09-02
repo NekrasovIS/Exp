@@ -4,7 +4,7 @@
 
 namespace devicehub::ui_theme {
 
-QString discordDarkStyleSheet() {
+QString darkStyleSheet() {
     // Акцент — зелёный градиент (в духе изумрудного: #34d399 -> #059669),
     // с более светлым вариантом при наведении и более тёмным при
     // нажатии — QSS не умеет алгоритмически осветлять/затемнять
@@ -40,8 +40,93 @@ QString discordDarkStyleSheet() {
             border-right: 1px solid #2a2d31;
         }
 
+        /* Тот же тон, что и у sidebar/ChannelsPanel (#202327) — оба
+           боковых списка (каналы слева, участники справа) читаются как
+           одна пара, отдельная от самой тёмной иконочной полосы
+           сообществ (#17191c) и от основного содержимого (#1c1e21). */
+        devicehub--MemberListPanel {
+            background-color: #202327;
+            border-left: 1px solid #2a2d31;
+        }
+
         devicehub--ChannelsPanel, devicehub--ChatView {
             background-color: transparent;
+        }
+
+        /* QListWidget не имел вообще никакого стиля — список участников
+           показывал стандартный светло-серый фон Qt/Windows, а выбранная
+           строка/иконка подсвечивалась стандартным синим Windows —
+           резко выбивалось из тёмной темы. Скруглённая полупрозрачная
+           подсветка вместо этого работает одинаково и для строк
+           текстовых списков (каналы, участники), и для круглых иконок
+           сообществ (просвечивает как скруглённый квадрат позади круга —
+           тот же приём и для hover-подсветки при наведении на сообщество).
+           padding — только у текстовых списков по имени объекта, чтобы
+           не сдвигать точно подобранную сетку иконок сообществ. */
+        QListWidget {
+            background: transparent;
+            border: none;
+            outline: 0;
+        }
+
+        QListWidget::item {
+            border-radius: 8px;
+        }
+
+        QListWidget::item:hover {
+            background-color: rgba(255, 255, 255, 15);
+        }
+
+        QListWidget::item:selected {
+            background-color: rgba(255, 255, 255, 25);
+        }
+
+        QListWidget::item:selected:hover {
+            background-color: rgba(255, 255, 255, 30);
+        }
+
+        QListWidget#channelList::item, QListWidget#memberList::item {
+            padding: 6px 8px;
+        }
+
+        /* QMenu (правый клик по сообществу/каналу, аккаунт в футере) не
+           имел вообще никакого стиля — показывал стандартное светлое
+           меню Windows. */
+        QMenu {
+            background-color: #202327;
+            color: #e3e6e8;
+            border: 1px solid #2a2d31;
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        QMenu::item {
+            padding: 6px 24px 6px 12px;
+            border-radius: 6px;
+        }
+
+        QMenu::item:selected {
+            background-color: #383c41;
+        }
+
+        QMenu::item:disabled {
+            color: #8b939c;
+        }
+
+        QMenu::separator {
+            height: 1px;
+            background-color: #2a2d31;
+            margin: 4px 8px;
+        }
+
+        /* QToolTip (например, у иконочных кнопок композера/сайдбара)
+           был таким же нестилизованным светлым системным всплытием. */
+        QToolTip {
+            background-color: #202327;
+            color: #e3e6e8;
+            border: 1px solid #2a2d31;
+            border-radius: 4px;
+            padding: 4px 8px;
         }
 
         QLabel {
@@ -120,6 +205,14 @@ QString discordDarkStyleSheet() {
             padding: 0;
         }
 
+        /* Круглая, в размер аватаров сообществ над ней (issue #182) —
+           тот же визуальный язык, что у кругов
+           CommunitiesPanel::listWidget(), а не форма по умолчанию от
+           QPushButton[accent="true"] выше. */
+        QPushButton#createCommunityButton {
+            border-radius: 22px;
+        }
+
         QLineEdit, QComboBox, QPlainTextEdit {
             background-color: #17191c;
             color: #e3e6e8;
@@ -135,6 +228,129 @@ QString discordDarkStyleSheet() {
 
         QComboBox::drop-down {
             border: none;
+        }
+
+        /* QCheckBox (например, "Encrypted channel" в диалоге создания
+           канала) не имел вообще никакого стиля — стандартный квадратик
+           Windows. Индикатор в духе остальных полей ввода (тот же тёмный
+           фон/рамка, что у QLineEdit), отмеченное состояние — акцентный
+           градиент без отдельной галочки (нет SVG icon-engine для
+           картинки — см. doc-комментарий IconFactory), заливка цветом
+           уже достаточно ясно читается как "включено" рядом с подписью. */
+        QCheckBox {
+            color: #e3e6e8;
+            spacing: %1px;
+        }
+
+        QCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 1px solid #2a2d31;
+            background-color: #17191c;
+        }
+
+        QCheckBox::indicator:hover {
+            border: 1px solid #34d399;
+        }
+
+        QCheckBox::indicator:checked {
+            border: none;
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #34d399, stop:1 #059669);
+        }
+
+        /* Тонкий скроллбар без стрелок (issue #182) вместо толстого
+           нативного Windows-скроллбара — применяется глобально через
+           QApplication::setStyleSheet(),
+           так что все прокручиваемые списки/области получают его сразу,
+           а не только та, ради которой его добавили. */
+        QScrollBar:vertical {
+            background: transparent;
+            width: 8px;
+            margin: 0px;
+        }
+
+        QScrollBar::handle:vertical {
+            background-color: #383c41;
+            border-radius: 4px;
+            min-height: 24px;
+        }
+
+        QScrollBar::handle:vertical:hover {
+            background-color: #464b51;
+        }
+
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+            background: none;
+            border: none;
+        }
+
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
+        }
+
+        QScrollBar:horizontal {
+            background: transparent;
+            height: 8px;
+            margin: 0px;
+        }
+
+        QScrollBar::handle:horizontal {
+            background-color: #383c41;
+            border-radius: 4px;
+            min-width: 24px;
+        }
+
+        QScrollBar::handle:horizontal:hover {
+            background-color: #464b51;
+        }
+
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+            background: none;
+            border: none;
+        }
+
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
+        }
+
+        QWidget#chatComposer {
+            background-color: #17191c;
+            border: 1px solid #2a2d31;
+            border-radius: 22px;
+        }
+
+        QLineEdit[composerInput="true"] {
+            background: transparent;
+            border: none;
+            border-radius: 0;
+        }
+
+        QLineEdit[composerInput="true"]:focus {
+            border: none;
+        }
+
+        /* Прозрачная круглая кнопка-иконка без рамки, с полупрозрачной
+           подсветкой при наведении/нажатии — изначально только для
+           композера сообщения (issue #182), затем переиспользована и для кнопки настроек в
+           FooterBar, отсюда общее имя свойства вместо "composerIcon".
+           border-radius рассчитан на круглую кнопку 32x32 — под другой
+           фиксированный размер кнопки нужен свой override. */
+        QPushButton[flatIconButton="true"] {
+            background: transparent;
+            border: none;
+            border-radius: 16px;
+            padding: 0;
+        }
+
+        QPushButton[flatIconButton="true"]:hover {
+            background-color: rgba(255, 255, 255, 20);
+        }
+
+        QPushButton[flatIconButton="true"]:pressed {
+            background-color: rgba(255, 255, 255, 35);
         }
 
         QTabWidget::pane {

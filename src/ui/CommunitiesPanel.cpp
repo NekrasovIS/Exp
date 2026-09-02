@@ -1,6 +1,7 @@
 #include "ui/CommunitiesPanel.h"
 
 #include <QColor>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QListWidget>
@@ -20,11 +21,21 @@ namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
 constexpr int kNameRole = Qt::UserRole + 2;
-constexpr int kRailWidth = 64;
-constexpr int kIconButtonSize = 28;
-constexpr int kIconButtonIconSize = 14;
-constexpr int kAvatarIconSize = 32;
-constexpr int kAvatarGridSize = 48;
+// Более широкая иконочная полоса сообществ с более крупными круглыми
+// аватарами вместо прежней тесной раскладки (issue #182 — расположение/
+// размеры, не цвета).
+constexpr int kRailWidth = 72;
+constexpr int kAvatarIconSize = 44;
+// Ширина вертикального скроллбара из QScrollBar:vertical в Theme.cpp —
+// держать в синхроне вручную (значения свойств QSS не могут ссылаться на
+// C++-константы). communityList всегда его резервирует (см.
+// setVerticalScrollBarPolicy ниже), поэтому сетка сразу считается с его
+// учётом, а не только когда сообществ становится достаточно много для
+// прокрутки — иначе центрирование circles/buttons плывёт в зависимости
+// от того, показан сейчас скроллбар или нет.
+constexpr int kScrollbarWidth = 8;
+constexpr int kAvatarGridSize = kRailWidth - 2 * ui_theme::kSpacingSm - kScrollbarWidth;
+constexpr int kAddButtonIconSize = 20;
 }  // namespace
 
 CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
@@ -35,14 +46,6 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
                                 ui_theme::kSpacingSm);
     layout->setSpacing(ui_theme::kSpacingSm);
-
-    refreshButton_ = new QPushButton(this);
-    refreshButton_->setObjectName(QStringLiteral("refreshCommunitiesButton"));
-    refreshButton_->setToolTip(tr("Refresh communities"));
-    refreshButton_->setIcon(ui_icons::refreshIcon());
-    refreshButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
-    refreshButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
-    refreshButton_->setProperty("iconOnly", true);
 
     listWidget_ = new QListWidget(this);
     listWidget_->setObjectName(QStringLiteral("communityList"));
@@ -57,19 +60,46 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     listWidget_->setGridSize(QSize(kAvatarGridSize, kAvatarGridSize));
     listWidget_->setFrameShape(QFrame::NoFrame);
     listWidget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Всегда зарезервировано (не AsNeeded) — иначе как только сообществ
+    // становится достаточно, чтобы список начал прокручиваться, кружки
+    // сдвигаются к левому краю виджета (появление скроллбара уменьшает
+    // ширину viewport'а, и IconMode перестаёт центрировать единственную
+    // колонку ячеек внутри него), а addButton_ ниже остаётся на месте —
+    // расхождение видно как "кривой" плюсик. Пустой зарезервированный
+    // трек не мешает — он прозрачный (см. QScrollBar:vertical в
+    // Theme.cpp) и не рисует ручку, если прокрутка не нужна.
+    listWidget_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
 
     addButton_ = new QPushButton(this);
     addButton_->setObjectName(QStringLiteral("createCommunityButton"));
     addButton_->setToolTip(tr("Create community"));
     addButton_->setProperty("accent", true);
     addButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kAccentForeground)));
-    addButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
-    addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    // Тот же размер, что и у аватаров сообществ (kAvatarIconSize) — тот
+    // же визуальный язык, что у круглых аватаров над ней. Центрирование
+    // по горизонтали — см. centerOverListContent() ниже. Круглая
+    // (border-radius в Theme.cpp по этому objectName), а не форма по
+    // умолчанию от общего QPushButton.
+    addButton_->setIconSize(QSize(kAddButtonIconSize, kAddButtonIconSize));
+    addButton_->setFixedSize(kAvatarIconSize, kAvatarIconSize);
     addButton_->setProperty("iconOnly", true);
 
-    layout->addWidget(refreshButton_, /*stretch=*/0, Qt::AlignHCenter);
+    // Центрирование не через Qt::AlignHCenter (это дало бы центр по
+    // полной ширине панели, на kScrollbarWidth/2 правее, чем реально
+    // центрированы кружки в communityList, зарезервировавшем эту
+    // ширину под скроллбар выше) — вместо этого та же лишняя ширина
+    // добавлена и сюда как отступ после кнопки, так что обе стороны
+    // центрируются относительно одной и той же эффективной ширины.
+    auto centerOverListContent = [this, layout](QWidget* button) {
+        auto* row = new QHBoxLayout;
+        row->addStretch(1);
+        row->addWidget(button);
+        row->addSpacing(kScrollbarWidth);
+        row->addStretch(1);
+        layout->addLayout(row);
+    };
     layout->addWidget(listWidget_, /*stretch=*/1);
-    layout->addWidget(addButton_, /*stretch=*/0, Qt::AlignHCenter);
+    centerOverListContent(addButton_);
 
     connect(addButton_, &QPushButton::clicked, this, &CommunitiesPanel::showAddDialog);
     connect(listWidget_, &QListWidget::customContextMenuRequested, this, &CommunitiesPanel::showContextMenu);

@@ -31,6 +31,7 @@ class CommunitiesPanel;
 class DesktopNotifier;
 class FooterBar;
 class LoginWindow;
+class MemberListPanel;
 class ModeratorsDialog;
 class ProfileDialog;
 class SearchDialog;
@@ -210,6 +211,7 @@ private:
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
     ChatView* chatView_ = nullptr;
+    MemberListPanel* memberListPanel_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
     ModeratorsDialog* moderatorsDialog_ = nullptr;
