@@ -10,8 +10,8 @@
 namespace devicehub {
 namespace {
 
-/// Spins the event loop for @p ms so queued timer events (like
-/// ToastBanner's auto-hide) actually fire.
+/// Крутит цикл событий в течение @p ms, чтобы поставленные в очередь события
+/// таймеров (например, авто-скрытие ToastBanner) успели сработать.
 void waitMs(int ms) {
     QEventLoop loop;
     QTimer::singleShot(ms, &loop, &QEventLoop::quit);
@@ -48,8 +48,9 @@ TEST(ToastBannerTest, CallingAgainWhileVisibleRestartsTimeoutWithNewTextAndVaria
     banner.showMessage(QStringLiteral("First"), ToastBanner::Variant::kInfo, /*timeoutMs=*/5000);
     ASSERT_FALSE(banner.isHidden());
 
-    // Second call arrives well before the first's 5s timeout would
-    // fire — its own, much shorter timeout is what should govern.
+    // Второй вызов приходит задолго до того, как сработает 5-секундный тайм-аут
+    // первого — определять поведение должен именно его собственный, гораздо
+    // более короткий тайм-аут.
     banner.showMessage(QStringLiteral("Second"), ToastBanner::Variant::kError, /*timeoutMs=*/30);
 
     EXPECT_EQ(banner.findChild<QLabel*>()->text(), QStringLiteral("Second"));

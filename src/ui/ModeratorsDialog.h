@@ -11,14 +11,16 @@ class QPushButton;
 namespace devicehub {
 
 /**
- * @brief Manage-moderators dialog opened from CommunitiesPanel's
- *        owner-only "Manage Moderators…" context menu entry (issue #114).
+ * @brief Диалог управления модераторами, открываемый из пункта
+ *        контекстного меню "Manage Moderators…" у CommunitiesPanel,
+ *        доступного только владельцу (issue #114).
  *
- * Pure presentation — MainWindow owns ChatRestClient and all the
- * wiring, the same "dumb widget" pattern as ProfileDialog/SettingsDialog.
- * setModerators() re-populates the list from scratch each time (after
- * every promote/demote round-trips through the server) rather than
- * this class tracking membership itself.
+ * Чистое представление — MainWindow владеет ChatRestClient и всей
+ * связующей логикой, тот же паттерн "тупого виджета", что и у
+ * ProfileDialog/SettingsDialog. setModerators() каждый раз заново
+ * заполняет список с нуля (после того как каждое повышение/понижение
+ * пройдёт через сервер и вернётся обратно), а не отслеживает состав
+ * сам этот класс.
  */
 class ModeratorsDialog : public QDialog {
     Q_OBJECT
@@ -26,13 +28,14 @@ class ModeratorsDialog : public QDialog {
 public:
     explicit ModeratorsDialog(QWidget* parent = nullptr);
 
-    /// Which community this dialog is currently showing — MainWindow
-    /// sets this before show()ing the dialog and reads it back when
-    /// wiring promoteRequested()/demoteRequested() to ChatRestClient.
+    /// Какое сообщество сейчас показывает этот диалог — MainWindow
+    /// устанавливает это перед вызовом show() у диалога и считывает
+    /// обратно при подключении promoteRequested()/demoteRequested() к
+    /// ChatRestClient.
     void setCommunity(qint64 id, const QString& name);
     [[nodiscard]] qint64 communityId() const { return communityId_; }
 
-    /// Replaces the moderator list contents.
+    /// Заменяет содержимое списка модераторов.
     void setModerators(const QStringList& logins);
 
     [[nodiscard]] QListWidget* moderatorsList() const { return moderatorsList_; }
@@ -42,9 +45,9 @@ public:
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
 signals:
-    /// @p communityId is always communityId() — included so a caller
-    /// doesn't need to separately track which community this dialog
-    /// last opened for.
+    /// @p communityId всегда равен communityId() — включён, чтобы
+    /// вызывающему коду не приходилось отдельно отслеживать, для какого
+    /// сообщества этот диалог открывался последний раз.
     void promoteRequested(qint64 communityId, const QString& login);
     void demoteRequested(qint64 communityId, const QString& login);
 

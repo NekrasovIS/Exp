@@ -65,10 +65,10 @@ public:
                const ICodeDeliveryChannel& codeDeliveryChannel, const ICodeDeliveryChannel* telegramChannel = nullptr,
                int rateLimitMaxRequests = 10, std::chrono::milliseconds rateLimitWindow = std::chrono::seconds{60});
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокирует поток, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:

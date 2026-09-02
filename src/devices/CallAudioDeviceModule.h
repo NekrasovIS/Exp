@@ -12,59 +12,64 @@
 namespace devicehub {
 
 /**
- * @brief `webrtc::AudioDeviceModule` bridging WebRTC's audio pipeline to
- *        Qt Multimedia, instead of a real OS audio device — libwebrtc
- *        has no pluggable "push samples into an AudioSource" API, only
- *        this device-module interface (see issue #46, Phase 2).
+ * @brief `webrtc::AudioDeviceModule`, соединяющий аудио-конвейер WebRTC
+ *        с Qt Multimedia вместо настоящего аудиоустройства ОС —
+ *        у libwebrtc нет подключаемого API вида «протолкнуть сэмплы в
+ *        AudioSource», только этот интерфейс device-module (см. issue
+ *        #46, Phase 2).
  *
- * Capture: call pushCapturedAudio() from wherever local microphone PCM
- * becomes available (e.g. AudioInputDevice on the Qt GUI thread) —
- * forwarded straight to WebRTC's registered AudioTransport whenever
- * recording is active.
+ * Захват: вызывайте pushCapturedAudio() оттуда, где становится доступен
+ * PCM с локального микрофона (например, AudioInputDevice на GUI-потоке
+ * Qt) — пересылается напрямую в зарегистрированный AudioTransport
+ * WebRTC, пока активна запись.
  *
- * Playout: WebRTC expects its AudioTransport::NeedMorePlayData() to be
- * pulled roughly every 10ms while playing — this class owns a
- * dedicated std::jthread that does that pulling and forwards decoded
- * PCM to @p playoutSink. That callback runs on this class's own
- * thread, not the Qt GUI thread — a caller that touches Qt objects in
- * it is responsible for marshaling back (e.g.
- * QMetaObject::invokeMethod with Qt::QueuedConnection).
+ * Воспроизведение: WebRTC ожидает, что его
+ * AudioTransport::NeedMorePlayData() будет опрашиваться примерно каждые
+ * 10 мс во время воспроизведения — этот класс владеет отдельным
+ * std::jthread, который выполняет этот опрос и пересылает
+ * декодированный PCM в @p playoutSink. Этот колбэк выполняется на
+ * собственном потоке этого класса, а не на GUI-потоке Qt — вызывающий
+ * код, трогающий в нём объекты Qt, сам отвечает за маршализацию обратно
+ * (например, через QMetaObject::invokeMethod с Qt::QueuedConnection).
  *
- * Every other AudioDeviceModule method (device enumeration/selection,
- * volume, mute, ...) is inherited as a no-op from
- * webrtc_impl::AudioDeviceModuleDefault — this bridge has exactly one
- * fixed virtual device, selection doesn't apply.
+ * Любой другой метод AudioDeviceModule (перечисление/выбор устройств,
+ * громкость, mute, ...) унаследован как no-op от
+ * webrtc_impl::AudioDeviceModuleDefault — у этого моста ровно одно
+ * фиксированное виртуальное устройство, выбор здесь неприменим.
  */
 class CallAudioDeviceModule : public webrtc::webrtc_impl::AudioDeviceModuleDefault<webrtc::AudioDeviceModule> {
 public:
-    /// (samples, frameCount, sampleRateHz, channels) — samples points to
-    /// frameCount * channels interleaved 16-bit PCM samples.
+    /// (samples, frameCount, sampleRateHz, channels) — samples указывает
+    /// на frameCount * channels чередующихся 16-битных PCM-сэмплов.
     using PlayoutSink = std::function<void(const int16_t* samples, size_t frameCount, int sampleRateHz,
                                             size_t channels)>;
 
     explicit CallAudioDeviceModule(PlayoutSink playoutSink);
     ~CallAudioDeviceModule() override;
 
-    /// Overrides the format requested from WebRTC on the playout side
-    /// (default 48000 Hz mono) — set this to match whatever real output
-    /// device the playout sink actually writes to. Must be called
-    /// before StartPlayout(); has no effect once the playout thread is
-    /// already running.
+    /// Переопределяет формат, запрашиваемый у WebRTC на стороне
+    /// воспроизведения (по умолчанию 48000 Гц моно) — устанавливайте
+    /// его в соответствии с тем, во что реально пишет playout sink на
+    /// настоящем устройстве вывода. Должен вызываться до StartPlayout();
+    /// не имеет эффекта, если поток воспроизведения уже запущен.
     void setPlayoutFormat(int sampleRateHz, size_t channels);
 
-    /// Overrides the total capture+render delay reported to WebRTC
-    /// alongside every pushCapturedAudio() call (default 0). WebRTC's
-    /// echo canceller uses this to time-align what it's currently
-    /// rendering against what the microphone just captured — reporting
-    /// 0 when there's real playout buffering (there is, see
-    /// AudioOutputDevice::streamingBufferDurationMs()) makes the echo
-    /// canceller worse than useless, not neutral. Safe to call from any
-    /// thread; takes effect on the next pushCapturedAudio() call.
+    /// Переопределяет суммарную задержку захвата+рендеринга,
+    /// сообщаемую в WebRTC при каждом вызове pushCapturedAudio() (по
+    /// умолчанию 0). Эхоподавитель WebRTC использует это значение, чтобы
+    /// синхронизировать по времени то, что он сейчас рендерит, с тем,
+    /// что микрофон только что захватил — сообщение 0, когда реальная
+    /// буферизация воспроизведения есть (а она есть, см.
+    /// AudioOutputDevice::streamingBufferDurationMs()), делает
+    /// эхоподавитель хуже, чем бесполезным, а не нейтральным. Безопасно
+    /// вызывать из любого потока; вступает в силу при следующем вызове
+    /// pushCapturedAudio().
     void setTotalDelayMs(int delayMs);
 
-    /// Pushes locally captured PCM into WebRTC. Safe to call from any
-    /// thread; a no-op until recording has actually been started
-    /// (StartRecording(), called by WebRTC once a send stream exists).
+    /// Проталкивает локально захваченный PCM в WebRTC. Безопасно
+    /// вызывать из любого потока; ничего не делает, пока запись
+    /// фактически не запущена (StartRecording(), вызывается WebRTC как
+    /// только появляется отправляющий поток).
     void pushCapturedAudio(const int16_t* samples, size_t frameCount, int sampleRateHz, size_t channels);
 
     int32_t RegisterAudioCallback(webrtc::AudioTransport* audioCallback) override;
@@ -96,8 +101,9 @@ private:
     std::atomic<bool> playing_{false};
     std::atomic<bool> recording_{false};
 
-    /// jthread rather than thread (C++20) — auto-requests-stop and joins
-    /// on destruction/reassignment, no hand-rolled atomic stop flag needed.
+    /// jthread, а не thread (C++20) — сам запрашивает остановку и
+    /// join'ится при разрушении/переприсваивании, самодельный атомарный
+    /// флаг остановки не нужен.
     std::jthread playoutThread_;
 
     int playoutSampleRateHz_ = 48000;
