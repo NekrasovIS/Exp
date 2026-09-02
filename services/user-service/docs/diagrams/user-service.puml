@@ -23,29 +23,48 @@ struct Profile {
   +displayName: optional<string>
   +avatarUrl: optional<string>
   +publicKey: optional<string>
+  +email: optional<string>
 }
 
 struct ProfileUpdate {
   +displayName: optional<string>
   +avatarUrl: optional<string>
   +publicKey: optional<string>
+  +email: optional<string>
 }
+
+enum UpdateProfileResult {
+  kUpdated
+  kNoSuchUser
+  kEmailTaken
+}
+note bottom of UpdateProfileResult
+  issue #156: обычный bool не различает
+  "нет такого пользователя" и "email
+  занят другим аккаунтом" (partial unique
+  index на users.email) — вызывающей
+  стороне нужно реагировать по-разному
+  (404 vs. 409).
+end note
 
 class UserRepository {
   +createUser(login: string, passwordHash: string) : bool
   +findPasswordHash(login: string) : optional<string>
   +findProfile(login: string) : optional<Profile>
-  +updateProfile(login: string, update: ProfileUpdate) : bool
+  +updateProfile(login: string, update: ProfileUpdate) : UpdateProfileResult
+  +resolveOtpIdentifier(identifier: string) : optional<pair<string, string>>
 }
 UserRepository ..> PqxxConnection : opens per call
 UserRepository ..> Profile : creates
 UserRepository ..> ProfileUpdate : reads
+UserRepository ..> UpdateProfileResult : returns
 
 class UserService {
   +registerUser(login: string, password: string) : bool
   +verifyCredentials(login: string, password: string) : bool
   +getProfile(login: string) : optional<Profile>
-  +updateProfile(login: string, update: ProfileUpdate) : bool
+  +updateProfile(login: string, update: ProfileUpdate) : UpdateProfileResult
+  +resolveOtpIdentifier(identifier: string) : optional<pair<string, string>>
 }
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
@@ -70,6 +89,7 @@ class HttpServer {
   -handleVerifyCredentials(request, response)
   -handleGetProfile(request, response)
   -handleUpdateOwnProfile(request, response)
+  -handleResolveOtpIdentifier(request, response)
 }
 HttpServer --> UserService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
@@ -91,10 +111,15 @@ note right of HttpServer
                                         preserves the fields not sent,
                                         fetch-then-merge since
                                         UserRepository::updateProfile()
-                                        always writes all three columns
+                                        always writes all four columns
                                         — display_name/avatar_url/
-                                        public_key, the last added by
-                                        issue #136)
+                                        public_key (issue #136)/email
+                                        (issue #156))
+  POST  /users/resolve-otp-identifier -> handleResolveOtpIdentifier
+                                        (issue #156, unauthenticated —
+                                        called by auth-service itself;
+                                        принимает login или email,
+                                        отвечает {found, login, email})
 end note
 
 note right of json_guard.json_guard

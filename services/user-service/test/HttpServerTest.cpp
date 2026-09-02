@@ -321,5 +321,72 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     EXPECT_EQ(profile["public_key"].get<std::string>(), "base64-x25519-public-key");
 }
 
+TEST(HttpServerTest, ResolveOtpIdentifierRouteRejectsMissingFieldWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/users/resolve-otp-identifier", "{}", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, ResolveOtpIdentifierRouteReturnsNotFoundForUnknownIdentifier) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/users/resolve-otp-identifier",
+        nlohmann::json{{"identifier", "no-such-identifier-ever-created@example.test"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    EXPECT_FALSE(nlohmann::json::parse(result->body)["found"].get<bool>());
+}
+
+TEST(HttpServerTest, ResolveOtpIdentifierRouteFindsUserByLoginOrEmailOnceEmailIsSet) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-otp-resolve-test");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+
+    // Уникален на каждый запуск, как и uniqueLogin() — захардкоженный
+    // литерал здесь столкнулся бы со строкой из предыдущего запуска на
+    // частичном уникальном индексе (issue #156), как только этот
+    // тестовый бинарник запустится второй раз на той же базе, превратив
+    // PATCH ниже в никак не связанный с тестом 409.
+    const std::string email = uniqueLogin("otp-resolve-test") + "@example.test";
+    const httplib::Result patchResult =
+        client.Patch("/users/me", authHeader, nlohmann::json{{"email", email}}.dump(), "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+
+    for (const std::string& identifier : {login, email}) {
+        const httplib::Result resolveResult = client.Post(
+            "/users/resolve-otp-identifier", nlohmann::json{{"identifier", identifier}}.dump(), "application/json");
+        ASSERT_TRUE(resolveResult);
+        ASSERT_EQ(resolveResult->status, 200);
+        const nlohmann::json body = nlohmann::json::parse(resolveResult->body);
+        EXPECT_TRUE(body["found"].get<bool>());
+        EXPECT_EQ(body["login"].get<std::string>(), login);
+        EXPECT_EQ(body["email"].get<std::string>(), email);
+    }
+}
+
 }  // namespace
 }  // namespace user_service

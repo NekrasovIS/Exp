@@ -83,6 +83,13 @@ add_library(auth_service_core
     src/TokenService.cpp
     src/RateLimiter.h
     src/RateLimiter.cpp
+    src/OtpStore.h
+    src/OtpStore.cpp
+    src/CodeDeliveryChannel.h
+    src/LoggingCodeDeliveryChannel.h
+    src/LoggingCodeDeliveryChannel.cpp
+    src/SmtpCodeDeliveryChannel.h
+    src/SmtpCodeDeliveryChannel.cpp
     src/HttpServer.h
     src/HttpServer.cpp
     src/UserServiceClient.h
@@ -92,6 +99,7 @@ target_include_directories(auth_service_core PUBLIC src)
 target_link_libraries(auth_service_core PUBLIC
     httplib::httplib
     OpenSSL::Crypto
+    OpenSSL::SSL
     nlohmann_json::nlohmann_json
 )
 
@@ -104,6 +112,8 @@ find_package(GTest CONFIG REQUIRED)
 add_executable(auth_service_tests
     test/TokenServiceTest.cpp
     test/RateLimiterTest.cpp
+    test/OtpStoreTest.cpp
+    test/SmtpCodeDeliveryChannelTest.cpp
     test/UserServiceClientIntegrationTest.cpp
     test/base64_utilsTest.cpp
     test/HttpServerTest.cpp

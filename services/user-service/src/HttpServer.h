@@ -12,18 +12,20 @@ namespace user_service {
 
 /**
  * @brief REST-фасад над UserService: POST /users/register,
- *        POST /users/verify-credentials (оба без аутентификации — их вызывает
- *        сам auth-service, а не напрямую клиенты конечных пользователей), а также
+ *        POST /users/verify-credentials, POST /users/resolve-otp-identifier
+ *        (issue #156, все три без аутентификации — вызываются самим
+ *        auth-service, а не напрямую клиентами), плюс
  *        GET /users/{login}/profile и PATCH /users/me (issue #110),
- *        которые требуют действительный заголовок `Authorization: Bearer <token>`,
- *        проверяемый через AuthServiceClient у auth-service.
+ *        которым нужен валидный заголовок
+ *        `Authorization: Bearer <token>`, проверяемый через
+ *        AuthServiceClient у auth-service.
  *
- * PATCH /users/me всегда пишет в собственный субъект токена — логин
- * в URL/теле запроса, если он указан, игнорируется, поэтому вызывающий
- * не может отредактировать чужой профиль.
+ * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
+ * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
+ * сторона никогда не может отредактировать чужой профиль.
  *
- * Тонкая обёртка над httplib::Server — вся логика работы с аккаунтами
- * находится в UserService, этот класс лишь транслирует HTTP-запросы/ответы.
+ * Тонкая обёртка над httplib::Server — вся бизнес-логика аккаунтов
+ * живёт в UserService, этот класс только переводит HTTP-запросы/ответы.
  */
 class HttpServer {
 public:
@@ -43,6 +45,7 @@ private:
     void handleVerifyCredentials(const httplib::Request& request, httplib::Response& response);
     void handleGetProfile(const httplib::Request& request, httplib::Response& response);
     void handleUpdateOwnProfile(const httplib::Request& request, httplib::Response& response);
+    void handleResolveOtpIdentifier(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

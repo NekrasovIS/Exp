@@ -190,8 +190,17 @@ cmake --build services/user-service/build --parallel
 `/auth/verify` к auth-service, `AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`).
 `PATCH /users/me` всегда пишет в логин из проверенного токена — логин
 в теле запроса, если есть, игнорируется; частичное тело (только
-`display_name`, только `avatar_url` или только `public_key`) не
-затирает несопровождённые поля.
+`display_name`, только `avatar_url`, только `public_key` или только
+`email`) не затирает несопровождённые поля. Ещё один эндпоинт —
+`POST /users/resolve-otp-identifier` (issue #156, без авторизации,
+вызывается самим auth-service) — принимает `{"identifier"}` (login или
+email) и отвечает `{"found", "login", "email"}`, используется для входа
+по одноразовому коду.
+
+`email` (issue #156, вход по одноразовому коду) — уникален, если задан
+(частичный уникальный индекс, допускает несколько `NULL`); попытка
+поставить уже занятый другим аккаунтом email через `PATCH /users/me`
+отвечает `409`.
 
 `public_key` (issue #136, Phase 1 сквозного шифрования — см. раздел
 «Сквозное шифрование» ниже) — base64 публичной половины X25519-пары,
@@ -229,6 +238,20 @@ in the signed payload). `/auth/token` and `/auth/register` are rate
 limited per client address (issue #102) — `/auth/refresh` isn't,
 matching `/auth/verify`'s reasoning (not meaningfully brute-forceable;
 it needs a valid signed token, not a guessed password).
+
+Вход по одноразовому коду (issue #156): `POST /auth/otp/request`
+(`{"identifier"}` — login или email, всегда отвечает 200, чтобы ответ
+нельзя было использовать для проверки существования аккаунта) и
+`POST /auth/otp/verify` (`{"identifier", "code"}` — при совпадении ещё
+действующего кода выдаёт `token`/`refresh_token`, та же форма ответа,
+что у `/auth/token`). Коды — 6-значные, живут 5 минут, хранятся
+хешированными в памяти (у auth-service нет своей БД), максимум 5
+попыток ввода. Доставка — через `SMTP_HOST`/`SMTP_PORT`/
+`SMTP_USERNAME`/`SMTP_PASSWORD`/`SMTP_FROM`; если `SMTP_HOST` не
+задан, код просто логируется в stdout вместо реальной отправки — так
+можно пройти весь flow локально/в CI без настоящего email-аккаунта. У
+пользователя должен быть задан email (`PATCH /users/me` на
+user-service, поле `email`), иначе входить по коду ему пока нельзя.
 
 ### chat-service
 
