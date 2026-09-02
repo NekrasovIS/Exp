@@ -4,28 +4,30 @@ class QString;
 
 namespace devicehub::ui_theme {
 
-/// Layout spacing scale — every setContentsMargins()/setSpacing() call
-/// and every QSS padding in discordDarkStyleSheet() draws from these
-/// three steps rather than ad hoc pixel values, so spacing stays
-/// visually consistent across panels.
+/// Шкала отступов layout'а — каждый вызов setContentsMargins()/
+/// setSpacing() и каждый padding в QSS в discordDarkStyleSheet() берётся
+/// из этих трёх шагов, а не из произвольных пиксельных значений, так
+/// что отступы остаются визуально согласованными между панелями.
 constexpr int kSpacingSm = 8;
 constexpr int kSpacingMd = 12;
 constexpr int kSpacingLg = 16;
 
-/// Accent/foreground palette (issue #155) — QPainter-based drawing
-/// (ChatBubble, ChatMessageRow, IconFactory) can't consume the QSS
-/// string below, so it draws colors from these named constants instead
-/// of restating hex literals; discordDarkStyleSheet() uses the same
-/// values inline in its raw QSS string (kept in sync by hand — QSS
-/// property values can't reference C++ constants).
+/// Палитра акцента/переднего плана (issue #155) — рисование через
+/// QPainter (ChatBubble, ChatMessageRow, IconFactory) не может
+/// использовать QSS-строку ниже, поэтому берёт цвета из этих именованных
+/// констант вместо повторения hex-литералов; discordDarkStyleSheet()
+/// использует те же значения инлайн в своей сырой QSS-строке (держатся
+/// в синхроне вручную — значения свойств QSS не могут ссылаться на
+/// C++-константы).
 constexpr const char* kAccentGradientStart = "#34d399";
 constexpr const char* kAccentGradientEnd = "#059669";
 constexpr const char* kAccentForeground = "#ffffff";
 constexpr const char* kBubbleOtherBackground = "#2a2d31";
 
-/// Qt stylesheet (QSS) implementing a dark theme with a green gradient
-/// accent on primary actions: three layered dark backgrounds, light
-/// text. Applied once via QApplication::setStyleSheet() in main.cpp.
+/// Таблица стилей Qt (QSS), реализующая тёмную тему с зелёным
+/// градиентным акцентом на основных действиях: три слоя тёмных фонов,
+/// светлый текст. Применяется один раз через
+/// QApplication::setStyleSheet() в main.cpp.
 QString discordDarkStyleSheet();
 
 }  // namespace devicehub::ui_theme

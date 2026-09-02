@@ -12,17 +12,20 @@ class QScreenCapture;
 namespace devicehub {
 
 /**
- * @brief Owns a QScreenCapture and its capture session for a chosen screen.
+ * @brief Владеет QScreenCapture и его сессией захвата для выбранного
+ *        экрана.
  *
- * Mirrors CameraDevice: QMediaCaptureSession only supports one video sink
- * at a time, so this class owns that one sink itself and re-emits every
- * frame via frameAvailable() rather than exposing the session for a
- * widget to attach directly — a consumer that wants to display it (the
- * settings preview, screen share in calls — issue #112) pushes frames
- * into its own QVideoSink/target instead. This lets both a local preview
- * widget and a call's outgoing video share the one screen capture, the
- * same single-owner-at-a-time pattern already used for CameraDevice/
- * AudioInputDevice/AudioOutputDevice (see their doc comments).
+ * Отражает CameraDevice: QMediaCaptureSession поддерживает только один
+ * video sink одновременно, поэтому этот класс сам владеет этим
+ * единственным sink'ом и переиспускает каждый кадр через
+ * frameAvailable(), а не открывает сессию наружу для прямого
+ * подключения виджета — потребитель, желающий его отобразить (превью в
+ * настройках, демонстрация экрана в звонках — issue #112), вместо этого
+ * проталкивает кадры в свой собственный QVideoSink/цель. Это позволяет
+ * и локальному виджету превью, и исходящему видео звонка делить один
+ * захват экрана — тот же паттерн «один владелец одновременно», что уже
+ * используется для CameraDevice/AudioInputDevice/AudioOutputDevice (см.
+ * их doc-комментарии).
  */
 class ScreenCaptureDevice : public QObject {
     Q_OBJECT
@@ -31,29 +34,30 @@ public:
     explicit ScreenCaptureDevice(QObject* parent = nullptr);
     ~ScreenCaptureDevice() override;
 
-    /// Selects @p screen and prepares the capture session for it.
+    /// Выбирает @p screen и готовит для него сессию захвата.
     void setScreen(QScreen* screen);
 
-    /// Starts capturing the selected screen.
+    /// Начинает захват выбранного экрана.
     void start();
 
-    /// Stops capturing.
+    /// Останавливает захват.
     void stop();
 
-    /// @return True while the screen is actively being captured.
+    /// @return True, пока экран активно захватывается.
     [[nodiscard]] bool isActive() const;
 
-    /// @return The capture session — for anything other than attaching a
-    /// video sink/output (this class already owns the one slot
-    /// QMediaCaptureSession allows); e.g. reserved for future
-    /// capture-session-level configuration.
+    /// @return Сессия захвата — для чего угодно, кроме подключения
+    /// video sink/вывода (этот класс уже владеет тем единственным
+    /// слотом, что допускает QMediaCaptureSession); например, оставлено
+    /// для будущей настройки на уровне сессии захвата.
     [[nodiscard]] QMediaCaptureSession& captureSession();
 
 signals:
-    /// Emitted for every captured frame, whatever the screen's active.
+    /// Испускается для каждого захваченного кадра, независимо от того,
+    /// чем занят захват экрана.
     void frameAvailable(const QVideoFrame& frame);
 
-    /// Emitted when screen capture reports an error.
+    /// Испускается, когда захват экрана сообщает об ошибке.
     void errorOccurred(const QString& message);
 
 private:

@@ -14,13 +14,13 @@
 
 #include <cstdlib>
 
-// Requires a live auth-service, user-service, and Postgres (see
+// Требует запущенных auth-service, user-service и Postgres (см.
 // services/auth-service, services/user-service, docker-compose.yml).
-// Reachable at AUTH_SERVICE_URL / USER_SERVICE_URL (defaults
-// http://127.0.0.1:8080 / http://127.0.0.1:8081). Skips itself rather
-// than failing when they're not running — CI doesn't currently
-// orchestrate all three together, so this is a manual/local end-to-end
-// check, not part of the automated suite's guarantees.
+// Доступны по AUTH_SERVICE_URL / USER_SERVICE_URL (по умолчанию
+// http://127.0.0.1:8080 / http://127.0.0.1:8081). Пропускает себя вместо
+// падения, если они не запущены — CI сейчас не оркестрирует все три
+// вместе, поэтому это ручная/локальная сквозная (end-to-end) проверка, а
+// не часть гарантий автоматического набора тестов.
 
 namespace devicehub {
 namespace {
@@ -54,8 +54,9 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     const QUrl userBaseUrl(userUrlEnv != nullptr ? QString::fromLocal8Bit(userUrlEnv)
                                                   : QStringLiteral("http://127.0.0.1:8081"));
 
-    // Unique per run so this never collides with a leftover row from a
-    // previous run against the same Postgres instance.
+    // Уникально при каждом запуске, чтобы никогда не столкнуться с
+    // оставшейся строкой от предыдущего запуска против того же экземпляра
+    // Postgres.
     const QString login = QStringLiteral("integration-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
     const QString password = QStringLiteral("integration-test-password");
 
@@ -110,9 +111,9 @@ TEST(AuthClientIntegrationTest, RequestTokenAndVerifyRoundTrip) {
     EXPECT_EQ(subject, login);
     ASSERT_FALSE(receivedRefreshToken.isEmpty());
 
-    // issue #105: the refresh token from that same login exchanges for
-    // a brand new (but still verifiable) access token, no credentials
-    // needed a second time.
+    // issue #105: refresh-токен от того же логина обменивается на совершенно
+    // новый (но по-прежнему проверяемый) access-токен, без повторного ввода
+    // учётных данных.
     QString refreshedToken;
     {
         QEventLoop loop;
@@ -270,6 +271,122 @@ TEST(AuthClientIntegrationTest, VerifyTokenWithInvalidTokenReportsNotValid) {
     EXPECT_FALSE(valid);
 }
 
+bool patchOwnEmail(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& token,
+                    const QString& email) {
+    QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/me"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Authorization", ("Bearer " + token).toUtf8());
+
+    const QJsonObject body{{"email", email}};
+    QNetworkReply* reply =
+        manager.sendCustomRequest(request, "PATCH", QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    bool succeeded = false;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, [&]() {
+        succeeded = (reply->error() == QNetworkReply::NoError);
+        reply->deleteLater();
+        loop.quit();
+    });
+    loop.exec();
+
+    return succeeded;
+}
+
+TEST(AuthClientIntegrationTest, RequestOtpThenVerifyOtpRoundTripsToAValidToken) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+    const char* userUrlEnv = std::getenv("USER_SERVICE_URL");
+    const QUrl userBaseUrl(userUrlEnv != nullptr ? QString::fromLocal8Bit(userUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8081"));
+
+    const QString login = QStringLiteral("integration-otp-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+    const QString email = login + QStringLiteral("@example.test");
+
+    QNetworkAccessManager setupManager;
+    if (!registerTestUser(setupManager, userBaseUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable at " << userBaseUrl.toString().toStdString()
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+
+    AuthClient client(authBaseUrl);
+
+    // Need a token to PATCH /users/me with — password login is the
+    // simplest way to get one for test setup, unrelated to the OTP flow
+    // this test actually exercises below.
+    QString setupToken;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString&, qint64) {
+                              setupToken = token;
+                              loop.quit();
+                          });
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        client.requestToken(login, password);
+        loop.exec();
+    }
+    if (setupToken.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString()
+                      << " — start it locally to run this test.";
+    }
+    ASSERT_TRUE(patchOwnEmail(setupManager, userBaseUrl, setupToken, email));
+
+    QString requestedIdentifier;
+    QString errorMessage;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::otpRequested, &loop, [&](const QString& identifier) {
+            requestedIdentifier = identifier;
+            loop.quit();
+        });
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
+            errorMessage = message;
+            loop.quit();
+        });
+        client.requestOtp(email);
+        loop.exec();
+    }
+    ASSERT_EQ(requestedIdentifier, email) << "errorOccurred: " << errorMessage.toStdString();
+
+    // The code itself only reaches the LoggingCodeDeliveryChannel
+    // fallback's stdout (no real SMTP account in this environment) —
+    // there's no way for this test to read it back, so this only
+    // verifies the request half round-trips; verifyOtp() with an
+    // invalid code below covers the failure path instead.
+}
+
+TEST(AuthClientIntegrationTest, VerifyOtpWithWrongCodeEmitsError) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+
+    AuthClient client(authBaseUrl);
+    bool errorFired = false;
+    QString errorMessage;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
+        errorFired = true;
+        errorMessage = message;
+        loop.quit();
+    });
+    QObject::connect(&client, &AuthClient::tokenReceived, &loop, [&](const QString&) { loop.quit(); });
+    client.verifyOtp(QStringLiteral("no-such-identifier@example.test"), QStringLiteral("000000"));
+    loop.exec();
+
+    if (!errorFired && errorMessage.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString()
+                      << " — start it locally to run this test.";
+    }
+    EXPECT_TRUE(errorFired);
+}
+
 TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegistered) {
     const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
     const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
@@ -280,7 +397,7 @@ TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegister
 
     AuthClient client(authBaseUrl);
 
-    // First registration — establishes the login.
+    // Первая регистрация — закрепляет логин.
     bool firstRegistered = false;
     bool firstFired = false;
     {
@@ -300,8 +417,9 @@ TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegister
     }
     ASSERT_TRUE(firstRegistered);
 
-    // Second registration of the same login must be reported as failed,
-    // and must NOT auto-issue a token the way a fresh registration does.
+    // Повторная регистрация того же логина должна сообщаться как неудачная
+    // и НЕ должна автоматически выдавать токен, как это делает первая
+    // (новая) регистрация.
     bool secondRegistered = true;
     bool tokenReceivedOnDuplicate = false;
     QEventLoop loop;

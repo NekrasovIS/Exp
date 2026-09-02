@@ -5,6 +5,8 @@
 #include <chrono>
 #include <string>
 
+#include "CodeDeliveryChannel.h"
+#include "OtpStore.h"
 #include "RateLimiter.h"
 #include "TokenService.h"
 #include "UserServiceClient.h"
@@ -12,42 +14,61 @@
 namespace auth_service {
 
 /**
- * @brief REST front-end for TokenService: POST /auth/token,
- *        POST /auth/verify, POST /auth/register, POST /auth/refresh.
+ * @brief REST-фасад над TokenService: POST /auth/token,
+ *        POST /auth/verify, POST /auth/register, POST /auth/refresh,
+ *        POST /auth/otp/request, POST /auth/otp/verify (issue #156).
  *
- * POST /auth/token requires valid {"login", "password"} — checked
- * against user-service via UserServiceClient — before a token is issued.
- * POST /auth/register forwards to user-service's own registration and,
- * on success, immediately issues a token too (auto-login) so the client
- * doesn't need a second round trip. Both also return a long-lived
- * refresh_token (issue #105) alongside the access token; POST
- * /auth/refresh exchanges a still-valid refresh token for a fresh
- * access token via {"refresh_token"} — without the user re-entering
- * credentials — same response shape as /auth/token. Thin wrapper around
- * httplib::Server otherwise — all token logic lives in TokenService,
- * this class only translates HTTP requests/responses.
+ * POST /auth/token требует валидные {"login", "password"} — проверяются
+ * через user-service (UserServiceClient) — прежде чем выдать токен.
+ * POST /auth/register перенаправляет в собственную регистрацию
+ * user-service и, при успехе, сразу же выдаёт токен (авто-логин), чтобы
+ * клиенту не требовался второй раунд запросов. Оба также возвращают
+ * долгоживущий refresh_token (issue #105) вместе с access-токеном;
+ * POST /auth/refresh обменивает ещё действующий refresh-токен на
+ * свежий access-токен через {"refresh_token"} — без повторного ввода
+ * учётных данных пользователем — та же форма ответа, что у /auth/token.
  *
- * /auth/token and /auth/register (both credential-checking) are rate
- * limited per client address (issue #102) — /auth/verify and
- * /auth/refresh aren't: /auth/verify is called legitimately by
- * chat-service on every single request it handles, and /auth/refresh
- * requires an already-valid signed refresh token rather than a
- * guessable credential, so neither should trip the limiter meant for
- * brute-force guarding.
+ * POST /auth/otp/request принимает {"identifier"} (login, email или
+ * Telegram chat_id, issue #156/#174) — всегда отвечает 200 независимо
+ * от того, находится ли реальный аккаунт по этому идентификатору,
+ * чтобы ответ нельзя было использовать для проверки существования
+ * аккаунта; если идентификатор находится, код доставляется через
+ * telegramChannel_ (если у аккаунта задан telegram_chat_id и канал
+ * настроен на сервере), иначе через codeDeliveryChannel_ (email), если
+ * задан email — предпочтение Telegram над email, когда оба доступны.
+ * POST /auth/otp/verify принимает {"identifier", "code"} и при
+ * совпадении ещё действующего кода выдаёт пару токен/refresh-токен —
+ * та же форма ответа, что у /auth/token.
+ *
+ * В остальном — тонкая обёртка над httplib::Server: вся логика токенов
+ * живёт в TokenService, этот класс только переводит HTTP-запросы/ответы.
+ *
+ * /auth/token, /auth/register, /auth/otp/request и /auth/otp/verify (все
+ * проверяющие учётные данные/код) ограничены по частоте на клиентский
+ * адрес (issue #102) — /auth/verify и /auth/refresh нет: /auth/verify
+ * легитимно вызывается chat-service на каждый обрабатываемый им запрос,
+ * а /auth/refresh требует уже валидный подписанный refresh-токен, а не
+ * угадываемые учётные данные, так что ни тот ни другой не должны
+ * попадать под лимитер, предназначенный против перебора.
  */
 class HttpServer {
 public:
-    /// @p rateLimitMaxRequests/@p rateLimitWindow configure the
-    /// /auth/token + /auth/register limiter — defaults are a real
-    /// production limit; tests pass a tiny window to trip it fast and
-    /// deterministically instead of waiting on a real clock.
+    /// @p telegramChannel — nullptr, если TELEGRAM_BOT_TOKEN не
+    /// настроен на сервере (issue #174); тогда доставка всегда идёт
+    /// через @p codeDeliveryChannel (email), как и без Telegram-
+    /// поддержки. @p rateLimitMaxRequests/@p rateLimitWindow настраивают
+    /// лимитер для /auth/token + /auth/register + /auth/otp/* — значения
+    /// по умолчанию рассчитаны на прод; тесты передают крошечное окно,
+    /// чтобы сработать быстро и детерминированно, а не ждать реальные
+    /// часы.
     HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
+               const ICodeDeliveryChannel& codeDeliveryChannel, const ICodeDeliveryChannel* telegramChannel = nullptr,
                int rateLimitMaxRequests = 10, std::chrono::milliseconds rateLimitWindow = std::chrono::seconds{60});
 
-    /// Blocks, serving requests until stop() is called from another thread.
+    /// Блокирует поток, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
 
-    /// Stops a listen() call in progress.
+    /// Останавливает выполняющийся вызов listen().
     void stop();
 
 private:
@@ -56,10 +77,15 @@ private:
     void handleVerifyToken(const httplib::Request& request, httplib::Response& response);
     void handleRegister(const httplib::Request& request, httplib::Response& response);
     void handleRefresh(const httplib::Request& request, httplib::Response& response);
+    void handleOtpRequest(const httplib::Request& request, httplib::Response& response);
+    void handleOtpVerify(const httplib::Request& request, httplib::Response& response);
 
     const TokenService& tokenService_;
     const UserServiceClient& userServiceClient_;
+    const ICodeDeliveryChannel& codeDeliveryChannel_;
+    const ICodeDeliveryChannel* telegramChannel_;
     RateLimiter rateLimiter_;
+    OtpStore otpStore_;
     httplib::Server server_;
 };
 

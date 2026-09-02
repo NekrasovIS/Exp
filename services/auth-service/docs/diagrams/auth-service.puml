@@ -35,11 +35,88 @@ TokenService ..> Hmac : signs/verifies with
 TokenService ..> Json : encodes payload as
 TokenService ..> base64_utils.base64_utils : uses
 
+struct OtpIdentity {
+  +login : string
+  +email : optional<string>
+  +telegramChatId : optional<string>
+}
 class UserServiceClient {
   +verifyCredentials(login: string, password: string) : bool
   +registerUser(login: string, password: string) : bool
+  +resolveOtpIdentifier(identifier: string) : optional<OtpIdentity>
 }
-UserServiceClient ..> "user-service" : POST /users/verify-credentials,\nPOST /users/register
+UserServiceClient ..> "user-service" : POST /users/verify-credentials,\nPOST /users/register,\nPOST /users/resolve-otp-identifier
+UserServiceClient ..> OtpIdentity : returns
+
+interface ICodeDeliveryChannel {
+  +send(destination: string, code: string)
+}
+class LoggingCodeDeliveryChannel {
+  +send(destination: string, code: string)
+}
+LoggingCodeDeliveryChannel ..|> ICodeDeliveryChannel
+
+class TlsConnection {
+  +isConnected() : bool
+  +writeLine(line: string)
+  +writeRaw(data: string)
+  +readLine() : string
+}
+note bottom of TlsConnection
+  issue #156/#174: тонкая обёртка над
+  OpenSSL BIO для построчного TLS-
+  соединения — общая транспортная основа
+  для SMTP (SmtpCodeDeliveryChannel) и
+  HTTP/1.1 (TelegramCodeDeliveryChannel),
+  без внешней библиотеки вроде libcurl.
+end note
+
+class SmtpCodeDeliveryChannel {
+  +send(destination: string, code: string)
+  +{static} fromEnvironment() : optional<SmtpConfig>
+}
+SmtpCodeDeliveryChannel ..|> ICodeDeliveryChannel
+SmtpCodeDeliveryChannel ..> TlsConnection : uses
+struct SmtpConfig {
+  +host : string
+  +port : int
+  +username : string
+  +password : string
+  +fromAddress : string
+}
+SmtpCodeDeliveryChannel ..> SmtpConfig : uses
+
+class TelegramCodeDeliveryChannel {
+  +send(destination: string, code: string)
+  +{static} fromEnvironment() : optional<TelegramConfig>
+}
+TelegramCodeDeliveryChannel ..|> ICodeDeliveryChannel
+TelegramCodeDeliveryChannel ..> TlsConnection : uses
+struct TelegramConfig {
+  +botToken : string
+}
+TelegramCodeDeliveryChannel ..> TelegramConfig : uses
+note bottom of TelegramCodeDeliveryChannel
+  issue #174: альтернативный канал доставки
+  OTP-кода — один HTTPS POST на Telegram Bot
+  API (api.telegram.org/bot<token>/sendMessage)
+  поверх того же TlsConnection, без libcurl.
+  destination — chat_id получателя, не
+  username и не номер телефона.
+end note
+
+class OtpStore {
+  +issue(login: string) : string
+  +verify(login: string, code: string) : bool
+  -{static} generateNumericCode() : string
+  -{static} hashCode(code: string) : string
+}
+note bottom of OtpStore
+  issue #156: одноразовые 6-значные коды,
+  хранятся хешированными (SHA-256) в памяти —
+  у auth-service нет своей БД, тот же подход,
+  что и у RateLimiter.
+end note
 
 class HttpServer {
   +listen(host: string, port: int)
@@ -48,9 +125,14 @@ class HttpServer {
   -handleVerifyToken(request, response)
   -handleRegister(request, response)
   -handleRefresh(request, response)
+  -handleOtpRequest(request, response)
+  -handleOtpVerify(request, response)
 }
 HttpServer --> TokenService : delegates to (const&)
 HttpServer --> UserServiceClient : checks credentials via (const&)
+HttpServer --> ICodeDeliveryChannel : доставляет код через (email, const&)
+HttpServer --> ICodeDeliveryChannel : доставляет код через (Telegram, const*,\nnullable — issue #174)
+HttpServer *-- OtpStore : owns
 HttpServer *-- HttplibServer : owns
 
 note right of HttpServer
@@ -68,17 +150,27 @@ note right of HttpServer
                          refresh_token for a fresh
                          access token, no credentials
                          needed again
+  POST /auth/otp/request -> handleOtpRequest (issue #156/#174)
+                         always 200 — не палит существование
+                         аккаунта; resolveOtpIdentifier() +
+                         OtpStore::issue() + доставка через
+                         Telegram (если задан telegram_chat_id
+                         и настроен TELEGRAM_BOT_TOKEN — в
+                         приоритете), иначе email
+  POST /auth/otp/verify  -> handleOtpVerify (issue #156)
+                         OtpStore::verify() -> тот же формат
+                         ответа, что у /auth/token
 
-  /auth/token and /auth/register now also
-  return a long-lived refresh_token
-  alongside the access token
+  /auth/token и /auth/register также
+  возвращают долгоживущий refresh_token
+  вместе с access-токеном
   (TokenService::issueRefreshToken()).
-  Refresh tokens carry "typ": "refresh"
-  in their payload so they can never be
-  used as an access token (or vice
-  versa) even though both share the
-  same signing secret — see
-  TokenService's doc comment.
+  Refresh-токены несут "typ": "refresh"
+  в payload, поэтому их нельзя
+  использовать как access-токен (и
+  наоборот), даже несмотря на общий
+  секрет подписи — см. doc-комментарий
+  TokenService.
 end note
 
 @enduml

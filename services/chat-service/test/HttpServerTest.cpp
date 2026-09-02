@@ -15,12 +15,12 @@
 #include <thread>
 #include <vector>
 
-// Route-level tests for HttpServer, hitting a real httplib::Server
-// instance over loopback HTTP. Requires a live Postgres (chat-service's
-// own, see docker-compose.yml) AND a live auth-service (to mint real
-// tokens for the Authorization header) — same dependencies as
-// WebSocketServerTest.cpp. Skips itself rather than failing when either
-// isn't reachable.
+// Тесты уровня маршрутов для HttpServer, обращающиеся к реальному
+// экземпляру httplib::Server через loopback HTTP. Требуют работающий
+// Postgres (собственный для chat-service, см. docker-compose.yml) И
+// работающий auth-service (для выпуска настоящих токенов для заголовка
+// Authorization) — те же зависимости, что и у WebSocketServerTest.cpp.
+// Пропускают себя, а не падают, если что-то из этого недоступно.
 
 namespace chat_service {
 namespace {
@@ -41,8 +41,8 @@ std::string uniqueSuffix() {
             .count());
 }
 
-// Same helper as WebSocketServerTest.cpp: registers a brand-new user
-// against a live auth-service and returns its token.
+// Тот же хэлпер, что и в WebSocketServerTest.cpp: регистрирует нового
+// пользователя в работающем auth-service и возвращает его токен.
 std::optional<std::string> registerAndGetToken(const std::string& host, int port, const std::string& login) {
     httplib::Client client(host, port);
     const nlohmann::json body{{"login", login}, {"password", "http-server-test-password"}};
@@ -87,13 +87,13 @@ private:
     std::thread thread_;
 };
 
-// Bundles everything a test needs: repository/auth client, a real owner
-// token — GTEST_SKIPs the calling test if either Postgres or
-// auth-service isn't reachable. Deliberately does NOT hold a ChatService
-// member: ChatService stores a reference to its repository, and this
-// struct is returned by value through std::optional (a move), which
-// would leave that reference dangling — each test constructs its own
-// local ChatService from fixture.repository instead.
+// Объединяет всё, что нужно тесту: репозиторий/auth-клиент, настоящий
+// токен владельца — делает GTEST_SKIP вызывающего теста, если Postgres
+// или auth-service недоступны. Намеренно НЕ хранит член ChatService:
+// ChatService хранит ссылку на свой repository, а эта структура
+// возвращается по значению через std::optional (перемещение), что
+// оставило бы эту ссылку висячей — вместо этого каждый тест строит свой
+// собственный локальный ChatService из fixture.repository.
 struct TestFixture {
     std::string authHost;
     int authPort;
@@ -196,12 +196,12 @@ TEST(HttpServerTest, CreateCommunityRejectsMissingNameWith400) {
     EXPECT_EQ(result->status, 400);
 }
 
-// Interim stand-in for real coverage-guided fuzzing (issue #121): a
-// deeply nested JSON body used to stack-overflow the whole process inside
-// nlohmann::json::parse()'s recursive descent (crashed WebSocketServer's
-// equivalent parse call, discovered via WebSocketServerTest — see
-// JsonGuard.h). This is the REST-endpoint half of the same vulnerability
-// class; it should now be rejected with a clean 400, not a crash.
+// Временная замена настоящему fuzzing'у, управляемому покрытием (issue
+// #121): сильно вложенное тело JSON раньше переполняло стек всего
+// процесса внутри рекурсивного спуска nlohmann::json::parse() (обрушивало
+// эквивалентный вызов parse в WebSocketServer, обнаружено через
+// WebSocketServerTest — см. JsonGuard.h). Это REST-эндпоинтная половина
+// того же класса уязвимости; теперь оно должно отклоняться чистым 400, а не падением.
 TEST(HttpServerTest, CreateCommunityRejectsDeeplyNestedBodyWith400) {
     auto fixtureOpt = TestFixture::create("http-server-create-community-nested-400");
     if (!fixtureOpt.has_value()) {
@@ -775,8 +775,8 @@ TEST(HttpServerTest, UploadAttachmentRejectsOversizedPayloadWith400) {
         chatService.createChannel(community.id, "general", fixture.ownerLogin);
     ASSERT_TRUE(channelId.has_value());
 
-    // 7,000,000 'A' characters decode cleanly (divisible by 4) to
-    // 5,250,000 zero bytes — over the 5 MB (5,242,880-byte) cap.
+    // 7 000 000 символов 'A' декодируются без остатка (делится на 4) в
+    // 5 250 000 нулевых байт — сверх лимита в 5 МБ (5 242 880 байт).
     const std::string oversizedBase64(7000000, 'A');
 
     const ScopedServer server(chatService, fixture.authServiceClient);
@@ -809,7 +809,7 @@ TEST(HttpServerTest, UploadThenDownloadAttachmentRoundTrip) {
     httplib::Client client(kTestHost, kTestPort);
     httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
 
-    // "Hello, attachment!" base64-encoded.
+    // "Hello, attachment!" в base64.
     const httplib::Result uploadResult = client.Post(
         "/channels/" + std::to_string(*channelId) + "/attachments", headers,
         nlohmann::json{{"filename", "greeting.txt"},
@@ -875,7 +875,7 @@ TEST(HttpServerTest, SearchMessagesReturnsOnlyMatchingBodiesNewestFirst) {
     ASSERT_EQ(result->status, 200);
     const nlohmann::json body = nlohmann::json::parse(result->body);
     ASSERT_EQ(body.size(), 2U);
-    // Case-insensitive, newest match first.
+    // Регистронезависимо, сначала самое новое совпадение.
     EXPECT_EQ(body[0]["body"].get<std::string>(), "another Quick message");
     EXPECT_EQ(body[1]["body"].get<std::string>(), "the quick brown fox");
 }
@@ -998,7 +998,7 @@ TEST(HttpServerTest, SetChannelKeySucceedsForOwnerAndGetMyChannelKeyRoundTrips) 
     httplib::Client client(kTestHost, kTestPort);
     httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
 
-    // Nothing set yet.
+    // Пока ничего не установлено.
     const httplib::Result beforeResult =
         client.Get("/channels/" + std::to_string(*channelId) + "/keys/me", headers);
     ASSERT_TRUE(beforeResult);

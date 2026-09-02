@@ -31,8 +31,8 @@ TEST(ChannelCryptoTest, EncryptThenDecryptRoundTripsThePlaintext) {
 }
 
 TEST(ChannelCryptoTest, TwoEncryptionsOfTheSamePlaintextProduceDifferentCiphertext) {
-    // Random nonce per call — same plaintext/key should not produce
-    // identical ciphertext twice.
+    // Случайный nonce при каждом вызове — один и тот же открытый текст/ключ
+    // не должны дважды давать идентичный шифротекст.
     const QByteArray key = generateChannelKey();
     const QString plaintext = QStringLiteral("same message");
     EXPECT_NE(encryptMessage(plaintext, key), encryptMessage(plaintext, key));

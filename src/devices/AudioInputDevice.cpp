@@ -19,10 +19,10 @@ AudioInputDevice::~AudioInputDevice() = default;
 void AudioInputDevice::start(const QAudioDevice& device) {
     stop();
 
-    // Qt only checks microphone permission status on its own — it never
-    // shows the macOS prompt unless the app explicitly requests it. Without
-    // this, an Undetermined status just leaves capture silently not
-    // starting, with no error and no prompt ever appearing.
+    // Qt сам по себе только проверяет статус разрешения на микрофон — он
+    // никогда не показывает диалог macOS, если приложение явно не
+    // запросит его. Без этого статус Undetermined просто молча оставляет
+    // захват не запущенным, без ошибки и без появления диалога.
     switch (qApp->checkPermission(QMicrophonePermission{})) {
         case Qt::PermissionStatus::Undetermined:
             qApp->requestPermission(QMicrophonePermission{}, this, [this, device](const QPermission& permission) {

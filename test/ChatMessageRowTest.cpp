@@ -2,9 +2,13 @@
 
 #include <gtest/gtest.h>
 
+#include <QAction>
 #include <QLabel>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QWidget>
 
 namespace devicehub {
 namespace {
@@ -24,10 +28,10 @@ ChatMessage sampleMessageWithAttachment() {
 TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
-    // Avatar (unnamed QLabel) + author (property "chatAuthor") + time
-    // ("mutedDescription") + body = 4 QLabels; own messages never get
-    // an author label (see NonOwnMessageWithHeader below), which is
-    // what distinguishes this count from the own-message case.
+    // Аватар (безымянный QLabel) + автор (свойство "chatAuthor") + время
+    // ("mutedDescription") + текст = 4 QLabel; у собственных сообщений
+    // никогда нет метки автора (см. NonOwnMessageWithHeader ниже) — именно
+    // это отличает данный счётчик от случая собственного сообщения.
     EXPECT_EQ(row.findChildren<QLabel*>().size(), 4);
     int authorLabelCount = 0;
     for (const QLabel* label : row.findChildren<QLabel*>()) {
@@ -41,7 +45,7 @@ TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
 TEST(ChatMessageRowTest, OwnMessageWithHeaderHasNoAuthorLabel) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
 
-    // Time + body only — own messages skip the avatar and author label.
+    // Только время + текст — у собственных сообщений нет аватара и метки автора.
     EXPECT_EQ(row.findChildren<QLabel*>().size(), 2);
     for (const QLabel* label : row.findChildren<QLabel*>()) {
         EXPECT_FALSE(label->property("chatAuthor").toBool());
@@ -72,6 +76,55 @@ TEST(ChatMessageRowTest, MessageWithAttachmentShowsDownloadButtonAndEmitsOnClick
     ASSERT_EQ(spy.count(), 1);
     EXPECT_EQ(spy.at(0).at(0).toLongLong(), 42);
     EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("report.pdf"));
+}
+
+TEST(ChatMessageRowTest, NonOwnMessageHasNoContextMenu) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::DefaultContextMenu);
+}
+
+TEST(ChatMessageRowTest, OwnMessageContextMenuEditActionEmitsEditRequestedWithCurrentBody) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+
+    // popup() (used by the handler) doesn't block, so the resulting menu
+    // exists as a child object right after the signal returns — no need
+    // to drive a real right-click or a modal event loop to test this.
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* editAction = menu->findChild<QAction*>(QStringLiteral("editMessageAction"));
+    ASSERT_NE(editAction, nullptr);
+
+    QSignalSpy spy(&row, &ChatMessageRow::editRequested);
+    editAction->trigger();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("hello"));
+}
+
+TEST(ChatMessageRowTest, OwnMessageContextMenuDeleteActionEmitsDeleteRequested) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* deleteAction = menu->findChild<QAction*>(QStringLiteral("deleteMessageAction"));
+    ASSERT_NE(deleteAction, nullptr);
+
+    QSignalSpy spy(&row, &ChatMessageRow::deleteRequested);
+    deleteAction->trigger();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
 }
 
 }  // namespace

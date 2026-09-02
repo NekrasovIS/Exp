@@ -25,6 +25,16 @@ Screen Capture) слева. Тёмная тема с зелёным градие
 - Список экранов и захват содержимого выбранного экрана с превью.
 - Вход по логину/паролю: получение и проверка токена авторизации через
   отдельные сервисы `auth-service` + `user-service` (Postgres).
+- Вход по одноразовому коду через email или Telegram (issue #156/#174) —
+  окно `LoginWindow` показывается при каждом запуске (токен между
+  перезапусками пока не сохраняется): ввод логина/email/Telegram
+  chat_id → код доставляется по одному из привязанных каналов (Telegram
+  в приоритете, если привязаны оба) → ввод кода завершает вход. Требует,
+  чтобы у аккаунта уже был задан email и/или Telegram chat_id (`Account`
+  → `Edit Profile`, поля `Email`/`Telegram chat ID`); своей
+  passwordless-регистрации нет, только для уже существующих аккаунтов.
+  Вход по паролю в `Account` (правый верхний угол) продолжает работать
+  как раньше и тоже закрывает `LoginWindow` при успехе.
 - Чаты и сообщества: подключение к каналу по ID и обмен сообщениями в
   реальном времени через `chat-service` (Postgres, WebSocket) — при
   открытии канала подгружается история сообщений, кнопка «Load older
@@ -190,8 +200,18 @@ cmake --build services/user-service/build --parallel
 `/auth/verify` к auth-service, `AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`).
 `PATCH /users/me` всегда пишет в логин из проверенного токена — логин
 в теле запроса, если есть, игнорируется; частичное тело (только
-`display_name`, только `avatar_url` или только `public_key`) не
-затирает несопровождённые поля.
+`display_name`, только `avatar_url`, только `public_key`, только
+`email` или только `telegram_chat_id`) не затирает несопровождённые
+поля. Ещё один эндпоинт — `POST /users/resolve-otp-identifier` (issue
+#156/#174, без авторизации, вызывается самим auth-service) — принимает
+`{"identifier"}` (login, email или Telegram chat_id) и отвечает
+`{"found", "login", "email", "telegram_chat_id"}`, используется для
+входа по одноразовому коду.
+
+`email` (issue #156) и `telegram_chat_id` (issue #174, вход по
+одноразовому коду) — оба уникальны, если заданы (частичные уникальные
+индексы, допускают несколько `NULL`); попытка поставить уже занятое
+другим аккаунтом значение через `PATCH /users/me` отвечает `409`.
 
 `public_key` (issue #136, Phase 1 сквозного шифрования — см. раздел
 «Сквозное шифрование» ниже) — base64 публичной половины X25519-пары,
@@ -229,6 +249,34 @@ in the signed payload). `/auth/token` and `/auth/register` are rate
 limited per client address (issue #102) — `/auth/refresh` isn't,
 matching `/auth/verify`'s reasoning (not meaningfully brute-forceable;
 it needs a valid signed token, not a guessed password).
+
+Вход по одноразовому коду (issue #156/#174): `POST /auth/otp/request`
+(`{"identifier"}` — login, email или Telegram chat_id, всегда отвечает
+200, чтобы ответ нельзя было использовать для проверки существования
+аккаунта) и `POST /auth/otp/verify` (`{"identifier", "code"}` — при
+совпадении ещё действующего кода выдаёт `token`/`refresh_token`, та же
+форма ответа, что у `/auth/token`). Коды — 6-значные, живут 5 минут,
+хранятся хешированными в памяти (у auth-service нет своей БД),
+максимум 5 попыток ввода.
+
+Доставка кода — через один из двух каналов, оба реализованы напрямую
+поверх OpenSSL (`TlsConnection`), без libcurl:
+- Email через SMTP — `SMTP_HOST`/`SMTP_PORT`/`SMTP_USERNAME`/
+  `SMTP_PASSWORD`/`SMTP_FROM`.
+- Telegram через Bot API (issue #174) — `TELEGRAM_BOT_TOKEN`; один
+  HTTPS POST на `api.telegram.org/bot<token>/sendMessage`. Пользователь
+  привязывает аккаунт, начав чат с ботом (бот присылает свой chat_id),
+  и вставляет его в настройки профиля (`telegram_chat_id`).
+
+Если у аккаунта заданы оба канала и на сервере настроен
+`TELEGRAM_BOT_TOKEN`, код уходит в Telegram — мгновенная доставка в
+чат вместо письма, которое может уйти в спам или прийти с задержкой.
+Если ни `SMTP_HOST`, ни `TELEGRAM_BOT_TOKEN` не заданы, код просто
+логируется в stdout вместо реальной отправки — так можно пройти весь
+flow локально/в CI без настоящих учётных данных. У пользователя должен
+быть задан хотя бы один из двух каналов (`PATCH /users/me` на
+user-service, поля `email`/`telegram_chat_id`), иначе входить по коду
+ему пока нельзя.
 
 ### chat-service
 
