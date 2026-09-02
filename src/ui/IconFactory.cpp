@@ -91,4 +91,44 @@ QIcon sendIcon(const QColor& fillColor) {
     return QIcon(pixmap);
 }
 
+QIcon settingsIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    constexpr int kToothCount = 8;
+    constexpr qreal kOuterRadius = 7.5;
+    constexpr qreal kInnerRadius = 3.4;
+    constexpr qreal kToothWidth = 3.0;
+    constexpr qreal kToothLength = 3.4;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(kSize / 2.0, kSize / 2.0);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    // Зубцы — kToothCount небольших скруглённых прямоугольников,
+    // повёрнутых равномерно вокруг центра.
+    for (int i = 0; i < kToothCount; ++i) {
+        painter.save();
+        painter.rotate(360.0 / kToothCount * i);
+        painter.drawRoundedRect(
+            QRectF(-kToothWidth / 2.0, -kOuterRadius - kToothLength + 1.0, kToothWidth, kToothLength), 1.0, 1.0);
+        painter.restore();
+    }
+
+    // Кольцо тела шестерёнки с полой серединой — одна заливка с
+    // правилом odd-even вместо двух отдельных фигур.
+    QPainterPath ring;
+    ring.addEllipse(QPointF(0, 0), kOuterRadius, kOuterRadius);
+    ring.addEllipse(QPointF(0, 0), kInnerRadius, kInnerRadius);
+    ring.setFillRule(Qt::OddEvenFill);
+    painter.drawPath(ring);
+
+    return QIcon(pixmap);
+}
+
 }  // namespace devicehub::ui_icons

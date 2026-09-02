@@ -32,4 +32,10 @@ QIcon communityAvatarIcon(const QString& label);
 /// вместо текстовой подписи.
 QIcon sendIcon(const QColor& fillColor);
 
+/// Значок-шестерёнка (кольцо с зубцами вокруг, полая середина) —
+/// рисуется вручную по той же причине, что и остальные значки в этом
+/// файле. Используется как иконка кнопки настроек в FooterBar вместо
+/// эмодзи "⚙" в тексте кнопки.
+QIcon settingsIcon(const QColor& fillColor);
+
 }  // namespace devicehub::ui_icons

@@ -29,6 +29,7 @@ constexpr int kIconButtonSize = 32;
 constexpr int kIconButtonIconSize = 16;
 constexpr int kAvatarIconSize = 44;
 constexpr int kAvatarGridSize = 56;
+constexpr int kAddButtonIconSize = 20;
 }  // namespace
 
 CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
@@ -67,8 +68,18 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     addButton_->setToolTip(tr("Create community"));
     addButton_->setProperty("accent", true);
     addButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kAccentForeground)));
-    addButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
-    addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    // Тот же размер, что и у аватаров сообществ (kAvatarIconSize), а не
+    // у refreshButton_ — иначе центрирование по ширине панели ставит
+    // его на несколько пикселей правее, чем сами круги: сетка списка
+    // отдаёт кругу отступ (kAvatarGridSize-kAvatarIconSize)/2 с каждой
+    // стороны, а Qt::AlignHCenter под списком считает от полной ширины
+    // содержимого панели — те же размер и центрирование совпадают
+    // только когда кнопка и круги одного диаметра. Круглая (border-
+    // radius в Theme.cpp по этому objectName), а не форма по умолчанию
+    // от общего QPushButton — тот же визуальный язык, что у круглых
+    // аватаров над ней.
+    addButton_->setIconSize(QSize(kAddButtonIconSize, kAddButtonIconSize));
+    addButton_->setFixedSize(kAvatarIconSize, kAvatarIconSize);
     addButton_->setProperty("iconOnly", true);
 
     layout->addWidget(refreshButton_, /*stretch=*/0, Qt::AlignHCenter);

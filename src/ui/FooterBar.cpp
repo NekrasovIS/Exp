@@ -1,17 +1,22 @@
 #include "ui/FooterBar.h"
 
+#include <QColor>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QSize>
 
+#include "ui/IconFactory.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
 
 namespace {
 constexpr int kAvatarDiameter = 28;
+constexpr int kSettingsButtonSize = 32;
+constexpr int kSettingsIconGlyphSize = 18;
 }  // namespace
 
 FooterBar::FooterBar(QWidget* parent) : QWidget(parent) {
@@ -37,8 +42,17 @@ FooterBar::FooterBar(QWidget* parent) : QWidget(parent) {
     profileLabel_ = new QLabel(tr("Not signed in"), this);
     profileLabel_->setObjectName(QStringLiteral("footerProfileLabel"));
 
-    settingsButton_ = new QPushButton(tr("⚙ Settings"), this);
+    // Иконка вместо текстовой подписи "⚙ Settings" (issue: визуальный
+    // проход по мотивам Discord) — тот же плоский иконочный стиль, что
+    // и у кнопок композера сообщения (attachFileButton/
+    // sendChatMessageButton).
+    settingsButton_ = new QPushButton(this);
     settingsButton_->setObjectName(QStringLiteral("footerSettingsButton"));
+    settingsButton_->setToolTip(tr("Settings"));
+    settingsButton_->setProperty("flatIconButton", true);
+    settingsButton_->setIcon(ui_icons::settingsIcon(QColor(ui_theme::kMutedForeground)));
+    settingsButton_->setIconSize(QSize(kSettingsIconGlyphSize, kSettingsIconGlyphSize));
+    settingsButton_->setFixedSize(kSettingsButtonSize, kSettingsButtonSize);
 
     layout->addWidget(avatarLabel_);
     layout->addWidget(profileLabel_);

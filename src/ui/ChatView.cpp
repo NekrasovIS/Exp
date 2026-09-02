@@ -255,7 +255,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     attachButton_ = new QPushButton(composer);
     attachButton_->setObjectName(QStringLiteral("attachFileButton"));
     attachButton_->setToolTip(tr("Attach"));
-    attachButton_->setProperty("composerIcon", true);
+    attachButton_->setProperty("flatIconButton", true);
     attachButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kMutedForeground)));
     attachButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
     attachButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
@@ -264,7 +264,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     sendButton_ = new QPushButton(composer);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
     sendButton_->setToolTip(tr("Send"));
-    sendButton_->setProperty("composerIcon", true);
+    sendButton_->setProperty("flatIconButton", true);
     sendButton_->setIcon(ui_icons::sendIcon(QColor(ui_theme::kAccentGradientStart)));
     sendButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
     sendButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);

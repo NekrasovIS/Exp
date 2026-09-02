@@ -205,6 +205,14 @@ QString discordDarkStyleSheet() {
             padding: 0;
         }
 
+        /* Круглая, в размер аватаров сообществ над ней (issue:
+           визуальный проход по мотивам Discord) — тот же визуальный
+           язык, что у кругов CommunitiesPanel::listWidget(), а не форма
+           по умолчанию от QPushButton[accent="true"] выше. */
+        QPushButton#createCommunityButton {
+            border-radius: 22px;
+        }
+
         QLineEdit, QComboBox, QPlainTextEdit {
             background-color: #17191c;
             color: #e3e6e8;
@@ -220,6 +228,35 @@ QString discordDarkStyleSheet() {
 
         QComboBox::drop-down {
             border: none;
+        }
+
+        /* QCheckBox (например, "Encrypted channel" в диалоге создания
+           канала) не имел вообще никакого стиля — стандартный квадратик
+           Windows. Индикатор в духе остальных полей ввода (тот же тёмный
+           фон/рамка, что у QLineEdit), отмеченное состояние — акцентный
+           градиент без отдельной галочки (нет SVG icon-engine для
+           картинки — см. doc-комментарий IconFactory), заливка цветом
+           уже достаточно ясно читается как "включено" рядом с подписью. */
+        QCheckBox {
+            color: #e3e6e8;
+            spacing: %1px;
+        }
+
+        QCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 1px solid #2a2d31;
+            background-color: #17191c;
+        }
+
+        QCheckBox::indicator:hover {
+            border: 1px solid #34d399;
+        }
+
+        QCheckBox::indicator:checked {
+            border: none;
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #34d399, stop:1 #059669);
         }
 
         /* Тонкий скроллбар без стрелок (issue: визуальный проход по
@@ -295,18 +332,25 @@ QString discordDarkStyleSheet() {
             border: none;
         }
 
-        QPushButton[composerIcon="true"] {
+        /* Прозрачная круглая кнопка-иконка без рамки, с полупрозрачной
+           подсветкой при наведении/нажатии — изначально только для
+           композера сообщения (issue: визуальный проход по мотивам
+           Discord), затем переиспользована и для кнопки настроек в
+           FooterBar, отсюда общее имя свойства вместо "composerIcon".
+           border-radius рассчитан на круглую кнопку 32x32 — под другой
+           фиксированный размер кнопки нужен свой override. */
+        QPushButton[flatIconButton="true"] {
             background: transparent;
             border: none;
             border-radius: 16px;
             padding: 0;
         }
 
-        QPushButton[composerIcon="true"]:hover {
+        QPushButton[flatIconButton="true"]:hover {
             background-color: rgba(255, 255, 255, 20);
         }
 
-        QPushButton[composerIcon="true"]:pressed {
+        QPushButton[flatIconButton="true"]:pressed {
             background-color: rgba(255, 255, 255, 35);
         }
 
