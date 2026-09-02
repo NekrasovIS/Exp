@@ -63,7 +63,7 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
     addButton_->setObjectName(QStringLiteral("createChannelButton"));
     addButton_->setToolTip(tr("Create channel"));
     addButton_->setProperty("accent", true);
-    addButton_->setIcon(ui_icons::plusIcon(QColor("#ffffff")));
+    addButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kAccentForeground)));
     addButton_->setIconSize(QSize(kIconSize, kIconSize));
     addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addButton_->setProperty("iconOnly", true);
