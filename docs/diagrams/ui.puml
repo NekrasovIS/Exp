@@ -103,9 +103,11 @@ class ChatView {
   +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
+  +toggleChatVisibilityButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
   -updateLocalVideoVisibility()
+  -onToggleChatVisibilityClicked()
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -119,6 +121,19 @@ class ChatView {
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
 }
+note right of ChatView
+  Issue #153: videoStrip_ и новый chatPanel_
+  (история + строка ввода) сидят в QSplitter
+  (chatSplitter_) вместо фиксированного
+  QVBoxLayout — во время звонка область видео
+  получает большую часть места
+  (setCallState(true, ...)), сворачивается
+  обратно во весь чат через
+  toggleChatVisibilityButton_. Видео-плитки
+  переключены с фиксированного размера на
+  минимальный + Expanding QSizePolicy, чтобы
+  реально расти в дополнительное пространство.
+end note
 
 struct ChatMessage {
   +author: QString

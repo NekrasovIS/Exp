@@ -13,6 +13,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QScrollArea;
+class QSplitter;
 class QStackedWidget;
 class QTimer;
 class QVBoxLayout;
@@ -164,6 +165,11 @@ public:
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
     [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
+    /// Кнопка "Show/Hide Chat" (issue #153) — видна только во время
+    /// звонка, когда область видео и панель чата делят QSplitter вместо
+    /// того, чтобы чат всегда занимал одну и ту же фиксированную долю
+    /// окна.
+    [[nodiscard]] QPushButton* toggleChatVisibilityButton() const { return toggleChatVisibilityButton_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -235,6 +241,11 @@ private:
     /// — используется совместно showChannel() и setEncrypted(), так что
     /// любой из них можно вызвать первым, не затерев эффект другого.
     void updateChannelTitleLabel();
+    /// Клик по "Hide Chat"/"Show Chat" (issue #153) — сворачивает/
+    /// восстанавливает долю chatPanel_ в chatSplitter_, отдавая
+    /// остальную часть окна области видео (или, если видео/демонстрация
+    /// экрана уже не активны, просто пустому месту).
+    void onToggleChatVisibilityClicked();
 
 
     QStackedWidget* stack_ = nullptr;
@@ -260,6 +271,17 @@ private:
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
     QLabel* callParticipantsLabel_ = nullptr;
+    /// Область видео (сверху) и chatPanel_ (снизу) — во время звонка
+    /// область видео получает большую часть пространства, а chatPanel_
+    /// можно свернуть через toggleChatVisibilityButton_ вместо
+    /// фиксированной доли 50/50 (issue #153).
+    QSplitter* chatSplitter_ = nullptr;
+    /// История (loadOlderButton_/scrollArea_/typingIndicatorLabel_) плюс
+    /// строка ввода сообщения — сгруппированы в один виджет, чтобы быть
+    /// одним дочерним элементом QSplitter.
+    QWidget* chatPanel_ = nullptr;
+    QPushButton* toggleChatVisibilityButton_ = nullptr;
+    bool chatPanelCollapsed_ = false;
     QWidget* videoStrip_ = nullptr;
     QHBoxLayout* videoStripLayout_ = nullptr;
     QVideoWidget* localVideoWidget_ = nullptr;
