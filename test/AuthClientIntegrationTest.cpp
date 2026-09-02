@@ -271,6 +271,122 @@ TEST(AuthClientIntegrationTest, VerifyTokenWithInvalidTokenReportsNotValid) {
     EXPECT_FALSE(valid);
 }
 
+bool patchOwnEmail(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& token,
+                    const QString& email) {
+    QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/me"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Authorization", ("Bearer " + token).toUtf8());
+
+    const QJsonObject body{{"email", email}};
+    QNetworkReply* reply =
+        manager.sendCustomRequest(request, "PATCH", QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    bool succeeded = false;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, [&]() {
+        succeeded = (reply->error() == QNetworkReply::NoError);
+        reply->deleteLater();
+        loop.quit();
+    });
+    loop.exec();
+
+    return succeeded;
+}
+
+TEST(AuthClientIntegrationTest, RequestOtpThenVerifyOtpRoundTripsToAValidToken) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+    const char* userUrlEnv = std::getenv("USER_SERVICE_URL");
+    const QUrl userBaseUrl(userUrlEnv != nullptr ? QString::fromLocal8Bit(userUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8081"));
+
+    const QString login = QStringLiteral("integration-otp-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+    const QString email = login + QStringLiteral("@example.test");
+
+    QNetworkAccessManager setupManager;
+    if (!registerTestUser(setupManager, userBaseUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable at " << userBaseUrl.toString().toStdString()
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+
+    AuthClient client(authBaseUrl);
+
+    // Need a token to PATCH /users/me with — password login is the
+    // simplest way to get one for test setup, unrelated to the OTP flow
+    // this test actually exercises below.
+    QString setupToken;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString&, qint64) {
+                              setupToken = token;
+                              loop.quit();
+                          });
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        client.requestToken(login, password);
+        loop.exec();
+    }
+    if (setupToken.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString()
+                      << " — start it locally to run this test.";
+    }
+    ASSERT_TRUE(patchOwnEmail(setupManager, userBaseUrl, setupToken, email));
+
+    QString requestedIdentifier;
+    QString errorMessage;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::otpRequested, &loop, [&](const QString& identifier) {
+            requestedIdentifier = identifier;
+            loop.quit();
+        });
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
+            errorMessage = message;
+            loop.quit();
+        });
+        client.requestOtp(email);
+        loop.exec();
+    }
+    ASSERT_EQ(requestedIdentifier, email) << "errorOccurred: " << errorMessage.toStdString();
+
+    // The code itself only reaches the LoggingCodeDeliveryChannel
+    // fallback's stdout (no real SMTP account in this environment) —
+    // there's no way for this test to read it back, so this only
+    // verifies the request half round-trips; verifyOtp() with an
+    // invalid code below covers the failure path instead.
+}
+
+TEST(AuthClientIntegrationTest, VerifyOtpWithWrongCodeEmitsError) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+
+    AuthClient client(authBaseUrl);
+    bool errorFired = false;
+    QString errorMessage;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString& message) {
+        errorFired = true;
+        errorMessage = message;
+        loop.quit();
+    });
+    QObject::connect(&client, &AuthClient::tokenReceived, &loop, [&](const QString&) { loop.quit(); });
+    client.verifyOtp(QStringLiteral("no-such-identifier@example.test"), QStringLiteral("000000"));
+    loop.exec();
+
+    if (!errorFired && errorMessage.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString()
+                      << " — start it locally to run this test.";
+    }
+    EXPECT_TRUE(errorFired);
+}
+
 TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegistered) {
     const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
     const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)

@@ -97,6 +97,8 @@ add_library(devicehub_core
     src/ui/ModeratorsDialog.cpp
     src/ui/SearchDialog.h
     src/ui/SearchDialog.cpp
+    src/ui/LoginWindow.h
+    src/ui/LoginWindow.cpp
     src/ui/FooterBar.h
     src/ui/FooterBar.cpp
     src/ui/Theme.h
@@ -241,6 +243,7 @@ add_executable(devicehub_tests
     test/ChatViewTypingIndicatorTest.cpp
     test/ChatViewMessageHistoryTest.cpp
     test/SearchDialogTest.cpp
+    test/LoginWindowTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
     test/ChatRestClientTest.cpp

@@ -60,8 +60,18 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
         GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
     }
 
+    // Unique per run, same as login — a hardcoded email literal would
+    // collide with a previous run's row on user-service's partial
+    // unique index (issue #156) the moment this binary runs a second
+    // time against the same database, turning updateOwnProfile() into
+    // an unrelated 409 that this test (only listening for
+    // profileUpdated(), not errorOccurred()) would just silently time
+    // out on instead of failing with a clear message.
+    const QString email = login + QStringLiteral("@example.test");
+
     UserProfileClient client(userServiceUrl());
     UserProfile updated;
+    QString updateError;
     {
         QEventLoop loop;
         QTimer::singleShot(3000, &loop, &QEventLoop::quit);
@@ -69,12 +79,20 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
             updated = profile;
             loop.quit();
         });
-        client.updateOwnProfile(token, QStringLiteral("Alice"), QStringLiteral("https://example.test/alice.png"));
+        QObject::connect(&client, &UserProfileClient::errorOccurred, &loop, [&](const QString& message) {
+            updateError = message;
+            loop.quit();
+        });
+        client.updateOwnProfile(
+            token, ProfileEdits{.displayName = QStringLiteral("Alice"),
+                                 .avatarUrl = QStringLiteral("https://example.test/alice.png"), .email = email});
         loop.exec();
     }
+    ASSERT_TRUE(updateError.isEmpty()) << updateError.toStdString();
     EXPECT_EQ(updated.login, login);
     EXPECT_EQ(updated.displayName, QStringLiteral("Alice"));
     EXPECT_EQ(updated.avatarUrl, QStringLiteral("https://example.test/alice.png"));
+    EXPECT_EQ(updated.email, email);
 
     UserProfile fetched;
     {
@@ -89,6 +107,7 @@ TEST(UserProfileClientTest, UpdateOwnProfileRoundTripsThroughFetchProfile) {
     }
     EXPECT_EQ(fetched.displayName, QStringLiteral("Alice"));
     EXPECT_EQ(fetched.avatarUrl, QStringLiteral("https://example.test/alice.png"));
+    EXPECT_EQ(fetched.email, email);
 }
 
 TEST(UserProfileClientTest, PublishPublicKeyRoundTripsThroughFetchProfile) {

@@ -124,4 +124,51 @@ void AuthClient::refreshAccessToken(const QString& refreshToken) {
     });
 }
 
+void AuthClient::requestOtp(const QString& identifier) {
+    QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/otp/request"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    const QJsonObject body{{"identifier", identifier}};
+    QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, identifier]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
+            const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
+            emit errorOccurred(detail.isEmpty() ? reply->errorString() : detail);
+            return;
+        }
+        emit otpRequested(identifier);
+    });
+}
+
+void AuthClient::verifyOtp(const QString& identifier, const QString& code) {
+    QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/otp/verify"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    const QJsonObject body{{"identifier", identifier}, {"code", code}};
+    QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
+            const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
+            emit errorOccurred(detail.isEmpty() ? reply->errorString() : detail);
+            return;
+        }
+
+        const QJsonDocument response = QJsonDocument::fromJson(reply->readAll());
+        if (!response.isObject() || !response.object().contains("token")) {
+            emit errorOccurred(QStringLiteral("Malformed response from auth-service"));
+            return;
+        }
+
+        const QJsonObject object = response.object();
+        emit tokenReceived(object.value("token").toString(), object.value("refresh_token").toString(),
+                            object.value("expires_at").toVariant().toLongLong());
+    });
+}
+
 }  // namespace devicehub

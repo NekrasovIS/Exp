@@ -31,6 +31,7 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class FooterBar;
+class LoginWindow;
 class ModeratorsDialog;
 class ProfileDialog;
 class SearchDialog;
@@ -73,13 +74,18 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
-    /// Avatar clicked in the footer (issue #151) — shows a small menu
-    /// (Edit Profile / Sign Out) anchored to the avatar instead of the
-    /// account actions living only in the top-right AccountMenu popup.
+    /// LoginWindow::requestCodeRequested() — issue #156.
+    void onRequestOtpCodeClicked(const QString& identifier);
+    /// LoginWindow::verifyCodeRequested() — issue #156.
+    void onVerifyOtpCodeClicked(const QString& identifier, const QString& code);
+    /// Клик по аватару в футере (issue #151) — показывает небольшое меню
+    /// (Edit Profile / Sign Out), привязанное к аватару, а не только к
+    /// действиям аккаунта из всплывающего AccountMenu в правом верхнем
+    /// углу.
     void onAccountSettingsClicked();
-    /// Clears local auth state and returns the UI to "not signed in" —
-    /// no server-side token revocation endpoint exists yet, so this is
-    /// a client-side-only sign-out.
+    /// Очищает локальное состояние авторизации и возвращает UI в
+    /// состояние "не авторизован" — эндпоинта отзыва токена на сервере
+    /// пока не существует, поэтому это выход только на стороне клиента.
     void signOut();
 
     /// Заново запрашивает список сообществ у chat-service (ничего не
@@ -205,6 +211,7 @@ private:
     ModeratorsDialog* moderatorsDialog_ = nullptr;
     ProfileDialog* profileDialog_ = nullptr;
     SearchDialog* searchDialog_ = nullptr;
+    LoginWindow* loginWindow_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;
 };

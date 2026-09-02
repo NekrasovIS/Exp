@@ -18,6 +18,21 @@ struct UserProfile {
     /// Публичный ключ X25519 в base64 (issue #136), пуст, если
     /// пользователь ещё не опубликовал его.
     QString publicKey;
+    /// Issue #156: пуст, пока пользователь не задаст — нужен, прежде
+    /// чем можно будет использовать вход по одноразовому коду, иначе не
+    /// используется на клиенте.
+    QString email;
+};
+
+/// Поля, которые может изменить updateOwnProfile() — сгруппированы
+/// согласно правилу CLAUDE.md "предпочитать меньшее количество
+/// аргументов функций" (displayName/avatarUrl/email — три однотипных
+/// QString подряд, легко перепутать местами при вызове), вместо того
+/// чтобы дальше расширять список параметров самого updateOwnProfile().
+struct ProfileEdits {
+    QString displayName;
+    QString avatarUrl;
+    QString email;
 };
 
 /**
@@ -42,7 +57,7 @@ public:
     /// Обновляет собственный профиль вызывающего (логин берётся из
     /// @p token на стороне сервера — через этот вызов его никогда
     /// нельзя подделать).
-    void updateOwnProfile(const QString& token, const QString& displayName, const QString& avatarUrl);
+    void updateOwnProfile(const QString& token, const ProfileEdits& edits);
 
     /// Публикует публичный ключ X25519 вызывающего (issue #136) —
     /// отдельный метод, а не третий параметр у updateOwnProfile(): это
