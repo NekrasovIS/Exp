@@ -124,4 +124,38 @@ QIcon settingsIcon(const QColor& fillColor) {
     return QIcon(pixmap);
 }
 
+QIcon membersIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    constexpr qreal kHeadRadius = 2.6;
+    constexpr qreal kHeadOffsetX = 5.0;
+    constexpr qreal kHeadY = -4.0;
+    constexpr qreal kBodyHalfWidth = 3.0;
+    constexpr qreal kBodyTop = -1.0;
+    constexpr qreal kBodyBottom = 7.0;
+    constexpr qreal kBodyRadius = 2.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(kSize / 2.0, kSize / 2.0);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    // Два силуэта человека (голова + плечи) бок о бок с зазором между
+    // ними — не перекрываются, иначе на сплошной заливке без обводки
+    // они слились бы в одно пятно без видимого шва между силуэтами.
+    for (const qreal centerX : {-kHeadOffsetX, kHeadOffsetX}) {
+        painter.drawEllipse(QPointF(centerX, kHeadY), kHeadRadius, kHeadRadius);
+        painter.drawRoundedRect(
+            QRectF(centerX - kBodyHalfWidth, kBodyTop, kBodyHalfWidth * 2.0, kBodyBottom - kBodyTop), kBodyRadius,
+            kBodyRadius);
+    }
+
+    return QIcon(pixmap);
+}
+
 }  // namespace devicehub::ui_icons

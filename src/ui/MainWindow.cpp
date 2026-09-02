@@ -275,6 +275,8 @@ MainWindow::MainWindow(QWidget* parent)
         searchDialog_->raise();
         searchDialog_->activateWindow();
     });
+    connect(chatView_, &ChatView::memberListToggleRequested, this,
+            [this]() { memberListPanel_->setVisible(memberListPanel_->isHidden()); });
     connect(searchDialog_, &SearchDialog::searchRequested, this, [this](const QString& query) {
         if (selectedChannelId_ < 0 || query.trimmed().isEmpty()) {
             return;

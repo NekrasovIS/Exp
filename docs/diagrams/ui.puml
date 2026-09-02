@@ -131,6 +131,7 @@ class ChatView {
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
   +toggleChatVisibilityButton() : QPushButton*
+  +memberListToggleButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
   -updateLocalVideoVisibility()
@@ -142,6 +143,7 @@ class ChatView {
   +videoToggleRequested()
   +screenShareToggleRequested()
   +openSearchRequested()
+  +memberListToggleRequested()
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
@@ -172,6 +174,17 @@ note right of ChatView
   поэтому больше нет setText("Update") на время
   редактирования сообщения, вместо этого виден
   editingIndicatorLabel_ ("Editing message").
+
+  memberListToggleButton_ (issue #184) — иконка
+  "участники" в правом углу шапки, тот же
+  IconFactory::membersIcon() приём, что и у
+  остальных плоских иконочных кнопок. ChatView не
+  владеет MemberListPanel (та живёт в MainWindow
+  рядом с ChatView, не внутри неё), поэтому кнопка
+  только сигнализирует клик через
+  memberListToggleRequested() — MainWindow сама
+  решает, показать панель или скрыть, переключая
+  memberListPanel_->setVisible().
 end note
 
 struct ChatMessage {
@@ -354,6 +367,7 @@ package "devicehub::ui_icons" <<Rectangle>> {
     +communityAvatarIcon(label: QString) : QIcon
     +sendIcon(fillColor: QColor) : QIcon
     +settingsIcon(fillColor: QColor) : QIcon
+    +membersIcon(fillColor: QColor) : QIcon
   }
 }
 
@@ -425,7 +439,7 @@ ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteReques
 CommunitiesPanel ..> IconFactory : plusIcon()/communityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon() >
 FooterBar ..> IconFactory : settingsIcon() >
-ChatView ..> IconFactory : plusIcon()/sendIcon() >
+ChatView ..> IconFactory : plusIcon()/sendIcon()/membersIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
 MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
@@ -438,6 +452,7 @@ ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
 SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::scrollToMessage() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested()/screenShareToggleRequested() >
+ChatView ..> MainWindow : memberListToggleRequested() (issue #184) >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
 ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested() >
