@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
@@ -28,7 +29,6 @@
 #include <algorithm>
 #include <utility>
 
-#include "ui/AccountMenu.h"
 #include "ui/ChannelsPanel.h"
 #include "ui/ChatMessageRow.h"
 #include "ui/ChatView.h"
@@ -85,13 +85,19 @@ MainWindow::MainWindow(QWidget* parent)
     connect(settingsDialog_->toggleCameraButton(), &QPushButton::clicked, this, &MainWindow::onToggleCameraClicked);
     connect(settingsDialog_->toggleScreenCaptureButton(), &QPushButton::clicked, this,
             &MainWindow::onToggleScreenCaptureClicked);
-    connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
-    connect(accountMenu_->registerButton(), &QPushButton::clicked, this, &MainWindow::onRegisterClicked);
-    connect(accountMenu_->editProfileButton(), &QPushButton::clicked, this, &MainWindow::onEditProfileClicked);
     connect(loginWindow_, &LoginWindow::requestCodeRequested, this, &MainWindow::onRequestOtpCodeClicked);
     connect(loginWindow_, &LoginWindow::verifyCodeRequested, this, &MainWindow::onVerifyOtpCodeClicked);
+    connect(loginWindow_, &LoginWindow::passwordSignInRequested, this, &MainWindow::onPasswordSignInClicked);
+    connect(loginWindow_, &LoginWindow::registerRequested, this, &MainWindow::onRegisterClicked);
     connect(&authClient_, &AuthClient::otpRequested, this,
             [this](const QString& identifier) { loginWindow_->showCodeSent(identifier); });
+    // Закрытие окна входа (крестик/Escape) без завершённой авторизации
+    // означает, что показывать интерфейс не для кого — приложение
+    // завершается, а не остаётся висеть со скрытым пустым MainWindow
+    // (issue #156). После успешного входа окно скрывается через hide(),
+    // не через reject()/close(), так что в этом случае rejected() не
+    // срабатывает.
+    connect(loginWindow_, &QDialog::rejected, qApp, &QCoreApplication::quit);
     connect(footerBar_, &FooterBar::accountSettingsRequested, this, &MainWindow::onAccountSettingsClicked);
     connect(profileDialog_, &ProfileDialog::saveRequested, this,
             [this](const ProfileEdits& edits) { userProfileClient_.updateOwnProfile(lastToken_, edits); });
@@ -131,7 +137,7 @@ MainWindow::MainWindow(QWidget* parent)
             [this](const QString& token, const QString& refreshToken, qint64 expiresAt) {
                 lastToken_ = token;
                 refreshToken_ = refreshToken;
-                accountMenu_->statusLabel()->setText(tr("Token received, verifying..."));
+                loginWindow_->statusLabel()->setText(tr("Token received, verifying..."));
                 authClient_.verifyToken(token);
 
                 // Незаметно обмениваем refresh-токен незадолго до
@@ -145,15 +151,18 @@ MainWindow::MainWindow(QWidget* parent)
                 }
             });
     connect(&authClient_, &AuthClient::tokenVerified, this, [this](bool valid, const QString& subject) {
-        accountMenu_->statusLabel()->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
         currentUserLogin_ = valid ? subject : QString();
         footerBar_->setProfileText(valid ? subject : tr("Not signed in"));
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
         chatView_->setCurrentUserLogin(currentUserLogin_);
-        accountMenu_->setEditProfileEnabled(valid);
         if (valid) {
+            // Скрываем окно входа и впервые показываем интерфейс — до
+            // этого момента MainWindow ни разу не был показан (issue
+            // #156, см. main.cpp): единственное видимое окно при
+            // запуске — LoginWindow.
             loginWindow_->hide();
+            show();
             refreshCommunities();
             // Заполняет отображаемое имя в подвале (до возврата этого
             // запроса используется просто логин выше) и заранее
@@ -170,22 +179,25 @@ MainWindow::MainWindow(QWidget* parent)
                 QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/identity-keys");
             identityKeyStore_.emplace(identityKeyDir, currentUserLogin_);
             userProfileClient_.publishPublicKey(lastToken_, identityKeyStore_->publicKeyBase64());
+        } else {
+            loginWindow_->showError(tr("Token rejected"));
         }
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
-        accountMenu_->statusLabel()->setText(tr("Error: %1").arg(message));
-        // errorOccurred() is shared by every AuthClient call (issue
-        // #156's requestOtp()/verifyOtp() included) — showing it in
-        // LoginWindow too, whenever it's the window actually in front
-        // of the user, means an OTP failure doesn't only appear in the
-        // top-right AccountMenu the user isn't looking at.
+        // errorOccurred() обслуживает все вызовы AuthClient — пока окно
+        // входа ещё видно, ошибка показывается там; после входа (когда
+        // это, например, фоновый обмен refresh-токена не удался) —
+        // тостом, иначе она осталась бы никем не увиденной в скрытом
+        // LoginWindow.
         if (loginWindow_->isVisible()) {
             loginWindow_->showError(message);
+        } else {
+            showToast(tr("Auth error: %1").arg(message), ToastBanner::Variant::kError);
         }
     });
     connect(&authClient_, &AuthClient::registrationCompleted, this, [this](bool registered) {
         if (!registered) {
-            accountMenu_->statusLabel()->setText(tr("Registration failed — login already taken"));
+            loginWindow_->showError(tr("Registration failed — login already taken"));
         }
         // При успехе сразу после этого срабатывает tokenReceived()
         // (автовход) и доводит метку статуса до "Verified".
@@ -554,11 +566,14 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
 
-    // Issue #156: there's no persisted token across restarts (every
-    // launch starts signed out), so gating on "not authenticated yet"
-    // reduces to "always show this at startup" — closed again once
-    // tokenVerified(true, ...) fires above, from either this window or
-    // the top-right AccountMenu's password login.
+    // Issue #156: токен между запусками не сохраняется (каждый
+    // запуск стартует разлогиненным), так что условие "ещё не
+    // авторизован" сводится к "всегда показывать это при старте".
+    // MainWindow при этом ни разу не показывается здесь — main.cpp не
+    // вызывает show() для него, единственное видимое окно на старте
+    // это LoginWindow; сам MainWindow показывается только из
+    // обработчика tokenVerified(true, ...) выше, после успешного входа
+    // по коду или по паролю/регистрации.
     loginWindow_->show();
 }
 
@@ -573,16 +588,6 @@ void MainWindow::buildUi() {
     auto* rootLayout = new QVBoxLayout(central);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
-
-    auto* topBar = new QWidget(central);
-    topBar->setObjectName(QStringLiteral("topBar"));
-    topBar->setAttribute(Qt::WA_StyledBackground, true);
-    auto* topBarLayout = new QHBoxLayout(topBar);
-    topBarLayout->setContentsMargins(ui_theme::kSpacingMd, ui_theme::kSpacingSm, ui_theme::kSpacingMd,
-                                      ui_theme::kSpacingSm);
-    accountMenu_ = new AccountMenu(topBar);
-    topBarLayout->addStretch();
-    topBarLayout->addWidget(accountMenu_);
 
     auto* sidebar = new QWidget(central);
     sidebar->setObjectName(QStringLiteral("sidebar"));
@@ -607,7 +612,6 @@ void MainWindow::buildUi() {
 
     footerBar_ = new FooterBar(central);
 
-    rootLayout->addWidget(topBar);
     rootLayout->addLayout(middleLayout, /*stretch=*/1);
     rootLayout->addWidget(footerBar_);
 
@@ -691,14 +695,14 @@ void MainWindow::onToggleScreenCaptureClicked() {
     }
 }
 
-void MainWindow::onRequestTokenClicked() {
-    accountMenu_->statusLabel()->setText(tr("Requesting token..."));
-    authClient_.requestToken(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
+void MainWindow::onPasswordSignInClicked(const QString& login, const QString& password) {
+    loginWindow_->statusLabel()->setText(tr("Requesting token..."));
+    authClient_.requestToken(login, password);
 }
 
-void MainWindow::onRegisterClicked() {
-    accountMenu_->statusLabel()->setText(tr("Registering..."));
-    authClient_.registerUser(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
+void MainWindow::onRegisterClicked(const QString& login, const QString& password) {
+    loginWindow_->statusLabel()->setText(tr("Registering..."));
+    authClient_.registerUser(login, password);
 }
 
 void MainWindow::onSendChatMessageClicked() {
@@ -864,8 +868,13 @@ void MainWindow::signOut() {
     channelsPanel_->setCurrentUserLogin(QString());
     chatView_->setCurrentUserLogin(QString());
     footerBar_->setProfileText(tr("Not signed in"));
-    accountMenu_->setEditProfileEnabled(false);
-    accountMenu_->statusLabel()->setText(tr("Signed out"));
+
+    // Тот же гейтинг, что и на старте (issue #156) — без токена
+    // показывать интерфейс не для кого, так что он снова прячется, а
+    // LoginWindow возвращается на первый шаг и показывается заново.
+    hide();
+    loginWindow_->reset();
+    loginWindow_->show();
 }
 
 void MainWindow::refreshCommunities() {
