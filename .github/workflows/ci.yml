@@ -36,6 +36,83 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  coverage:
+    # Source-based code coverage (issue #146) — Clang-only (LLVM's
+    # -fprofile-instr-generate/-fcoverage-mapping), same Linux-runner
+    # pattern already proven for the fuzz/services jobs below. Root
+    # DeviceHub isn't included here — it would need its own Linux/Clang
+    # build of Qt6+WebRTC from vcpkg, a much bigger lift than these three
+    # services; can be added later if that's worth doing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: auth-service
+            test_binary: auth_service_tests
+          - service: user-service
+            test_binary: user_service_tests
+          - service: chat-service
+            test_binary: chat_service_tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Clang and LLVM coverage tools
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+
+      - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
+        run: sudo apt-get install -y autoconf autoconf-archive automake libtool
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-services-${{ matrix.service }}-${{ runner.os }}-${{ hashFiles(format('services/{0}/vcpkg.json', matrix.service)) }}
+          restore-keys: |
+            vcpkg-services-${{ matrix.service }}-${{ runner.os }}-
+
+      - name: Start Postgres (docker compose)
+        run: docker compose up -d --wait
+
+      - name: Configure
+        run: >
+          cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-coverage
+          -DCMAKE_CXX_COMPILER=clang++ -DDEVICEHUB_ENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build services/${{ matrix.service }}/build-coverage --parallel
+
+      - name: Test (with coverage profiling)
+        working-directory: services/${{ matrix.service }}/build-coverage
+        # ctest via gtest_discover_tests launches the test binary once per
+        # discovered TEST(); "%p" substitutes each run's own PID so the
+        # per-process .profraw files never collide with each other.
+        run: LLVM_PROFILE_FILE="%p.profraw" ctest --output-on-failure
+
+      - name: Generate coverage report
+        working-directory: services/${{ matrix.service }}/build-coverage
+        run: |
+          llvm-profdata merge -sparse *.profraw -o coverage.profdata
+          llvm-cov report ./${{ matrix.test_binary }} \
+            -instr-profile=coverage.profdata \
+            -ignore-filename-regex='(/test/|/vcpkg_installed/)'
+          llvm-cov show ./${{ matrix.test_binary }} \
+            -instr-profile=coverage.profdata \
+            -ignore-filename-regex='(/test/|/vcpkg_installed/)' \
+            -format=html -output-dir=coverage-html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: services/${{ matrix.service }}/build-coverage/coverage-html
+
   services:
     # Separate job on Linux rather than folding into build-and-test above:
     # GitHub-hosted macOS runners don't support the `services:`/`container:`
