@@ -35,27 +35,31 @@ public:
     /// Обновляет подпись/состояние кнопки Mute.
     void setMuted(bool muted);
 
-    /// Обновляет подпись кнопки видео и видимость локального превью —
-    /// та же логика, что раньше жила в ChatView::setVideoEnabled().
+    /// Обновляет подпись кнопки видео и видимость локального превью
+    /// камеры — независимо от setScreenShareEnabled() (issue #185, оба
+    /// можно включить одновременно).
     void setVideoEnabled(bool enabled);
 
-    /// Обновляет подпись кнопки демонстрации экрана и видимость
-    /// локального превью — та же логика, что раньше жила в
-    /// ChatView::setScreenShareEnabled().
+    /// То же самое, что setVideoEnabled(), для отдельного превью
+    /// демонстрации экрана (issue #185 — свой QVideoWidget, а не общий с
+    /// камерой, раз оба теперь могут быть активны одновременно).
     void setScreenShareEnabled(bool enabled);
 
     /// Список участников звонка, кроме нас самих — пустой список
     /// скрывает подпись целиком.
     void setCallParticipants(const QStringList& participants);
 
-    /// Создаёт (при первом кадре от @p peerLogin) или обновляет плитку
-    /// удалённого видео этого участника.
-    void showRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
+    /// Создаёт (при первом кадре такого рода от @p peerLogin) или
+    /// обновляет плитку удалённого видео этого участника. @p isScreenShare
+    /// различает камеру и демонстрацию экрана одного и того же участника
+    /// (issue #185) — у каждого рода своя плитка, оба могут быть видны
+    /// одновременно.
+    void showRemoteVideoFrame(const QString& peerLogin, const QImage& frame, bool isScreenShare);
 
-    /// Убирает плитку удалённого видео участника @p peerLogin, если она
-    /// была — например, когда участник перестал слать видео или вышел
-    /// из звонка.
-    void removeRemoteVideo(const QString& peerLogin);
+    /// Убирает плитку удалённого видео @p peerLogin рода @p isScreenShare,
+    /// если она была — например, когда участник перестал слать её или
+    /// вышел из звонка.
+    void removeRemoteVideo(const QString& peerLogin, bool isScreenShare);
 
     /// Сбрасывает состояние окна к «звонка нет» — вызывается
     /// MainWindow-ом при выходе из звонка, перед скрытием окна: снимает
@@ -69,6 +73,10 @@ public:
     [[nodiscard]] QPushButton* leaveCallButton() const { return leaveCallButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
+    /// Отдельное превью демонстрации экрана (issue #185) — не то же
+    /// самое, что localVideoWidget() (камера): оба могут быть видны
+    /// одновременно.
+    [[nodiscard]] QVideoWidget* localScreenShareVideoWidget() const { return localScreenShareVideoWidget_; }
 
 signals:
     void muteToggleRequested();
@@ -81,12 +89,11 @@ signals:
     void leaveCallRequested();
 
 private:
-    /// Пересчитывает видимость localVideoWidget_/окна плиток целиком —
-    /// общая логика для setVideoEnabled()/setScreenShareEnabled(), как
-    /// и раньше в ChatView (камера и демонстрация экрана в CallManager
-    /// взаимоисключающие, но оба сеттера вызываются на каждое
-    /// переключение — см. их вызовы в MainWindow).
-    void updateLocalVideoVisibility();
+    /// Пересчитывает видимость всей videoStrip_ — видна, пока показывать
+    /// есть что: локальная камера, локальная демонстрация экрана или
+    /// хотя бы одна удалённая плитка (issue #185 — все три источника
+    /// теперь независимы друг от друга, а не два взаимоисключающих).
+    void updateVideoStripVisibility();
 
     QLabel* callParticipantsLabel_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
@@ -96,6 +103,10 @@ private:
     QWidget* videoStrip_ = nullptr;
     QHBoxLayout* videoStripLayout_ = nullptr;
     QVideoWidget* localVideoWidget_ = nullptr;
+    QVideoWidget* localScreenShareVideoWidget_ = nullptr;
+    /// Ключ — "<login>#camera" или "<login>#screen" (issue #185), чтобы
+    /// камера и демонстрация экрана одного участника не делили одну
+    /// плитку.
     QHash<QString, QLabel*> remoteVideoTiles_;
     bool videoActive_ = false;
     bool screenShareActive_ = false;

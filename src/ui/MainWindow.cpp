@@ -297,9 +297,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&callManager_, &CallManager::callError, this,
             [this](const QString& message) { showToast(message, ToastBanner::Variant::kError); });
     connect(&callManager_, &CallManager::remoteVideoFrameReceived, this,
-            [this](const QString& login, const QImage& frame) { callWindow_->showRemoteVideoFrame(login, frame); });
+            [this](const QString& login, const QImage& frame, bool isScreenShare) {
+                callWindow_->showRemoteVideoFrame(login, frame, isScreenShare);
+            });
     connect(&callManager_, &CallManager::remoteVideoTrackRemoved, this,
-            [this](const QString& login) { callWindow_->removeRemoteVideo(login); });
+            [this](const QString& login, bool isScreenShare) { callWindow_->removeRemoteVideo(login, isScreenShare); });
 
     connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
         if (lastToken_.isEmpty()) {
@@ -550,14 +552,15 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&camera_, &CameraDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { callWindow_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
     // Тот же рефакторинг "владеет единственным sink, ретранслирует", что
-    // и у CameraDevice (issue #112) — демонстрация экрана и видео с
-    // камеры используют одну и ту же плитку/трек локального превью,
-    // взаимоисключающе (CallManager::enableScreenShare() останавливает
-    // камеру и наоборот), поэтому оба разветвляются на неё одинаково.
+    // и у CameraDevice (issue #112). Демонстрация экрана и видео с
+    // камеры — независимые треки с issue #185, у каждого своя плитка
+    // локального превью (localScreenShareVideoWidget() против
+    // localVideoWidget()), а не общая.
     connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { settingsDialog_->screenPreview()->videoSink()->setVideoFrame(frame); });
-    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
-            [this](const QVideoFrame& frame) { callWindow_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
+    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this, [this](const QVideoFrame& frame) {
+        callWindow_->localScreenShareVideoWidget()->videoSink()->setVideoFrame(frame);
+    });
 
     // Issue #156: there's no persisted token across restarts (every
     // launch starts signed out), so gating on "not authenticated yet"
@@ -797,12 +800,9 @@ void MainWindow::onVideoToggleClicked() {
         const QCameraDevice cameraDevice = settingsDialog_->cameraCombo()->currentData().value<QCameraDevice>();
         callManager_.enableVideo(cameraDevice);
     }
-    // enableVideo() мог только что отключить демонстрацию экрана (видео
-    // с камеры и демонстрация экрана в CallManager взаимоисключающие,
-    // issue #112) — обновляем обе кнопки переключения/общее локальное
-    // превью вместе.
+    // Независимо от screenShareEnabled_ (issue #185 — оба трека
+    // независимы), поэтому обновляем только состояние видео.
     callWindow_->setVideoEnabled(callManager_.videoEnabled());
-    callWindow_->setScreenShareEnabled(callManager_.screenShareEnabled());
 }
 
 void MainWindow::onScreenShareToggleClicked() {
@@ -814,7 +814,6 @@ void MainWindow::onScreenShareToggleClicked() {
     } else {
         showToast(tr("No screen available"), ToastBanner::Variant::kError);
     }
-    callWindow_->setVideoEnabled(callManager_.videoEnabled());
     callWindow_->setScreenShareEnabled(callManager_.screenShareEnabled());
 }
 

@@ -16,6 +16,13 @@ namespace devicehub {
 
 namespace {
 constexpr int kVideoTileSize = 160;
+
+/// Ключ remoteVideoTiles_ для (@p peerLogin, @p isScreenShare) — камера
+/// и демонстрация экрана одного участника (issue #185) получают разные
+/// плитки, а не делят одну.
+QString remoteTileKey(const QString& peerLogin, bool isScreenShare) {
+    return peerLogin + (isScreenShare ? QStringLiteral("#screen") : QStringLiteral("#camera"));
+}
 }  // namespace
 
 CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
@@ -75,6 +82,20 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     localVideoWidget_->setMinimumSize(kVideoTileSize, kVideoTileSize);
     localVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     videoStripLayout_->insertWidget(0, localVideoWidget_);
+    localVideoWidget_->setVisible(false);
+
+    // Отдельная плитка для локального превью демонстрации экрана (issue
+    // #185) — камера и демонстрация экрана теперь независимы и могут
+    // быть видны одновременно, поэтому один общий QVideoWidget на оба
+    // источника больше не подходит (кто последний прислал кадр, тот и
+    // виден).
+    localScreenShareVideoWidget_ = new QVideoWidget(videoStrip_);
+    localScreenShareVideoWidget_->setObjectName(QStringLiteral("localScreenShareVideoWidget"));
+    localScreenShareVideoWidget_->setMinimumSize(kVideoTileSize, kVideoTileSize);
+    localScreenShareVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    videoStripLayout_->insertWidget(1, localScreenShareVideoWidget_);
+    localScreenShareVideoWidget_->setVisible(false);
+
     videoStrip_->setVisible(false);
 
     rootLayout->addLayout(controlsRow);
@@ -89,24 +110,19 @@ void CallWindow::setMuted(bool muted) {
 void CallWindow::setVideoEnabled(bool enabled) {
     videoToggleButton_->setText(enabled ? tr("Disable Video") : tr("Enable Video"));
     videoActive_ = enabled;
-    updateLocalVideoVisibility();
+    localVideoWidget_->setVisible(enabled);
+    updateVideoStripVisibility();
 }
 
 void CallWindow::setScreenShareEnabled(bool enabled) {
     screenShareToggleButton_->setText(enabled ? tr("Stop Sharing") : tr("Share Screen"));
     screenShareActive_ = enabled;
-    updateLocalVideoVisibility();
+    localScreenShareVideoWidget_->setVisible(enabled);
+    updateVideoStripVisibility();
 }
 
-void CallWindow::updateLocalVideoVisibility() {
-    // Камера и демонстрация экрана в CallManager взаимоисключающие, но
-    // MainWindow вызывает оба setVideoEnabled()/setScreenShareEnabled()
-    // после каждого переключения — см. doc-комментарий у прежнего
-    // ChatView::updateLocalVideoVisibility(), логика перенесена без
-    // изменений.
-    const bool anyActive = videoActive_ || screenShareActive_;
-    localVideoWidget_->setVisible(anyActive);
-    videoStrip_->setVisible(anyActive || !remoteVideoTiles_.isEmpty());
+void CallWindow::updateVideoStripVisibility() {
+    videoStrip_->setVisible(videoActive_ || screenShareActive_ || !remoteVideoTiles_.isEmpty());
 }
 
 void CallWindow::setCallParticipants(const QStringList& participants) {
@@ -118,8 +134,9 @@ void CallWindow::setCallParticipants(const QStringList& participants) {
     callParticipantsLabel_->setVisible(true);
 }
 
-void CallWindow::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame) {
-    QLabel* tile = remoteVideoTiles_.value(peerLogin, nullptr);
+void CallWindow::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame, bool isScreenShare) {
+    const QString key = remoteTileKey(peerLogin, isScreenShare);
+    QLabel* tile = remoteVideoTiles_.value(key, nullptr);
     if (tile == nullptr) {
         tile = new QLabel(videoStrip_);
         tile->setObjectName(QStringLiteral("remoteVideoTile"));
@@ -127,21 +144,19 @@ void CallWindow::showRemoteVideoFrame(const QString& peerLogin, const QImage& fr
         tile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         tile->setScaledContents(true);
         videoStripLayout_->addWidget(tile);
-        remoteVideoTiles_.insert(peerLogin, tile);
+        remoteVideoTiles_.insert(key, tile);
     }
     tile->setPixmap(QPixmap::fromImage(frame));
     videoStrip_->setVisible(true);
 }
 
-void CallWindow::removeRemoteVideo(const QString& peerLogin) {
-    QLabel* tile = remoteVideoTiles_.take(peerLogin);
+void CallWindow::removeRemoteVideo(const QString& peerLogin, bool isScreenShare) {
+    QLabel* tile = remoteVideoTiles_.take(remoteTileKey(peerLogin, isScreenShare));
     if (tile == nullptr) {
         return;
     }
     delete tile;
-    if (remoteVideoTiles_.isEmpty() && !localVideoWidget_->isVisible()) {
-        videoStrip_->setVisible(false);
-    }
+    updateVideoStripVisibility();
 }
 
 void CallWindow::resetForNewCall() {

@@ -120,8 +120,8 @@ class CallWindow {
   +setVideoEnabled(enabled: bool)
   +setScreenShareEnabled(enabled: bool)
   +setCallParticipants(participants: QStringList)
-  +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
-  +removeRemoteVideo(peerLogin: QString)
+  +showRemoteVideoFrame(peerLogin: QString, frame: QImage, isScreenShare: bool)
+  +removeRemoteVideo(peerLogin: QString, isScreenShare: bool)
   +resetForNewCall()
   +muteToggleButton() : QPushButton*
   +videoToggleButton() : QPushButton*
@@ -129,7 +129,8 @@ class CallWindow {
   +leaveCallButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
   +localVideoWidget() : QVideoWidget*
-  -updateLocalVideoVisibility()
+  +localScreenShareVideoWidget() : QVideoWidget*
+  -updateVideoStripVisibility()
   .. signals ..
   +muteToggleRequested()
   +videoToggleRequested()
@@ -144,14 +145,21 @@ note right of CallWindow
   область внутри ChatView. MainWindow
   show()/hide() её вместе с фактическим входом/
   выходом из звонка (см. leaveCallIfActive()).
-  Видео (локальное превью + удалённые плитки) —
-  тот же код, что раньше жил в ChatView (issue
-  #91/#153), перенесён без изменения логики.
   leaveCallRequested() и ChatView::
   callToggleRequested() (когда уже в звонке)
   подключены к одному и тому же слоту
   MainWindow::onCallToggleClicked() — оба
   означают "выйти из звонка".
+
+  Камера и демонстрация экрана больше не
+  взаимоисключают друг друга (тот же issue #185,
+  на уровне CallManager — см. chat.puml):
+  отдельная плитка локального превью на каждую
+  (localVideoWidget()/localScreenShareVideoWidget()),
+  и remoteVideoTiles_ теперь ключуется по
+  "<login>#camera"/"<login>#screen", а не просто
+  по login — камера и демонстрация экрана одного
+  участника получают разные плитки.
 end note
 
 struct ChatMessage {

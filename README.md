@@ -563,7 +563,7 @@ RTTI, поэтому у экспортируемых классов вроде `
 не реагируя на собственное уведомление WebRTC `OnRenegotiationNeeded()`
 (он специально оставлен no-op'ом). `PeerConnection`, созданный уже
 после включения видео, получает трек как часть своего собственного
-исходного offer/answer (`attachVideoTrack()`, вызывается и из
+исходного offer/answer (`attachCameraTrack()`, вызывается и из
 `ensurePeerConnection()` тоже). После первого добавления трек больше
 никогда не удаляется — `enableVideo()`/`disableVideo()` только
 переключают `webrtc::VideoTrackInterface::set_enabled()`, тем же
@@ -617,17 +617,22 @@ fan-out кадров камеры, что уже используется для
 декодирования WebRTC), так что перед `emit remoteVideoFrameReceived()`
 тот же hop через `invokeMethod`, что и везде в этом классе.
 
-Демонстрация экрана в звонках (issue #112) переиспользует ровно тот же
-общий видео-трек, что и камера, а не заводит второй: `enableVideo()`/
-`enableScreenShare()` взаимоисключающие (включение одного сначала
-выключает другое) и просто переключают, откуда `CallVideoTrackSource`
-берёт кадры (`camera_` vs `screenCapture_`), заодно выставляя
-`is_screencast()` через новый `CallVideoTrackSource::setIsScreencast()`
-(поле — `std::atomic<bool>`, пишется из GUI-потока, читается WebRTC
-откуда угодно). Проще второго трека (не нужна повторная
-renegotiation/attach на каждого пира при переключении), ценой того,
-что одновременно показать и камеру, и экран нельзя — осознанное
-упрощение первой версии, не ограничение самого WebRTC. `ScreenCaptureDevice`
+Демонстрация экрана в звонках (issue #112) поначалу переиспользовала
+один общий видео-трек с камерой, взаимоисключающе (включение одного
+сначала выключало другое) — issue #185 разделил это на два полностью
+независимых `CallVideoTrackSource`/видеотрека (`cameraTrackSource_`/
+`localCameraTrack_` и `screenShareTrackSource_`/`localScreenShareTrack_`
+в `CallManager`), каждый со своим `is_screencast()`, зафиксированным
+один раз при создании (`CallVideoTrackSource`'s конструктор, а не
+переключаемым на лету через `setIsScreencast()` — раз источники теперь
+не делятся между камерой и экраном, переключать стало нечего).
+`enableVideo()`/`enableScreenShare()` теперь можно включать
+одновременно — платой стала повторная renegotiation/attach на каждого
+пира при первом использовании каждого трека (было бесплатно, пока трек
+был один), и на приёмной стороне — различение камеры/экрана одного и
+того же участника по id трека (`kCameraTrackId`/`kScreenShareTrackId`,
+доходит через msid в SDP), чтобы `remoteVideoFrameReceived()` могла
+сообщить UI, какая это из двух плиток. `ScreenCaptureDevice`
 получил тот же рефакторинг, что раньше `CameraDevice` (issue #72):
 владеет единственным источником кадров и рассылает их через
 `frameAvailable()` всем подписчикам сразу (превью в Settings и

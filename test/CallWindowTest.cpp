@@ -47,11 +47,27 @@ TEST(CallWindowTest, SetScreenShareEnabledTogglesButtonLabelAndLocalPreviewVisib
 
     window.setScreenShareEnabled(true);
     EXPECT_EQ(window.screenShareToggleButton()->text(), QStringLiteral("Stop Sharing"));
-    EXPECT_FALSE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 
     window.setScreenShareEnabled(false);
     EXPECT_EQ(window.screenShareToggleButton()->text(), QStringLiteral("Share Screen"));
+    EXPECT_TRUE(window.localScreenShareVideoWidget()->isHidden());
+}
+
+TEST(CallWindowTest, VideoAndScreenShareLocalPreviewsAreIndependent) {
+    // issue #185: камера и демонстрация экрана больше не взаимоисключают
+    // друг друга — включение одной не трогает видимость другой, и обе
+    // локальные плитки могут быть видны одновременно.
+    CallWindow window;
+
+    window.setVideoEnabled(true);
+    window.setScreenShareEnabled(true);
+    EXPECT_FALSE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
+
+    window.setVideoEnabled(false);
     EXPECT_TRUE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 }
 
 TEST(CallWindowTest, SetCallParticipantsShowsJoinedNames) {
@@ -80,23 +96,44 @@ TEST(CallWindowTest, SetCallParticipantsWithEmptyListHidesLabel) {
 TEST(CallWindowTest, ShowRemoteVideoFrameCreatesATileFindableByObjectName) {
     CallWindow window;
 
-    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32));
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
 
     EXPECT_NE(window.findChild<QLabel*>(QStringLiteral("remoteVideoTile")), nullptr);
 }
 
+TEST(CallWindowTest, CameraAndScreenShareFromTheSamePeerGetSeparateTiles) {
+    // issue #185: удалённая камера и демонстрация экрана одного и того
+    // же участника — два независимых видеотрека, каждый со своей
+    // плиткой, а не общей.
+    CallWindow window;
+
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/true);
+
+    EXPECT_EQ(window.findChildren<QLabel*>(QStringLiteral("remoteVideoTile")).size(), 2);
+
+    window.removeRemoteVideo(QStringLiteral("alice"), /*isScreenShare=*/true);
+
+    EXPECT_EQ(window.findChildren<QLabel*>(QStringLiteral("remoteVideoTile")).size(), 1);
+}
+
 TEST(CallWindowTest, RemoveRemoteVideoDropsThatParticipantsTile) {
     CallWindow window;
-    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32));
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
 
-    window.removeRemoteVideo(QStringLiteral("alice"));
+    window.removeRemoteVideo(QStringLiteral("alice"), /*isScreenShare=*/false);
 
     EXPECT_EQ(window.findChild<QLabel*>(QStringLiteral("remoteVideoTile")), nullptr);
 }
 
 TEST(CallWindowTest, ResetForNewCallClearsRemoteTilesAndParticipants) {
     CallWindow window;
-    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32));
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
     window.setCallParticipants({QStringLiteral("alice")});
 
     window.resetForNewCall();
