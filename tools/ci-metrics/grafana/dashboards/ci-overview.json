@@ -1,0 +1,123 @@
+{
+  "title": "CI overview — tests, coverage, sanitizers",
+  "uid": "ci-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "time": { "from": "now-30d", "to": "now" },
+  "refresh": "",
+  "tags": ["ci", "devicehub"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Failed tests per job",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "spanNulls": true, "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT r.created_at AS \"time\", j.tests_failed AS value, j.job_name AS metric FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.tests_failed IS NOT NULL AND $__timeFilter(r.created_at) ORDER BY 1",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Code coverage % (lines) by service",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "drawStyle": "line", "spanNulls": true, "fillOpacity": 15 }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT r.created_at AS \"time\", c.line_coverage_percent AS value, c.service AS metric FROM ci_coverage c JOIN ci_runs r ON r.run_id = c.run_id WHERE $__timeFilter(r.created_at) ORDER BY 1",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Sanitizer pass/fail by service",
+      "type": "state-timeline",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 0, "fillOpacity": 100 },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "fail", "color": "red" }, "1": { "text": "pass", "color": "green" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT r.created_at AS \"time\", (j.service || ' / ' || j.sanitizer) AS metric, CASE j.conclusion WHEN 'success' THEN 1 ELSE 0 END AS value FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.kind = 'sanitizers' AND $__timeFilter(r.created_at) ORDER BY 1",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Most recent CI run — job status",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "conclusion" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "success": { "text": "✅ pass", "color": "green" }, "failure": { "text": "❌ fail", "color": "red" } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "SELECT j.job_name, j.kind, j.service, j.sanitizer, j.conclusion, j.tests_total, j.tests_failed, j.duration_seconds FROM ci_job_results j WHERE j.run_id = (SELECT run_id FROM ci_runs ORDER BY created_at DESC LIMIT 1) ORDER BY j.kind, j.service NULLS FIRST, j.sanitizer",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
