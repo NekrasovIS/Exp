@@ -30,15 +30,29 @@ class CommunitiesPanel {
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +refreshButton() : QPushButton*
+  +connectDialog() : CommunityConnectDialog*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   .. signals ..
   +createRequested(name: QString)
   +renameRequested(id: int64, newName: QString)
   +deleteRequested(id: int64)
-  +joinRequested(id: int64)
+  +joinByCodeRequested(code: QString)
+  +regenerateInviteCodeRequested(id: int64)
   +communitySelected(id: int64)
   +manageModeratorsRequested(id: int64, name: QString)
+}
+
+class CommunityConnectDialog {
+  +inviteCodeEdit() : QLineEdit*
+  +joinButton() : QPushButton*
+  +nameEdit() : QLineEdit*
+  +createButton() : QPushButton*
+  -onJoinClicked()
+  -onCreateClicked()
+  .. signals ..
+  +joinRequested(code: QString)
+  +createRequested(name: QString)
 }
 
 class ChannelsPanel {
@@ -374,6 +388,7 @@ MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> DesktopNotifier : notifyMessage() (from\nmessageReceived() handler) >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
+MainWindow ..> ChatRestClient : joinedCommunityByCode()\ninviteCodeRegenerated() (issue #186) >
 MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
@@ -384,8 +399,10 @@ MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
 AccountMenu ..> MainWindow : editProfileButton().clicked() >
 ProfileDialog ..> MainWindow : saveRequested() >
 
-CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
+CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinByCodeRequested()\nregenerateInviteCodeRequested()/communitySelected() >
 CommunitiesPanel ..> MainWindow : manageModeratorsRequested() (issue #114) >
+CommunitiesPanel *-- CommunityConnectDialog : owns ("+" dialog, issue #186)
+CommunityConnectDialog ..> CommunitiesPanel : joinRequested()/createRequested() >
 ModeratorsDialog ..> MainWindow : promoteRequested()/demoteRequested() >
 MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestClient signals) >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >

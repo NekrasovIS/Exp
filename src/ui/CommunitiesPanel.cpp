@@ -1,6 +1,8 @@
 #include "ui/CommunitiesPanel.h"
 
+#include <QClipboard>
 #include <QColor>
+#include <QGuiApplication>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QListWidget>
@@ -11,6 +13,7 @@
 #include <QSize>
 #include <QVBoxLayout>
 
+#include "ui/CommunityConnectDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/Theme.h"
 
@@ -20,6 +23,12 @@ namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kOwnerRole = Qt::UserRole + 1;
 constexpr int kNameRole = Qt::UserRole + 2;
+/// Issue #186 — только members-scope listing (см. doc-комментарий
+/// ChatRestClient::listCommunities()) заполняет это непустым значением;
+/// для остальных случаев (не должно происходить, раз этот виджет
+/// вообще получает только "мои сообщества") — пустая строка, тот же
+/// сигнал "нет кода", что и у ChatItem::inviteCode.
+constexpr int kInviteCodeRole = Qt::UserRole + 3;
 constexpr int kRailWidth = 64;
 constexpr int kIconButtonSize = 28;
 constexpr int kIconButtonIconSize = 14;
@@ -71,6 +80,10 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(listWidget_, /*stretch=*/1);
     layout->addWidget(addButton_, /*stretch=*/0, Qt::AlignHCenter);
 
+    connectDialog_ = new CommunityConnectDialog(this);
+    connect(connectDialog_, &CommunityConnectDialog::joinRequested, this, &CommunitiesPanel::joinByCodeRequested);
+    connect(connectDialog_, &CommunityConnectDialog::createRequested, this, &CommunitiesPanel::createRequested);
+
     connect(addButton_, &QPushButton::clicked, this, &CommunitiesPanel::showAddDialog);
     connect(listWidget_, &QListWidget::customContextMenuRequested, this, &CommunitiesPanel::showContextMenu);
     connect(listWidget_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
@@ -87,6 +100,7 @@ void CommunitiesPanel::setCommunities(const QList<ChatItem>& communities) {
         item->setData(kIdRole, community.id);
         item->setData(kOwnerRole, community.ownerLogin);
         item->setData(kNameRole, community.name);
+        item->setData(kInviteCodeRole, community.inviteCode);
     }
 }
 
@@ -104,12 +118,9 @@ void CommunitiesPanel::setCurrentUserLogin(const QString& login) {
 }
 
 void CommunitiesPanel::showAddDialog() {
-    bool ok = false;
-    const QString name =
-        QInputDialog::getText(this, tr("New community"), tr("Community name:"), QLineEdit::Normal, QString(), &ok);
-    if (ok && !name.trimmed().isEmpty()) {
-        emit createRequested(name.trimmed());
-    }
+    connectDialog_->show();
+    connectDialog_->raise();
+    connectDialog_->activateWindow();
 }
 
 void CommunitiesPanel::showContextMenu(const QPoint& pos) {
@@ -120,10 +131,17 @@ void CommunitiesPanel::showContextMenu(const QPoint& pos) {
 
     const qint64 id = item->data(kIdRole).toLongLong();
     const QString name = item->data(kNameRole).toString();
+    const QString inviteCode = item->data(kInviteCodeRole).toString();
     const bool isOwner = !currentUserLogin_.isEmpty() && item->data(kOwnerRole).toString() == currentUserLogin_;
 
     QMenu menu(this);
-    QAction* joinAction = menu.addAction(tr("Join"));
+    // Копирование доступно любому участнику (issue #186) — сервер уже
+    // отдаёт код только состоящим в сообществе (GET /communities/mine),
+    // так что делиться им дальше — не привилегия одного владельца.
+    // Перевыпуск, наоборот, только владельцу — он делает старый код
+    // недействительным для всех сразу.
+    QAction* copyInviteCodeAction = !inviteCode.isEmpty() ? menu.addAction(tr("Copy Invite Code")) : nullptr;
+    QAction* regenerateInviteCodeAction = isOwner ? menu.addAction(tr("Regenerate Invite Code")) : nullptr;
     QAction* renameAction = isOwner ? menu.addAction(tr("Rename…")) : nullptr;
     QAction* deleteAction = isOwner ? menu.addAction(tr("Delete")) : nullptr;
     QAction* manageModeratorsAction = isOwner ? menu.addAction(tr("Manage Moderators…")) : nullptr;
@@ -133,8 +151,10 @@ void CommunitiesPanel::showContextMenu(const QPoint& pos) {
         return;
     }
 
-    if (chosen == joinAction) {
-        emit joinRequested(id);
+    if (chosen == copyInviteCodeAction) {
+        QGuiApplication::clipboard()->setText(inviteCode);
+    } else if (chosen == regenerateInviteCodeAction) {
+        emit regenerateInviteCodeRequested(id);
     } else if (chosen == renameAction) {
         bool ok = false;
         const QString newName =

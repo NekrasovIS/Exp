@@ -10,12 +10,22 @@ class QPushButton;
 
 namespace devicehub {
 
+class CommunityConnectDialog;
+
 /**
  * @brief Узкая иконочная полоса в самом левом краю боковой панели:
  *        по одному значку-аватару на сообщество (первая буква, зелёный
- *        градиент), кнопка обновления сверху и кнопка "+" внизу для
- *        создания нового; правый клик — для присоединения/
- *        переименования/удаления.
+ *        градиент), кнопка обновления сверху и кнопка "+" внизу,
+ *        открывающая CommunityConnectDialog (присоединение по коду
+ *        приглашения или создание нового, issue #186); правый клик —
+ *        для переименования/удаления/копирования кода приглашения.
+ *
+ * Список (issue #186) — только сообщества, в которых уже состоит
+ * вошедший пользователь, а не все существующие: подключиться к новому
+ * теперь можно только по коду приглашения, не выбором из общего
+ * списка — отсюда и переход от "Join" в контекстном меню (нужен был
+ * общий список, чтобы вообще увидеть, что присоединять) к
+ * CommunityConnectDialog.
  *
  * Чистое представление — не владеет никаким сетевым состоянием.
  * MainWindow передаёт ей текущий список сообществ и логин вошедшего
@@ -47,12 +57,20 @@ public:
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
     [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
+    [[nodiscard]] CommunityConnectDialog* connectDialog() const { return connectDialog_; }
 
 signals:
     void createRequested(const QString& name);
     void renameRequested(qint64 id, const QString& newName);
     void deleteRequested(qint64 id);
-    void joinRequested(qint64 id);
+    /// Клик по "Join" в CommunityConnectDialog (issue #186) — заменяет
+    /// прежний joinRequested(qint64 id): до ответа сервера вызывающая
+    /// сторона знает только код, не id сообщества.
+    void joinByCodeRequested(const QString& code);
+    /// Клик по "Regenerate Invite Code" в контекстном меню (issue #186,
+    /// только для владельца — прежний код @p id сразу перестаёт
+    /// работать).
+    void regenerateInviteCodeRequested(qint64 id);
     /// Клик по "Manage Moderators…" (только для владельца, issue #114)
     /// — @p name позволяет MainWindow озаглавить диалог без отдельного
     /// поиска.
@@ -66,6 +84,7 @@ private:
     QListWidget* listWidget_ = nullptr;
     QPushButton* addButton_ = nullptr;
     QPushButton* refreshButton_ = nullptr;
+    CommunityConnectDialog* connectDialog_ = nullptr;
     QString currentUserLogin_;
 };
 

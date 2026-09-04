@@ -307,8 +307,15 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QString& newName) { chatRestClient_.renameCommunity(lastToken_, id, newName); });
     connect(communitiesPanel_, &CommunitiesPanel::deleteRequested, this,
             [this](qint64 id) { chatRestClient_.deleteCommunity(lastToken_, id); });
-    connect(communitiesPanel_, &CommunitiesPanel::joinRequested, this,
-            [this](qint64 id) { chatRestClient_.joinCommunity(lastToken_, id); });
+    connect(communitiesPanel_, &CommunitiesPanel::joinByCodeRequested, this, [this](const QString& code) {
+        if (lastToken_.isEmpty()) {
+            showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+            return;
+        }
+        chatRestClient_.joinCommunityByCode(lastToken_, code);
+    });
+    connect(communitiesPanel_, &CommunitiesPanel::regenerateInviteCodeRequested, this,
+            [this](qint64 id) { chatRestClient_.regenerateInviteCode(lastToken_, id); });
     connect(communitiesPanel_, &CommunitiesPanel::communitySelected, this, [this](qint64 id) {
         selectedCommunityId_ = id;
         closeChatView();
@@ -343,11 +350,28 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(chatView_, &ChatView::createChannelRequested, channelsPanel_->addButton(), &QPushButton::click);
 
-    connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
-        showToast(tr("Community '%1' created").arg(name), ToastBanner::Variant::kSuccess);
-        pendingCommunitySelection_ = id;
-        refreshCommunities();
-    });
+    connect(&chatRestClient_, &ChatRestClient::communityCreated, this,
+            [this](qint64 id, const QString& name, const QString& inviteCode) {
+                // Код приглашения показан сразу здесь (issue #186) —
+                // тем не менее доступен и позже через "Copy Invite Code"
+                // в контекстном меню сообщества, тост не единственный
+                // способ его увидеть.
+                showToast(tr("Community '%1' created — invite code: %2").arg(name, inviteCode),
+                           ToastBanner::Variant::kSuccess);
+                pendingCommunitySelection_ = id;
+                refreshCommunities();
+            });
+    connect(&chatRestClient_, &ChatRestClient::joinedCommunityByCode, this,
+            [this](qint64 id, const QString& name) {
+                showToast(tr("Joined community '%1'").arg(name), ToastBanner::Variant::kSuccess);
+                pendingCommunitySelection_ = id;
+                refreshCommunities();
+            });
+    connect(&chatRestClient_, &ChatRestClient::inviteCodeRegenerated, this,
+            [this](qint64, const QString& inviteCode) {
+                showToast(tr("New invite code: %1").arg(inviteCode), ToastBanner::Variant::kSuccess);
+                refreshCommunities();
+            });
     connect(&chatRestClient_, &ChatRestClient::communitiesListed, this, [this](const QList<ChatItem>& communities) {
         communities_ = communities;
         communitiesPanel_->setCommunities(communities_);

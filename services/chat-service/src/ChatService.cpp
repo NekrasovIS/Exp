@@ -12,6 +12,19 @@ std::vector<Community> ChatService::listCommunities() {
     return repository_.listCommunities();
 }
 
+std::vector<Community> ChatService::listCommunitiesForMember(const std::string& login) {
+    return repository_.listCommunitiesForMember(login);
+}
+
+std::optional<Community> ChatService::findCommunityByInviteCode(const std::string& code) {
+    return repository_.findCommunityByInviteCode(code);
+}
+
+RegenerateInviteCodeResult ChatService::regenerateInviteCode(std::int64_t communityId,
+                                                               const std::string& requesterLogin) {
+    return repository_.regenerateInviteCode(communityId, requesterLogin);
+}
+
 MutationResult ChatService::renameCommunity(std::int64_t id, const std::string& newName,
                                              const std::string& requesterLogin) {
     return repository_.renameCommunity(id, newName, requesterLogin);
