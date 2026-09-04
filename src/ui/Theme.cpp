@@ -68,6 +68,23 @@ QString discordDarkStyleSheet() {
             font-weight: 600;
         }
 
+        /* Issue #188: превью изображения-вложения — тот же приглушённый
+           текст, что и mutedDescription, пока это ещё плейсхолдер "Loading
+           preview…", плюс рамка/скругление, читаемые и вокруг уже
+           загруженной картинки как лёгкая рамка кадра. */
+        QLabel#chatAttachmentPreview {
+            color: #8b939c;
+            font-size: 12px;
+            border: 1px solid #2a2d31;
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        QLabel#chatAttachmentVideoPlaceholder {
+            color: #8b939c;
+            font-size: 12px;
+        }
+
         QScrollArea#chatMessagesScrollArea, QScrollArea#chatMessagesScrollArea > QWidget > QWidget,
         QWidget#chatMessagesContainer {
             background: transparent;

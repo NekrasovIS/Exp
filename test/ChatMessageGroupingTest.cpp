@@ -46,5 +46,26 @@ TEST(ChatMessageGroupingTest, DoesNotGroupWhenATimestampFailsToParse) {
     EXPECT_FALSE(chat_message_grouping::shouldGroupWithPrevious(previous, current));
 }
 
+TEST(ChatMessageGroupingTest, SameCalendarDayIsNotADifferentDay) {
+    const ChatMessage previous{.sentAt = QStringLiteral("2026-08-05 09:00:00")};
+    const ChatMessage current{.sentAt = QStringLiteral("2026-08-05 23:59:59")};
+    EXPECT_FALSE(chat_message_grouping::isDifferentCalendarDay(previous, current));
+}
+
+TEST(ChatMessageGroupingTest, CrossingMidnightIsADifferentDay) {
+    const ChatMessage previous{.sentAt = QStringLiteral("2026-08-05 23:59:59")};
+    const ChatMessage current{.sentAt = QStringLiteral("2026-08-06 00:00:01")};
+    EXPECT_TRUE(chat_message_grouping::isDifferentCalendarDay(previous, current));
+}
+
+TEST(ChatMessageGroupingTest, UnparseableTimestampCountsAsADifferentDay) {
+    // issue #188: в отличие от shouldGroupWithPrevious(), здесь "не
+    // уверены" означает true, а не false — лучше показать лишний
+    // разделитель даты, чем незаметно скрыть настоящую границу дня.
+    const ChatMessage previous{.sentAt = QStringLiteral("garbage")};
+    const ChatMessage current{.sentAt = QStringLiteral("2026-08-05 09:00:01")};
+    EXPECT_TRUE(chat_message_grouping::isDifferentCalendarDay(previous, current));
+}
+
 }  // namespace
 }  // namespace devicehub

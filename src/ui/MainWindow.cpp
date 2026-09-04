@@ -230,6 +230,14 @@ MainWindow::MainWindow(QWidget* parent)
                 pendingDownloadFilenames_.insert(attachmentId, filename);
                 chatRestClient_.downloadAttachment(lastToken_, attachmentId);
             });
+    // Issue #188: та же ChatRestClient::downloadAttachment(), что и
+    // "Download" выше, только результат идёт в ChatView::
+    // setAttachmentPreview() вместо диалога "сохранить на диск" —
+    // attachmentDownloaded() ниже различает эти два случая по тому, есть
+    // ли @p attachmentId в pendingDownloadFilenames_ (заполняется только
+    // настоящим кликом по "Download").
+    connect(chatView_, &ChatView::previewAttachmentRequested, this,
+            [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
     connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
             [this](qint64 id, const QString& /*filename*/) {
                 chatClient_.sendMessage(chatView_->messageEdit()->text(), id);
@@ -237,6 +245,17 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
             [this](qint64 attachmentId, const QByteArray& data) {
+                if (!pendingDownloadFilenames_.contains(attachmentId)) {
+                    // Фоновая загрузка превью изображения (issue #188),
+                    // не клик по "Download" — decode напрямую в строку
+                    // сообщения, никакого диалога сохранения. Пустой
+                    // QImage() при неудачном decode — setAttachmentPreview()
+                    // сама показывает "Preview unavailable" в этом случае.
+                    QImage image;
+                    image.loadFromData(data);
+                    chatView_->setAttachmentPreview(attachmentId, image);
+                    return;
+                }
                 const QString filename = pendingDownloadFilenames_.take(attachmentId);
                 const QString savePath =
                     QFileDialog::getSaveFileName(this, tr("Save Attachment"), filename.isEmpty() ? QString() : filename);

@@ -5,6 +5,7 @@
 
 #include <optional>
 
+class QImage;
 class QLabel;
 class QResizeEvent;
 
@@ -29,6 +30,18 @@ struct ChatMessage {
     qint64 attachmentId = -1;
     QString attachmentFilename;
 };
+
+/// True, если @p filename оканчивается на одно из известных расширений
+/// растровых изображений (issue #188) — ChatView запрашивает превью
+/// только для таких вложений, не для произвольных файлов. Регистр
+/// расширения не важен.
+[[nodiscard]] bool isImageAttachment(const QString& filename);
+
+/// То же самое, для видео (issue #188) — только чтобы показать значок-
+/// заглушку вместо кнопки "Download" в бабле, без реальной загрузки
+/// файла (в отличие от изображений, у видео нет дешёвого способа
+/// получить превью-кадр без скачивания и декодирования всего файла).
+[[nodiscard]] bool isVideoAttachment(const QString& filename);
 
 /**
  * @brief Одна строка в списке сообщений ChatView, оформленная в виде
@@ -63,6 +76,15 @@ public:
     /// ChatClient::messageEdited() срабатывает для сообщения этой строки.
     void updateBody(const QString& newBody);
 
+    /// Заменяет плейсхолдер превью изображения-вложения на реально
+    /// загруженный @p image (issue #188), масштабируя с сохранением
+    /// пропорций под текущую максимальную ширину плитки превью. Ничего
+    /// не делает, если у этой строки нет вложения-изображения —
+    /// ChatView сам решает, кому из строк это вообще может пригодиться
+    /// (see isImageAttachment()), но передаёт данные сюда без повторной
+    /// проверки, поэтому вызывающий код может звать это безусловно.
+    void setAttachmentPreview(const QImage& image);
+
 signals:
     /// Выбор "Edit" в контекстном меню по правому клику (только для
     /// собственных сообщений, issue #107/#150) — @p currentBody
@@ -90,6 +112,11 @@ private:
     QLabel* timeLabel_ = nullptr;
     QString formattedSentAt_;
     qint64 messageId_ = 0;
+    /// Плейсхолдер превью изображения-вложения (issue #188) — null, если
+    /// у сообщения нет вложения-изображения. setAttachmentPreview()
+    /// заменяет плейсхолдерный текст на реальную картинку, когда она
+    /// загружена.
+    QLabel* attachmentPreviewLabel_ = nullptr;
 };
 
 }  // namespace devicehub
