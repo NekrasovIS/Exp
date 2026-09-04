@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QImage>
 #include <QLabel>
 #include <QLayout>
 #include <QPushButton>
@@ -72,7 +73,9 @@ TEST(ChatViewTest, AppendMessageAddsARow) {
     const int countBefore = view.messagesContainer()->layout()->count();
     view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
 
-    EXPECT_EQ(view.messagesContainer()->layout()->count(), countBefore + 1);
+    // +2, не +1 (issue #188): первое сообщение в списке всегда получает
+    // разделитель даты перед собой, помимо самой строки сообщения.
+    EXPECT_EQ(view.messagesContainer()->layout()->count(), countBefore + 2);
 }
 
 TEST(ChatViewTest, AppendSystemLineAddsARow) {
@@ -208,6 +211,112 @@ TEST(ChatViewTest, ScrollToMessageReturnsTrueForALoadedMessageAndFalseOtherwise)
 
     EXPECT_TRUE(view.scrollToMessage(5));
     EXPECT_FALSE(view.scrollToMessage(999));
+}
+
+TEST(ChatViewTest, ConsecutiveMessagesOnTheSameDayGetOnlyOneDateSeparator) {
+    ChatView view;
+
+    view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    view.appendMessage(ChatMessage{.author = "alice", .body = "again", .sentAt = "2026-08-05 20:00:00"});
+
+    EXPECT_EQ(view.findChildren<QLabel*>(QStringLiteral("chatDateSeparator")).size(), 1);
+}
+
+TEST(ChatViewTest, MessagesOnDifferentDaysGetASeparatorEach) {
+    ChatView view;
+
+    view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    view.appendMessage(ChatMessage{.author = "alice", .body = "next day", .sentAt = "2026-08-06 09:00:00"});
+
+    EXPECT_EQ(view.findChildren<QLabel*>(QStringLiteral("chatDateSeparator")).size(), 2);
+}
+
+TEST(ChatViewTest, PrependingOlderMessagesAcrossADayBoundaryAddsTwoSeparators) {
+    ChatView view;
+    // Не первое сообщение вообще — appendMessage() уже дало бы своей
+    // дате отдельный разделитель, здесь важно только то, что происходит
+    // внутри самой пачки prependMessages().
+    view.appendMessage(ChatMessage{.author = "alice", .body = "later", .sentAt = "2026-08-06 09:00:00"});
+
+    view.prependMessages({
+        ChatMessage{.author = "alice", .body = "day1", .sentAt = "2026-08-05 09:00:00"},
+        ChatMessage{.author = "alice", .body = "day2", .sentAt = "2026-08-06 08:00:00"},
+    });
+
+    // Один разделитель перед самым первым (старейшим) сообщением пачки,
+    // один — на границе дня внутри неё; уже показанное "later" получило
+    // свой собственный при первом appendMessage() выше.
+    EXPECT_EQ(view.findChildren<QLabel*>(QStringLiteral("chatDateSeparator")).size(), 3);
+}
+
+TEST(ChatViewTest, ClearLogRemovesDateSeparatorsToo) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    ASSERT_FALSE(view.findChildren<QLabel*>(QStringLiteral("chatDateSeparator")).isEmpty());
+
+    view.clearLog();
+
+    EXPECT_TRUE(view.findChildren<QLabel*>(QStringLiteral("chatDateSeparator")).isEmpty());
+}
+
+TEST(ChatViewTest, AppendingAnImageAttachmentEmitsPreviewAttachmentRequested) {
+    ChatView view;
+    QSignalSpy spy(&view, &ChatView::previewAttachmentRequested);
+
+    view.appendMessage(ChatMessage{.author = "alice",
+                                    .body = "look",
+                                    .sentAt = "2026-08-05 09:00:00",
+                                    .attachmentId = 7,
+                                    .attachmentFilename = "photo.png"});
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 7);
+}
+
+TEST(ChatViewTest, AppendingANonImageAttachmentDoesNotRequestAPreview) {
+    ChatView view;
+    QSignalSpy spy(&view, &ChatView::previewAttachmentRequested);
+
+    view.appendMessage(ChatMessage{.author = "alice",
+                                    .body = "see attached",
+                                    .sentAt = "2026-08-05 09:00:00",
+                                    .attachmentId = 8,
+                                    .attachmentFilename = "report.pdf"});
+
+    EXPECT_EQ(spy.count(), 0);
+}
+
+TEST(ChatViewTest, SetAttachmentPreviewReachesTheRowThatRequestedIt) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 9,
+                                    .author = "alice",
+                                    .body = "look",
+                                    .sentAt = "2026-08-05 09:00:00",
+                                    .attachmentId = 7,
+                                    .attachmentFilename = "photo.png"});
+    auto* preview = view.findChild<QLabel*>(QStringLiteral("chatAttachmentPreview"));
+    ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(preview->pixmap().isNull());
+
+    QImage image(4, 4, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    view.setAttachmentPreview(7, image);
+
+    EXPECT_FALSE(preview->pixmap().isNull());
+}
+
+TEST(ChatViewTest, SetAttachmentPreviewAfterClearLogDoesNotCrash) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.author = "alice",
+                                    .body = "look",
+                                    .sentAt = "2026-08-05 09:00:00",
+                                    .attachmentId = 7,
+                                    .attachmentFilename = "photo.png"});
+    view.clearLog();
+
+    QImage image(4, 4, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    view.setAttachmentPreview(7, image);  // must not crash, must not dereference a dangling row
 }
 
 }  // namespace

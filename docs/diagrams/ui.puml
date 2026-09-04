@@ -79,6 +79,7 @@ class ChatView {
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
@@ -108,6 +109,8 @@ class ChatView {
   -connectMessageRow(row: ChatMessageRow*)
   -updateLocalVideoVisibility()
   -onToggleChatVisibilityClicked()
+  -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
+  -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -120,6 +123,7 @@ class ChatView {
   +deleteMessageRequested(id: qint64)
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
+  +previewAttachmentRequested(attachmentId: qint64)
 }
 note right of ChatView
   Issue #153: videoStrip_ и новый chatPanel_
@@ -133,6 +137,23 @@ note right of ChatView
   переключены с фиксированного размера на
   минимальный + Expanding QSizePolicy, чтобы
   реально расти в дополнительное пространство.
+
+  Issue #188: appendMessage()/prependMessages()
+  вставляют разделитель даты
+  (buildDateSeparatorLabel()) перед любым
+  сообщением, чей день отличается от
+  предыдущего показанного (isDifferentCalendarDay()
+  в chat_message_grouping) — включая самое
+  первое сообщение канала. Для вложений-
+  изображений (isImageAttachment() у
+  ChatMessageRow) появление строки сразу
+  запрашивает фоновую загрузку превью
+  (previewAttachmentRequested()) через
+  pendingImagePreviewRows_ — QHash<qint64,
+  QPointer<ChatMessageRow>>, QPointer вместо
+  голого указателя, поскольку строка может
+  исчезнуть (переключение канала, удаление
+  сообщения) раньше, чем придёт ответ.
 end note
 
 struct ChatMessage {
@@ -187,6 +208,7 @@ class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
   +messageId() : qint64
   +updateBody(newBody: QString)
+  +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
@@ -204,15 +226,29 @@ note right of ChatMessageRow
   Own messages: right-click the bubble for a
   context menu (Edit/Delete) instead of
   always-visible buttons (issue #150).
+
+  Issue #188: isImageAttachment()/isVideoAttachment()
+  — свободные функции в namespace devicehub (по
+  расширению файла), не методы класса — ChatView
+  тоже вызывает isImageAttachment() напрямую, чтобы
+  решить, запрашивать ли превью, без дублирования
+  этой проверки. Изображение — плейсхолдер "Loading
+  preview…" сразу, реальная картинка приходит позже
+  через setAttachmentPreview() от ChatView; видео —
+  статичный значок-заглушка с именем файла, без
+  автозагрузки (нет дешёвого способа получить
+  превью-кадр видео без полной загрузки/декодирования
+  файла).
 end note
 
 package "devicehub::chat_message_grouping" <<Rectangle>> {
   class ChatMessageGrouping << (N,orchid) namespace >> {
     +parseSentAt(raw: QString) : QDateTime
     +shouldGroupWithPrevious(previous: ChatMessage, current: ChatMessage) : bool
+    +isDifferentCalendarDay(previous: ChatMessage, current: ChatMessage) : bool
   }
 }
-ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious() >
+ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious()/\nisDifferentCalendarDay() >
 ChatMessageRow ..> ChatMessageGrouping : parseSentAt() (time label) >
 
 class AccountMenu {
@@ -397,6 +433,8 @@ MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteV
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
+ChatView ..> MainWindow : previewAttachmentRequested() -> ChatRestClient::\ndownloadAttachment() (issue #188) >
+ChatRestClient ..> MainWindow : attachmentDownloaded() -> decode QImage\n-> ChatView::setAttachmentPreview() (issue #188) >
 ChatView ..> MainWindow : openSearchRequested() -> show()/raise()\nSearchDialog (issue #118) >
 MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
 ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >

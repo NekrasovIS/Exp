@@ -3,8 +3,10 @@
 #include <QAction>
 #include <QFontMetricsF>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QMenu>
+#include <QPixmap>
 #include <QPoint>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -28,13 +30,32 @@ constexpr qreal kNewGroupTopMarginEm = 0.5;
 constexpr qreal kGroupedTopMarginEm = 0.08;
 constexpr qreal kMaxBubbleWidthFraction = 0.7;
 constexpr const char* kOwnTextColor = ui_theme::kAccentForeground;
+constexpr int kAttachmentPreviewMaxWidth = 240;
+constexpr int kAttachmentPreviewMaxHeight = 200;
 
 QString formatTime(const QString& rawSentAt) {
     const QDateTime parsed = chat_message_grouping::parseSentAt(rawSentAt);
     return parsed.isValid() ? parsed.toString(QStringLiteral("HH:mm")) : rawSentAt;
 }
 
+bool hasAnyExtension(const QString& filename, std::initializer_list<const char*> extensions) {
+    for (const char* extension : extensions) {
+        if (filename.endsWith(QLatin1String(extension), Qt::CaseInsensitive)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
+
+bool isImageAttachment(const QString& filename) {
+    return hasAnyExtension(filename, {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"});
+}
+
+bool isVideoAttachment(const QString& filename) {
+    return hasAnyExtension(filename, {".mp4", ".mov", ".webm", ".mkv", ".avi"});
+}
 
 ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, QWidget* parent)
     : QWidget(parent), messageId_(message.id) {
@@ -108,6 +129,34 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
             emit downloadRequested(attachmentId, attachmentFilename);
         });
         bubbleLayout->addWidget(downloadButton);
+
+        // Issue #188: превью изображения-вложения прямо в бабле, помимо
+        // кнопки "Download" выше (не вместо неё — она всё ещё нужна,
+        // чтобы сохранить файл на диск). Начинается как текстовый
+        // плейсхолдер — сама строка не знает, когда (и успешно ли)
+        // загрузится реальная картинка, это решает ChatView, вызывая
+        // setAttachmentPreview() по результату отдельного сетевого
+        // запроса, который она сама инициирует.
+        if (isImageAttachment(message.attachmentFilename)) {
+            attachmentPreviewLabel_ = new QLabel(tr("Loading preview…"), bubble_);
+            attachmentPreviewLabel_->setObjectName(QStringLiteral("chatAttachmentPreview"));
+            attachmentPreviewLabel_->setAlignment(Qt::AlignCenter);
+            attachmentPreviewLabel_->setMinimumHeight(qRound(em * kAvatarEm * 1.5));
+            attachmentPreviewLabel_->setMaximumWidth(kAttachmentPreviewMaxWidth);
+            bubbleLayout->addWidget(attachmentPreviewLabel_);
+        } else if (isVideoAttachment(message.attachmentFilename)) {
+            // Видео (issue #188) — только значок-заглушка с именем
+            // файла, без автозагрузки: в отличие от изображений, у
+            // видео нет дешёвого способа получить превью-кадр без
+            // скачивания и декодирования всего файла.
+            auto* videoPlaceholder =
+                new QLabel(QStringLiteral("\U0001F3AC ") + message.attachmentFilename, bubble_);
+            videoPlaceholder->setObjectName(QStringLiteral("chatAttachmentVideoPlaceholder"));
+            if (isOwnMessage) {
+                videoPlaceholder->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+            }
+            bubbleLayout->addWidget(videoPlaceholder);
+        }
     }
 
     if (isOwnMessage) {
@@ -157,6 +206,20 @@ void ChatMessageRow::updateBody(const QString& newBody) {
     if (timeLabel_ != nullptr) {
         timeLabel_->setText(formattedSentAt_ + QStringLiteral(" (edited)"));
     }
+}
+
+void ChatMessageRow::setAttachmentPreview(const QImage& image) {
+    if (attachmentPreviewLabel_ == nullptr) {
+        return;
+    }
+    if (image.isNull()) {
+        attachmentPreviewLabel_->setText(tr("Preview unavailable"));
+        return;
+    }
+    const QPixmap scaled = QPixmap::fromImage(image).scaled(
+        kAttachmentPreviewMaxWidth, kAttachmentPreviewMaxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    attachmentPreviewLabel_->setText(QString());
+    attachmentPreviewLabel_->setPixmap(scaled);
 }
 
 void ChatMessageRow::resizeEvent(QResizeEvent* event) {

@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <QAction>
+#include <QImage>
 #include <QLabel>
 #include <QMenu>
 #include <QPoint>
@@ -23,6 +24,22 @@ ChatMessage sampleMessageWithAttachment() {
                         .sentAt = "2026-08-05 09:00:00",
                         .attachmentId = 42,
                         .attachmentFilename = "report.pdf"};
+}
+
+ChatMessage sampleMessageWithImageAttachment() {
+    return ChatMessage{.author = "alice",
+                        .body = "look at this",
+                        .sentAt = "2026-08-05 09:00:00",
+                        .attachmentId = 43,
+                        .attachmentFilename = "photo.PNG"};
+}
+
+ChatMessage sampleMessageWithVideoAttachment() {
+    return ChatMessage{.author = "alice",
+                        .body = "watch this",
+                        .sentAt = "2026-08-05 09:00:00",
+                        .attachmentId = 44,
+                        .attachmentFilename = "clip.mp4"};
 }
 
 TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
@@ -125,6 +142,75 @@ TEST(ChatMessageRowTest, OwnMessageContextMenuDeleteActionEmitsDeleteRequested) 
     deleteAction->trigger();
     ASSERT_EQ(spy.count(), 1);
     EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
+}
+
+TEST(ChatMessageRowTest, IsImageAttachmentRecognizesKnownImageExtensionsCaseInsensitively) {
+    EXPECT_TRUE(isImageAttachment(QStringLiteral("photo.png")));
+    EXPECT_TRUE(isImageAttachment(QStringLiteral("photo.PNG")));
+    EXPECT_TRUE(isImageAttachment(QStringLiteral("photo.jpeg")));
+    EXPECT_TRUE(isImageAttachment(QStringLiteral("animated.gif")));
+    EXPECT_FALSE(isImageAttachment(QStringLiteral("report.pdf")));
+    EXPECT_FALSE(isImageAttachment(QStringLiteral("clip.mp4")));
+}
+
+TEST(ChatMessageRowTest, IsVideoAttachmentRecognizesKnownVideoExtensionsCaseInsensitively) {
+    EXPECT_TRUE(isVideoAttachment(QStringLiteral("clip.mp4")));
+    EXPECT_TRUE(isVideoAttachment(QStringLiteral("clip.MOV")));
+    EXPECT_FALSE(isVideoAttachment(QStringLiteral("photo.png")));
+    EXPECT_FALSE(isVideoAttachment(QStringLiteral("report.pdf")));
+}
+
+TEST(ChatMessageRowTest, NonImageNonVideoAttachmentHasNoPreviewOrVideoPlaceholder) {
+    ChatMessageRow row(sampleMessageWithAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentPreview"), nullptr);
+    EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentVideoPlaceholder"), nullptr);
+}
+
+TEST(ChatMessageRowTest, ImageAttachmentShowsPlaceholderThenRealPreviewOnceLoaded) {
+    ChatMessageRow row(sampleMessageWithImageAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* preview = row.findChild<QLabel*>("chatAttachmentPreview");
+    ASSERT_NE(preview, nullptr);
+    EXPECT_FALSE(preview->text().isEmpty());
+    EXPECT_TRUE(preview->pixmap().isNull());
+
+    QImage image(8, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    row.setAttachmentPreview(image);
+
+    EXPECT_TRUE(preview->text().isEmpty());
+    EXPECT_FALSE(preview->pixmap().isNull());
+}
+
+TEST(ChatMessageRowTest, FailedImagePreviewShowsAFallbackMessage) {
+    ChatMessageRow row(sampleMessageWithImageAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    row.setAttachmentPreview(QImage());
+
+    auto* preview = row.findChild<QLabel*>("chatAttachmentPreview");
+    ASSERT_NE(preview, nullptr);
+    EXPECT_FALSE(preview->text().isEmpty());
+    EXPECT_TRUE(preview->pixmap().isNull());
+}
+
+TEST(ChatMessageRowTest, SetAttachmentPreviewOnARowWithoutAnImageAttachmentIsANoop) {
+    ChatMessageRow row(sampleMessageWithAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    QImage image(8, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    row.setAttachmentPreview(image);  // must not crash
+
+    EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentPreview"), nullptr);
+}
+
+TEST(ChatMessageRowTest, VideoAttachmentShowsAPlaceholderWithTheFilename) {
+    ChatMessageRow row(sampleMessageWithVideoAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* placeholder = row.findChild<QLabel*>("chatAttachmentVideoPlaceholder");
+    ASSERT_NE(placeholder, nullptr);
+    EXPECT_TRUE(placeholder->text().contains(QStringLiteral("clip.mp4")));
+    EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentPreview"), nullptr);
 }
 
 }  // namespace
