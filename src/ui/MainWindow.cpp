@@ -31,6 +31,7 @@
 #include "ui/AccountMenu.h"
 #include "ui/ChannelsPanel.h"
 #include "ui/ChatMessageRow.h"
+#include "ui/CallWindow.h"
 #include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
@@ -219,9 +220,13 @@ MainWindow::MainWindow(QWidget* parent)
             [this](const QString& login) { chatView_->showTypingUser(login); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
-    connect(chatView_, &ChatView::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
-    connect(chatView_, &ChatView::videoToggleRequested, this, &MainWindow::onVideoToggleClicked);
-    connect(chatView_, &ChatView::screenShareToggleRequested, this, &MainWindow::onScreenShareToggleClicked);
+    connect(callWindow_, &CallWindow::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
+    connect(callWindow_, &CallWindow::videoToggleRequested, this, &MainWindow::onVideoToggleClicked);
+    connect(callWindow_, &CallWindow::screenShareToggleRequested, this, &MainWindow::onScreenShareToggleClicked);
+    // "Leave call" внутри самого окна звонка сводится ровно к тому же
+    // действию, что и клик по кнопке звонка в ChatView, когда мы уже в
+    // звонке — переиспользуем тот же слот, а не дублируем его тело.
+    connect(callWindow_, &CallWindow::leaveCallRequested, this, &MainWindow::onCallToggleClicked);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
     connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
@@ -283,18 +288,20 @@ MainWindow::MainWindow(QWidget* parent)
         if (!callParticipants_.contains(login)) {
             callParticipants_.append(login);
         }
-        chatView_->setCallParticipants(callParticipants_);
+        callWindow_->setCallParticipants(callParticipants_);
     });
     connect(&callManager_, &CallManager::participantLeft, this, [this](const QString& login) {
         callParticipants_.removeAll(login);
-        chatView_->setCallParticipants(callParticipants_);
+        callWindow_->setCallParticipants(callParticipants_);
     });
     connect(&callManager_, &CallManager::callError, this,
             [this](const QString& message) { showToast(message, ToastBanner::Variant::kError); });
     connect(&callManager_, &CallManager::remoteVideoFrameReceived, this,
-            [this](const QString& login, const QImage& frame) { chatView_->showRemoteVideoFrame(login, frame); });
+            [this](const QString& login, const QImage& frame, bool isScreenShare) {
+                callWindow_->showRemoteVideoFrame(login, frame, isScreenShare);
+            });
     connect(&callManager_, &CallManager::remoteVideoTrackRemoved, this,
-            [this](const QString& login) { chatView_->removeRemoteVideo(login); });
+            [this](const QString& login, bool isScreenShare) { callWindow_->removeRemoteVideo(login, isScreenShare); });
 
     connect(communitiesPanel_, &CommunitiesPanel::createRequested, this, [this](const QString& name) {
         if (lastToken_.isEmpty()) {
@@ -543,16 +550,17 @@ MainWindow::MainWindow(QWidget* parent)
     // CallManager::enableVideo()), поэтому это безопасно оставить
     // подключённым безусловно.
     connect(&camera_, &CameraDevice::frameAvailable, this,
-            [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
+            [this](const QVideoFrame& frame) { callWindow_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
     // Тот же рефакторинг "владеет единственным sink, ретранслирует", что
-    // и у CameraDevice (issue #112) — демонстрация экрана и видео с
-    // камеры используют одну и ту же плитку/трек локального превью,
-    // взаимоисключающе (CallManager::enableScreenShare() останавливает
-    // камеру и наоборот), поэтому оба разветвляются на неё одинаково.
+    // и у CameraDevice (issue #112). Демонстрация экрана и видео с
+    // камеры — независимые треки с issue #185, у каждого своя плитка
+    // локального превью (localScreenShareVideoWidget() против
+    // localVideoWidget()), а не общая.
     connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
             [this](const QVideoFrame& frame) { settingsDialog_->screenPreview()->videoSink()->setVideoFrame(frame); });
-    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this,
-            [this](const QVideoFrame& frame) { chatView_->localVideoWidget()->videoSink()->setVideoFrame(frame); });
+    connect(&screenCapture_, &ScreenCaptureDevice::frameAvailable, this, [this](const QVideoFrame& frame) {
+        callWindow_->localScreenShareVideoWidget()->videoSink()->setVideoFrame(frame);
+    });
 
     // Issue #156: there's no persisted token across restarts (every
     // launch starts signed out), so gating on "not authenticated yet"
@@ -599,6 +607,11 @@ void MainWindow::buildUi() {
     chatView_ = new ChatView(central);
     toastBanner_ = new ToastBanner(chatView_);
     desktopNotifier_ = new DesktopNotifier(this, this);
+
+    // Отдельное окно звонка (issue #185) — MainWindow владеет её временем
+    // жизни через дерево QObject (this как родитель), показывает/скрывает
+    // по фактическому входу/выходу из звонка.
+    callWindow_ = new CallWindow(this);
 
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
@@ -760,26 +773,24 @@ void MainWindow::onAttachFileClicked() {
 
 void MainWindow::onCallToggleClicked() {
     if (callManager_.inCall()) {
-        if (callManager_.videoEnabled()) {
-            callManager_.disableVideo();
-        }
-        if (callManager_.screenShareEnabled()) {
-            callManager_.disableScreenShare();
-        }
-        callManager_.leaveCall();
-        callParticipants_.clear();
-        chatView_->setCallParticipants(callParticipants_);
-    } else {
-        const QAudioDevice inputDevice = settingsDialog_->inputCombo()->currentData().value<QAudioDevice>();
-        const QAudioDevice outputDevice = settingsDialog_->outputCombo()->currentData().value<QAudioDevice>();
-        callManager_.joinCall(inputDevice, outputDevice);
+        leaveCallIfActive();
+        return;
     }
-    chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
+    const QAudioDevice inputDevice = settingsDialog_->inputCombo()->currentData().value<QAudioDevice>();
+    const QAudioDevice outputDevice = settingsDialog_->outputCombo()->currentData().value<QAudioDevice>();
+    callManager_.joinCall(inputDevice, outputDevice);
+    chatView_->setCallState(true);
+    callWindow_->setMuted(callManager_.isMuted());
+    callWindow_->setVideoEnabled(false);
+    callWindow_->setScreenShareEnabled(false);
+    callWindow_->show();
+    callWindow_->raise();
+    callWindow_->activateWindow();
 }
 
 void MainWindow::onMuteToggleClicked() {
     callManager_.setMuted(!callManager_.isMuted());
-    chatView_->setCallState(callManager_.inCall(), callManager_.isMuted());
+    callWindow_->setMuted(callManager_.isMuted());
 }
 
 void MainWindow::onVideoToggleClicked() {
@@ -789,12 +800,9 @@ void MainWindow::onVideoToggleClicked() {
         const QCameraDevice cameraDevice = settingsDialog_->cameraCombo()->currentData().value<QCameraDevice>();
         callManager_.enableVideo(cameraDevice);
     }
-    // enableVideo() мог только что отключить демонстрацию экрана (видео
-    // с камеры и демонстрация экрана в CallManager взаимоисключающие,
-    // issue #112) — обновляем обе кнопки переключения/общее локальное
-    // превью вместе.
-    chatView_->setVideoEnabled(callManager_.videoEnabled());
-    chatView_->setScreenShareEnabled(callManager_.screenShareEnabled());
+    // Независимо от screenShareEnabled_ (issue #185 — оба трека
+    // независимы), поэтому обновляем только состояние видео.
+    callWindow_->setVideoEnabled(callManager_.videoEnabled());
 }
 
 void MainWindow::onScreenShareToggleClicked() {
@@ -806,8 +814,25 @@ void MainWindow::onScreenShareToggleClicked() {
     } else {
         showToast(tr("No screen available"), ToastBanner::Variant::kError);
     }
-    chatView_->setVideoEnabled(callManager_.videoEnabled());
-    chatView_->setScreenShareEnabled(callManager_.screenShareEnabled());
+    callWindow_->setScreenShareEnabled(callManager_.screenShareEnabled());
+}
+
+void MainWindow::leaveCallIfActive() {
+    if (!callManager_.inCall()) {
+        return;
+    }
+    if (callManager_.videoEnabled()) {
+        callManager_.disableVideo();
+    }
+    if (callManager_.screenShareEnabled()) {
+        callManager_.disableScreenShare();
+    }
+    callManager_.leaveCall();
+    callParticipants_.clear();
+    callWindow_->setCallParticipants(callParticipants_);
+    callWindow_->resetForNewCall();
+    callWindow_->hide();
+    chatView_->setCallState(false);
 }
 
 void MainWindow::onEditProfileClicked() {
@@ -888,18 +913,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     // Звонок привязан к тому каналу, на который мы подписаны — выходим
     // из него перед переключением, а не оставляем PeerConnection
     // висящими на канале, к которому мы уже даже не подключены.
-    if (callManager_.inCall()) {
-        if (callManager_.videoEnabled()) {
-            callManager_.disableVideo();
-        }
-        if (callManager_.screenShareEnabled()) {
-            callManager_.disableScreenShare();
-        }
-        callManager_.leaveCall();
-        callParticipants_.clear();
-        chatView_->setCallParticipants(callParticipants_);
-        chatView_->setCallState(false, callManager_.isMuted());
-    }
+    leaveCallIfActive();
     selectedChannelId_ = id;
     oldestMessageId_ = -1;
     chatClient_.disconnectFromChannel();
@@ -927,18 +941,7 @@ void MainWindow::finishOpeningChannel(qint64 id) {
 }
 
 void MainWindow::closeChatView() {
-    if (callManager_.inCall()) {
-        if (callManager_.videoEnabled()) {
-            callManager_.disableVideo();
-        }
-        if (callManager_.screenShareEnabled()) {
-            callManager_.disableScreenShare();
-        }
-        callManager_.leaveCall();
-        callParticipants_.clear();
-        chatView_->setCallParticipants(callParticipants_);
-        chatView_->setCallState(false, callManager_.isMuted());
-    }
+    leaveCallIfActive();
     if (selectedChannelId_ >= 0) {
         chatClient_.disconnectFromChannel();
     }

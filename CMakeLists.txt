@@ -82,6 +82,10 @@ add_library(devicehub_core
     src/ui/ChannelsPanel.cpp
     src/ui/ChatView.h
     src/ui/ChatView.cpp
+    src/ui/CallWindow.h
+    src/ui/CallWindow.cpp
+    src/ui/DraggableVideoTile.h
+    src/ui/DraggableVideoTile.cpp
     src/ui/ChatMessageRow.h
     src/ui/ChatMessageRow.cpp
     src/ui/ChatMessageGrouping.h
@@ -246,6 +250,8 @@ add_executable(devicehub_tests
     test/CommunitiesPanelTest.cpp
     test/ChannelsPanelTest.cpp
     test/ChatViewTest.cpp
+    test/CallWindowTest.cpp
+    test/DraggableVideoTileTest.cpp
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp
     test/FooterBarTest.cpp

@@ -27,6 +27,7 @@ namespace devicehub {
 
 class AccountMenu;
 class ChannelsPanel;
+class CallWindow;
 class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
@@ -74,6 +75,12 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+
+    /// Выходит из текущего звонка, если он вообще идёт — общая часть
+    /// onCallToggleClicked()/openChannel()/closeChatView() (звонок
+    /// привязан к каналу, поэтому уходит вместе с ним при
+    /// переключении/закрытии), включая скрытие callWindow_.
+    void leaveCallIfActive();
     /// LoginWindow::requestCodeRequested() — issue #156.
     void onRequestOtpCodeClicked(const QString& identifier);
     /// LoginWindow::verifyCodeRequested() — issue #156.
@@ -205,6 +212,7 @@ private:
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
     ChatView* chatView_ = nullptr;
+    CallWindow* callWindow_ = nullptr;
     AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
