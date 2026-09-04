@@ -195,10 +195,10 @@ TEST(MainWindowUiTest, AttachFileButtonExists) {
     EXPECT_EQ(attachFileButton->text(), QStringLiteral("Attach"));
 }
 
-TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
-    // #68: кнопки Call/Mute находятся в заголовке канала ChatView — про то,
-    // как MainWindow синхронизирует их текст/состояние доступности с
-    // CallManager, см. ChatView::setCallState().
+TEST(MainWindowUiTest, CallControlsExistAndCallWindowStartsHidden) {
+    // #68: "Call" — в заголовке канала ChatView; "Mute" — в отдельном
+    // CallWindow (issue #185), которую MainWindow показывает только
+    // после фактического входа в звонок — см. MainWindow::onCallToggleClicked().
     const MainWindow window;
 
     auto* callToggleButton = window.findChild<QPushButton*>("callToggleButton");
@@ -209,23 +209,22 @@ TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
 
     EXPECT_EQ(callToggleButton->text(), QStringLiteral("Call"));
     EXPECT_EQ(muteToggleButton->text(), QStringLiteral("Mute"));
-    EXPECT_FALSE(muteToggleButton->isEnabled());
+    EXPECT_TRUE(muteToggleButton->window()->isHidden());
 }
 
-TEST(MainWindowUiTest, VideoToggleButtonExistsAndStartsDisabled) {
-    // #91: переключатель видео находится в заголовке канала ChatView рядом
-    // с Call/Mute — про то, как MainWindow синхронизирует его текст/
-    // состояние доступности с CallManager, см. ChatView::setVideoEnabled().
+TEST(MainWindowUiTest, VideoToggleButtonExists) {
+    // #91: переключатель видео живёт в CallWindow (issue #185), а не в
+    // заголовке канала ChatView — про синхронизацию его текста с
+    // CallManager см. MainWindow::onVideoToggleClicked().
     const MainWindow window;
 
     auto* videoToggleButton = window.findChild<QPushButton*>("videoToggleButton");
 
     ASSERT_NE(videoToggleButton, nullptr);
     EXPECT_EQ(videoToggleButton->text(), QStringLiteral("Enable Video"));
-    EXPECT_FALSE(videoToggleButton->isEnabled());
 }
 
-TEST(MainWindowUiTest, ScreenShareToggleButtonExistsAndStartsDisabled) {
+TEST(MainWindowUiTest, ScreenShareToggleButtonExists) {
     // #112: зеркально повторяет кнопку переключения видео — в CallManager
     // взаимоисключает её, тот же паттерн UI-сигналов.
     const MainWindow window;
@@ -234,7 +233,6 @@ TEST(MainWindowUiTest, ScreenShareToggleButtonExistsAndStartsDisabled) {
 
     ASSERT_NE(screenShareToggleButton, nullptr);
     EXPECT_EQ(screenShareToggleButton->text(), QStringLiteral("Share Screen"));
-    EXPECT_FALSE(screenShareToggleButton->isEnabled());
 }
 
 TEST(MainWindowUiTest, SearchButtonExists) {

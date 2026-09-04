@@ -502,15 +502,26 @@ WebRTC падает с fatal CHECK на нулевом числе каналов
 один сэмпл, как было по ошибке в первой версии `CallAudioDeviceModule`.
 
 В шапке открытого канала (issue #46, Phase 4) — кнопка «Call»/«Leave
-call», кнопка «Mute»/«Unmute» (активна только во время звонка,
-переключает реальный per-track mute через
-`webrtc::AudioTrackInterface::set_enabled`, а не заглушку в UI) и метка
-со списком участников звонка. `ChatView` сама ничего не знает про
-`CallManager` — как и остальные панели, только шлёт UI-сигналы
-(`callToggleRequested`/`muteToggleRequested`); `MainWindow` решает
-join/leave по `CallManager::inCall()` и обновляет `ChatView` обратно
-через `setCallState()`/`setCallParticipants()`. Переключение канала или
-закрытие чата сначала выходит из активного звонка — он привязан к
+call», которая входит в звонок или выходит из него.
+Сам звонок (issue #185) — отдельное окно `CallWindow`, а не часть
+`ChatView`: кнопка «Mute»/«Unmute» (переключает реальный per-track mute
+через `webrtc::AudioTrackInterface::set_enabled`, а не заглушку в UI),
+«Enable Video»/«Disable Video», «Share Screen», «Leave call» и метка со
+списком участников звонка живут в `CallWindow`, которую `MainWindow`
+показывает при входе в звонок и скрывает при выходе — до issue #185 те
+же элементы были встроены прямо в заголовок/тело `ChatView`. И
+`ChatView`, и `CallWindow` сами ничего не знают про `CallManager` — как
+и остальные панели, только шлют UI-сигналы (`callToggleRequested` у
+`ChatView`; `muteToggleRequested`/`videoToggleRequested`/
+`screenShareToggleRequested`/`leaveCallRequested` у `CallWindow`,
+последний решает то же самое, что «Leave call» в заголовке канала —
+`MainWindow` подключает оба к одному и тому же слоту); `MainWindow`
+решает join/leave по `CallManager::inCall()` и обновляет оба виджета
+обратно через `ChatView::setCallState()`/`CallWindow`'s
+`setMuted()`/`setVideoEnabled()`/`setScreenShareEnabled()`/
+`setCallParticipants()`. Переключение канала или закрытие чата сначала
+выходит из активного звонка (`MainWindow::leaveCallIfActive()`,
+переиспользуется всеми тремя местами выхода) — он привязан к
 подписанному каналу, оставлять его подключённым к уже недоступному
 каналу не имеет смысла.
 
@@ -577,16 +588,17 @@ RTTI, поэтому у экспортируемых классов вроде `
   renegotiation после удаления трека. Обойдено тем, что трек больше не
   удаляется вообще, только `set_enabled(false)`.
 
-UI (issue #91) добавляет кнопку «Enable Video»/«Disable Video» в шапку
-канала (рядом с Call/Mute, тот же паттерн — обычная `QPushButton`,
-активна только во время звонка) и полоску видео над списком сообщений:
-локальное превью (`QVideoWidget`, тот же fan-out кадров камеры, что уже
-используется для превью в Settings — `CameraDevice::frameAvailable`
-рассчитан на нескольких подписчиков сразу) и по одному тайлу
-(`QLabel` с `QPixmap`) на каждого участника, чьё видео пришло. Полоска
-скрыта, когда показывать нечего, и полностью сбрасывается при выходе из
-звонка (`ChatView::setCallState(false, ...)`), а не отдельным вызовом на
-каждом месте выхода — так каждый из уже существующих путей завершения
+UI (issue #91) добавляет кнопку «Enable Video»/«Disable Video» и
+полоску видео — с issue #185 обе живут в `CallWindow` (см. выше), а не
+в заголовке/теле `ChatView`: локальное превью (`QVideoWidget`, тот же
+fan-out кадров камеры, что уже используется для превью в Settings —
+`CameraDevice::frameAvailable` рассчитан на нескольких подписчиков
+сразу) и по одному тайлу (`QLabel` с `QPixmap`) на каждого участника,
+чьё видео пришло. Полоска скрыта, когда показывать нечего, и полностью
+сбрасывается при выходе из звонка (`CallWindow::resetForNewCall()`,
+вызывается из `MainWindow::leaveCallIfActive()`), а не отдельным
+вызовом на каждом месте выхода — так каждый из уже существующих путей
+завершения
 звонка получает сброс бесплатно.
 
 Приём удалённого видео потребовал нового бэкенд-пути, которого не было
@@ -621,7 +633,7 @@ renegotiation/attach на каждого пира при переключени�
 `frameAvailable()` всем подписчикам сразу (превью в Settings и
 исходящее видео звонка), а не отдаёт захват какому-то одному виджету
 напрямую. Кнопка «Share Screen» — тот же UI-паттерн, что и «Enable
-Video», рядом в шапке канала.
+Video», рядом в `CallWindow`.
 
 Источник кадров под этим фасадом (issue #154) — не Qt6 `QScreenCapture`,
 а прямой захват через Windows.Graphics.Capture (WinRT): в vcpkg-сборке

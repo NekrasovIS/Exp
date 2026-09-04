@@ -96,74 +96,21 @@ TEST(ChatViewTest, ClearLogRemovesAllAppendedRows) {
     EXPECT_EQ(view.messagesContainer()->layout()->count(), 1);  // остался только завершающий stretch
 }
 
-TEST(ChatViewTest, SetCallStateReflectsJoinedAndMuted) {
+TEST(ChatViewTest, SetCallStateReflectsJoined) {
     ChatView view;
 
-    view.setCallState(/*inCall=*/true, /*muted=*/true);
+    view.setCallState(/*inCall=*/true);
 
     EXPECT_EQ(view.callToggleButton()->text(), QStringLiteral("Leave call"));
-    EXPECT_TRUE(view.muteToggleButton()->isEnabled());
-    EXPECT_EQ(view.muteToggleButton()->text(), QStringLiteral("Unmute"));
 }
 
 TEST(ChatViewTest, SetCallStateReflectsNotInCall) {
     ChatView view;
-    view.setCallState(true, false);
+    view.setCallState(true);
 
-    view.setCallState(/*inCall=*/false, /*muted=*/false);
+    view.setCallState(/*inCall=*/false);
 
     EXPECT_EQ(view.callToggleButton()->text(), QStringLiteral("Call"));
-    EXPECT_FALSE(view.muteToggleButton()->isEnabled());
-}
-
-TEST(ChatViewTest, ToggleChatVisibilityButtonHiddenOutsideACall) {
-    ChatView view;
-
-    // isHidden() отражает явный флаг hide/show независимо от того,
-    // отображается ли (никогда не показанный, headless-тест) виджет
-    // реально на экране — см. ToastBannerTest.cpp для того же паттерна.
-    EXPECT_TRUE(view.toggleChatVisibilityButton()->isHidden());
-
-    view.setCallState(/*inCall=*/true, /*muted=*/false);
-    EXPECT_FALSE(view.toggleChatVisibilityButton()->isHidden());
-    EXPECT_EQ(view.toggleChatVisibilityButton()->text(), QStringLiteral("Hide Chat"));
-
-    view.setCallState(/*inCall=*/false, /*muted=*/false);
-    EXPECT_TRUE(view.toggleChatVisibilityButton()->isHidden());
-}
-
-TEST(ChatViewTest, ClickingToggleChatVisibilityButtonTogglesItsLabel) {
-    ChatView view;
-    view.setCallState(/*inCall=*/true, /*muted=*/false);
-
-    view.toggleChatVisibilityButton()->click();
-    EXPECT_EQ(view.toggleChatVisibilityButton()->text(), QStringLiteral("Show Chat"));
-
-    view.toggleChatVisibilityButton()->click();
-    EXPECT_EQ(view.toggleChatVisibilityButton()->text(), QStringLiteral("Hide Chat"));
-}
-
-TEST(ChatViewTest, SetCallParticipantsShowsJoinedNames) {
-    ChatView view;
-
-    view.setCallParticipants({QStringLiteral("alice"), QStringLiteral("bob")});
-
-    // isHidden() отражает явный флаг hide/show независимо от того,
-    // отображается ли (никогда не показываемый, в headless-тесте) виджет
-    // реально на экране — тот же паттерн см. в ToastBannerTest.cpp.
-    EXPECT_FALSE(view.callParticipantsLabel()->isHidden());
-    EXPECT_TRUE(view.callParticipantsLabel()->text().contains(QStringLiteral("alice")));
-    EXPECT_TRUE(view.callParticipantsLabel()->text().contains(QStringLiteral("bob")));
-}
-
-TEST(ChatViewTest, SetCallParticipantsWithEmptyListHidesLabel) {
-    ChatView view;
-    view.setCallParticipants({QStringLiteral("alice")});
-    ASSERT_FALSE(view.callParticipantsLabel()->isHidden());
-
-    view.setCallParticipants({});
-
-    EXPECT_TRUE(view.callParticipantsLabel()->isHidden());
 }
 
 TEST(ChatViewTest, ClickingPlaceholderCreateButtonEmitsCreateChannelRequested) {
@@ -180,15 +127,6 @@ TEST(ChatViewTest, ClickingCallToggleButtonEmitsCallToggleRequested) {
     QSignalSpy spy(&view, &ChatView::callToggleRequested);
 
     emit view.callToggleButton()->clicked();
-
-    EXPECT_EQ(spy.count(), 1);
-}
-
-TEST(ChatViewTest, ClickingMuteToggleButtonEmitsMuteToggleRequested) {
-    ChatView view;
-    QSignalSpy spy(&view, &ChatView::muteToggleRequested);
-
-    emit view.muteToggleButton()->clicked();
 
     EXPECT_EQ(spy.count(), 1);
 }

@@ -1,23 +1,17 @@
 #pragma once
 
-#include <QHash>
 #include <QList>
-#include <QStringList>
 #include <QWidget>
 
 #include "ui/ChatMessageRow.h"
 
-class QHBoxLayout;
-class QImage;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QScrollArea;
-class QSplitter;
 class QStackedWidget;
 class QTimer;
 class QVBoxLayout;
-class QVideoWidget;
 
 namespace devicehub {
 
@@ -111,37 +105,12 @@ public:
     /// Очищает список сообщений и сбрасывает состояние группировки.
     void clearLog();
 
-    /// Обновляет кнопки Call/Leave и Mute/Unmute — MainWindow вызывает
-    /// это после каждого изменения состояния CallManager (вход, выход,
-    /// переключение mute), а не сам этот виджет отслеживает состояние
-    /// звонка. Выход из звонка (inCall == false) также сбрасывает
-    /// видео-полосу: скрывает её и убирает все удалённые плитки,
-    /// поскольку видео не может пережить звонок, которому принадлежит.
-    void setCallState(bool inCall, bool muted);
-
-    /// Обновляет небольшую метку "кто в звонке".
-    void setCallParticipants(const QStringList& participants);
-
-    /// Обновляет кнопку переключения видео и видимость локального
-    /// превью — MainWindow вызывает это после каждого
-    /// CallManager::enableVideo()/disableVideo().
-    void setVideoEnabled(bool enabled);
-
-    /// То же самое, что setVideoEnabled(), для демонстрации экрана
-    /// (issue #112) — MainWindow вызывает это после каждого
-    /// CallManager::enableScreenShare()/disableScreenShare(). Включение
-    /// одного всегда подразумевает, что другое теперь отключено (видео
-    /// и демонстрация экрана в CallManager взаимоисключающие), поэтому
-    /// вызывающий код должен вызывать оба сеттера вместе, а не полагаться
-    /// здесь на то, что один подразумевает другой.
-    void setScreenShareEnabled(bool enabled);
-
-    /// Показывает (создавая плитку при первом вызове) последний
-    /// декодированный кадр входящего видеотрека @p peerLogin.
-    void showRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
-
-    /// Убирает видео-плитку @p peerLogin, если она есть.
-    void removeRemoteVideo(const QString& peerLogin);
+    /// Обновляет текст кнопки Call/Leave — MainWindow вызывает это
+    /// после каждого входа/выхода из звонка. Элементы управления самим
+    /// звонком (mute, видео, демонстрация экрана, видео-плитки) больше
+    /// не в ChatView — см. CallWindow (issue #185), которую MainWindow
+    /// показывает/скрывает вместе с этим состоянием.
+    void setCallState(bool inCall);
 
     /// Показывает "<login> is typing…" на несколько секунд, затем
     /// автоматически скрывает — MainWindow вызывает это из
@@ -157,19 +126,9 @@ public:
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
     [[nodiscard]] QPushButton* attachButton() const { return attachButton_; }
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
-    [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
-    [[nodiscard]] QPushButton* videoToggleButton() const { return videoToggleButton_; }
-    [[nodiscard]] QPushButton* screenShareToggleButton() const { return screenShareToggleButton_; }
     [[nodiscard]] QPushButton* searchButton() const { return searchButton_; }
-    [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
-    [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
     [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
-    /// Кнопка "Show/Hide Chat" (issue #153) — видна только во время
-    /// звонка, когда область видео и панель чата делят QSplitter вместо
-    /// того, чтобы чат всегда занимал одну и ту же фиксированную долю
-    /// окна.
-    [[nodiscard]] QPushButton* toggleChatVisibilityButton() const { return toggleChatVisibilityButton_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -179,21 +138,9 @@ signals:
 
     /// Клик по кнопке звонка — MainWindow решает, входить или выходить,
     /// на основе CallManager::inCall(), и вызывает обратно
-    /// setCallState().
+    /// setCallState(). Дальнейшее управление уже идущим звонком (mute,
+    /// видео, демонстрация экрана, выход) — через CallWindow, не отсюда.
     void callToggleRequested();
-
-    /// Клик по кнопке mute — тот же паттерн, что и callToggleRequested().
-    void muteToggleRequested();
-
-    /// Клик по кнопке переключения видео — тот же паттерн, что и
-    /// callToggleRequested(): MainWindow решает включить или отключить
-    /// на основе CallManager::videoEnabled() и вызывает обратно
-    /// setVideoEnabled().
-    void videoToggleRequested();
-
-    /// Клик по кнопке переключения демонстрации экрана — тот же
-    /// паттерн, что и videoToggleRequested().
-    void screenShareToggleRequested();
 
     /// Клик по "Search" (issue #118) — MainWindow показывает/поднимает
     /// свой SearchDialog.
@@ -230,23 +177,10 @@ private:
     /// appendMessage() (пока единственное место, где создаются строки).
     void connectMessageRow(ChatMessageRow* row);
 
-    /// Видимость локального превью/полосы — это "активно видео с
-    /// камеры или демонстрация экрана" — пересчитывается из
-    /// videoActive_/screenShareActive_, а не из собственного @p enabled
-    /// каждого сеттера, так что вызов setVideoEnabled()/
-    /// setScreenShareEnabled() в любом порядке после взаимоисключающего
-    /// переключения всё равно оставляет видимым нужное.
-    void updateLocalVideoVisibility();
     /// Перерисовывает channelTitleLabel_ из currentChannelName_/encrypted_
     /// — используется совместно showChannel() и setEncrypted(), так что
     /// любой из них можно вызвать первым, не затерев эффект другого.
     void updateChannelTitleLabel();
-    /// Клик по "Hide Chat"/"Show Chat" (issue #153) — сворачивает/
-    /// восстанавливает долю chatPanel_ в chatSplitter_, отдавая
-    /// остальную часть окна области видео (или, если видео/демонстрация
-    /// экрана уже не активны, просто пустому месту).
-    void onToggleChatVisibilityClicked();
-
 
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
@@ -263,29 +197,8 @@ private:
     QPushButton* sendButton_ = nullptr;
     QPushButton* attachButton_ = nullptr;
     QPushButton* callToggleButton_ = nullptr;
-    QPushButton* muteToggleButton_ = nullptr;
-    QPushButton* videoToggleButton_ = nullptr;
-    QPushButton* screenShareToggleButton_ = nullptr;
-    bool videoActive_ = false;
-    bool screenShareActive_ = false;
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
-    QLabel* callParticipantsLabel_ = nullptr;
-    /// Область видео (сверху) и chatPanel_ (снизу) — во время звонка
-    /// область видео получает большую часть пространства, а chatPanel_
-    /// можно свернуть через toggleChatVisibilityButton_ вместо
-    /// фиксированной доли 50/50 (issue #153).
-    QSplitter* chatSplitter_ = nullptr;
-    /// История (loadOlderButton_/scrollArea_/typingIndicatorLabel_) плюс
-    /// строка ввода сообщения — сгруппированы в один виджет, чтобы быть
-    /// одним дочерним элементом QSplitter.
-    QWidget* chatPanel_ = nullptr;
-    QPushButton* toggleChatVisibilityButton_ = nullptr;
-    bool chatPanelCollapsed_ = false;
-    QWidget* videoStrip_ = nullptr;
-    QHBoxLayout* videoStripLayout_ = nullptr;
-    QVideoWidget* localVideoWidget_ = nullptr;
-    QHash<QString, QLabel*> remoteVideoTiles_;
     QLabel* typingIndicatorLabel_ = nullptr;
     QTimer* typingIndicatorHideTimer_ = nullptr;
     QTimer* typingThrottleTimer_ = nullptr;

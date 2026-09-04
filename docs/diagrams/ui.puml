@@ -84,36 +84,20 @@ class ChatView {
   +cancelEditingMessage()
   +appendSystemLine(text: QString)
   +clearLog()
-  +setCallState(inCall: bool, muted: bool)
-  +setCallParticipants(participants: QStringList)
-  +setVideoEnabled(enabled: bool)
-  +setScreenShareEnabled(enabled: bool)
-  +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
-  +removeRemoteVideo(peerLogin: QString)
+  +setCallState(inCall: bool)
   +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
   +attachButton() : QPushButton*
   +callToggleButton() : QPushButton*
-  +muteToggleButton() : QPushButton*
-  +videoToggleButton() : QPushButton*
-  +screenShareToggleButton() : QPushButton*
   +searchButton() : QPushButton*
-  +callParticipantsLabel() : QLabel*
-  +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
-  +toggleChatVisibilityButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
-  -updateLocalVideoVisibility()
-  -onToggleChatVisibilityClicked()
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
-  +muteToggleRequested()
-  +videoToggleRequested()
-  +screenShareToggleRequested()
   +openSearchRequested()
   +typingRequested()
   +loadOlderMessagesRequested()
@@ -122,17 +106,52 @@ class ChatView {
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
 }
 note right of ChatView
-  Issue #153: videoStrip_ и новый chatPanel_
-  (история + строка ввода) сидят в QSplitter
-  (chatSplitter_) вместо фиксированного
-  QVBoxLayout — во время звонка область видео
-  получает большую часть места
-  (setCallState(true, ...)), сворачивается
-  обратно во весь чат через
-  toggleChatVisibilityButton_. Видео-плитки
-  переключены с фиксированного размера на
-  минимальный + Expanding QSizePolicy, чтобы
-  реально расти в дополнительное пространство.
+  Issue #185: mute/видео/демонстрация экрана/
+  видео-плитки/список участников вынесены в
+  отдельный класс CallWindow (см. ниже) — здесь
+  остаётся только callToggleButton_ (Call/Leave
+  call), обычный QVBoxLayout вместо QSplitter
+  issue #153 (видео больше не делит место с
+  чатом внутри ChatView).
+end note
+
+class CallWindow {
+  +setMuted(muted: bool)
+  +setVideoEnabled(enabled: bool)
+  +setScreenShareEnabled(enabled: bool)
+  +setCallParticipants(participants: QStringList)
+  +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
+  +removeRemoteVideo(peerLogin: QString)
+  +resetForNewCall()
+  +muteToggleButton() : QPushButton*
+  +videoToggleButton() : QPushButton*
+  +screenShareToggleButton() : QPushButton*
+  +leaveCallButton() : QPushButton*
+  +callParticipantsLabel() : QLabel*
+  +localVideoWidget() : QVideoWidget*
+  -updateLocalVideoVisibility()
+  .. signals ..
+  +muteToggleRequested()
+  +videoToggleRequested()
+  +screenShareToggleRequested()
+  +leaveCallRequested()
+}
+note right of CallWindow
+  Issue #185: реальное отдельное top-level окно
+  (setWindowFlag(Qt::Window, true) поверх
+  QWidget с parent — MainWindow всё ещё владеет
+  временем жизни через дерево QObject), а не
+  область внутри ChatView. MainWindow
+  show()/hide() её вместе с фактическим входом/
+  выходом из звонка (см. leaveCallIfActive()).
+  Видео (локальное превью + удалённые плитки) —
+  тот же код, что раньше жил в ChatView (issue
+  #91/#153), перенесён без изменения логики.
+  leaveCallRequested() и ChatView::
+  callToggleRequested() (когда уже в звонке)
+  подключены к одному и тому же слоту
+  MainWindow::onCallToggleClicked() — оба
+  означают "выйти из звонка".
 end note
 
 struct ChatMessage {
@@ -348,6 +367,7 @@ package "src/user" {
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- ChatView : owns (main content area)
+MainWindow *-- CallWindow : owns (separate top-level\nwindow, issue #185)
 MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- ProfileDialog : owns (opened from\nAccountMenu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
@@ -392,8 +412,9 @@ ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteReques
 CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
-MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
-MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >
+MainWindow ..> CallWindow : setMuted()/setVideoEnabled()/setScreenShareEnabled()\nsetCallParticipants() (issue #185) >
+MainWindow ..> CallWindow : showRemoteVideoFrame()/removeRemoteVideo()\nresetForNewCall() >
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
