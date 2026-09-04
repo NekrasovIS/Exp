@@ -2,11 +2,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 // Требует работающий Postgres (см. docker-compose.yml), доступный по
 // USER_SERVICE_DATABASE_URL (значение по умолчанию совпадает с docker-compose.yml).
@@ -301,6 +303,247 @@ TEST(UserRepositoryTest, UpdateProfileReturnsTelegramChatIdTakenForDuplicateChat
 
     EXPECT_EQ(repository.updateProfile(loginB, ProfileUpdate{.telegramChatId = chatId}),
               UpdateProfileResult::kTelegramChatIdTaken);
+}
+
+TEST(UserRepositoryTest, SendFriendRequestToSelfIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-friend-self");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_EQ(repository.sendFriendRequest(login, login), SendFriendRequestResult::kCannotFriendSelf);
+}
+
+TEST(UserRepositoryTest, SendFriendRequestToNonexistentRecipientIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-friend-norecipient");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_EQ(repository.sendFriendRequest(login, "no-such-login-ever-created"),
+              SendFriendRequestResult::kNoSuchRecipient);
+}
+
+TEST(UserRepositoryTest, SendFriendRequestSucceedsAndShowsUpInIncomingRequests) {
+    UserRepository repository(connectionString());
+    const std::string requester = uniqueLogin("user-repository-test-friend-req");
+    const std::string recipient = uniqueLogin("user-repository-test-friend-rcp");
+
+    bool created = false;
+    try {
+        created = repository.createUser(requester, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(recipient, "some-hash"));
+
+    ASSERT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kSent);
+
+    const std::vector<FriendRequestInfo> incoming = repository.listIncomingFriendRequests(recipient);
+    ASSERT_EQ(incoming.size(), 1);
+    EXPECT_EQ(incoming[0].requesterLogin, requester);
+}
+
+TEST(UserRepositoryTest, SendFriendRequestTwiceWhilePendingIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string requester = uniqueLogin("user-repository-test-friend-dup-req");
+    const std::string recipient = uniqueLogin("user-repository-test-friend-dup-rcp");
+
+    bool created = false;
+    try {
+        created = repository.createUser(requester, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(recipient, "some-hash"));
+    ASSERT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kSent);
+
+    EXPECT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kAlreadyRequested);
+}
+
+TEST(UserRepositoryTest, MutualFriendRequestsAutoAcceptIntoAFriendship) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-mutual-a");
+    const std::string loginB = uniqueLogin("user-repository-test-mutual-b");
+
+    bool created = false;
+    try {
+        created = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+
+    ASSERT_EQ(repository.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kSent);
+    EXPECT_EQ(repository.sendFriendRequest(loginB, loginA), SendFriendRequestResult::kAutoAccepted);
+
+    const std::vector<std::string> friendsOfA = repository.listFriends(loginA);
+    EXPECT_NE(std::find(friendsOfA.begin(), friendsOfA.end(), loginB), friendsOfA.end());
+    EXPECT_TRUE(repository.listIncomingFriendRequests(loginB).empty());
+}
+
+TEST(UserRepositoryTest, SendFriendRequestToAnExistingFriendIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-already-friends-a");
+    const std::string loginB = uniqueLogin("user-repository-test-already-friends-b");
+
+    bool created = false;
+    try {
+        created = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+    ASSERT_EQ(repository.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kSent);
+    ASSERT_EQ(repository.sendFriendRequest(loginB, loginA), SendFriendRequestResult::kAutoAccepted);
+
+    EXPECT_EQ(repository.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kAlreadyFriends);
+}
+
+TEST(UserRepositoryTest, RespondToFriendRequestAcceptCreatesAFriendship) {
+    UserRepository repository(connectionString());
+    const std::string requester = uniqueLogin("user-repository-test-accept-req");
+    const std::string recipient = uniqueLogin("user-repository-test-accept-rcp");
+
+    bool created = false;
+    try {
+        created = repository.createUser(requester, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(recipient, "some-hash"));
+    ASSERT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kSent);
+    const std::vector<FriendRequestInfo> incoming = repository.listIncomingFriendRequests(recipient);
+    ASSERT_EQ(incoming.size(), 1);
+
+    EXPECT_EQ(repository.respondToFriendRequest(incoming[0].id, recipient, /*accept=*/true),
+              RespondToFriendRequestResult::kAccepted);
+
+    const std::vector<std::string> friendsOfRequester = repository.listFriends(requester);
+    EXPECT_NE(std::find(friendsOfRequester.begin(), friendsOfRequester.end(), recipient), friendsOfRequester.end());
+}
+
+TEST(UserRepositoryTest, RespondToFriendRequestDeclineDoesNotCreateAFriendship) {
+    UserRepository repository(connectionString());
+    const std::string requester = uniqueLogin("user-repository-test-decline-req");
+    const std::string recipient = uniqueLogin("user-repository-test-decline-rcp");
+
+    bool created = false;
+    try {
+        created = repository.createUser(requester, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(recipient, "some-hash"));
+    ASSERT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kSent);
+    const std::vector<FriendRequestInfo> incoming = repository.listIncomingFriendRequests(recipient);
+    ASSERT_EQ(incoming.size(), 1);
+
+    EXPECT_EQ(repository.respondToFriendRequest(incoming[0].id, recipient, /*accept=*/false),
+              RespondToFriendRequestResult::kDeclined);
+    EXPECT_TRUE(repository.listFriends(requester).empty());
+
+    // Отклонённая заявка не блокирует повторную (issue #187) — не как
+    // pending-заявка, партиальный индекс её больше не видит.
+    EXPECT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kSent);
+}
+
+TEST(UserRepositoryTest, RespondToFriendRequestByWrongRecipientIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string requester = uniqueLogin("user-repository-test-wrong-recipient-req");
+    const std::string recipient = uniqueLogin("user-repository-test-wrong-recipient-rcp");
+    const std::string impostor = uniqueLogin("user-repository-test-wrong-recipient-imp");
+
+    bool created = false;
+    try {
+        created = repository.createUser(requester, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(recipient, "some-hash"));
+    ASSERT_TRUE(repository.createUser(impostor, "some-hash"));
+    ASSERT_EQ(repository.sendFriendRequest(requester, recipient), SendFriendRequestResult::kSent);
+    const std::vector<FriendRequestInfo> incoming = repository.listIncomingFriendRequests(recipient);
+    ASSERT_EQ(incoming.size(), 1);
+
+    EXPECT_EQ(repository.respondToFriendRequest(incoming[0].id, impostor, /*accept=*/true),
+              RespondToFriendRequestResult::kNotYourRequest);
+}
+
+TEST(UserRepositoryTest, RespondToNonexistentFriendRequestIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-no-such-request");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_EQ(repository.respondToFriendRequest(-1, login, /*accept=*/true),
+              RespondToFriendRequestResult::kNoSuchRequest);
+}
+
+TEST(UserRepositoryTest, RemoveFriendDeletesAnExistingFriendshipAndIsSymmetric) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-remove-a");
+    const std::string loginB = uniqueLogin("user-repository-test-remove-b");
+
+    bool created = false;
+    try {
+        created = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+    ASSERT_EQ(repository.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kSent);
+    ASSERT_EQ(repository.sendFriendRequest(loginB, loginA), SendFriendRequestResult::kAutoAccepted);
+
+    // removeFriend(B, A) — обратный порядок аргументов относительно
+    // того, как дружба была создана — должен сработать так же, как
+    // removeFriend(A, B): friendships ненаправленная.
+    EXPECT_TRUE(repository.removeFriend(loginB, loginA));
+    EXPECT_TRUE(repository.listFriends(loginA).empty());
+    EXPECT_TRUE(repository.listFriends(loginB).empty());
+}
+
+TEST(UserRepositoryTest, RemoveFriendReturnsFalseWhenNotFriends) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-notfriends-a");
+    const std::string loginB = uniqueLogin("user-repository-test-notfriends-b");
+
+    bool created = false;
+    try {
+        created = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+
+    EXPECT_FALSE(repository.removeFriend(loginA, loginB));
 }
 
 }  // namespace

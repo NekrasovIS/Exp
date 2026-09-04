@@ -3,8 +3,17 @@
 #include <pqxx/pqxx>
 
 #include <string_view>
+#include <utility>
 
 namespace user_service {
+
+namespace {
+/// friendships хранит ненаправленную пару в каноническом порядке
+/// (меньший login первым) — одна строка вместо двух.
+std::pair<std::string, std::string> canonicalPair(const std::string& loginA, const std::string& loginB) {
+    return loginA < loginB ? std::make_pair(loginA, loginB) : std::make_pair(loginB, loginA);
+}
+}  // namespace
 
 UserRepository::UserRepository(std::string connectionString) : connectionString_(std::move(connectionString)) {}
 
@@ -96,6 +105,130 @@ std::optional<OtpIdentity> UserRepository::resolveOtpIdentifier(const std::strin
         .login = rows[0][0].as<std::string>(),
         .email = rows[0][1].is_null() ? std::nullopt : std::make_optional(rows[0][1].as<std::string>()),
         .telegramChatId = rows[0][2].is_null() ? std::nullopt : std::make_optional(rows[0][2].as<std::string>())};
+}
+
+SendFriendRequestResult UserRepository::sendFriendRequest(const std::string& requesterLogin,
+                                                           const std::string& recipientLogin) {
+    if (requesterLogin == recipientLogin) {
+        return SendFriendRequestResult::kCannotFriendSelf;
+    }
+
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result recipientRows =
+        transaction.exec("SELECT 1 FROM users WHERE login = $1", pqxx::params{recipientLogin});
+    if (recipientRows.empty()) {
+        return SendFriendRequestResult::kNoSuchRecipient;
+    }
+
+    const auto [loginA, loginB] = canonicalPair(requesterLogin, recipientLogin);
+    const pqxx::result friendshipRows = transaction.exec(
+        "SELECT 1 FROM friendships WHERE user_a_login = $1 AND user_b_login = $2", pqxx::params{loginA, loginB});
+    if (!friendshipRows.empty()) {
+        return SendFriendRequestResult::kAlreadyFriends;
+    }
+
+    // Взаимная заявка — получатель уже отправлял pending-заявку
+    // отправителю — сразу становится дружбой, а не второй записью.
+    const pqxx::result reverseRows = transaction.exec(
+        "SELECT id FROM friend_requests WHERE requester_login = $1 AND recipient_login = $2 AND status = 'pending'",
+        pqxx::params{recipientLogin, requesterLogin});
+    if (!reverseRows.empty()) {
+        transaction.exec("UPDATE friend_requests SET status = 'accepted', responded_at = now() WHERE id = $1",
+                          pqxx::params{reverseRows[0][0].as<std::int64_t>()});
+        transaction.exec("INSERT INTO friendships (user_a_login, user_b_login) VALUES ($1, $2)",
+                          pqxx::params{loginA, loginB});
+        transaction.commit();
+        return SendFriendRequestResult::kAutoAccepted;
+    }
+
+    try {
+        transaction.exec("INSERT INTO friend_requests (requester_login, recipient_login) VALUES ($1, $2)",
+                          pqxx::params{requesterLogin, recipientLogin});
+    } catch (const pqxx::unique_violation&) {
+        // Частичный уникальный индекс friend_requests_pending_unique —
+        // уже есть pending-заявка в этом же направлении.
+        return SendFriendRequestResult::kAlreadyRequested;
+    }
+    transaction.commit();
+    return SendFriendRequestResult::kSent;
+}
+
+RespondToFriendRequestResult UserRepository::respondToFriendRequest(std::int64_t requestId,
+                                                                      const std::string& recipientLogin,
+                                                                      bool accept) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT requester_login, recipient_login FROM friend_requests WHERE id = $1 AND status = 'pending'",
+        pqxx::params{requestId});
+    if (rows.empty()) {
+        return RespondToFriendRequestResult::kNoSuchRequest;
+    }
+    const std::string requesterLogin = rows[0][0].as<std::string>();
+    if (rows[0][1].as<std::string>() != recipientLogin) {
+        return RespondToFriendRequestResult::kNotYourRequest;
+    }
+
+    transaction.exec("UPDATE friend_requests SET status = $1, responded_at = now() WHERE id = $2",
+                      pqxx::params{std::string(accept ? "accepted" : "declined"), requestId});
+    if (accept) {
+        const auto [loginA, loginB] = canonicalPair(requesterLogin, recipientLogin);
+        transaction.exec("INSERT INTO friendships (user_a_login, user_b_login) VALUES ($1, $2)",
+                          pqxx::params{loginA, loginB});
+    }
+    transaction.commit();
+    return accept ? RespondToFriendRequestResult::kAccepted : RespondToFriendRequestResult::kDeclined;
+}
+
+std::vector<FriendRequestInfo> UserRepository::listIncomingFriendRequests(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT id, requester_login, created_at FROM friend_requests "
+                          "WHERE recipient_login = $1 AND status = 'pending' ORDER BY created_at DESC",
+                          pqxx::params{login});
+
+    std::vector<FriendRequestInfo> requests;
+    requests.reserve(rows.size());
+    for (const auto& row : rows) {
+        requests.push_back(FriendRequestInfo{.id = row[0].as<std::int64_t>(),
+                                              .requesterLogin = row[1].as<std::string>(),
+                                              .createdAt = row[2].as<std::string>()});
+    }
+    return requests;
+}
+
+std::vector<std::string> UserRepository::listFriends(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT CASE WHEN user_a_login = $1 THEN user_b_login ELSE user_a_login END "
+                          "FROM friendships WHERE user_a_login = $1 OR user_b_login = $1",
+                          pqxx::params{login});
+
+    std::vector<std::string> friends;
+    friends.reserve(rows.size());
+    for (const auto& row : rows) {
+        friends.push_back(row[0].as<std::string>());
+    }
+    return friends;
+}
+
+bool UserRepository::removeFriend(const std::string& loginA, const std::string& loginB) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const auto [canonicalA, canonicalB] = canonicalPair(loginA, loginB);
+    const pqxx::result rows =
+        transaction.exec("DELETE FROM friendships WHERE user_a_login = $1 AND user_b_login = $2 RETURNING 1",
+                          pqxx::params{canonicalA, canonicalB});
+    transaction.commit();
+    return !rows.empty();
 }
 
 }  // namespace user_service
