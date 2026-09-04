@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: ci-metrics-postgres
+    uid: ci-metrics-postgres
+    type: postgres
+    access: proxy
+    url: ci-metrics-postgres:5432
+    database: ci_metrics
+    user: ci_metrics
+    isDefault: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: $CI_METRICS_POSTGRES_PASSWORD
