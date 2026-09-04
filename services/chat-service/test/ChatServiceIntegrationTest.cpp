@@ -184,6 +184,72 @@ TEST(ChatServiceIntegrationTest, ListCommunitiesIncludesCreatedCommunity) {
                              [&](const Community& community) { return community.id == created.id; }));
 }
 
+TEST(ChatServiceIntegrationTest, CreatedCommunityHasAUniqueInviteCodeUsableToJoin) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    const std::string member = "integration-test-member-" + suffix;
+    Community created{};
+    try {
+        created = service.createCommunity("integration-test-invite-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    ASSERT_TRUE(created.inviteCode.has_value());
+    EXPECT_FALSE(created.inviteCode->empty());
+
+    const std::optional<Community> found = service.findCommunityByInviteCode(*created.inviteCode);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->id, created.id);
+
+    EXPECT_TRUE(service.joinCommunity(found->id, member));
+    const std::vector<Community> memberCommunities = service.listCommunitiesForMember(member);
+    EXPECT_TRUE(std::any_of(memberCommunities.begin(), memberCommunities.end(),
+                             [&](const Community& community) { return community.id == created.id; }));
+
+    EXPECT_FALSE(service.findCommunityByInviteCode("not-a-real-code").has_value());
+}
+
+TEST(ChatServiceIntegrationTest, RegenerateInviteCodeIsOwnerOnlyAndInvalidatesThePreviousCode) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    const std::string other = "integration-test-other-" + suffix;
+    Community created{};
+    try {
+        created = service.createCommunity("integration-test-regen-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::string originalCode = *created.inviteCode;
+
+    const RegenerateInviteCodeResult forbidden = service.regenerateInviteCode(created.id, other);
+    EXPECT_EQ(forbidden.result, MutationResult::kForbidden);
+
+    const RegenerateInviteCodeResult success = service.regenerateInviteCode(created.id, owner);
+    ASSERT_EQ(success.result, MutationResult::kSuccess);
+    EXPECT_NE(success.inviteCode, originalCode);
+
+    EXPECT_FALSE(service.findCommunityByInviteCode(originalCode).has_value());
+    const std::optional<Community> found = service.findCommunityByInviteCode(success.inviteCode);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->id, created.id);
+
+    EXPECT_EQ(service.regenerateInviteCode(-1, owner).result, MutationResult::kNotFound);
+}
+
 TEST(ChatServiceIntegrationTest, CreateChannelRejectsNonexistentCommunity) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");

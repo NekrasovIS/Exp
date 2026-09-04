@@ -6,6 +6,7 @@
     "ixwebsocket",
     "libpqxx",
     "nlohmann-json",
+    "openssl",
     "gtest"
   ]
 }
