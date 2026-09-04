@@ -131,12 +131,14 @@ class CallWindow {
   +localVideoWidget() : QVideoWidget*
   +localScreenShareVideoWidget() : QVideoWidget*
   -updateVideoStripVisibility()
+  -nextRemoteTileCascadePosition() : QPoint
   .. signals ..
   +muteToggleRequested()
   +videoToggleRequested()
   +screenShareToggleRequested()
   +leaveCallRequested()
 }
+CallWindow "1" *-- "0..*" DraggableVideoTile : owns, wraps each local/remote\nvideo widget (issue #185)
 note right of CallWindow
   Issue #185: реальное отдельное top-level окно
   (setWindowFlag(Qt::Window, true) поверх
@@ -160,6 +162,50 @@ note right of CallWindow
   "<login>#camera"/"<login>#screen", а не просто
   по login — камера и демонстрация экрана одного
   участника получают разные плитки.
+
+  videoStrip_ (issue #185, последняя часть) —
+  canvas-QWidget без layout'а, а не QHBoxLayout:
+  каждая плитка внутри — DraggableVideoTile (см.
+  ниже), сама решающая своё место и размер по
+  перетаскиванию мышью. nextRemoteTileCascadePosition()
+  даёт только стартовую позицию новой удалённой
+  плитке (по диагонали, с переносом каждые 8 штук),
+  а не финальную — пользователь может перетащить
+  куда угодно сразу после появления.
+end note
+
+class DraggableVideoTile {
+  +content() : QWidget*
+  +resizeGrip() : QWidget*
+  #resizeEvent(event: QResizeEvent*)
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
+  -handleMouseEvent(watched: QObject*, event: QEvent*) : bool
+}
+note right of DraggableVideoTile
+  Issue #185: универсальная обёртка вокруг любого
+  content (QVideoWidget для локальных превью,
+  QLabel для удалённых плиток, issue #91) — сама
+  не знает, что внутри. content() растягивается на
+  весь клиентский прямоугольник плитки; маленький
+  resizeGrip() в правом нижнем углу лежит поверх
+  ОТДЕЛЬНЫМ дочерним виджетом, а не рисуется через
+  paintEvent() поверх content() — content() обычно
+  композитится (особенно QVideoWidget) и перекрыл
+  бы обычную QPainter-отрисовку родителя.
+
+  Перетаскивание/resize реализованы через
+  installEventFilter() на content()/resizeGrip()
+  (тот же приём, что уже использует FooterBar для
+  кликабельного avatarLabel_), а не переопределением
+  mousePress/Move/ReleaseEvent() у самой плитки —
+  иначе события мыши получал бы только тот из двух
+  виджетов, что реально под курсором, и до плитки
+  они бы не доходили. Resize считает новый размер
+  от глобальной позиции курсора (устойчиво к
+  собственному изменению размера между кадрами
+  событий), move — от локальной (совпадает у
+  content() и у плитки, поскольку content() всегда
+  стоит в (0, 0) её координат).
 end note
 
 struct ChatMessage {

@@ -1,16 +1,18 @@
 #pragma once
 
 #include <QHash>
+#include <QPoint>
 #include <QStringList>
 #include <QWidget>
 
-class QHBoxLayout;
 class QImage;
 class QLabel;
 class QPushButton;
 class QVideoWidget;
 
 namespace devicehub {
+
+class DraggableVideoTile;
 
 /**
  * @brief Отдельное окно звонка (issue #185) — участники, элементы
@@ -25,6 +27,11 @@ namespace devicehub {
  * над CallManager, и вызывает сеттеры с результатом. Показывается/
  * скрывается MainWindow-ом по фактическому переходу в/из звонка — сама
  * не решает, когда её открыть.
+ *
+ * Видео-плитки (issue #185, последняя часть) — каждая обёрнута в
+ * DraggableVideoTile и свободно позиционируется мышью внутри canvas
+ * videoStrip_ (обычный QWidget без layout'а, а не QHBoxLayout, который
+ * раньше сам решал место каждой плитки).
  */
 class CallWindow : public QWidget {
     Q_OBJECT
@@ -95,19 +102,31 @@ private:
     /// теперь независимы друг от друга, а не два взаимоисключающих).
     void updateVideoStripVisibility();
 
+    /// Позиция для только что созданной удалённой плитки — по диагонали
+    /// каскадом от предыдущей (с переносом после нескольких шагов, а не
+    /// бесконечно за пределы окна), так что несколько новых плиток не
+    /// садятся друг на друга ровно в одной точке. Пользователь всё равно
+    /// может перетащить любую плитку куда угодно после появления — это
+    /// только стартовая позиция.
+    [[nodiscard]] QPoint nextRemoteTileCascadePosition();
+
     QLabel* callParticipantsLabel_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QPushButton* videoToggleButton_ = nullptr;
     QPushButton* screenShareToggleButton_ = nullptr;
     QPushButton* leaveCallButton_ = nullptr;
+    /// Canvas без layout'а — DraggableVideoTile-плитки внутри него
+    /// позиционируются вручную (изначально) и мышью (после).
     QWidget* videoStrip_ = nullptr;
-    QHBoxLayout* videoStripLayout_ = nullptr;
     QVideoWidget* localVideoWidget_ = nullptr;
     QVideoWidget* localScreenShareVideoWidget_ = nullptr;
+    DraggableVideoTile* localCameraTile_ = nullptr;
+    DraggableVideoTile* localScreenShareTile_ = nullptr;
     /// Ключ — "<login>#camera" или "<login>#screen" (issue #185), чтобы
     /// камера и демонстрация экрана одного участника не делили одну
     /// плитку.
-    QHash<QString, QLabel*> remoteVideoTiles_;
+    QHash<QString, DraggableVideoTile*> remoteVideoTiles_;
+    int nextRemoteTileCascadeIndex_ = 0;
     bool videoActive_ = false;
     bool screenShareActive_ = false;
 };

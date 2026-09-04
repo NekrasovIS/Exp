@@ -8,6 +8,8 @@
 #include <QSignalSpy>
 #include <QVideoWidget>
 
+#include "ui/DraggableVideoTile.h"
+
 namespace devicehub {
 namespace {
 
@@ -30,16 +32,23 @@ TEST(CallWindowTest, SetMutedTogglesButtonLabel) {
     EXPECT_EQ(window.muteToggleButton()->text(), QStringLiteral("Mute"));
 }
 
+// Видимость переключается на обёртке DraggableVideoTile, а не на самом
+// localVideoWidget()/localScreenShareVideoWidget() (issue #185, часть
+// про перетаскиваемые плитки) — content_->isHidden() не отражает
+// скрытие родителя (Qt не выставляет этот флаг на детях, когда прячет
+// сам контейнер), поэтому эти тесты проверяют parentWidget()
+// (саму плитку), а не сам видео-виджет.
+
 TEST(CallWindowTest, SetVideoEnabledTogglesButtonLabelAndLocalPreviewVisibility) {
     CallWindow window;
 
     window.setVideoEnabled(true);
     EXPECT_EQ(window.videoToggleButton()->text(), QStringLiteral("Disable Video"));
-    EXPECT_FALSE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localVideoWidget()->parentWidget()->isHidden());
 
     window.setVideoEnabled(false);
     EXPECT_EQ(window.videoToggleButton()->text(), QStringLiteral("Enable Video"));
-    EXPECT_TRUE(window.localVideoWidget()->isHidden());
+    EXPECT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
 }
 
 TEST(CallWindowTest, SetScreenShareEnabledTogglesButtonLabelAndLocalPreviewVisibility) {
@@ -47,11 +56,11 @@ TEST(CallWindowTest, SetScreenShareEnabledTogglesButtonLabelAndLocalPreviewVisib
 
     window.setScreenShareEnabled(true);
     EXPECT_EQ(window.screenShareToggleButton()->text(), QStringLiteral("Stop Sharing"));
-    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
 
     window.setScreenShareEnabled(false);
     EXPECT_EQ(window.screenShareToggleButton()->text(), QStringLiteral("Share Screen"));
-    EXPECT_TRUE(window.localScreenShareVideoWidget()->isHidden());
+    EXPECT_TRUE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
 }
 
 TEST(CallWindowTest, VideoAndScreenShareLocalPreviewsAreIndependent) {
@@ -62,12 +71,21 @@ TEST(CallWindowTest, VideoAndScreenShareLocalPreviewsAreIndependent) {
 
     window.setVideoEnabled(true);
     window.setScreenShareEnabled(true);
-    EXPECT_FALSE(window.localVideoWidget()->isHidden());
-    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localVideoWidget()->parentWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
 
     window.setVideoEnabled(false);
-    EXPECT_TRUE(window.localVideoWidget()->isHidden());
-    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
+    EXPECT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
+}
+
+TEST(CallWindowTest, LocalPreviewTilesAreDraggable) {
+    // issue #185: обе локальные плитки — DraggableVideoTile, а не голый
+    // QVideoWidget напрямую в layout'е.
+    CallWindow window;
+
+    EXPECT_NE(qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget()), nullptr);
+    EXPECT_NE(qobject_cast<DraggableVideoTile*>(window.localScreenShareVideoWidget()->parentWidget()), nullptr);
 }
 
 TEST(CallWindowTest, SetCallParticipantsShowsJoinedNames) {
