@@ -3,9 +3,12 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -418,6 +421,145 @@ TEST(HttpServerTest, ResolveOtpIdentifierRouteFindsUserByTelegramChatId) {
     EXPECT_TRUE(body["found"].get<bool>());
     EXPECT_EQ(body["login"].get<std::string>(), login);
     EXPECT_EQ(body["telegram_chat_id"].get<std::string>(), chatId);
+}
+
+// Как registerViaAuthServiceAndGetToken(), но заявкам в друзья (issue
+// #187) нужен ещё и сам login стороны, а не только токен — сервер
+// определяет отправителя/адресата по логину, зашитому в токене, а не
+// по тому, что передано в теле запроса.
+struct FriendTestAccount {
+    std::string login;
+    std::string token;
+};
+
+std::optional<FriendTestAccount> registerFriendTestAccount(const std::string& loginPrefix) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    httplib::Client client(authHost, authPort);
+    const std::string login = uniqueLogin(loginPrefix);
+    const nlohmann::json body{{"login", login}, {"password", "http-server-friends-test-password"}};
+    const httplib::Result result = client.Post("/auth/register", body.dump(), "application/json");
+    if (!result || result->status != 201) {
+        return std::nullopt;
+    }
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded() || !response.contains("token")) {
+        return std::nullopt;
+    }
+    return FriendTestAccount{.login = login, .token = response["token"].get<std::string>()};
+}
+
+TEST(HttpServerTest, SendFriendRequestRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/friends/requests", nlohmann::json{{"recipient_login", "anyone"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Остальные сценарии (400/201/incoming-list/accept/friends-list)
+// намеренно собраны в один тест на пару аккаунтов, а не разбиты по
+// одному сценарию на тест, как везде выше в этом файле, — каждая
+// registerFriendTestAccount() — это отдельный вызов POST
+// /auth/register, а он делит один и тот же rate limit (10 запросов/60с
+// на remote_addr, HttpServer.h::HttpServer()) с /auth/token и
+// /auth/otp/* auth-service — при большом числе тестов, каждый из
+// которых регистрирует собственную пару, набор тестов внутри одного
+// 60-секундного окна легко превышает 10 и валит несвязанные соседние
+// тесты 429-м (замечено на практике при первой версии этого файла).
+TEST(HttpServerTest, SendFriendRequestRouteValidationAndAcceptRoundTrip) {
+    const std::optional<FriendTestAccount> requester = registerFriendTestAccount("http-server-friend-a");
+    const std::optional<FriendTestAccount> recipient = registerFriendTestAccount("http-server-friend-b");
+    if (!requester.has_value() || !recipient.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers requesterAuth{{"Authorization", "Bearer " + requester->token}};
+    httplib::Headers recipientAuth{{"Authorization", "Bearer " + recipient->token}};
+
+    const httplib::Result badBodyResult = client.Post("/friends/requests", requesterAuth, "{}", "application/json");
+    ASSERT_TRUE(badBodyResult);
+    EXPECT_EQ(badBodyResult->status, 400);
+
+    const httplib::Result sendResult =
+        client.Post("/friends/requests", requesterAuth,
+                    nlohmann::json{{"recipient_login", recipient->login}}.dump(), "application/json");
+    ASSERT_TRUE(sendResult);
+    ASSERT_EQ(sendResult->status, 201);
+
+    const nlohmann::json requests = nlohmann::json::parse(client.Get("/friends/requests", recipientAuth)->body);
+    ASSERT_TRUE(requests.is_array());
+    ASSERT_FALSE(requests.empty());
+    EXPECT_TRUE(std::any_of(requests.begin(), requests.end(), [&](const nlohmann::json& item) {
+        return item["requester_login"].get<std::string>() == requester->login;
+    }));
+    const std::int64_t requestId = requests[0]["id"].get<std::int64_t>();
+
+    const httplib::Result acceptResult = client.Post("/friends/requests/" + std::to_string(requestId) + "/accept",
+                                                       recipientAuth, "", "application/json");
+    ASSERT_TRUE(acceptResult);
+    EXPECT_EQ(acceptResult->status, 200);
+
+    const nlohmann::json requesterFriends = nlohmann::json::parse(client.Get("/friends", requesterAuth)->body);
+    const nlohmann::json recipientFriends = nlohmann::json::parse(client.Get("/friends", recipientAuth)->body);
+    EXPECT_TRUE(std::find(requesterFriends.begin(), requesterFriends.end(), recipient->login) !=
+                requesterFriends.end());
+    EXPECT_TRUE(std::find(recipientFriends.begin(), recipientFriends.end(), requester->login) !=
+                recipientFriends.end());
+}
+
+TEST(HttpServerTest, DeclineFriendRequestThenMutualRequestAndRemoveRoundTrip) {
+    const std::optional<FriendTestAccount> requester = registerFriendTestAccount("http-server-friend-c");
+    const std::optional<FriendTestAccount> recipient = registerFriendTestAccount("http-server-friend-d");
+    if (!requester.has_value() || !recipient.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers requesterAuth{{"Authorization", "Bearer " + requester->token}};
+    httplib::Headers recipientAuth{{"Authorization", "Bearer " + recipient->token}};
+
+    ASSERT_TRUE(client.Post("/friends/requests", requesterAuth,
+                             nlohmann::json{{"recipient_login", recipient->login}}.dump(), "application/json"));
+    const nlohmann::json requests = nlohmann::json::parse(client.Get("/friends/requests", recipientAuth)->body);
+    ASSERT_FALSE(requests.empty());
+    const std::int64_t requestId = requests[0]["id"].get<std::int64_t>();
+
+    const httplib::Result declineResult = client.Post("/friends/requests/" + std::to_string(requestId) + "/decline",
+                                                        recipientAuth, "", "application/json");
+    ASSERT_TRUE(declineResult);
+    EXPECT_EQ(declineResult->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(client.Get("/friends", requesterAuth)->body).empty());
+
+    // Отклонённая заявка не блокирует будущее сближение (issue #187) —
+    // взаимная заявка сразу создаёт дружбу, без отдельного accept.
+    ASSERT_TRUE(client.Post("/friends/requests", requesterAuth,
+                             nlohmann::json{{"recipient_login", recipient->login}}.dump(), "application/json"));
+    ASSERT_TRUE(client.Post("/friends/requests", recipientAuth,
+                             nlohmann::json{{"recipient_login", requester->login}}.dump(), "application/json"));
+    EXPECT_FALSE(nlohmann::json::parse(client.Get("/friends", requesterAuth)->body).empty());
+
+    const httplib::Result removeResult = client.Delete("/friends/" + recipient->login, requesterAuth);
+    ASSERT_TRUE(removeResult);
+    EXPECT_EQ(removeResult->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(client.Get("/friends", requesterAuth)->body).empty());
 }
 
 }  // namespace

@@ -85,6 +85,13 @@ Screen Capture) слева. Тёмная тема с зелёным градие
   forward secrecy (компрометация ключа канала = компрометация всей его
   истории), нет мультиустройственности, нет автоматического
   довыпуска ключа новому участнику при вступлении.
+- Личные сообщения и друзья (issue #187). **Фаза 1** — заявки в друзья:
+  backend в `user-service` (`POST /friends/requests`,
+  `GET /friends/requests`, accept/decline, `GET /friends`,
+  `DELETE /friends/{login}` — см. раздел user-service ниже), без UI в
+  DeviceHub пока. Взаимные заявки авто-принимаются в дружбу. Личные
+  сообщения (Фаза 2) и экран переписки в клиенте (Фаза 3) — отдельные
+  задачи следом.
 
 ## Сборка
 
@@ -207,6 +214,16 @@ cmake --build services/user-service/build --parallel
 `{"identifier"}` (login, email или Telegram chat_id) и отвечает
 `{"found", "login", "email", "telegram_chat_id"}`, используется для
 входа по одноразовому коду.
+
+Заявки в друзья (issue #187, Фаза 1 — backend, без UI; сама фича
+описана в разделе «Возможности» выше) — все требуют `Authorization:
+Bearer`: `POST /friends/requests {recipient_login}` (201 `"sent"`, либо
+`"accepted"`, если у получателя уже была встречная pending-заявка —
+взаимный интерес сразу становится дружбой без отдельного accept),
+`GET /friends/requests` (входящие pending-заявки вызывающего),
+`POST /friends/requests/{id}/accept` / `.../decline` (только адресат
+конкретной заявки), `GET /friends` (список друзей вызывающего),
+`DELETE /friends/{login}` (расфрендить, работает в любую сторону пары).
 
 `email` (issue #156) и `telegram_chat_id` (issue #174, вход по
 одноразовому коду) — оба уникальны, если заданы (частичные уникальные

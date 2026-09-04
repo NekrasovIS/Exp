@@ -41,3 +41,36 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email) WHERE email IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS users_telegram_chat_id_unique ON users (telegram_chat_id)
     WHERE telegram_chat_id IS NOT NULL;
+
+-- Заявки в друзья (issue #187, Фаза 1). Может быть несколько строк на
+-- пару (requester, recipient) со временем (отклонённая заявка не
+-- запрещает отправить новую позже) — уникальность только среди pending
+-- обеспечивает частичный индекс ниже, а не ограничение на самой
+-- таблице (тот же приём, что и с invite_code у chat-service).
+CREATE TABLE IF NOT EXISTS friend_requests (
+    id BIGSERIAL PRIMARY KEY,
+    requester_login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    recipient_login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    responded_at TIMESTAMPTZ,
+    CHECK (requester_login <> recipient_login)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_pending_unique ON friend_requests (requester_login, recipient_login)
+    WHERE status = 'pending';
+
+-- Ненаправленное отношение — ровно одна строка на пару независимо от
+-- того, кто кого добавил, поэтому login'ы хранятся в каноническом
+-- порядке (меньший первым); UserRepository всегда сортирует пару перед
+-- INSERT/SELECT, а не полагается на вызывающую сторону.
+CREATE TABLE IF NOT EXISTS friendships (
+    user_a_login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    user_b_login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (user_a_login < user_b_login),
+    PRIMARY KEY (user_a_login, user_b_login)
+);
+
+CREATE INDEX IF NOT EXISTS friend_requests_recipient_status_idx ON friend_requests (recipient_login, status);
+CREATE INDEX IF NOT EXISTS friendships_user_b_login_idx ON friendships (user_b_login);
