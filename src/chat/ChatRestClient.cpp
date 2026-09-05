@@ -382,4 +382,92 @@ void ChatRestClient::fetchMyChannelKey(const QString& token, qint64 channelId) {
     });
 }
 
+void ChatRestClient::openDmThread(const QString& token, const QString& recipientLogin) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token),
+        QJsonDocument(QJsonObject{{"recipient_login", recipientLogin}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, recipientLogin]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit dmThreadOpened(object.value("id").toVariant().toLongLong(), recipientLogin);
+    });
+}
+
+void ChatRestClient::listDmThreads(const QString& token) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads")));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<DirectMessageThreadInfo> threads;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                threads.push_back(DirectMessageThreadInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                            .otherLogin = object.value("other_login").toString(),
+                                                            .createdAt = object.value("created_at").toString()});
+            }
+        }
+        emit dmThreadsListed(threads);
+    });
+}
+
+void ChatRestClient::sendDirectMessage(const QString& token, qint64 threadId, const QString& body) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads/%1/messages").arg(threadId)));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token),
+                                                 QJsonDocument(QJsonObject{{"body", body}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, threadId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit directMessageSent(threadId, DirectMessageInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                             .author = object.value("author").toString(),
+                                                             .body = object.value("body").toString(),
+                                                             .sentAt = object.value("sent_at").toString()});
+    });
+}
+
+void ChatRestClient::listDirectMessages(const QString& token, qint64 threadId, int limit, qint64 beforeId) {
+    QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads/%1/messages").arg(threadId)));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    if (beforeId >= 0) {
+        query.addQueryItem(QStringLiteral("before_id"), QString::number(beforeId));
+    }
+    url.setQuery(query);
+
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, threadId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<DirectMessageInfo> messages;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                messages.push_back(DirectMessageInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                       .author = object.value("author").toString(),
+                                                       .body = object.value("body").toString(),
+                                                       .sentAt = object.value("sent_at").toString()});
+            }
+        }
+        emit directMessagesListed(threadId, messages);
+    });
+}
+
 }  // namespace devicehub

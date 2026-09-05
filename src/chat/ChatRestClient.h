@@ -33,6 +33,24 @@ struct ChatMessageInfo {
     QString attachmentFilename;
 };
 
+/// Диалог личных сообщений, как его возвращает REST API chat-service
+/// (issue #187, Фаза 2).
+struct DirectMessageThreadInfo {
+    qint64 id = 0;
+    QString otherLogin;
+    QString createdAt;
+};
+
+/// Сообщение в диалоге личных сообщений — без вложений/edited_at в
+/// этой фазе, в отличие от ChatMessageInfo (см. doc-комментарий
+/// direct_messages в init.sql на стороне chat-service).
+struct DirectMessageInfo {
+    qint64 id = 0;
+    QString author;
+    QString body;
+    QString sentAt;
+};
+
 /**
  * @brief REST-клиент для управления сообществами/каналами chat-service:
  *        создание/список сообществ, вступление, создание/список каналов.
@@ -110,6 +128,20 @@ public:
     /// совпадение первым, до @p limit результатов.
     void searchMessages(const QString& token, qint64 channelId, const QString& query, int limit = 20);
 
+    /// Открывает диалог с @p recipientLogin (issue #187, Фаза 2) —
+    /// идемпотентно, тот же id при повторном вызове; вызывает
+    /// dmThreadOpened(), либо errorOccurred() (403 "can only message
+    /// friends", если получатель не друг, или 400 при попытке написать
+    /// самому себе).
+    void openDmThread(const QString& token, const QString& recipientLogin);
+
+    void listDmThreads(const QString& token);
+
+    void sendDirectMessage(const QString& token, qint64 threadId, const QString& body);
+
+    /// Тот же постраничный контракт, что и у listMessages().
+    void listDirectMessages(const QString& token, qint64 threadId, int limit, qint64 beforeId = -1);
+
 signals:
     void communityCreated(qint64 id, const QString& name);
     void communitiesListed(const QList<ChatItem>& communities);
@@ -142,6 +174,16 @@ signals:
     /// Ответ на searchMessages() — @p matches отсортирован от самых
     /// новых, возможно пуст.
     void messagesFound(qint64 channelId, const QString& query, const QList<ChatMessageInfo>& matches);
+
+    /// Ответ на openDmThread() — @p otherLogin переносится из вызова
+    /// (сервер отвечает только id, не логин собеседника — вызывающая
+    /// сторона его и так уже знает).
+    void dmThreadOpened(qint64 id, const QString& otherLogin);
+    void dmThreadsListed(const QList<DirectMessageThreadInfo>& threads);
+    void directMessageSent(qint64 threadId, const DirectMessageInfo& message);
+    /// Ответ на listDirectMessages() — тот же хронологический порядок,
+    /// что и у messagesListed().
+    void directMessagesListed(qint64 threadId, const QList<DirectMessageInfo>& messages);
 
     void errorOccurred(const QString& message);
 
