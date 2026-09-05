@@ -12,10 +12,10 @@ namespace devicehub {
 
 /**
  * @brief Узкая иконочная полоса в самом левом краю боковой панели:
- *        по одному значку-аватару на сообщество (первая буква, зелёный
- *        градиент), кнопка обновления сверху и кнопка "+" внизу для
- *        создания нового; правый клик — для присоединения/
- *        переименования/удаления.
+ *        кнопка "Friends" (issue #187) сверху, по одному значку-аватару
+ *        на сообщество (первая буква, зелёный градиент), кнопка
+ *        обновления и кнопка "+" внизу для создания нового; правый клик
+ *        — для присоединения/переименования/удаления.
  *
  * Чистое представление — не владеет никаким сетевым состоянием.
  * MainWindow передаёт ей текущий список сообществ и логин вошедшего
@@ -47,6 +47,7 @@ public:
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
     [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
+    [[nodiscard]] QPushButton* friendsButton() const { return friendsButton_; }
 
 signals:
     void createRequested(const QString& name);
@@ -58,6 +59,9 @@ signals:
     /// поиска.
     void manageModeratorsRequested(qint64 id, const QString& name);
     void communitySelected(qint64 id);
+    /// Клик по кнопке "Friends" (issue #187) — переключает MainWindow в
+    /// режим друзей/личных сообщений вместо сообществ/каналов.
+    void friendsRequested();
 
 private:
     void showAddDialog();
@@ -66,6 +70,7 @@ private:
     QListWidget* listWidget_ = nullptr;
     QPushButton* addButton_ = nullptr;
     QPushButton* refreshButton_ = nullptr;
+    QPushButton* friendsButton_ = nullptr;
     QString currentUserLogin_;
 };
 

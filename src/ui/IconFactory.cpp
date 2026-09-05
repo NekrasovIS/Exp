@@ -63,4 +63,24 @@ QIcon communityAvatarIcon(const QString& label) {
     return QIcon(pixmap);
 }
 
+QIcon friendsIcon(const QColor& strokeColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(strokeColor, 1.8, Qt::SolidLine, Qt::RoundCap));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QPointF(9, 9), 4.0, 4.0);
+    painter.drawEllipse(QPointF(16, 10), 3.2, 3.2);
+    painter.drawArc(QRectF(3, 14, 12, 8), 0, 180 * 16);
+    painter.drawArc(QRectF(12.5, 15, 9, 6.5), 0, 180 * 16);
+
+    return QIcon(pixmap);
+}
+
 }  // namespace devicehub::ui_icons

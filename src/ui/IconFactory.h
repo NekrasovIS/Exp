@@ -26,4 +26,9 @@ QIcon refreshIcon();
 /// строки.
 QIcon communityAvatarIcon(const QString& label);
 
+/// Нарисованная вручную иконка "друзья" (два пересекающихся круга) для
+/// кнопки Friends в CommunitiesPanel (issue #187) — тот же приём, что и
+/// у plusIcon(): QPainter напрямую, без SVG-плагина.
+QIcon friendsIcon(const QColor& strokeColor);
+
 }  // namespace devicehub::ui_icons
