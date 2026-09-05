@@ -59,10 +59,41 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
                                                                         : nlohmann::json(nullptr)}};
 }
+
+nlohmann::json toJson(const DirectMessageThread& thread) {
+    return nlohmann::json{{"id", thread.id}, {"other_login", thread.otherLogin}, {"created_at", thread.createdAt}};
+}
+
+nlohmann::json toJson(const DirectMessage& message) {
+    return nlohmann::json{{"id", message.id}, {"author", message.authorLogin}, {"body", message.body}, {"sent_at", message.sentAt}};
+}
+
+std::optional<std::string> parseRecipientLogin(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("recipient_login") || !json["recipient_login"].is_string()) {
+        return std::nullopt;
+    }
+    return json["recipient_login"].get<std::string>();
+}
+
+std::optional<std::string> parseMessageBody(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("body") || !json["body"].is_string()) {
+        return std::nullopt;
+    }
+    return json["body"].get<std::string>();
+}
 }  // namespace
 
-HttpServer::HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient)
-    : chatService_(chatService), authServiceClient_(authServiceClient) {
+HttpServer::HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                        const UserServiceClient& userServiceClient)
+    : chatService_(chatService), authServiceClient_(authServiceClient), userServiceClient_(userServiceClient) {
     registerRoutes();
 }
 
@@ -143,6 +174,20 @@ void HttpServer::registerRoutes() {
     server_.Get(R"(/channels/(\d+)/keys/me)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleGetMyChannelKey(request, response);
+                 });
+    server_.Post("/dm/threads", [this](const httplib::Request& request, httplib::Response& response) {
+        handleOpenThread(request, response);
+    });
+    server_.Get("/dm/threads", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListMyThreads(request, response);
+    });
+    server_.Post(R"(/dm/threads/(\d+)/messages)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handlePostDirectMessage(request, response);
+                  });
+    server_.Get(R"(/dm/threads/(\d+)/messages)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleListDirectMessages(request, response);
                  });
 }
 
@@ -598,6 +643,110 @@ void HttpServer::handleGetMyChannelKey(const httplib::Request& request, httplib:
         return;
     }
     response.set_content(nlohmann::json{{"wrapped_key", *wrappedKey}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleOpenThread(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const std::optional<std::string> recipientLogin = parseRecipientLogin(request.body);
+    if (!recipientLogin.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'recipient_login' string"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+    if (*recipientLogin == *login) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "cannot message yourself"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    // Дружба принадлежит user-service, не этой базе (issue #187, Фаза
+    // 2) — уже открытый диалог продолжает работать, даже если дружба
+    // позже разорвётся, поэтому проверка только здесь, не в
+    // handlePostDirectMessage()/handleListDirectMessages().
+    if (!userServiceClient_.areFriends(*login, *recipientLogin)) {
+        response.status = 403;
+        response.set_content(nlohmann::json{{"error", "can only message friends"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::int64_t threadId = chatService_.findOrCreateThread(*login, *recipientLogin);
+    response.set_content(nlohmann::json{{"id", threadId}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListMyThreads(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json threads = nlohmann::json::array();
+    for (const DirectMessageThread& thread : chatService_.listMyThreads(*login)) {
+        threads.push_back(toJson(thread));
+    }
+    response.set_content(threads.dump(), kJsonContentType);
+}
+
+void HttpServer::handlePostDirectMessage(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto threadId = std::stoll(request.matches[1].str());
+    // 404, а не 403, для не-участника — не подтверждает существование
+    // чужого диалога (тот же приём приватности, что и у findChannelKey()
+    // выше, просто на уровень строже, поскольку личный диалог — не
+    // полу-публичный канал сообщества).
+    if (!chatService_.isThreadParticipant(threadId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such thread"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> body = parseMessageBody(request.body);
+    if (!body.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'body' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<DirectMessage> message = chatService_.postDirectMessage(threadId, *login, *body);
+    response.status = 201;
+    response.set_content(toJson(*message).dump(), kJsonContentType);
+}
+
+void HttpServer::handleListDirectMessages(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto threadId = std::stoll(request.matches[1].str());
+    if (!chatService_.isThreadParticipant(threadId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such thread"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultMessageLimit;
+    const std::optional<std::int64_t> beforeId =
+        request.has_param("before_id") ? std::make_optional(std::stoll(request.get_param_value("before_id")))
+                                        : std::nullopt;
+
+    nlohmann::json messages = nlohmann::json::array();
+    for (const DirectMessage& message : chatService_.listDirectMessages(threadId, limit, beforeId)) {
+        messages.push_back(toJson(message));
+    }
+    response.set_content(messages.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

@@ -122,6 +122,9 @@ void HttpServer::registerRoutes() {
     server_.Delete(R"(/friends/([^/]+))", [this](const httplib::Request& request, httplib::Response& response) {
         handleRemoveFriend(request, response);
     });
+    server_.Get("/internal/friendship", [this](const httplib::Request& request, httplib::Response& response) {
+        handleCheckFriendship(request, response);
+    });
 }
 
 void HttpServer::handleRegister(const httplib::Request& request, httplib::Response& response) {
@@ -396,6 +399,19 @@ void HttpServer::handleRemoveFriend(const httplib::Request& request, httplib::Re
         return;
     }
     response.set_content(nlohmann::json{{"status", "removed"}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleCheckFriendship(const httplib::Request& request, httplib::Response& response) {
+    if (!request.has_param("user_a") || !request.has_param("user_b")) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'user_a' and 'user_b' query params"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const bool areFriends =
+        userService_.areFriends(request.get_param_value("user_a"), request.get_param_value("user_b"));
+    response.set_content(nlohmann::json{{"friends", areFriends}}.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

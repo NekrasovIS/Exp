@@ -147,6 +147,12 @@ public:
     /// если они не были друзьями.
     [[nodiscard]] bool removeFriend(const std::string& loginA, const std::string& loginB);
 
+    /// @return True, если @p loginA и @p loginB — друзья (issue #187,
+    /// Фаза 2) — используется через внутренний эндпоинт
+    /// GET /internal/friendship, чтобы chat-service мог разрешить
+    /// открытие нового диалога личных сообщений только между друзьями.
+    [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
+
 private:
     std::string connectionString_;
 };

@@ -95,6 +95,26 @@ struct EditMessageResult {
     std::string editedAt;  // имеет смысл только при result == kSuccess
 };
 
+/// Диалог личных сообщений, как его возвращает listMyThreads() (issue
+/// #187, Фаза 2) — @p otherLogin уже посчитан относительно вызывающей
+/// стороны (не user_a/user_b из таблицы), чтобы вызывающему коду не
+/// приходилось решать, какая из двух колонок "не я".
+struct DirectMessageThread {
+    std::int64_t id = 0;
+    std::string otherLogin;
+    std::string createdAt;
+};
+
+/// Сообщение в диалоге личных сообщений — без вложений/edited_at в
+/// этой фазе (в отличие от Message выше), см. doc-комментарий таблицы
+/// direct_messages в init.sql.
+struct DirectMessage {
+    std::int64_t id = 0;
+    std::string authorLogin;
+    std::string body;
+    std::string sentAt;
+};
+
 /**
  * @brief Хранилище на базе Postgres для сообществ/каналов/членств/
  *        сообщений/вложений.
@@ -265,6 +285,33 @@ public:
     ///         тот же паттерн "всегда собственный логин из токена", что
     ///         и у PATCH /users/me в user-service).
     [[nodiscard]] std::optional<std::string> findChannelKey(std::int64_t channelId, const std::string& login);
+
+    /// Возвращает id диалога между @p loginA и @p loginB, создавая его
+    /// при первом обращении (issue #187, Фаза 2) — идемпотентно, порядок
+    /// аргументов не важен (direct_message_threads хранит канонический
+    /// порядок внутри себя). Не проверяет дружбу — это делает HttpServer
+    /// через UserServiceClient до вызова этого метода, поскольку дружба
+    /// принадлежит user-service, а не этой базе.
+    [[nodiscard]] std::int64_t findOrCreateThread(const std::string& loginA, const std::string& loginB);
+
+    /// Диалоги @p login, самые новые первыми.
+    [[nodiscard]] std::vector<DirectMessageThread> listMyThreads(const std::string& login);
+
+    /// @return True, если @p login — участник диалога @p threadId
+    /// (включая случай, когда такого диалога вообще нет — тогда тоже
+    /// false, а не отдельная ошибка).
+    [[nodiscard]] bool isThreadParticipant(std::int64_t threadId, const std::string& login);
+
+    /// @return Сохранённое сообщение, либо std::nullopt, если @p threadId
+    /// не существует. Не проверяет, что @p authorLogin — участник — эту
+    /// проверку HttpServer уже сделал через isThreadParticipant().
+    [[nodiscard]] std::optional<DirectMessage> insertDirectMessage(std::int64_t threadId,
+                                                                    const std::string& authorLogin,
+                                                                    const std::string& body);
+
+    /// Тот же постраничный контракт, что и у listRecentMessages().
+    [[nodiscard]] std::vector<DirectMessage> listDirectMessages(std::int64_t threadId, int limit,
+                                                                 std::optional<std::int64_t> beforeId = std::nullopt);
 
 private:
     std::string connectionString_;

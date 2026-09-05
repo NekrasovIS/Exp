@@ -1,0 +1,52 @@
+@startuml dm_open_thread_sequence
+title Открытие диалога личных сообщений (issue #187, Фаза 2)
+
+actor "Клиент (login = A)" as ClientA
+participant "chat-service\nHttpServer" as ChatHttp
+participant "chat-service\nUserServiceClient" as UserClient
+participant "user-service\nHttpServer" as UserHttp
+participant "user-service\nUserRepository" as UserRepo
+participant "chat-service\nChatService" as ChatSvc
+participant "chat-service\nChatRepository" as ChatRepo
+
+ClientA -> ChatHttp : POST /dm/threads\n{recipient_login: B}\nAuthorization: Bearer <token>
+ChatHttp -> ChatHttp : authenticate(request) -> "A"
+
+alt recipient_login == "A"
+  ChatHttp --> ClientA : 400 "cannot message yourself"
+else recipient_login != "A"
+  ChatHttp -> UserClient : areFriends("A", "B")
+  UserClient -> UserHttp : GET /internal/friendship?user_a=A&user_b=B
+  UserHttp -> UserRepo : areFriends("A", "B")
+  UserRepo --> UserHttp : bool
+  UserHttp --> UserClient : 200 {friends: bool}
+  UserClient --> ChatHttp : bool
+
+  alt not friends
+    ChatHttp --> ClientA : 403 "can only message friends"
+  else friends
+    ChatHttp -> ChatSvc : findOrCreateThread("A", "B")
+    ChatSvc -> ChatRepo : findOrCreateThread("A", "B")
+    ChatRepo -> ChatRepo : INSERT ... ON CONFLICT DO NOTHING,\nthen SELECT id
+    ChatRepo --> ChatSvc : threadId
+    ChatSvc --> ChatHttp : threadId
+    ChatHttp --> ClientA : 200 {id: threadId}
+  end
+end
+
+note over UserClient, UserHttp
+  Fail closed: любая сетевая ошибка при вызове
+  GET /internal/friendship трактуется как "не друзья"
+  (UserServiceClient::areFriends() возвращает false),
+  а не приводит к исключению — недоступный user-service
+  не должен открывать доступ к новым диалогам по умолчанию.
+end note
+
+note over ChatHttp
+  Проверка дружбы — только здесь, не в
+  handlePostDirectMessage()/handleListDirectMessages():
+  уже открытый диалог продолжает работать, даже если
+  дружба между A и B будет позже разорвана.
+end note
+
+@enduml

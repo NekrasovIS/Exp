@@ -58,6 +58,17 @@ public:
                                                                        const AttachmentUpload& upload);
     [[nodiscard]] std::optional<AttachmentData> findAttachmentData(std::int64_t attachmentId);
 
+    /// См. ChatRepository::findOrCreateThread() (issue #187, Фаза 2) —
+    /// дружба проверяется в HttpServer до вызова этого метода.
+    [[nodiscard]] std::int64_t findOrCreateThread(const std::string& loginA, const std::string& loginB);
+    [[nodiscard]] std::vector<DirectMessageThread> listMyThreads(const std::string& login);
+    [[nodiscard]] bool isThreadParticipant(std::int64_t threadId, const std::string& login);
+    [[nodiscard]] std::optional<DirectMessage> postDirectMessage(std::int64_t threadId,
+                                                                  const std::string& authorLogin,
+                                                                  const std::string& body);
+    [[nodiscard]] std::vector<DirectMessage> listDirectMessages(std::int64_t threadId, int limit,
+                                                                 std::optional<std::int64_t> beforeId = std::nullopt);
+
 private:
     ChatRepository& repository_;
 };
