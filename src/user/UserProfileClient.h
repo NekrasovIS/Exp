@@ -1,7 +1,9 @@
 #pragma once
 
+#include <QList>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QStringList>
 #include <QUrl>
 
 namespace devicehub {
@@ -41,6 +43,14 @@ struct ProfileEdits {
     QString telegramChatId;
 };
 
+/// Входящая заявка в друзья (issue #187, Фаза 1), как её возвращает
+/// GET /friends/requests.
+struct FriendRequestInfo {
+    qint64 id = 0;
+    QString requesterLogin;
+    QString createdAt;
+};
+
 /**
  * @brief REST-клиент для эндпоинтов профиля user-service:
  *        GET /users/{login}/profile, PATCH /users/me (issue #110).
@@ -72,9 +82,29 @@ public:
     /// редактирования профиля.
     void publishPublicKey(const QString& token, const QString& publicKey);
 
+    /// Отправляет заявку в друзья @p recipientLogin (issue #187, Фаза
+    /// 1) — вызывает friendRequestSent() с @p status "sent" или
+    /// "accepted" (у получателя уже была встречная pending-заявка).
+    void sendFriendRequest(const QString& token, const QString& recipientLogin);
+    /// Входящие pending-заявки вызывающего.
+    void listIncomingFriendRequests(const QString& token);
+    void acceptFriendRequest(const QString& token, qint64 requestId);
+    void declineFriendRequest(const QString& token, qint64 requestId);
+    void listFriends(const QString& token);
+    /// Расфрендить — работает в любую сторону пары.
+    void removeFriend(const QString& token, const QString& login);
+
 signals:
     void profileReceived(const UserProfile& profile);
     void profileUpdated(const UserProfile& profile);
+
+    void friendRequestSent(const QString& recipientLogin, const QString& status);
+    void incomingFriendRequestsListed(const QList<FriendRequestInfo>& requests);
+    void friendRequestAccepted(qint64 requestId);
+    void friendRequestDeclined(qint64 requestId);
+    void friendsListed(const QStringList& logins);
+    void friendRemoved(const QString& login);
+
     void errorOccurred(const QString& message);
 
 private:

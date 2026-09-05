@@ -21,7 +21,25 @@ class MainWindow {
   -showToast(text: QString, variant: ToastVariant)
   -onAccountSettingsClicked()
   -signOut()
+  -showFriendsMode()
+  -showCommunitiesMode()
+  -openDmThreadWith(login: QString)
+  -pollOpenDmThread()
 }
+note right of MainWindow
+  Issue #187, Фаза 3: sidebarListStack_
+  (channelsPanel_/friendsPanel_) и
+  contentStack_ (chatView_/
+  directMessageView_) переключаются вместе
+  — showFriendsMode()/showCommunitiesMode().
+  dmPollTimer_ (4с) перезапрашивает
+  последние сообщения открытого диалога,
+  пока backend не доставляет их через
+  WebSocket (Фаза 2b); directMessagesListed()
+  сам решает, initial load это (setMessages)
+  или новые сообщения (appendMessage только
+  для id > lastSeenDmMessageId_).
+end note
 
 class CommunitiesPanel {
   +setCommunities(communities: QList<ChatItem>)
@@ -30,6 +48,7 @@ class CommunitiesPanel {
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +refreshButton() : QPushButton*
+  +friendsButton() : QPushButton*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   .. signals ..
@@ -39,7 +58,57 @@ class CommunitiesPanel {
   +joinRequested(id: int64)
   +communitySelected(id: int64)
   +manageModeratorsRequested(id: int64, name: QString)
+  +friendsRequested()
 }
+
+class FriendsPanel {
+  +setFriends(logins: QStringList)
+  +setIncomingRequests(requests: QList<FriendRequestInfo>)
+  +friendsList() : QListWidget*
+  +requestsList() : QListWidget*
+  +addFriendButton() : QPushButton*
+  -showAddFriendDialog()
+  -showFriendContextMenu(pos: QPoint)
+  -showRequestContextMenu(pos: QPoint)
+  .. signals ..
+  +friendSelected(login: QString)
+  +addFriendRequested(recipientLogin: QString)
+  +acceptRequestRequested(requestId: int64)
+  +declineRequestRequested(requestId: int64)
+  +removeFriendRequested(login: QString)
+}
+note right of FriendsPanel
+  Issue #187, Фаза 3: заменяет
+  ChannelsPanel в режиме Friends
+  (MainWindow::showFriendsMode()) —
+  входящие заявки сверху (accept/decline
+  по правому клику), друзья снизу (клик
+  открывает диалог, правый клик —
+  расфрендить).
+end note
+
+class DirectMessageView {
+  +showPlaceholder()
+  +showThread(otherLogin: QString)
+  +setMessages(messages: QList<DirectMessageInfo>)
+  +appendMessage(message: DirectMessageInfo)
+  +messagesList() : QListWidget*
+  +messageEdit() : QLineEdit*
+  +sendButton() : QPushButton*
+  -onSendClicked()
+  .. signals ..
+  +sendMessageRequested(body: QString)
+}
+note right of DirectMessageView
+  Issue #187, Фаза 3: заменяет ChatView в
+  режиме Friends — сильно упрощена (без
+  вложений/поиска/звонков/шифрования/
+  редактирования, которых backend этой
+  фазы и не поддерживает для личных
+  сообщений); сообщения — обычные строки
+  "login: текст", а не ChatBubble/
+  ChatMessageRow.
+end note
 
 class ChannelsPanel {
   +setChannels(channels: QList<ChatItem>)
@@ -347,7 +416,9 @@ package "src/user" {
 
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
+MainWindow *-- FriendsPanel : owns (replaces ChannelsPanel\nin Friends mode, issue #187)
 MainWindow *-- ChatView : owns (main content area)
+MainWindow *-- DirectMessageView : owns (replaces ChatView\nin Friends mode, issue #187)
 MainWindow *-- AccountMenu : owns (top-right)
 MainWindow *-- ProfileDialog : owns (opened from\nAccountMenu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
@@ -378,6 +449,10 @@ MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
 MainWindow ..> UserProfileClient : profileReceived()/Updated()\nerrorOccurred() (issue #110) >
+MainWindow ..> UserProfileClient : sendFriendRequest()/listFriends()\naccept|declineFriendRequest()/removeFriend()\n(issue #187, Фаза 3) >
+MainWindow ..> ChatRestClient : openDmThread()/listDmThreads()\nsendDirectMessage()/listDirectMessages()\n(issue #187, Фаза 3) >
+FriendsPanel ..> MainWindow : friendSelected()/addFriendRequested()\naccept|declineRequestRequested()\nremoveFriendRequested() >
+DirectMessageView ..> MainWindow : sendMessageRequested() >
 MainWindow ..> AccountMenu : setEditProfileEnabled() >
 MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
 MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
