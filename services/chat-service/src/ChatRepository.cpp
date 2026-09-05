@@ -3,6 +3,7 @@
 #include <pqxx/pqxx>
 
 #include <algorithm>
+#include <utility>
 
 namespace chat_service {
 
@@ -17,6 +18,13 @@ bool isModerator(pqxx::work& transaction, std::int64_t communityId, const std::s
         transaction.exec("SELECT is_moderator FROM memberships WHERE community_id = $1 AND member_login = $2",
                           pqxx::params{communityId, login});
     return !rows.empty() && rows[0][0].as<bool>();
+}
+
+/// direct_message_threads хранит неупорядоченную пару в каноническом
+/// порядке (меньший login первым) — одна строка вместо двух, тот же
+/// приём, что и у friendships в user-service.
+std::pair<std::string, std::string> canonicalPair(const std::string& loginA, const std::string& loginB) {
+    return loginA < loginB ? std::make_pair(loginA, loginB) : std::make_pair(loginB, loginA);
 }
 
 }  // namespace
@@ -520,6 +528,98 @@ std::optional<std::string> ChatRepository::findChannelKey(std::int64_t channelId
         return std::nullopt;
     }
     return rows[0][0].as<std::string>();
+}
+
+std::int64_t ChatRepository::findOrCreateThread(const std::string& loginA, const std::string& loginB) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const auto [canonicalA, canonicalB] = canonicalPair(loginA, loginB);
+    // INSERT ... ON CONFLICT DO NOTHING, затем SELECT, а не наоборот —
+    // избегает состояния гонки между проверкой существования и
+    // созданием при двух одновременных первых сообщениях одной паре.
+    transaction.exec(
+        "INSERT INTO direct_message_threads (user_a_login, user_b_login) VALUES ($1, $2) "
+        "ON CONFLICT (user_a_login, user_b_login) DO NOTHING",
+        pqxx::params{canonicalA, canonicalB});
+    const pqxx::result rows = transaction.exec(
+        "SELECT id FROM direct_message_threads WHERE user_a_login = $1 AND user_b_login = $2",
+        pqxx::params{canonicalA, canonicalB});
+    transaction.commit();
+    return rows[0][0].as<std::int64_t>();
+}
+
+std::vector<DirectMessageThread> ChatRepository::listMyThreads(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, CASE WHEN user_a_login = $1 THEN user_b_login ELSE user_a_login END, created_at "
+        "FROM direct_message_threads WHERE user_a_login = $1 OR user_b_login = $1 ORDER BY created_at DESC",
+        pqxx::params{login});
+
+    std::vector<DirectMessageThread> threads;
+    threads.reserve(rows.size());
+    for (const auto& row : rows) {
+        threads.push_back(DirectMessageThread{
+            .id = row[0].as<std::int64_t>(), .otherLogin = row[1].as<std::string>(), .createdAt = row[2].as<std::string>()});
+    }
+    return threads;
+}
+
+bool ChatRepository::isThreadParticipant(std::int64_t threadId, const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT 1 FROM direct_message_threads WHERE id = $1 AND (user_a_login = $2 OR user_b_login = $2)",
+                          pqxx::params{threadId, login});
+    return !rows.empty();
+}
+
+std::optional<DirectMessage> ChatRepository::insertDirectMessage(std::int64_t threadId, const std::string& authorLogin,
+                                                                   const std::string& body) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("INSERT INTO direct_messages (thread_id, author_login, body) "
+                          "SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM direct_message_threads WHERE id = $1) "
+                          "RETURNING id, sent_at",
+                          pqxx::params{threadId, authorLogin, body});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    transaction.commit();
+    return DirectMessage{.id = rows[0][0].as<std::int64_t>(),
+                         .authorLogin = authorLogin,
+                         .body = body,
+                         .sentAt = rows[0][1].as<std::string>()};
+}
+
+std::vector<DirectMessage> ChatRepository::listDirectMessages(std::int64_t threadId, int limit,
+                                                                std::optional<std::int64_t> beforeId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // Тот же приём "LIMIT по новейшим, затем развернуть", что и у
+    // listRecentMessages() — см. её doc-комментарий.
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, author_login, body, sent_at FROM direct_messages "
+        "WHERE thread_id = $1 AND ($3::bigint IS NULL OR id < $3) "
+        "ORDER BY sent_at DESC, id DESC LIMIT $2",
+        pqxx::params{threadId, limit, beforeId});
+
+    std::vector<DirectMessage> messages;
+    messages.reserve(rows.size());
+    for (const auto& row : rows) {
+        messages.push_back(DirectMessage{.id = row[0].as<std::int64_t>(),
+                                          .authorLogin = row[1].as<std::string>(),
+                                          .body = row[2].as<std::string>(),
+                                          .sentAt = row[3].as<std::string>()});
+    }
+    std::reverse(messages.begin(), messages.end());
+    return messages;
 }
 
 }  // namespace chat_service

@@ -89,9 +89,16 @@ Screen Capture) слева. Тёмная тема с зелёным градие
   backend в `user-service` (`POST /friends/requests`,
   `GET /friends/requests`, accept/decline, `GET /friends`,
   `DELETE /friends/{login}` — см. раздел user-service ниже), без UI в
-  DeviceHub пока. Взаимные заявки авто-принимаются в дружбу. Личные
-  сообщения (Фаза 2) и экран переписки в клиенте (Фаза 3) — отдельные
-  задачи следом.
+  DeviceHub пока. Взаимные заявки авто-принимаются в дружбу. **Фаза 2**
+  — личные диалоги: backend в `chat-service` (`POST /dm/threads`,
+  `GET /dm/threads`, `POST`/`GET /dm/threads/{id}/messages` — см. раздел
+  chat-service ниже), тоже без UI. Открыть новый диалог можно только с
+  другом — chat-service проверяет это через внутренний вызов на
+  user-service (`GET /internal/friendship`, см.
+  `services/chat-service/docs/diagrams/dm-open-thread-sequence.puml`);
+  уже открытый диалог продолжает работать, даже если дружба потом
+  разорвётся. Пока только REST — живой доставки через WebSocket и
+  экрана переписки в клиенте (Фаза 3) нет.
 
 ## Сборка
 
@@ -224,6 +231,10 @@ Bearer`: `POST /friends/requests {recipient_login}` (201 `"sent"`, либо
 `POST /friends/requests/{id}/accept` / `.../decline` (только адресат
 конкретной заявки), `GET /friends` (список друзей вызывающего),
 `DELETE /friends/{login}` (расфрендить, работает в любую сторону пары).
+`GET /internal/friendship?user_a=&user_b=` (issue #187, Фаза 2, без
+авторизации — вызывается только chat-service, не клиентами напрямую,
+чтобы решить, можно ли открыть новый диалог личных сообщений; отвечает
+`{"friends": bool}`).
 
 `email` (issue #156) и `telegram_chat_id` (issue #174, вход по
 одноразовому коду) — оба уникальны, если заданы (частичные уникальные
@@ -312,7 +323,9 @@ cmake --build services/chat-service/build --parallel
 Два порта: REST на `127.0.0.1:8082` (`CHAT_SERVICE_REST_PORT`) и
 WebSocket на `127.0.0.1:8083` (`CHAT_SERVICE_WS_PORT`) —
 `CHAT_SERVICE_HOST` меняет адрес для обоих. Ходит в auth-service по
-`AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT`.
+`AUTH_SERVICE_HOST`/`AUTH_SERVICE_PORT` и (issue #187, Фаза 2, только
+для `POST /dm/threads` — см. ниже) в user-service по
+`USER_SERVICE_HOST`/`USER_SERVICE_PORT`.
 
 REST: `POST /communities`, `GET /communities`,
 `PATCH /communities/{id}` (переименование, только владелец),
@@ -404,6 +417,23 @@ REST остаётся источником истории (и теперь по�
 сервер их не разбирает. Участники звонка (`call_join`/`call_leave`) —
 отдельный от подписки на текстовый канал список: можно быть в чате, не
 будучи в звонке, и наоборот.
+
+Личные диалоги (issue #187, Фаза 2) — переиспользуют message-модель, но
+без community/channel: `POST /dm/threads` (тело `{"recipient_login"}`)
+открывает диалог с другом или возвращает уже существующий (идемпотентно
+— один и тот же id при повторном вызове в любом направлении), 400 при
+попытке написать самому себе, 403, если получатель не друг (дружба
+проверяется через `GET /internal/friendship` на user-service, см.
+`UserServiceClient`, — уже открытый диалог продолжает работать, даже
+если дружба потом разорвётся). `GET /dm/threads` — мои диалоги
+(`{"id", "other_login", "created_at"}`). `POST
+/dm/threads/{id}/messages` (тело `{"body"}`) и `GET
+/dm/threads/{id}/messages` (та же пагинация `?limit=&before_id=`, что и
+у `/channels/{id}/messages`) — оба отвечают 404 не-участнику диалога, а
+не 403, чтобы не подтверждать само существование чужого диалога. Пока
+без вложений/редактирования/удаления и без живой доставки через
+WebSocket — только REST (Фаза 2b добавит доставку в реальном времени
+отдельной задачей); UI в DeviceHub — Фаза 3.
 
 ### DeviceHub ↔ сервисы
 
@@ -659,7 +689,14 @@ renegotiation/attach на каждого пира при переключени�
 - `UserServiceIntegrationTest` (user-service) — регистрация и проверка
   учётных данных напрямую в Postgres.
 - `ChatServiceIntegrationTest` (chat-service) — сообщества/каналы/
-  сообщения напрямую в Postgres.
+  сообщения напрямую в Postgres, включая личные диалоги (issue #187,
+  Фаза 2) — не требует auth-service/user-service, вызывает ChatService
+  напрямую.
+- `UserServiceClientTest` (chat-service, issue #187, Фаза 2) —
+  `UserServiceClient::areFriends()` против живого user-service (плюс
+  auth-service для выпуска токенов, чтобы реально подружить два
+  аккаунта через `POST /friends/requests`); недоступный-сервис случай
+  выполняется всегда, без пропуска.
 
 ## Диаграммы
 

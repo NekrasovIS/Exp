@@ -54,6 +54,22 @@ class AttachmentData {
   +contentType : string
   +data : string
 }
+class DirectMessageThread {
+  +id : int64
+  +otherLogin : string
+  +createdAt : string
+}
+class DirectMessage {
+  +id : int64
+  +authorLogin : string
+  +body : string
+  +sentAt : string
+}
+note bottom of DirectMessage
+  issue #187, Фаза 2: без вложений/
+  редактирования/удаления в этой фазе,
+  в отличие от Message.
+end note
 
 package "chat_service::base64" <<Rectangle>> {
   class Base64 << (N,orchid) namespace >> {
@@ -85,6 +101,11 @@ class ChatRepository {
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
   +findChannelKey(channelId: int64, login: string) : optional<string>
+  +findOrCreateThread(loginA: string, loginB: string) : int64
+  +listMyThreads(login: string) : vector<DirectMessageThread>
+  +isThreadParticipant(threadId: int64, login: string) : bool
+  +insertDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
+  +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> Channel : creates
@@ -93,6 +114,8 @@ ChatRepository ..> AttachmentMetadata : creates
 ChatRepository ..> AttachmentUpload : reads
 ChatRepository ..> AttachmentData : reads
 ChatRepository ..> MutationResult : returns
+ChatRepository ..> DirectMessageThread : returns
+ChatRepository ..> DirectMessage : returns
 ChatRepository ..> PqxxConnection : opens per call
 
 class ChatService {
@@ -119,12 +142,39 @@ class ChatService {
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
+  +findOrCreateThread(loginA: string, loginB: string) : int64
+  +listMyThreads(login: string) : vector<DirectMessageThread>
+  +isThreadParticipant(threadId: int64, login: string) : bool
+  +postDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
+  +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
 }
+note bottom of ChatService
+  issue #187, Фаза 2: ChatService не
+  проверяет дружбу — тонкий проброс к
+  ChatRepository, как и большинство
+  остальных методов здесь. Проверку
+  дружбы (через UserServiceClient) делает
+  HttpServer перед вызовом
+  findOrCreateThread() — та же граница
+  ответственности, что и у
+  authenticate()/AuthServiceClient.
+end note
 ChatService --> ChatRepository : delegates to (&)
 
 class AuthServiceClient {
   +verifyToken(token: string) : optional<string>
 }
+
+class UserServiceClient {
+  +areFriends(loginA: string, loginB: string) : bool
+}
+note bottom of UserServiceClient
+  issue #187, Фаза 2: fail closed, как и
+  AuthServiceClient — недоступный
+  user-service не открывает доступ к
+  новым диалогам по умолчанию.
+end note
+UserServiceClient ..> "user-service" : GET /internal/friendship
 AuthServiceClient ..> "auth-service" : POST /auth/verify
 
 class HttpServer {
@@ -150,11 +200,16 @@ class HttpServer {
   -handleListMembers(request, response)
   -handleSetChannelKey(request, response)
   -handleGetMyChannelKey(request, response)
+  -handleOpenThread(request, response)
+  -handleListMyThreads(request, response)
+  -handlePostDirectMessage(request, response)
+  -handleListDirectMessages(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }
 HttpServer --> ChatService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
+HttpServer --> UserServiceClient : checks friendship via (const&, issue #187)
 HttpServer ..> Base64 : decode() (validates\nupload/download payloads)
 HttpServer ..> JsonGuard : guards parse() with (issue #129)
 HttpServer *-- HttplibServer : owns
@@ -216,6 +271,19 @@ note right of HttpServer
                               community moderator only)
   GET    /channels/{id}/keys/me         (issue #138, 404
                               if no key set for you yet)
+  POST   /dm/threads                    (issue #187, Фаза 2;
+                              {recipient_login} — 403, если
+                              не друзья, кроме уже
+                              открытого диалога)
+  GET    /dm/threads
+  POST   /dm/threads/{id}/messages      ({"body"}; 404 —
+                              не участник, не "403", чтобы
+                              не подтверждать существование
+                              чужого диалога)
+  GET    /dm/threads/{id}/messages      (?limit=, before_id=,
+                              та же пагинация, что и у
+                              /channels/{id}/messages;
+                              тоже 404 для не-участника)
 
   Owner-only routes answer 403 for
   non-owners, 404 for a nonexistent

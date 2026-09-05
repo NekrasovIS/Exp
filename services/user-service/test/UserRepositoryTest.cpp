@@ -546,5 +546,29 @@ TEST(UserRepositoryTest, RemoveFriendReturnsFalseWhenNotFriends) {
     EXPECT_FALSE(repository.removeFriend(loginA, loginB));
 }
 
+TEST(UserRepositoryTest, AreFriendsReflectsCurrentFriendshipStateInEitherArgumentOrder) {
+    UserRepository repository(connectionString());
+    const std::string loginA = uniqueLogin("user-repository-test-arefriends-a");
+    const std::string loginB = uniqueLogin("user-repository-test-arefriends-b");
+
+    bool created = false;
+    try {
+        created = repository.createUser(loginA, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(loginB, "some-hash"));
+
+    EXPECT_FALSE(repository.areFriends(loginA, loginB));
+    EXPECT_FALSE(repository.areFriends(loginB, loginA));
+
+    ASSERT_EQ(repository.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kSent);
+    ASSERT_EQ(repository.sendFriendRequest(loginB, loginA), SendFriendRequestResult::kAutoAccepted);
+
+    EXPECT_TRUE(repository.areFriends(loginA, loginB));
+    EXPECT_TRUE(repository.areFriends(loginB, loginA));
+}
+
 }  // namespace
 }  // namespace user_service

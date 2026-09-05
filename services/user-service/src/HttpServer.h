@@ -22,7 +22,11 @@ namespace user_service {
  *        DELETE /friends/{login} (issue #187, заявки в друзья) —
  *        которым нужен валидный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через
- *        AuthServiceClient у auth-service.
+ *        AuthServiceClient у auth-service. Плюс
+ *        GET /internal/friendship?user_a=&user_b= (issue #187, Фаза 2) —
+ *        без аутентификации, как и /users/resolve-otp-identifier: не
+ *        вызывается напрямую клиентами, только chat-service, чтобы
+ *        решить, можно ли открыть новый диалог личных сообщений.
  *
  * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
  * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
@@ -56,6 +60,7 @@ private:
     void handleDeclineFriendRequest(const httplib::Request& request, httplib::Response& response);
     void handleListFriends(const httplib::Request& request, httplib::Response& response);
     void handleRemoveFriend(const httplib::Request& request, httplib::Response& response);
+    void handleCheckFriendship(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

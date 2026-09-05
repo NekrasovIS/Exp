@@ -2,12 +2,14 @@
 #include "ChatRepository.h"
 #include "ChatService.h"
 #include "HttpServer.h"
+#include "UserServiceClient.h"
 
 #include <gtest/gtest.h>
 #include <httplib.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -62,8 +64,19 @@ constexpr int kTestPort = 18082;
 
 class ScopedServer {
 public:
+    // Большинство тестов в этом файле не касаются личных диалогов
+    // (issue #187, Фаза 2) и не нуждаются в настоящем user-service —
+    // делегирует на недостижимый статический UserServiceClient
+    // (program lifetime, поэтому ссылка внутри HttpServer остаётся
+    // валидной), чтобы не переписывать все ~40 существующих вызовов
+    // ScopedServer(chatService, authServiceClient) в этом файле.
     ScopedServer(ChatService& chatService, const AuthServiceClient& authServiceClient)
-        : server_(chatService, authServiceClient), thread_([this] { server_.listen(kTestHost, kTestPort); }) {
+        : ScopedServer(chatService, authServiceClient, unreachableUserServiceClient()) {}
+
+    ScopedServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                 const UserServiceClient& userServiceClient)
+        : server_(chatService, authServiceClient, userServiceClient),
+          thread_([this] { server_.listen(kTestHost, kTestPort); }) {
         httplib::Client probe(kTestHost, kTestPort);
         probe.set_connection_timeout(0, 50000);
         for (int attempt = 0; attempt < 100; ++attempt) {
@@ -83,6 +96,11 @@ public:
     ScopedServer& operator=(const ScopedServer&) = delete;
 
 private:
+    static const UserServiceClient& unreachableUserServiceClient() {
+        static const UserServiceClient instance("127.0.0.1", 1);
+        return instance;
+    }
+
     HttpServer server_;
     std::thread thread_;
 };
@@ -1091,6 +1109,136 @@ TEST(HttpServerTest, UploadAttachmentRejectsEncryptedChannelWith400) {
 
     ASSERT_TRUE(result);
     EXPECT_EQ(result->status, 400);
+}
+
+// Регистрирует через auth-service, как и registerAndGetToken(), но
+// возвращает и сам login — нужен, чтобы затем позвать
+// POST /friends/requests на user-service от лица этого аккаунта (issue
+// #187, Фаза 2).
+struct DmTestAccount {
+    std::string login;
+    std::string token;
+};
+
+std::optional<DmTestAccount> registerDmTestAccount(const std::string& authHost, int authPort,
+                                                    const std::string& loginPrefix) {
+    const std::string login = loginPrefix + "-" + uniqueSuffix();
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, login);
+    if (!token.has_value()) {
+        return std::nullopt;
+    }
+    return DmTestAccount{.login = login, .token = *token};
+}
+
+void makeFriends(const std::string& userServiceHost, int userServicePort, const DmTestAccount& accountA,
+                  const DmTestAccount& accountB) {
+    httplib::Client userServiceClient(userServiceHost, userServicePort);
+    userServiceClient.Post("/friends/requests", httplib::Headers{{"Authorization", bearer(accountA.token)}},
+                            nlohmann::json{{"recipient_login", accountB.login}}.dump(), "application/json");
+    userServiceClient.Post("/friends/requests", httplib::Headers{{"Authorization", bearer(accountB.token)}},
+                            nlohmann::json{{"recipient_login", accountA.login}}.dump(), "application/json");
+}
+
+TEST(HttpServerTest, OpenThreadRouteRejectsNonFriendsThenSucceedsAfterBefriending) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::optional<DmTestAccount> accountA = registerDmTestAccount(authHost, authPort, "http-server-dm-a");
+    const std::optional<DmTestAccount> accountB = registerDmTestAccount(authHost, authPort, "http-server-dm-b");
+    if (!accountA.has_value() || !accountB.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient(authHost, authPort);
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const ScopedServer server(chatService, authServiceClient, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeaderA{{"Authorization", bearer(accountA->token)}};
+
+    const httplib::Result selfResult =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountA->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(selfResult);
+    EXPECT_EQ(selfResult->status, 400);
+
+    const httplib::Result forbiddenResult =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountB->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(forbiddenResult);
+    EXPECT_EQ(forbiddenResult->status, 403);
+
+    makeFriends(userServiceHost, userServicePort, *accountA, *accountB);
+
+    const httplib::Result openResult =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountB->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(openResult);
+    ASSERT_EQ(openResult->status, 200);
+    const std::int64_t threadId = nlohmann::json::parse(openResult->body)["id"].get<std::int64_t>();
+
+    httplib::Headers authHeaderB{{"Authorization", bearer(accountB->token)}};
+    const nlohmann::json threadsForB = nlohmann::json::parse(client.Get("/dm/threads", authHeaderB)->body);
+    EXPECT_TRUE(std::any_of(threadsForB.begin(), threadsForB.end(),
+                             [&](const nlohmann::json& item) { return item["id"].get<std::int64_t>() == threadId; }));
+}
+
+TEST(HttpServerTest, DirectMessageRoutesRejectNonParticipantsAndRoundTripForParticipants) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::optional<DmTestAccount> accountA = registerDmTestAccount(authHost, authPort, "http-server-dm-msg-a");
+    const std::optional<DmTestAccount> accountB = registerDmTestAccount(authHost, authPort, "http-server-dm-msg-b");
+    const std::optional<DmTestAccount> stranger = registerDmTestAccount(authHost, authPort, "http-server-dm-msg-c");
+    if (!accountA.has_value() || !accountB.has_value() || !stranger.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    makeFriends(userServiceHost, userServicePort, *accountA, *accountB);
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient(authHost, authPort);
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const ScopedServer server(chatService, authServiceClient, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeaderA{{"Authorization", bearer(accountA->token)}};
+    httplib::Headers authHeaderB{{"Authorization", bearer(accountB->token)}};
+    httplib::Headers authHeaderStranger{{"Authorization", bearer(stranger->token)}};
+
+    const httplib::Result openResult =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountB->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(openResult);
+    const std::int64_t threadId = nlohmann::json::parse(openResult->body)["id"].get<std::int64_t>();
+
+    const httplib::Result strangerPostResult =
+        client.Post("/dm/threads/" + std::to_string(threadId) + "/messages", authHeaderStranger,
+                    nlohmann::json{{"body", "sneaking in"}}.dump(), "application/json");
+    ASSERT_TRUE(strangerPostResult);
+    EXPECT_EQ(strangerPostResult->status, 404);
+    const httplib::Result strangerListResult =
+        client.Get("/dm/threads/" + std::to_string(threadId) + "/messages", authHeaderStranger);
+    ASSERT_TRUE(strangerListResult);
+    EXPECT_EQ(strangerListResult->status, 404);
+
+    const httplib::Result postResult =
+        client.Post("/dm/threads/" + std::to_string(threadId) + "/messages", authHeaderA,
+                    nlohmann::json{{"body", "hello there"}}.dump(), "application/json");
+    ASSERT_TRUE(postResult);
+    EXPECT_EQ(postResult->status, 201);
+
+    const httplib::Result listResult = client.Get("/dm/threads/" + std::to_string(threadId) + "/messages", authHeaderB);
+    ASSERT_TRUE(listResult);
+    ASSERT_EQ(listResult->status, 200);
+    const nlohmann::json messages = nlohmann::json::parse(listResult->body);
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages[0]["body"].get<std::string>(), "hello there");
+    EXPECT_EQ(messages[0]["author"].get<std::string>(), accountA->login);
 }
 
 }  // namespace

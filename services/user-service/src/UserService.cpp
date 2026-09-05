@@ -53,4 +53,8 @@ bool UserService::removeFriend(const std::string& loginA, const std::string& log
     return repository_.removeFriend(loginA, loginB);
 }
 
+bool UserService::areFriends(const std::string& loginA, const std::string& loginB) {
+    return repository_.areFriends(loginA, loginB);
+}
+
 }  // namespace user_service

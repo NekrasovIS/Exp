@@ -106,4 +106,26 @@ std::vector<Message> ChatService::searchMessages(std::int64_t channelId, const s
     return repository_.searchMessages(channelId, query, limit);
 }
 
+std::int64_t ChatService::findOrCreateThread(const std::string& loginA, const std::string& loginB) {
+    return repository_.findOrCreateThread(loginA, loginB);
+}
+
+std::vector<DirectMessageThread> ChatService::listMyThreads(const std::string& login) {
+    return repository_.listMyThreads(login);
+}
+
+bool ChatService::isThreadParticipant(std::int64_t threadId, const std::string& login) {
+    return repository_.isThreadParticipant(threadId, login);
+}
+
+std::optional<DirectMessage> ChatService::postDirectMessage(std::int64_t threadId, const std::string& authorLogin,
+                                                              const std::string& body) {
+    return repository_.insertDirectMessage(threadId, authorLogin, body);
+}
+
+std::vector<DirectMessage> ChatService::listDirectMessages(std::int64_t threadId, int limit,
+                                                             std::optional<std::int64_t> beforeId) {
+    return repository_.listDirectMessages(threadId, limit, beforeId);
+}
+
 }  // namespace chat_service

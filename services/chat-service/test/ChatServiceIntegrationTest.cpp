@@ -609,5 +609,111 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     EXPECT_EQ(service.setChannelKey(-1, member, owner, "irrelevant"), MutationResult::kNotFound);
 }
 
+TEST(ChatServiceIntegrationTest, FindOrCreateThreadIsIdempotentAndArgumentOrderIndependent) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-a-" + suffix;
+    const std::string loginB = "dm-test-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_EQ(service.findOrCreateThread(loginB, loginA), threadId);
+    EXPECT_EQ(service.findOrCreateThread(loginA, loginB), threadId);
+}
+
+TEST(ChatServiceIntegrationTest, ListMyThreadsShowsTheOtherLoginForBothParticipants) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-list-a-" + suffix;
+    const std::string loginB = "dm-test-list-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::vector<DirectMessageThread> threadsForA = service.listMyThreads(loginA);
+    const std::vector<DirectMessageThread> threadsForB = service.listMyThreads(loginB);
+    ASSERT_TRUE(std::any_of(threadsForA.begin(), threadsForA.end(),
+                             [&](const DirectMessageThread& t) { return t.id == threadId && t.otherLogin == loginB; }));
+    ASSERT_TRUE(std::any_of(threadsForB.begin(), threadsForB.end(),
+                             [&](const DirectMessageThread& t) { return t.id == threadId && t.otherLogin == loginA; }));
+}
+
+TEST(ChatServiceIntegrationTest, IsThreadParticipantReflectsMembership) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-participant-a-" + suffix;
+    const std::string loginB = "dm-test-participant-b-" + suffix;
+    const std::string stranger = "dm-test-participant-stranger-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_TRUE(service.isThreadParticipant(threadId, loginA));
+    EXPECT_TRUE(service.isThreadParticipant(threadId, loginB));
+    EXPECT_FALSE(service.isThreadParticipant(threadId, stranger));
+    EXPECT_FALSE(service.isThreadParticipant(-1, loginA));
+}
+
+TEST(ChatServiceIntegrationTest, PostDirectMessageAndListDirectMessagesRoundTrip) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-post-a-" + suffix;
+    const std::string loginB = "dm-test-post-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::optional<DirectMessage> first = service.postDirectMessage(threadId, loginA, "hello");
+    ASSERT_TRUE(first.has_value());
+    const std::optional<DirectMessage> second = service.postDirectMessage(threadId, loginB, "hi back");
+    ASSERT_TRUE(second.has_value());
+
+    const std::vector<DirectMessage> messages = service.listDirectMessages(threadId, 10);
+    ASSERT_EQ(messages.size(), 2);
+    EXPECT_EQ(messages[0].authorLogin, loginA);
+    EXPECT_EQ(messages[0].body, "hello");
+    EXPECT_EQ(messages[1].authorLogin, loginB);
+    EXPECT_EQ(messages[1].body, "hi back");
+
+    EXPECT_FALSE(service.postDirectMessage(-1, loginA, "into the void").has_value());
+}
+
 }  // namespace
 }  // namespace chat_service

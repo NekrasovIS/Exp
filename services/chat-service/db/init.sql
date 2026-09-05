@@ -90,3 +90,33 @@ ALTER TABLE memberships ADD COLUMN IF NOT EXISTS is_moderator BOOLEAN NOT NULL D
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS messages_channel_id_sent_at_idx ON messages (channel_id, sent_at);
+
+-- Личные диалоги (issue #187, Фаза 2) — переиспользует message-модель,
+-- но без community/channel: ровно одна строка на неупорядоченную пару
+-- участников, login'ы в каноническом порядке (меньший первым), как и
+-- friendships в user-service. Открыть новый диалог можно только между
+-- друзьями (проверяется через внутренний GET /internal/friendship на
+-- user-service, см. UserServiceClient) — не хранится здесь, поскольку
+-- дружба не принадлежит chat-service; уже открытый диалог продолжает
+-- работать, даже если дружба позже будет разорвана.
+CREATE TABLE IF NOT EXISTS direct_message_threads (
+    id BIGSERIAL PRIMARY KEY,
+    user_a_login TEXT NOT NULL,
+    user_b_login TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (user_a_login <> user_b_login),
+    CHECK (user_a_login < user_b_login),
+    UNIQUE (user_a_login, user_b_login)
+);
+
+-- Без вложений/редактирования/удаления в этой фазе (в отличие от
+-- messages выше) — то же MVP-first сужение, что и у Фазы 1 (без UI).
+CREATE TABLE IF NOT EXISTS direct_messages (
+    id BIGSERIAL PRIMARY KEY,
+    thread_id BIGINT NOT NULL REFERENCES direct_message_threads(id) ON DELETE CASCADE,
+    author_login TEXT NOT NULL,
+    body TEXT NOT NULL,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS direct_messages_thread_id_sent_at_idx ON direct_messages (thread_id, sent_at);
