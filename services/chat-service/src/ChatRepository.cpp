@@ -72,6 +72,15 @@ Community ChatRepository::createCommunity(const std::string& name, const std::st
     const pqxx::result rows =
         transaction.exec("INSERT INTO communities (name, owner_login, invite_code) VALUES ($1, $2, $3) RETURNING id",
                           pqxx::params{name, ownerLogin, inviteCode});
+    // Владелец должен сразу быть участником своего же сообщества — без
+    // этой строки GET /communities/mine (issue #186, member-scoped
+    // список) никогда не покажет только что созданное сообщество тому,
+    // кто его создал: этот insert исторически отсутствовал, пока
+    // единственным способом посмотреть сообщества был listCommunities()
+    // (список всех, без фильтра по участию), который эту дыру не
+    // проявлял.
+    transaction.exec("INSERT INTO memberships (community_id, member_login) VALUES ($1, $2)",
+                      pqxx::params{rows[0][0].as<std::int64_t>(), ownerLogin});
     transaction.commit();
 
     return Community{

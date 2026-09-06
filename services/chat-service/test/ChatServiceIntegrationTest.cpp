@@ -184,6 +184,32 @@ TEST(ChatServiceIntegrationTest, ListCommunitiesIncludesCreatedCommunity) {
                              [&](const Community& community) { return community.id == created.id; }));
 }
 
+// issue #207 — createCommunity() вставляла строку в communities, но
+// никогда не добавляла владельца в memberships, поэтому
+// listCommunitiesForMember(owner) (то, что GET /communities/mine
+// реально использует) всегда возвращал пустой список только что
+// созданному сообществу его же создателем.
+TEST(ChatServiceIntegrationTest, OwnerIsAMemberOfTheCommunityTheyJustCreated) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    Community created{};
+    try {
+        created = service.createCommunity("integration-test-owner-membership-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::vector<Community> ownerCommunities = service.listCommunitiesForMember(owner);
+    EXPECT_TRUE(std::any_of(ownerCommunities.begin(), ownerCommunities.end(),
+                             [&](const Community& community) { return community.id == created.id; }));
+}
+
 TEST(ChatServiceIntegrationTest, CreatedCommunityHasAUniqueInviteCodeUsableToJoin) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
