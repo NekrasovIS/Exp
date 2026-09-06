@@ -121,9 +121,15 @@ def apply_sql(statements):
     if not statements:
         return
     script = "\n".join(statements)
+    # -1/--single-transaction wraps the whole script in one transaction —
+    # without it, a failure partway through (e.g. run 3 of 5) would leave
+    # run 3's ci_runs row committed with only some of its ci_job_results
+    # rows inserted, and existing_run_ids() would then skip that run_id
+    # forever on future invocations, silently freezing it in an
+    # incomplete state instead of retrying it.
     subprocess.run(
         ["docker", "compose", "exec", "-T", "ci-metrics-postgres", "psql", "-U", "ci_metrics",
-         "-d", "ci_metrics", "-v", "ON_ERROR_STOP=1"],
+         "-d", "ci_metrics", "-v", "ON_ERROR_STOP=1", "-1"],
         input=script,
         text=True,
         check=True,
