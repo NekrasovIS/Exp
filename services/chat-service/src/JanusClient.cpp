@@ -52,7 +52,7 @@ std::optional<nlohmann::json> JanusClient::post(const std::string& path, const n
     return response;
 }
 
-std::optional<nlohmann::json> JanusClient::longPoll(std::int64_t sessionId) const {
+std::optional<nlohmann::json> JanusClient::longPollOnce(std::int64_t sessionId) const {
     httplib::Client client(host_, port_);
 
     const std::string path = "/janus/" + std::to_string(sessionId) + "?maxev=1&rid=" + nextTransactionId();
@@ -76,26 +76,34 @@ std::optional<std::int64_t> JanusClient::createSession() const {
     return (*response)["data"]["id"].get<std::int64_t>();
 }
 
-std::optional<std::int64_t> JanusClient::attachVideoroomHandle(std::int64_t sessionId) const {
+std::optional<std::int64_t> JanusClient::attachHandle(std::int64_t sessionId, const std::string& plugin) const {
     const std::optional<nlohmann::json> response =
-        post("/janus/" + std::to_string(sessionId),
-             nlohmann::json{{"janus", "attach"}, {"plugin", "janus.plugin.videoroom"}});
+        post("/janus/" + std::to_string(sessionId), nlohmann::json{{"janus", "attach"}, {"plugin", plugin}});
     if (!response || response->value("janus", "") != "success") {
         return std::nullopt;
     }
     return (*response)["data"]["id"].get<std::int64_t>();
 }
 
-std::optional<nlohmann::json> JanusClient::sendPluginMessage(std::int64_t sessionId, std::int64_t handleId,
-                                                               const nlohmann::json& requestBody) const {
-    std::optional<nlohmann::json> response =
-        post("/janus/" + std::to_string(sessionId) + "/" + std::to_string(handleId),
-             nlohmann::json{{"janus", "message"}, {"body", requestBody}});
+std::optional<nlohmann::json> JanusClient::sendMessage(std::int64_t sessionId, std::int64_t handleId,
+                                                         const nlohmann::json& body,
+                                                         const std::optional<nlohmann::json>& jsep) const {
+    nlohmann::json payload{{"janus", "message"}, {"body", body}};
+    if (jsep.has_value()) {
+        payload["jsep"] = *jsep;
+    }
+    return post("/janus/" + std::to_string(sessionId) + "/" + std::to_string(handleId), payload);
+}
+
+std::optional<nlohmann::json> JanusClient::sendPluginMessageWithAckFallback(std::int64_t sessionId,
+                                                                              std::int64_t handleId,
+                                                                              const nlohmann::json& requestBody) const {
+    std::optional<nlohmann::json> response = sendMessage(sessionId, handleId, requestBody);
     if (!response) {
         return std::nullopt;
     }
     if (response->value("janus", "") == "ack") {
-        response = longPoll(sessionId);
+        response = longPollOnce(sessionId);
     }
     return response;
 }
@@ -105,18 +113,18 @@ bool JanusClient::ensureRoomExists(const std::string& roomId) const {
     if (!sessionId) {
         return false;
     }
-    const std::optional<std::int64_t> handleId = attachVideoroomHandle(*sessionId);
+    const std::optional<std::int64_t> handleId = attachHandle(*sessionId, "janus.plugin.videoroom");
     if (!handleId) {
         return false;
     }
 
-    const std::optional<nlohmann::json> existsResponse =
-        sendPluginMessage(*sessionId, *handleId, nlohmann::json{{"request", "exists"}, {"room", roomId}});
+    const std::optional<nlohmann::json> existsResponse = sendPluginMessageWithAckFallback(
+        *sessionId, *handleId, nlohmann::json{{"request", "exists"}, {"room", roomId}});
     if (existsResponse && videoroomData(*existsResponse).value("exists", false)) {
         return true;
     }
 
-    const std::optional<nlohmann::json> createResponse = sendPluginMessage(
+    const std::optional<nlohmann::json> createResponse = sendPluginMessageWithAckFallback(
         *sessionId, *handleId,
         nlohmann::json{
             {"request", "create"}, {"room", roomId}, {"publishers", 8}, {"bitrate", 512000}, {"videocodec", "vp8,h264"}});

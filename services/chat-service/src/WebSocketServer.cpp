@@ -4,7 +4,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <optional>
+#include <thread>
 #include <vector>
 
 namespace chat_service {
@@ -74,6 +76,7 @@ void WebSocketServer::handleMessage(const std::shared_ptr<ix::ConnectionState>& 
             if (subscription.has_value()) {
                 removeCallParticipant(*subscription, &webSocket);
             }
+            stopJanusProxySession(&webSocket);
             break;
         }
         default:
@@ -170,6 +173,10 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleCallLeave(webSocket, subscription);
     } else if (body.contains("call_signal")) {
         handleCallSignal(webSocket, subscription, body["call_signal"]);
+    } else if (body.contains("janus_attach")) {
+        handleJanusAttach(webSocket);
+    } else if (body.contains("janus_message")) {
+        handleJanusMessage(webSocket, subscription, body["janus_message"]);
     } else if (body.contains("typing")) {
         handleTyping(webSocket, subscription);
     } else if (body.contains("edit_message")) {
@@ -363,6 +370,133 @@ void WebSocketServer::handleCallSignal(ix::WebSocket& webSocket, const Subscript
 
     target->send(
         nlohmann::json{{"call_signal", {{"from", subscription.login}, {"payload", body["payload"]}}}}.dump());
+}
+
+void WebSocketServer::handleJanusAttach(ix::WebSocket& webSocket) {
+    std::int64_t sessionId = 0;
+    bool haveSession = false;
+    {
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        if (const auto it = janusSessions_.find(&webSocket); it != janusSessions_.end()) {
+            sessionId = it->second.sessionId;
+            haveSession = true;
+        }
+    }
+
+    if (!haveSession) {
+        const std::optional<std::int64_t> newSessionId = janusClient_.createSession();
+        if (!newSessionId) {
+            webSocket.send(nlohmann::json{{"error", "SFU unavailable"}}.dump());
+            return;
+        }
+        sessionId = *newSessionId;
+
+        // pumpJanusEvents() переживёт возврат из этого обработчика и
+        // должно продолжать слать в этот же сокет из отдельного потока —
+        // нужен shared_ptr, не сырой &webSocket (тот же приём, что и у
+        // adресатов в broadcastToChannel()).
+        std::shared_ptr<ix::WebSocket> socketHandle;
+        for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            if (client.get() == &webSocket) {
+                socketHandle = client;
+                break;
+            }
+        }
+        if (!socketHandle) {
+            webSocket.send(nlohmann::json{{"error", "connection not found"}}.dump());
+            return;
+        }
+
+        JanusProxySession session;
+        session.sessionId = sessionId;
+        session.eventPump = std::jthread([this, socketHandle, sessionId](const std::stop_token& stopToken) {
+            pumpJanusEvents(socketHandle, sessionId, stopToken);
+        });
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        janusSessions_[&webSocket] = std::move(session);
+    }
+
+    const std::optional<std::int64_t> handleId = janusClient_.attachHandle(sessionId, "janus.plugin.videoroom");
+    if (!handleId) {
+        webSocket.send(nlohmann::json{{"error", "failed to attach Janus handle"}}.dump());
+        return;
+    }
+    webSocket.send(nlohmann::json{{"janus_attached", {{"handle", *handleId}}}}.dump());
+}
+
+void WebSocketServer::handleJanusMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                          const nlohmann::json& body) {
+    if (!body.contains("handle") || !body["handle"].is_number_integer() || !body.contains("body") ||
+        !body["body"].is_object()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"handle\", \"body\", \"jsep\"?}"}}.dump());
+        return;
+    }
+
+    // Единственный барьер против использования через этот прокси чужой
+    // комнаты (issue #232): если body содержит "room", он обязан быть
+    // комнатой именно этого канала — та же формула, что и в
+    // handleCallJoin(). Без этой проверки клиент мог бы просто подставить
+    // room другого канала и обойти проверку членства из call_join.
+    if (body["body"].contains("room")) {
+        const std::string expectedRoom = "channel-" + std::to_string(subscription.channelId);
+        if (!body["body"]["room"].is_string() || body["body"]["room"].get<std::string>() != expectedRoom) {
+            webSocket.send(nlohmann::json{{"error", "room mismatch"}}.dump());
+            return;
+        }
+    }
+
+    std::int64_t sessionId = 0;
+    {
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        const auto it = janusSessions_.find(&webSocket);
+        if (it == janusSessions_.end()) {
+            webSocket.send(nlohmann::json{{"error", "no Janus session — send janus_attach first"}}.dump());
+            return;
+        }
+        sessionId = it->second.sessionId;
+    }
+
+    const auto handleId = body["handle"].get<std::int64_t>();
+    const std::optional<nlohmann::json> jsep = body.contains("jsep") ? std::make_optional(body["jsep"]) : std::nullopt;
+    const std::optional<nlohmann::json> response = janusClient_.sendMessage(sessionId, handleId, body["body"], jsep);
+    if (!response) {
+        webSocket.send(nlohmann::json{{"error", "SFU unavailable"}}.dump());
+        return;
+    }
+    webSocket.send(nlohmann::json{{"janus_message_ack", *response}}.dump());
+}
+
+void WebSocketServer::pumpJanusEvents(std::shared_ptr<ix::WebSocket> socket, std::int64_t sessionId,
+                                       std::stop_token stopToken) {
+    while (!stopToken.stop_requested()) {
+        const std::optional<nlohmann::json> event = janusClient_.longPollOnce(sessionId);
+        if (stopToken.stop_requested()) {
+            return;
+        }
+        if (!event) {
+            // Janus временно недоступен — не крутиться busy-loop'ом,
+            // пока остановка не запрошена или он не отвечает снова.
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
+        }
+        socket->send(nlohmann::json{{"janus_event", *event}}.dump());
+    }
+}
+
+void WebSocketServer::stopJanusProxySession(ix::WebSocket* socket) {
+    JanusProxySession session;
+    {
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        const auto it = janusSessions_.find(socket);
+        if (it == janusSessions_.end()) {
+            return;
+        }
+        session = std::move(it->second);
+        janusSessions_.erase(it);
+    }
+    // session разрушается здесь, уже вне лока — деструктор std::jthread
+    // запрашивает остановку и join'ится, что может занять время вплоть до
+    // тайм-аута текущего long-poll внутри pumpJanusEvents().
 }
 
 void WebSocketServer::handleTyping(ix::WebSocket& webSocket, const Subscription& subscription) {

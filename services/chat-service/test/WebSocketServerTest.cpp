@@ -352,6 +352,93 @@ TEST(WebSocketServerTest, CallJoinRejectsNonChannelMember) {
     server.stop();
 }
 
+// issue #232: прокси Janus-сигналинга через WebSocketServer — join как
+// publisher без SDP (сама по себе валидная просьба Janus, ответ на неё —
+// "ack" сразу и реальный videoroom-эвент асинхронно, тот же протокол,
+// что services/janus/verify/verify-forwarding.mjs исследовал для #230),
+// плюс проверка, что чужую комнату через body.room подставить нельзя.
+TEST(WebSocketServerTest, JanusProxyAttachAndJoinRoundTrip) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18096"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-janusproxy-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-janusproxy-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string login = "ws-janusproxy-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, login));
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, login);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"call_join", true}});
+    const std::optional<nlohmann::json> joinResponse =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); });
+    ASSERT_TRUE(joinResponse.has_value());
+    if ((*joinResponse)["sfu_room"].is_null()) {
+        GTEST_SKIP() << "Janus not reachable — run `docker compose --profile sfu up -d janus` to run this test.";
+    }
+    const std::string room = (*joinResponse)["sfu_room"].get<std::string>();
+
+    client.send(nlohmann::json{{"janus_attach", true}});
+    const std::optional<nlohmann::json> attached =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("janus_attached"); });
+    ASSERT_TRUE(attached.has_value());
+    const auto handle = (*attached)["janus_attached"]["handle"].get<std::int64_t>();
+
+    // Чужая комната через body.room отклоняется, не доходя до Janus.
+    client.send(nlohmann::json{{"janus_message", {{"handle", handle}, {"body", {{"room", "someone-elses-room"}}}}}});
+    const std::optional<nlohmann::json> mismatch =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ((*mismatch)["error"].get<std::string>(), "room mismatch");
+
+    // join как publisher без SDP — валидный самостоятельный запрос
+    // videoroom; ack приходит сразу, реальный результат — асинхронно.
+    client.send(nlohmann::json{
+        {"janus_message",
+         {{"handle", handle}, {"body", {{"request", "join"}, {"room", room}, {"ptype", "publisher"}}}}}});
+    const std::optional<nlohmann::json> ack =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("janus_message_ack"); });
+    ASSERT_TRUE(ack.has_value());
+
+    const std::optional<nlohmann::json> event = client.waitFor([](const nlohmann::json& m) {
+        return m.contains("janus_event") && m["janus_event"].contains("plugindata") &&
+               m["janus_event"]["plugindata"]["data"].value("videoroom", "") == "joined";
+    });
+    ASSERT_TRUE(event.has_value());
+    EXPECT_EQ((*event)["janus_event"]["plugindata"]["data"]["room"].get<std::string>(), room);
+
+    server.stop();
+}
+
 TEST(WebSocketServerTest, HelloWithMissingFieldsIsRejectedWithError) {
     ix::initNetSystem();
 
