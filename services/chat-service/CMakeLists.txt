@@ -221,6 +221,7 @@ if(DEVICEHUB_ENABLE_FUZZING)
 
     chat_service_add_fuzz_target(base64_fuzz fuzz/Base64Fuzz.cpp)
     chat_service_add_fuzz_target(json_guard_fuzz fuzz/JsonGuardFuzz.cpp)
+    chat_service_add_fuzz_target(websocket_frame_fuzz fuzz/WebSocketFrameFuzz.cpp)
 endif()
 include(GoogleTest)
 gtest_discover_tests(chat_service_tests)
