@@ -38,6 +38,59 @@ services:
       timeout: 3s
       retries: 5
 
+  # Метрики CI (issue #193) — отдельная БД, тот же паттерн "своя Postgres
+  # на сервис", что и у auth/user/chat-service выше, хотя это и не сам
+  # DeviceHub, а служебная инфраструктура разработки. Наполняется
+  # tools/ci-metrics/collect.py (опрос GitHub Actions API), не самим CI —
+  # раннеры GitHub Actions не имеют сетевого доступа к этой локальной
+  # машине, поэтому это pull, а не push. За профилем "ci-metrics" — не
+  # часть обычного `docker compose up -d` для разработки самого
+  # DeviceHub/сервисов, поднимается отдельно
+  # (`docker compose --profile ci-metrics up -d`).
+  ci-metrics-postgres:
+    profiles: ["ci-metrics"]
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ci_metrics
+      POSTGRES_PASSWORD: ${CI_METRICS_POSTGRES_PASSWORD:-dev-only-password}
+      POSTGRES_DB: ci_metrics
+    ports:
+      - "5435:5432"
+    volumes:
+      - ci-metrics-postgres-data:/var/lib/postgresql/data
+      - ./tools/ci-metrics/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ci_metrics"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  grafana:
+    profiles: ["ci-metrics"]
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3000:3000"
+    environment:
+      # Local-dev-only default, same convention as the Postgres passwords
+      # above — override via GF_SECURITY_ADMIN_PASSWORD for anything
+      # beyond a throwaway local instance.
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-dev-only-password}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Позволяет datasource-provisioning-файлу ниже подставить пароль из
+      # переменной окружения ($CI_METRICS_POSTGRES_PASSWORD), а не
+      # хранить его как литерал в закоммиченном YAML.
+      GF_ENABLE_ENVIRONMENT_VARIABLE_EXPANSION: "true"
+      CI_METRICS_POSTGRES_PASSWORD: ${CI_METRICS_POSTGRES_PASSWORD:-dev-only-password}
+    volumes:
+      - ./tools/ci-metrics/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./tools/ci-metrics/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      ci-metrics-postgres:
+        condition: service_healthy
+
 volumes:
   user-service-postgres-data:
   chat-service-postgres-data:
+  ci-metrics-postgres-data:
+  grafana-data:

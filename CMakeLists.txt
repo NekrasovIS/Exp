@@ -77,8 +77,14 @@ add_library(devicehub_core
     src/user/IdentityKeyStore.cpp
     src/ui/CommunitiesPanel.h
     src/ui/CommunitiesPanel.cpp
+    src/ui/CommunityConnectDialog.h
+    src/ui/CommunityConnectDialog.cpp
     src/ui/ChannelsPanel.h
     src/ui/ChannelsPanel.cpp
+    src/ui/FriendsPanel.h
+    src/ui/FriendsPanel.cpp
+    src/ui/DirectMessageView.h
+    src/ui/DirectMessageView.cpp
     src/ui/ChatView.h
     src/ui/ChatView.cpp
     src/ui/ChatMessageRow.h
@@ -225,7 +231,10 @@ add_executable(devicehub_tests
     test/ToastBannerTest.cpp
     test/NotificationPolicyTest.cpp
     test/CommunitiesPanelTest.cpp
+    test/CommunityConnectDialogTest.cpp
     test/ChannelsPanelTest.cpp
+    test/FriendsPanelTest.cpp
+    test/DirectMessageViewTest.cpp
     test/ChatViewTest.cpp
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp
