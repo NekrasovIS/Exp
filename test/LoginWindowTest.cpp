@@ -144,5 +144,94 @@ TEST(LoginWindowTest, ResetReturnsToIdentifierStepAndClearsEverything) {
     EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("bob"));
 }
 
+TEST(LoginWindowTest, UsePasswordButtonSwitchesToThePasswordStep) {
+    LoginWindow window;
+
+    EXPECT_TRUE(window.passwordLoginEdit()->parentWidget()->isHidden());
+
+    window.usePasswordButton()->click();
+
+    EXPECT_FALSE(window.passwordLoginEdit()->parentWidget()->isHidden());
+}
+
+TEST(LoginWindowTest, BackToCodeButtonReturnsToTheIdentifierStep) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+
+    window.backToCodeButton()->click();
+
+    EXPECT_FALSE(window.identifierEdit()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.passwordLoginEdit()->parentWidget()->isHidden());
+}
+
+TEST(LoginWindowTest, ClickingPasswordSignInWithEmptyFieldsShowsStatusAndEmitsNothing) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+    QSignalSpy spy(&window, &LoginWindow::passwordSignInRequested);
+
+    window.passwordSignInButton()->click();
+
+    EXPECT_EQ(spy.count(), 0);
+    EXPECT_FALSE(window.statusLabel()->text().isEmpty());
+}
+
+TEST(LoginWindowTest, ClickingPasswordSignInEmitsPasswordSignInRequestedWithBothFields) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+    window.passwordLoginEdit()->setText(QStringLiteral("alice"));
+    window.passwordEdit()->setText(QStringLiteral("hunter2"));
+    QSignalSpy spy(&window, &LoginWindow::passwordSignInRequested);
+
+    window.passwordSignInButton()->click();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("alice"));
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("hunter2"));
+}
+
+TEST(LoginWindowTest, ClickingRegisterWithEmptyFieldsShowsStatusAndEmitsNothing) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+    QSignalSpy spy(&window, &LoginWindow::registerRequested);
+
+    window.registerButton()->click();
+
+    EXPECT_EQ(spy.count(), 0);
+    EXPECT_FALSE(window.statusLabel()->text().isEmpty());
+}
+
+TEST(LoginWindowTest, ClickingRegisterEmitsRegisterRequestedWithBothFields) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+    window.passwordLoginEdit()->setText(QStringLiteral("bob"));
+    window.passwordEdit()->setText(QStringLiteral("s3cret"));
+    QSignalSpy spy(&window, &LoginWindow::registerRequested);
+
+    window.registerButton()->click();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("bob"));
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("s3cret"));
+}
+
+TEST(LoginWindowTest, PasswordFieldMasksInput) {
+    LoginWindow window;
+
+    EXPECT_EQ(window.passwordEdit()->echoMode(), QLineEdit::Password);
+}
+
+TEST(LoginWindowTest, ResetAlsoClearsPasswordFieldsAndReturnsFromPasswordStep) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+    window.passwordLoginEdit()->setText(QStringLiteral("carol"));
+    window.passwordEdit()->setText(QStringLiteral("pw"));
+
+    window.reset();
+
+    EXPECT_FALSE(window.identifierEdit()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.passwordLoginEdit()->text().isEmpty());
+    EXPECT_TRUE(window.passwordEdit()->text().isEmpty());
+}
+
 }  // namespace
 }  // namespace devicehub

@@ -1,18 +1,24 @@
 #include "ui/ChatView.h"
 
+#include <QColor>
+#include <QDate>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSize>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
 #include "ui/ChatMessageGrouping.h"
+#include "ui/IconFactory.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -22,6 +28,8 @@ constexpr int kPlaceholderPageIndex = 0;
 constexpr int kChannelPageIndex = 1;
 constexpr int kTypingIndicatorHideMs = 3000;
 constexpr int kTypingThrottleMs = 2000;
+constexpr int kComposerIconButtonSize = 32;
+constexpr int kComposerIconGlyphSize = 18;
 /// Насколько близко к низу (в пикселях) всё ещё считается "внизу" для
 /// stickToBottom_ — небольшой запас, а не требование точного
 /// максимального значения, которое округление layout'а может промахнуть
@@ -94,11 +102,26 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     searchButton_->setObjectName(QStringLiteral("searchButton"));
     connect(searchButton_, &QPushButton::clicked, this, &ChatView::openSearchRequested);
 
+    // Иконка вместо текстовой кнопки (issue #184) — тот же плоский
+    // иконочный стиль, что и у композера/FooterBar. ChatView не хранит
+    // открыта ли сейчас MemberListPanel (ей не владеет), поэтому кнопка
+    // просто сигнализирует клик каждый раз, без переключения своего
+    // текста/вида.
+    memberListToggleButton_ = new QPushButton(channelPage);
+    memberListToggleButton_->setObjectName(QStringLiteral("memberListToggleButton"));
+    memberListToggleButton_->setToolTip(tr("Members"));
+    memberListToggleButton_->setProperty("flatIconButton", true);
+    memberListToggleButton_->setIcon(ui_icons::membersIcon(QColor(ui_theme::kMutedForeground)));
+    memberListToggleButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    memberListToggleButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(memberListToggleButton_, &QPushButton::clicked, this, &ChatView::memberListToggleRequested);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
     headerRow->addWidget(callToggleButton_);
     headerRow->addWidget(searchButton_);
+    headerRow->addWidget(memberListToggleButton_);
 
     loadOlderButton_ = new QPushButton(tr("Load older messages"), channelPage);
     loadOlderButton_->setObjectName(QStringLiteral("loadOlderMessagesButton"));
@@ -152,10 +175,29 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     typingThrottleTimer_->setSingleShot(true);
     typingThrottleTimer_->setInterval(kTypingThrottleMs);
 
-    auto* sendRow = new QHBoxLayout;
-    sendRow->setSpacing(ui_theme::kSpacingSm);
-    messageEdit_ = new QLineEdit(channelPage);
+    // Виден только в режиме редактирования (issue #182 — иконка "Send"
+    // теперь не может сама по себе сказать "Update", как раньше умел её
+    // текст, см. connectMessageRow()/cancelEditingMessage() ниже).
+    editingIndicatorLabel_ = new QLabel(tr("Editing message"), channelPage);
+    editingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    editingIndicatorLabel_->setVisible(false);
+
+    // Композер как единая "таблетка" (issue #182) —
+    // messageEdit_/attachButton_/sendButton_ рисуются
+    // без собственного фона/рамки (см. Theme.cpp) и сливаются в один
+    // скруглённый контейнер вместо трёх раздельных прямоугольных
+    // элементов управления в ряд.
+    auto* composer = new QWidget(channelPage);
+    composer->setObjectName(QStringLiteral("chatComposer"));
+    composer->setAttribute(Qt::WA_StyledBackground, true);
+    auto* composerLayout = new QHBoxLayout(composer);
+    composerLayout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
+                                        ui_theme::kSpacingSm);
+    composerLayout->setSpacing(ui_theme::kSpacingSm);
+
+    messageEdit_ = new QLineEdit(composer);
     messageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
+    messageEdit_->setProperty("composerInput", true);
     messageEdit_->setPlaceholderText(tr("Message"));
     connect(messageEdit_, &QLineEdit::textEdited, this, [this]() {
         if (typingThrottleTimer_->isActive()) {
@@ -165,23 +207,34 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
         emit typingRequested();
     });
 
-    attachButton_ = new QPushButton(tr("Attach"), channelPage);
+    attachButton_ = new QPushButton(composer);
     attachButton_->setObjectName(QStringLiteral("attachFileButton"));
+    attachButton_->setToolTip(tr("Attach"));
+    attachButton_->setProperty("flatIconButton", true);
+    attachButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kMutedForeground)));
+    attachButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    attachButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(attachButton_, &QPushButton::clicked, this, &ChatView::attachFileRequested);
 
-    sendButton_ = new QPushButton(tr("Send"), channelPage);
+    sendButton_ = new QPushButton(composer);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
-    sendButton_->setProperty("accent", true);
+    sendButton_->setToolTip(tr("Send"));
+    sendButton_->setProperty("flatIconButton", true);
+    sendButton_->setIcon(ui_icons::sendIcon(QColor(ui_theme::kAccentGradientStart)));
+    sendButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    sendButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(messageEdit_, &QLineEdit::returnPressed, sendButton_, &QPushButton::click);
 
-    sendRow->addWidget(messageEdit_, /*stretch=*/1);
-    sendRow->addWidget(attachButton_);
-    sendRow->addWidget(sendButton_);
+    composerLayout->addWidget(attachButton_);
+    composerLayout->addWidget(messageEdit_, /*stretch=*/1);
+    composerLayout->addWidget(sendButton_);
 
     channelLayout->addLayout(headerRow);
     channelLayout->addWidget(loadOlderButton_, /*stretch=*/0, Qt::AlignHCenter);
     channelLayout->addWidget(scrollArea_, /*stretch=*/1);
     channelLayout->addWidget(typingIndicatorLabel_);
-    channelLayout->addLayout(sendRow);
+    channelLayout->addWidget(editingIndicatorLabel_);
+    channelLayout->addWidget(composer);
 
     stack_->insertWidget(kPlaceholderPageIndex, placeholderPage);
     stack_->insertWidget(kChannelPageIndex, channelPage);
@@ -224,11 +277,15 @@ void ChatView::setCurrentUserLogin(const QString& login) {
 }
 
 void ChatView::appendMessage(const ChatMessage& message) {
+    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, message)) {
+        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(message.sentAt));
+    }
     const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
     auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
+    requestPreviewIfImageAttachment(message, row);
     lastMessage_ = message;
     hasLastMessage_ = true;
 }
@@ -245,16 +302,24 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
     // же пачке — не сравнивается с тем, что уже было самым старым
     // показанным сообщением, так что границы пагинации не дотягиваются
     // до уже отрисованной истории (см. doc-комментарий prependMessages()
-    // в ChatView.h).
+    // в ChatView.h). Тот же приём, что и у showHeaderForNext ниже —
+    // previousInBatch{} по умолчанию пуст, поэтому isDifferentCalendarDay()
+    // для самого первого сообщения пачки вернёт true сама по себе
+    // (пустая метка времени не разбирается) без отдельной проверки "это
+    // первая итерация?".
     bool showHeaderForNext = true;
     ChatMessage previousInBatch{};
     int insertIndex = 0;
     for (const ChatMessage& message : messages) {
         const bool showHeader =
             showHeaderForNext || !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, message);
+        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, message)) {
+            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(message.sentAt));
+        }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
         auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
         messagesLayout_->insertWidget(insertIndex++, row);
+        requestPreviewIfImageAttachment(message, row);
         previousInBatch = message;
         showHeaderForNext = false;
     }
@@ -290,10 +355,45 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
         editingMessageId_ = id;
         messageEdit_->setText(currentBody);
         messageEdit_->setFocus();
-        sendButton_->setText(tr("Update"));
+        editingIndicatorLabel_->setVisible(true);
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+}
+
+void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
+    if (message.attachmentId < 0 || !isImageAttachment(message.attachmentFilename)) {
+        return;
+    }
+    pendingImagePreviewRows_.insert(message.attachmentId, row);
+    emit previewAttachmentRequested(message.attachmentId);
+}
+
+void ChatView::setAttachmentPreview(qint64 attachmentId, const QImage& image) {
+    const QPointer<ChatMessageRow> row = pendingImagePreviewRows_.take(attachmentId);
+    if (row.isNull()) {
+        return;
+    }
+    row->setAttachmentPreview(image);
+}
+
+QLabel* ChatView::buildDateSeparatorLabel(const QString& sentAt) {
+    const QDateTime parsed = chat_message_grouping::parseSentAt(sentAt);
+    QString text;
+    if (!parsed.isValid()) {
+        text = tr("Unknown date");
+    } else if (const QDate date = parsed.date(); date == QDate::currentDate()) {
+        text = tr("Today");
+    } else if (date == QDate::currentDate().addDays(-1)) {
+        text = tr("Yesterday");
+    } else {
+        text = QLocale().toString(date, QStringLiteral("MMMM d, yyyy"));
+    }
+    auto* label = new QLabel(text, messagesContainer_);
+    label->setObjectName(QStringLiteral("chatDateSeparator"));
+    label->setProperty("sectionTitle", true);
+    label->setAlignment(Qt::AlignCenter);
+    return label;
 }
 
 void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
@@ -325,7 +425,7 @@ void ChatView::removeMessage(qint64 id) {
 void ChatView::cancelEditingMessage() {
     editingMessageId_ = -1;
     messageEdit_->clear();
-    sendButton_->setText(tr("Send"));
+    editingIndicatorLabel_->setVisible(false);
 }
 
 void ChatView::appendSystemLine(const QString& text) {
@@ -360,6 +460,10 @@ void ChatView::clearLog() {
     // из другого канала), как только загрузятся сообщения нового
     // канала.
     cancelEditingMessage();
+    // Строки, на которые эти записи ссылались, только что удалены выше
+    // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
+    // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
+    pendingImagePreviewRows_.clear();
 }
 
 }  // namespace devicehub

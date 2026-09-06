@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
@@ -19,6 +20,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -28,15 +30,18 @@
 #include <algorithm>
 #include <utility>
 
-#include "ui/AccountMenu.h"
 #include "ui/ChannelsPanel.h"
+#include "ui/ChatMessageGrouping.h"
 #include "ui/ChatMessageRow.h"
 #include "ui/CallWindow.h"
 #include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
+#include "ui/DirectMessageView.h"
 #include "ui/FooterBar.h"
+#include "ui/FriendsPanel.h"
 #include "ui/LoginWindow.h"
+#include "ui/MemberListPanel.h"
 #include "ui/ModeratorsDialog.h"
 #include "ui/ProfileDialog.h"
 #include "ui/SearchDialog.h"
@@ -51,6 +56,10 @@ constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
 constexpr const char* kDefaultUserServiceUrl = "http://127.0.0.1:8081";
 constexpr int kToastTimeoutMs = 4000;
+/// Интервал поллинга нового сообщения в открытом диалоге личных
+/// сообщений (issue #187, Фаза 3) — backend этой фазы (Фаза 2) не
+/// доставляет их через WebSocket, только REST-история.
+constexpr int kDmPollIntervalMs = 4000;
 /// За сколько до фактического истечения срока действия access-токена
 /// обменивать refresh-токен (issue #105) — небольшой запас, чтобы
 /// обмен, выполняемый в фоне, успел завершиться прежде, чем что-либо,
@@ -62,6 +71,23 @@ constexpr int kMessagePageSize = 50;
 /// отклонялся немедленным toast, а не круговым походом на сервер лишь
 /// затем, чтобы получить тот же 400.
 constexpr qint64 kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
+/// Длина превью последнего сообщения под именем канала в сайдбаре
+/// (issue #152) — только косметическое ограничение строки, не имеет
+/// отношения к лимитам самого тела сообщения.
+constexpr int kChannelPreviewMaxChars = 60;
+
+/// Однострочное превью тела сообщения для списка каналов (issue #152):
+/// переносы строк схлопываются в пробел, длина ограничена
+/// kChannelPreviewMaxChars с многоточием.
+QString truncateForChannelPreview(const QString& body) {
+    QString flattened = body;
+    flattened.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    if (flattened.size() > kChannelPreviewMaxChars) {
+        flattened.truncate(kChannelPreviewMaxChars);
+        flattened += QStringLiteral("…");
+    }
+    return flattened;
+}
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -81,18 +107,30 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
 
+    // Issue #187, Фаза 2b (живая доставка через WebSocket) ещё не
+    // сделана на backend'е — поллинг каждые несколько секунд вместо
+    // неё, пока открыт какой-либо диалог (см. pollOpenDmThread()).
+    dmPollTimer_ = new QTimer(this);
+    connect(dmPollTimer_, &QTimer::timeout, this, &MainWindow::pollOpenDmThread);
+
     connect(settingsDialog_->playToneButton(), &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
     connect(settingsDialog_->toggleMicButton(), &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
     connect(settingsDialog_->toggleCameraButton(), &QPushButton::clicked, this, &MainWindow::onToggleCameraClicked);
     connect(settingsDialog_->toggleScreenCaptureButton(), &QPushButton::clicked, this,
             &MainWindow::onToggleScreenCaptureClicked);
-    connect(accountMenu_->requestTokenButton(), &QPushButton::clicked, this, &MainWindow::onRequestTokenClicked);
-    connect(accountMenu_->registerButton(), &QPushButton::clicked, this, &MainWindow::onRegisterClicked);
-    connect(accountMenu_->editProfileButton(), &QPushButton::clicked, this, &MainWindow::onEditProfileClicked);
     connect(loginWindow_, &LoginWindow::requestCodeRequested, this, &MainWindow::onRequestOtpCodeClicked);
     connect(loginWindow_, &LoginWindow::verifyCodeRequested, this, &MainWindow::onVerifyOtpCodeClicked);
+    connect(loginWindow_, &LoginWindow::passwordSignInRequested, this, &MainWindow::onPasswordSignInClicked);
+    connect(loginWindow_, &LoginWindow::registerRequested, this, &MainWindow::onRegisterClicked);
     connect(&authClient_, &AuthClient::otpRequested, this,
             [this](const QString& identifier) { loginWindow_->showCodeSent(identifier); });
+    // Закрытие окна входа (крестик/Escape) без завершённой авторизации
+    // означает, что показывать интерфейс не для кого — приложение
+    // завершается, а не остаётся висеть со скрытым пустым MainWindow
+    // (issue #156). После успешного входа окно скрывается через hide(),
+    // не через reject()/close(), так что в этом случае rejected() не
+    // срабатывает.
+    connect(loginWindow_, &QDialog::rejected, qApp, &QCoreApplication::quit);
     connect(footerBar_, &FooterBar::accountSettingsRequested, this, &MainWindow::onAccountSettingsClicked);
     connect(profileDialog_, &ProfileDialog::saveRequested, this,
             [this](const ProfileEdits& edits) { userProfileClient_.updateOwnProfile(lastToken_, edits); });
@@ -115,6 +153,12 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&userProfileClient_, &UserProfileClient::errorOccurred, this, [this](const QString& message) {
         profileDialog_->statusLabel()->setText(tr("Error: %1").arg(message));
+        // Общий для профиля и заявок в друзья (issue #187) — в отличие
+        // от статус-лейбла ProfileDialog, тост виден независимо от
+        // того, открыт ли этот диалог, что важно именно для ошибок
+        // заявок в друзья (например, "already friends"), которые
+        // случаются в режиме Friends, а не в ProfileDialog.
+        showToast(tr("Error: %1").arg(message), ToastBanner::Variant::kError);
     });
     connect(&audioInput_, &AudioInputDevice::levelChanged, settingsDialog_->micLevelBar(), [this](float level) {
         settingsDialog_->micLevelBar()->setValue(static_cast<int>(level * 100.0f));
@@ -132,7 +176,7 @@ MainWindow::MainWindow(QWidget* parent)
             [this](const QString& token, const QString& refreshToken, qint64 expiresAt) {
                 lastToken_ = token;
                 refreshToken_ = refreshToken;
-                accountMenu_->statusLabel()->setText(tr("Token received, verifying..."));
+                loginWindow_->statusLabel()->setText(tr("Token received, verifying..."));
                 authClient_.verifyToken(token);
 
                 // Незаметно обмениваем refresh-токен незадолго до
@@ -146,15 +190,18 @@ MainWindow::MainWindow(QWidget* parent)
                 }
             });
     connect(&authClient_, &AuthClient::tokenVerified, this, [this](bool valid, const QString& subject) {
-        accountMenu_->statusLabel()->setText(valid ? tr("Verified — subject: %1").arg(subject) : tr("Token rejected"));
         currentUserLogin_ = valid ? subject : QString();
         footerBar_->setProfileText(valid ? subject : tr("Not signed in"));
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
         chatView_->setCurrentUserLogin(currentUserLogin_);
-        accountMenu_->setEditProfileEnabled(valid);
         if (valid) {
+            // Скрываем окно входа и впервые показываем интерфейс — до
+            // этого момента MainWindow ни разу не был показан (issue
+            // #156, см. main.cpp): единственное видимое окно при
+            // запуске — LoginWindow.
             loginWindow_->hide();
+            show();
             refreshCommunities();
             // Заполняет отображаемое имя в подвале (до возврата этого
             // запроса используется просто логин выше) и заранее
@@ -171,28 +218,32 @@ MainWindow::MainWindow(QWidget* parent)
                 QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/identity-keys");
             identityKeyStore_.emplace(identityKeyDir, currentUserLogin_);
             userProfileClient_.publishPublicKey(lastToken_, identityKeyStore_->publicKeyBase64());
+        } else {
+            loginWindow_->showError(tr("Token rejected"));
         }
     });
     connect(&authClient_, &AuthClient::errorOccurred, this, [this](const QString& message) {
-        accountMenu_->statusLabel()->setText(tr("Error: %1").arg(message));
-        // errorOccurred() is shared by every AuthClient call (issue
-        // #156's requestOtp()/verifyOtp() included) — showing it in
-        // LoginWindow too, whenever it's the window actually in front
-        // of the user, means an OTP failure doesn't only appear in the
-        // top-right AccountMenu the user isn't looking at.
+        // errorOccurred() обслуживает все вызовы AuthClient — пока окно
+        // входа ещё видно, ошибка показывается там; после входа (когда
+        // это, например, фоновый обмен refresh-токена не удался) —
+        // тостом, иначе она осталась бы никем не увиденной в скрытом
+        // LoginWindow.
         if (loginWindow_->isVisible()) {
             loginWindow_->showError(message);
+        } else {
+            showToast(tr("Auth error: %1").arg(message), ToastBanner::Variant::kError);
         }
     });
     connect(&authClient_, &AuthClient::registrationCompleted, this, [this](bool registered) {
         if (!registered) {
-            accountMenu_->statusLabel()->setText(tr("Registration failed — login already taken"));
+            loginWindow_->showError(tr("Registration failed — login already taken"));
         }
         // При успехе сразу после этого срабатывает tokenReceived()
         // (автовход) и доводит метку статуса до "Verified".
     });
 
     connect(chatView_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
+    connect(chatView_->messageEdit(), &QLineEdit::returnPressed, chatView_->sendButton(), &QPushButton::click);
     connect(&chatClient_, &ChatClient::subscribed, this,
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
@@ -206,6 +257,13 @@ MainWindow::MainWindow(QWidget* parent)
                                                       .attachmentId = attachmentId,
                                                       .attachmentFilename = attachmentFilename});
                 desktopNotifier_->notifyMessage(author, displayBody, currentUserLogin_);
+                // Канал уже открыт — не непрочитанный, но превью в
+                // сайдбаре (issue #152) всё равно должно оставаться
+                // актуальным без отдельного REST-похода.
+                channelsPanel_->recordChannelActivity(
+                    selectedChannelId_, id,
+                    currentChannelEncrypted_ ? tr("🔒 Encrypted message") : truncateForChannelPreview(displayBody),
+                    chat_message_grouping::parseSentAt(sentAt));
             });
     connect(&chatClient_, &ChatClient::messageEdited, this,
             [this](qint64 id, const QString& newBody, const QString& /*editedAt*/) {
@@ -235,6 +293,14 @@ MainWindow::MainWindow(QWidget* parent)
                 pendingDownloadFilenames_.insert(attachmentId, filename);
                 chatRestClient_.downloadAttachment(lastToken_, attachmentId);
             });
+    // Issue #188: та же ChatRestClient::downloadAttachment(), что и
+    // "Download" выше, только результат идёт в ChatView::
+    // setAttachmentPreview() вместо диалога "сохранить на диск" —
+    // attachmentDownloaded() ниже различает эти два случая по тому, есть
+    // ли @p attachmentId в pendingDownloadFilenames_ (заполняется только
+    // настоящим кликом по "Download").
+    connect(chatView_, &ChatView::previewAttachmentRequested, this,
+            [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
     connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
             [this](qint64 id, const QString& /*filename*/) {
                 chatClient_.sendMessage(chatView_->messageEdit()->text(), id);
@@ -242,6 +308,17 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
             [this](qint64 attachmentId, const QByteArray& data) {
+                if (!pendingDownloadFilenames_.contains(attachmentId)) {
+                    // Фоновая загрузка превью изображения (issue #188),
+                    // не клик по "Download" — decode напрямую в строку
+                    // сообщения, никакого диалога сохранения. Пустой
+                    // QImage() при неудачном decode — setAttachmentPreview()
+                    // сама показывает "Preview unavailable" в этом случае.
+                    QImage image;
+                    image.loadFromData(data);
+                    chatView_->setAttachmentPreview(attachmentId, image);
+                    return;
+                }
                 const QString filename = pendingDownloadFilenames_.take(attachmentId);
                 const QString savePath =
                     QFileDialog::getSaveFileName(this, tr("Save Attachment"), filename.isEmpty() ? QString() : filename);
@@ -266,6 +343,8 @@ MainWindow::MainWindow(QWidget* parent)
         searchDialog_->raise();
         searchDialog_->activateWindow();
     });
+    connect(chatView_, &ChatView::memberListToggleRequested, this,
+            [this]() { memberListPanel_->setVisible(memberListPanel_->isHidden()); });
     connect(searchDialog_, &SearchDialog::searchRequested, this, [this](const QString& query) {
         if (selectedChannelId_ < 0 || query.trimmed().isEmpty()) {
             return;
@@ -314,13 +393,23 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QString& newName) { chatRestClient_.renameCommunity(lastToken_, id, newName); });
     connect(communitiesPanel_, &CommunitiesPanel::deleteRequested, this,
             [this](qint64 id) { chatRestClient_.deleteCommunity(lastToken_, id); });
-    connect(communitiesPanel_, &CommunitiesPanel::joinRequested, this,
-            [this](qint64 id) { chatRestClient_.joinCommunity(lastToken_, id); });
+    connect(communitiesPanel_, &CommunitiesPanel::joinByCodeRequested, this, [this](const QString& code) {
+        if (lastToken_.isEmpty()) {
+            showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+            return;
+        }
+        chatRestClient_.joinCommunityByCode(lastToken_, code);
+    });
+    connect(communitiesPanel_, &CommunitiesPanel::regenerateInviteCodeRequested, this,
+            [this](qint64 id) { chatRestClient_.regenerateInviteCode(lastToken_, id); });
     connect(communitiesPanel_, &CommunitiesPanel::communitySelected, this, [this](qint64 id) {
+        showCommunitiesMode();
         selectedCommunityId_ = id;
         closeChatView();
         refreshChannelsForSelectedCommunity();
+        chatRestClient_.listMembers(lastToken_, id);
     });
+    connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::showFriendsMode);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
                 moderatorsDialog_->setCommunity(id, name);
@@ -333,6 +422,95 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QString& login) { chatRestClient_.promoteModerator(lastToken_, id, login); });
     connect(moderatorsDialog_, &ModeratorsDialog::demoteRequested, this,
             [this](qint64 id, const QString& login) { chatRestClient_.demoteModerator(lastToken_, id, login); });
+
+    connect(friendsPanel_, &FriendsPanel::friendSelected, this, &MainWindow::openDmThreadWith);
+    connect(friendsPanel_, &FriendsPanel::addFriendRequested, this, [this](const QString& login) {
+        if (lastToken_.isEmpty()) {
+            showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+            return;
+        }
+        userProfileClient_.sendFriendRequest(lastToken_, login);
+    });
+    connect(friendsPanel_, &FriendsPanel::acceptRequestRequested, this,
+            [this](qint64 requestId) { userProfileClient_.acceptFriendRequest(lastToken_, requestId); });
+    connect(friendsPanel_, &FriendsPanel::declineRequestRequested, this,
+            [this](qint64 requestId) { userProfileClient_.declineFriendRequest(lastToken_, requestId); });
+    connect(friendsPanel_, &FriendsPanel::removeFriendRequested, this,
+            [this](const QString& login) { userProfileClient_.removeFriend(lastToken_, login); });
+
+    connect(&userProfileClient_, &UserProfileClient::friendRequestSent, this,
+            [this](const QString& recipientLogin, const QString& status) {
+                showToast(status == QStringLiteral("accepted")
+                              ? tr("You and '%1' are now friends").arg(recipientLogin)
+                              : tr("Friend request sent to '%1'").arg(recipientLogin),
+                          ToastBanner::Variant::kSuccess);
+                userProfileClient_.listFriends(lastToken_);
+                userProfileClient_.listIncomingFriendRequests(lastToken_);
+            });
+    connect(&userProfileClient_, &UserProfileClient::incomingFriendRequestsListed, this,
+            [this](const QList<FriendRequestInfo>& requests) { friendsPanel_->setIncomingRequests(requests); });
+    connect(&userProfileClient_, &UserProfileClient::friendRequestAccepted, this, [this](qint64) {
+        showToast(tr("Friend request accepted"), ToastBanner::Variant::kSuccess);
+        userProfileClient_.listFriends(lastToken_);
+        userProfileClient_.listIncomingFriendRequests(lastToken_);
+    });
+    connect(&userProfileClient_, &UserProfileClient::friendRequestDeclined, this, [this](qint64) {
+        userProfileClient_.listIncomingFriendRequests(lastToken_);
+    });
+    connect(&userProfileClient_, &UserProfileClient::friendsListed, this,
+            [this](const QStringList& logins) { friendsPanel_->setFriends(logins); });
+    connect(&userProfileClient_, &UserProfileClient::friendRemoved, this, [this](const QString&) {
+        userProfileClient_.listFriends(lastToken_);
+    });
+
+    connect(&chatRestClient_, &ChatRestClient::dmThreadOpened, this, [this](qint64 id, const QString& otherLogin) {
+        openDmThreadId_ = id;
+        openDmOtherLogin_ = otherLogin;
+        dmHistoryLoaded_ = false;
+        // Не переносить lastSeenDmMessageId_ от предыдущего диалога:
+        // корректность appendMessage()-only-для-новых в
+        // directMessagesListed() ниже иначе тихо зависела бы от того,
+        // что id сообщений — общая для всех диалогов последовательность
+        // (см. direct_messages.id в chat-service), а не от чего-то, что
+        // видно прямо здесь.
+        lastSeenDmMessageId_ = -1;
+        directMessageView_->showThread(otherLogin);
+        chatRestClient_.listDirectMessages(lastToken_, id, /*limit=*/50);
+        dmPollTimer_->start(kDmPollIntervalMs);
+    });
+    connect(&chatRestClient_, &ChatRestClient::directMessagesListed, this,
+            [this](qint64 threadId, const QList<DirectMessageInfo>& messages) {
+                if (threadId != openDmThreadId_) {
+                    return;
+                }
+                if (!dmHistoryLoaded_) {
+                    directMessageView_->setMessages(messages);
+                    dmHistoryLoaded_ = true;
+                    for (const DirectMessageInfo& message : messages) {
+                        lastSeenDmMessageId_ = std::max(lastSeenDmMessageId_, message.id);
+                    }
+                    return;
+                }
+                for (const DirectMessageInfo& message : messages) {
+                    if (message.id > lastSeenDmMessageId_) {
+                        directMessageView_->appendMessage(message);
+                        lastSeenDmMessageId_ = message.id;
+                    }
+                }
+            });
+    connect(&chatRestClient_, &ChatRestClient::directMessageSent, this,
+            [this](qint64 threadId, const DirectMessageInfo& message) {
+                if (threadId != openDmThreadId_) {
+                    return;
+                }
+                directMessageView_->appendMessage(message);
+                lastSeenDmMessageId_ = std::max(lastSeenDmMessageId_, message.id);
+            });
+    connect(directMessageView_, &DirectMessageView::sendMessageRequested, this, [this](const QString& body) {
+        if (openDmThreadId_ >= 0) {
+            chatRestClient_.sendDirectMessage(lastToken_, openDmThreadId_, body);
+        }
+    });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {
@@ -350,11 +528,28 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(chatView_, &ChatView::createChannelRequested, channelsPanel_->addButton(), &QPushButton::click);
 
-    connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
-        showToast(tr("Community '%1' created").arg(name), ToastBanner::Variant::kSuccess);
-        pendingCommunitySelection_ = id;
-        refreshCommunities();
-    });
+    connect(&chatRestClient_, &ChatRestClient::communityCreated, this,
+            [this](qint64 id, const QString& name, const QString& inviteCode) {
+                // Код приглашения показан сразу здесь (issue #186) —
+                // тем не менее доступен и позже через "Copy Invite Code"
+                // в контекстном меню сообщества, тост не единственный
+                // способ его увидеть.
+                showToast(tr("Community '%1' created — invite code: %2").arg(name, inviteCode),
+                           ToastBanner::Variant::kSuccess);
+                pendingCommunitySelection_ = id;
+                refreshCommunities();
+            });
+    connect(&chatRestClient_, &ChatRestClient::joinedCommunityByCode, this,
+            [this](qint64 id, const QString& name) {
+                showToast(tr("Joined community '%1'").arg(name), ToastBanner::Variant::kSuccess);
+                pendingCommunitySelection_ = id;
+                refreshCommunities();
+            });
+    connect(&chatRestClient_, &ChatRestClient::inviteCodeRegenerated, this,
+            [this](qint64, const QString& inviteCode) {
+                showToast(tr("New invite code: %1").arg(inviteCode), ToastBanner::Variant::kSuccess);
+                refreshCommunities();
+            });
     connect(&chatRestClient_, &ChatRestClient::communitiesListed, this, [this](const QList<ChatItem>& communities) {
         communities_ = communities;
         communitiesPanel_->setCommunities(communities_);
@@ -392,8 +587,15 @@ MainWindow::MainWindow(QWidget* parent)
                     moderatorsDialog_->setModerators(logins);
                 }
             });
-    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64) {
+    connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 id) {
         showToast(tr("Joined community"), ToastBanner::Variant::kSuccess);
+        // Список участников не обновляется сам — без этого только что
+        // присоединившийся пользователь не появляется в MemberListPanel,
+        // пока кто-нибудь не переоткроет сообщество (см. также
+        // membersListed() ниже, тот же фильтр по selectedCommunityId_).
+        if (id == selectedCommunityId_) {
+            chatRestClient_.listMembers(lastToken_, id);
+        }
     });
     connect(&chatRestClient_, &ChatRestClient::channelCreated, this,
             [this](qint64 id, const QString& name, bool isEncrypted) {
@@ -420,7 +622,10 @@ MainWindow::MainWindow(QWidget* parent)
                 refreshChannelsForSelectedCommunity();
             });
     connect(&chatRestClient_, &ChatRestClient::membersListed, this,
-            [this](qint64 /*communityId*/, const QStringList& logins) {
+            [this](qint64 communityId, const QStringList& logins) {
+                if (communityId == selectedCommunityId_) {
+                    memberListPanel_->setMembers(logins);
+                }
                 if (!pendingEncryptedSetup_.has_value()) {
                     return;  // Не связано с текущим созданием зашифрованного канала.
                 }
@@ -444,6 +649,19 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::channelsListed, this, [this](const QList<ChatItem>& channels) {
         channels_ = channels;
         channelsPanel_->setChannels(channels_);
+        // Превью последнего сообщения + сортировка по активности в
+        // сайдбаре (issue #152) — единственный способ узнать о канале,
+        // который сейчас не открыт (ChatClient подписан ровно на один
+        // канал одновременно, см. его doc-комментарий), не трогая
+        // chat-service: свой отдельный REST-запрос на канал (см.
+        // ChatRestClient::fetchLatestMessage()), ответ приходит через
+        // latestMessageFetched() выше, а не через messagesListed() —
+        // чтобы никогда не перепутаться с реальной подгрузкой истории,
+        // если пользователь откроет один из этих каналов раньше, чем
+        // придёт ответ на его превью.
+        for (const ChatItem& channel : channels_) {
+            chatRestClient_.fetchLatestMessage(lastToken_, channel.id);
+        }
         if (pendingChannelSelection_ >= 0) {
             channelsPanel_->selectChannelId(pendingChannelSelection_);
             const auto it = std::find_if(channels_.cbegin(), channels_.cend(),
@@ -491,6 +709,26 @@ MainWindow::MainWindow(QWidget* parent)
             finishOpeningChannel(channelId);
         }
     });
+    connect(&chatRestClient_, &ChatRestClient::latestMessageFetched, this,
+            [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
+                // Фоновый запрос превью для сайдбара (issue #152) — своя
+                // ветка, отдельная от messagesListed()/подгрузки истории
+                // открытого канала ниже, специально чтобы ответ на этот
+                // запрос никогда не мог быть перепутан с ответом на
+                // реальную подгрузку истории для того же канала, даже
+                // если оба запроса оказались в полёте одновременно (см.
+                // doc-комментарий ChatRestClient::fetchLatestMessage()).
+                if (messages.isEmpty()) {
+                    return;
+                }
+                const ChatMessageInfo& latest = messages.first();
+                const auto it = std::find_if(channels_.cbegin(), channels_.cend(),
+                                              [channelId](const ChatItem& item) { return item.id == channelId; });
+                const bool isEncrypted = it != channels_.cend() && it->isEncrypted;
+                channelsPanel_->recordChannelActivity(
+                    channelId, latest.id, isEncrypted ? tr("🔒 Encrypted message") : truncateForChannelPreview(latest.body),
+                    chat_message_grouping::parseSentAt(latest.sentAt));
+            });
     connect(&chatRestClient_, &ChatRestClient::messagesListed, this,
             [this](qint64 channelId, const QList<ChatMessageInfo>& messages) {
                 if (channelId != selectedChannelId_) {
@@ -562,11 +800,14 @@ MainWindow::MainWindow(QWidget* parent)
         callWindow_->localScreenShareVideoWidget()->videoSink()->setVideoFrame(frame);
     });
 
-    // Issue #156: there's no persisted token across restarts (every
-    // launch starts signed out), so gating on "not authenticated yet"
-    // reduces to "always show this at startup" — closed again once
-    // tokenVerified(true, ...) fires above, from either this window or
-    // the top-right AccountMenu's password login.
+    // Issue #156: токен между запусками не сохраняется (каждый
+    // запуск стартует разлогиненным), так что условие "ещё не
+    // авторизован" сводится к "всегда показывать это при старте".
+    // MainWindow при этом ни разу не показывается здесь — main.cpp не
+    // вызывает show() для него, единственное видимое окно на старте
+    // это LoginWindow; сам MainWindow показывается только из
+    // обработчика tokenVerified(true, ...) выше, после успешного входа
+    // по коду или по паролю/регистрации.
     loginWindow_->show();
 }
 
@@ -582,30 +823,35 @@ void MainWindow::buildUi() {
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    auto* topBar = new QWidget(central);
-    topBar->setObjectName(QStringLiteral("topBar"));
-    topBar->setAttribute(Qt::WA_StyledBackground, true);
-    auto* topBarLayout = new QHBoxLayout(topBar);
-    topBarLayout->setContentsMargins(ui_theme::kSpacingMd, ui_theme::kSpacingSm, ui_theme::kSpacingMd,
-                                      ui_theme::kSpacingSm);
-    accountMenu_ = new AccountMenu(topBar);
-    topBarLayout->addStretch();
-    topBarLayout->addWidget(accountMenu_);
-
     auto* sidebar = new QWidget(central);
     sidebar->setObjectName(QStringLiteral("sidebar"));
     sidebar->setAttribute(Qt::WA_StyledBackground, true);
-    sidebar->setFixedWidth(280);
+    // 72px иконочная полоса сообществ + 240px список каналов
+    // (issue #182 — расположение/размеры, не цвета).
+    sidebar->setFixedWidth(312);
     auto* sidebarLayout = new QHBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
     sidebarLayout->setSpacing(0);
     communitiesPanel_ = new CommunitiesPanel(sidebar);
     channelsPanel_ = new ChannelsPanel(sidebar);
+    friendsPanel_ = new FriendsPanel(sidebar);
+    sidebarListStack_ = new QStackedWidget(sidebar);
+    sidebarListStack_->addWidget(channelsPanel_);
+    sidebarListStack_->addWidget(friendsPanel_);
     sidebarLayout->addWidget(communitiesPanel_);
-    sidebarLayout->addWidget(channelsPanel_, /*stretch=*/1);
+    sidebarLayout->addWidget(sidebarListStack_, /*stretch=*/1);
 
     chatView_ = new ChatView(central);
-    toastBanner_ = new ToastBanner(chatView_);
+    directMessageView_ = new DirectMessageView(central);
+    contentStack_ = new QStackedWidget(central);
+    contentStack_->addWidget(chatView_);
+    contentStack_->addWidget(directMessageView_);
+    // Родитель — contentStack_, а не chatView_ (issue #187, Фаза 3):
+    // тост должен быть виден и в режиме Friends, когда показан
+    // directMessageView_, а не chatView_ — ToastBanner сам следит за
+    // resize() своего parentWidget() (см. её конструктор), так что
+    // достаточно просто выбрать родителя, который виден в обоих режимах.
+    toastBanner_ = new ToastBanner(contentStack_);
     desktopNotifier_ = new DesktopNotifier(this, this);
 
     // Отдельное окно звонка (issue #185) — MainWindow владеет её временем
@@ -613,14 +859,20 @@ void MainWindow::buildUi() {
     // по фактическому входу/выходу из звонка.
     callWindow_ = new CallWindow(this);
 
+    // Список участников сообщества справа от чата — элемент раскладки,
+    // которого раньше не было вовсе (issue #182); та же 240px ширина,
+    // что и список каналов.
+    memberListPanel_ = new MemberListPanel(central);
+    memberListPanel_->setFixedWidth(240);
+
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
     middleLayout->addWidget(sidebar);
-    middleLayout->addWidget(chatView_, /*stretch=*/1);
+    middleLayout->addWidget(contentStack_, /*stretch=*/1);
+    middleLayout->addWidget(memberListPanel_);
 
     footerBar_ = new FooterBar(central);
 
-    rootLayout->addWidget(topBar);
     rootLayout->addLayout(middleLayout, /*stretch=*/1);
     rootLayout->addWidget(footerBar_);
 
@@ -704,14 +956,14 @@ void MainWindow::onToggleScreenCaptureClicked() {
     }
 }
 
-void MainWindow::onRequestTokenClicked() {
-    accountMenu_->statusLabel()->setText(tr("Requesting token..."));
-    authClient_.requestToken(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
+void MainWindow::onPasswordSignInClicked(const QString& login, const QString& password) {
+    loginWindow_->statusLabel()->setText(tr("Requesting token..."));
+    authClient_.requestToken(login, password);
 }
 
-void MainWindow::onRegisterClicked() {
-    accountMenu_->statusLabel()->setText(tr("Registering..."));
-    authClient_.registerUser(accountMenu_->loginEdit()->text(), accountMenu_->passwordEdit()->text());
+void MainWindow::onRegisterClicked(const QString& login, const QString& password) {
+    loginWindow_->statusLabel()->setText(tr("Registering..."));
+    authClient_.registerUser(login, password);
 }
 
 void MainWindow::onSendChatMessageClicked() {
@@ -874,7 +1126,10 @@ void MainWindow::signOut() {
     refreshToken_.clear();
     currentUserLogin_.clear();
     identityKeyStore_.reset();
+    showCommunitiesMode();
     closeChatView();
+    friendsPanel_->setFriends({});
+    friendsPanel_->setIncomingRequests({});
     selectedCommunityId_ = -1;
     pendingCommunitySelection_ = -1;
     pendingChannelSelection_ = -1;
@@ -889,8 +1144,13 @@ void MainWindow::signOut() {
     channelsPanel_->setCurrentUserLogin(QString());
     chatView_->setCurrentUserLogin(QString());
     footerBar_->setProfileText(tr("Not signed in"));
-    accountMenu_->setEditProfileEnabled(false);
-    accountMenu_->statusLabel()->setText(tr("Signed out"));
+
+    // Тот же гейтинг, что и на старте (issue #156) — без токена
+    // показывать интерфейс не для кого, так что он снова прячется, а
+    // LoginWindow возвращается на первый шаг и показывается заново.
+    hide();
+    loginWindow_->reset();
+    loginWindow_->show();
 }
 
 void MainWindow::refreshCommunities() {
@@ -916,6 +1176,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     leaveCallIfActive();
     selectedChannelId_ = id;
     oldestMessageId_ = -1;
+    channelsPanel_->setOpenChannelId(id);
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
     chatView_->clearLog();
@@ -948,6 +1209,7 @@ void MainWindow::closeChatView() {
     selectedChannelId_ = -1;
     oldestMessageId_ = -1;
     currentChannelEncrypted_ = false;
+    channelsPanel_->setOpenChannelId(-1);
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
 }
@@ -982,6 +1244,52 @@ QString MainWindow::decryptForDisplay(const QString& ciphertext) const {
 
 void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {
     toastBanner_->showMessage(text, variant, kToastTimeoutMs);
+}
+
+void MainWindow::showFriendsMode() {
+    sidebarListStack_->setCurrentWidget(friendsPanel_);
+    contentStack_->setCurrentWidget(directMessageView_);
+    // Список участников — для канала сообщества, в режиме друзей нет
+    // выбранного сообщества, которое он мог бы описывать (issue #182 +
+    // #187 — панель и режим друзей появились в двух независимых PR, не
+    // знавших друг о друге).
+    memberListPanel_->setVisible(false);
+    directMessageView_->showPlaceholder();
+    openDmThreadId_ = -1;
+    openDmOtherLogin_.clear();
+    dmHistoryLoaded_ = false;
+    lastSeenDmMessageId_ = -1;
+    dmPollTimer_->stop();
+    if (!lastToken_.isEmpty()) {
+        userProfileClient_.listFriends(lastToken_);
+        userProfileClient_.listIncomingFriendRequests(lastToken_);
+    }
+}
+
+void MainWindow::showCommunitiesMode() {
+    sidebarListStack_->setCurrentWidget(channelsPanel_);
+    contentStack_->setCurrentWidget(chatView_);
+    memberListPanel_->setVisible(true);
+    openDmThreadId_ = -1;
+    openDmOtherLogin_.clear();
+    dmHistoryLoaded_ = false;
+    lastSeenDmMessageId_ = -1;
+    dmPollTimer_->stop();
+}
+
+void MainWindow::openDmThreadWith(const QString& login) {
+    if (lastToken_.isEmpty()) {
+        showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+        return;
+    }
+    chatRestClient_.openDmThread(lastToken_, login);
+}
+
+void MainWindow::pollOpenDmThread() {
+    if (openDmThreadId_ < 0) {
+        return;
+    }
+    chatRestClient_.listDirectMessages(lastToken_, openDmThreadId_, /*limit=*/50);
 }
 
 }  // namespace devicehub

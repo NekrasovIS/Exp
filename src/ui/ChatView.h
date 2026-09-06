@@ -1,10 +1,13 @@
 #pragma once
 
+#include <QHash>
 #include <QList>
+#include <QPointer>
 #include <QWidget>
 
 #include "ui/ChatMessageRow.h"
 
+class QImage;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -78,6 +81,12 @@ public:
     /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
 
+    /// Передаёт загруженное изображение вложения дальше в строку,
+    /// которая его запросила (issue #188, см. previewAttachmentRequested())
+    /// — ничего не делает, если та строка с тех пор исчезла (например,
+    /// пользователь переключил канал раньше, чем пришёл ответ).
+    void setAttachmentPreview(qint64 attachmentId, const QImage& image);
+
     /// Прокручивает к строке @p id, если она сейчас показана (issue
     /// #118, переход к результату поиска) — @return false, если это
     /// сообщение сейчас не загружено (например, дальше в истории, чем
@@ -129,6 +138,11 @@ public:
     [[nodiscard]] QPushButton* searchButton() const { return searchButton_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
     [[nodiscard]] QPushButton* loadOlderButton() const { return loadOlderButton_; }
+    /// Иконка "участники" в правом углу шапки (issue #184) — переключает
+    /// видимость MemberListPanel, которой ChatView не владеет сама,
+    /// поэтому только сигнализирует запрос, а не хранит состояние
+    /// открыт/свёрнут самостоятельно.
+    [[nodiscard]] QPushButton* memberListToggleButton() const { return memberListToggleButton_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -145,6 +159,11 @@ signals:
     /// Клик по "Search" (issue #118) — MainWindow показывает/поднимает
     /// свой SearchDialog.
     void openSearchRequested();
+
+    /// Клик по иконке "участники" (issue #184) — MainWindow переключает
+    /// видимость своей MemberListPanel; сама ChatView этой панелью не
+    /// владеет и не знает, открыта она сейчас или нет.
+    void memberListToggleRequested();
 
     /// Пользователь печатает в поле сообщения — с ограничением частоты
     /// (не чаще одного раза за окно охлаждения), а не при каждом
@@ -170,12 +189,31 @@ signals:
     /// из того ChatMessageRow, откуда пришёл.
     void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
 
+    /// Испускается сразу при появлении строки с вложением-изображением
+    /// (issue #188, см. isImageAttachment()) — MainWindow запускает
+    /// фоновую загрузку через ChatRestClient::downloadAttachment() и
+    /// передаёт результат обратно в setAttachmentPreview(), а не в
+    /// обработчик "сохранить на диск", который тот же REST-вызов
+    /// использует для настоящих кликов по "Download".
+    void previewAttachmentRequested(qint64 attachmentId);
+
 private:
     /// Подключает editRequested()/deleteRequested() свежесозданной
     /// строки к собственному состоянию режима редактирования этого
     /// view / deleteMessageRequested() — используется совместно
     /// appendMessage() (пока единственное место, где создаются строки).
     void connectMessageRow(ChatMessageRow* row);
+
+    /// Если у @p message есть вложение-изображение (issue #188),
+    /// запоминает @p row в pendingImagePreviewRows_ и испускает
+    /// previewAttachmentRequested() — общая часть appendMessage()/
+    /// prependMessages(), оба создают строки одинаково.
+    void requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row);
+
+    /// Строит центрированную метку-разделитель дат (issue #188) —
+    /// "Today"/"Yesterday"/полная дата в зависимости от того, на какой
+    /// день приходится @p sentAt относительно текущей даты.
+    [[nodiscard]] QLabel* buildDateSeparatorLabel(const QString& sentAt);
 
     /// Перерисовывает channelTitleLabel_ из currentChannelName_/encrypted_
     /// — используется совместно showChannel() и setEncrypted(), так что
@@ -199,7 +237,12 @@ private:
     QPushButton* callToggleButton_ = nullptr;
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
+    QPushButton* memberListToggleButton_ = nullptr;
     QLabel* typingIndicatorLabel_ = nullptr;
+    /// Виден только пока editingMessageId_ >= 0 — единственный оставшийся
+    /// индикатор режима редактирования с тех пор, как sendButton_ стал
+    /// иконкой без текста (issue #182).
+    QLabel* editingIndicatorLabel_ = nullptr;
     QTimer* typingIndicatorHideTimer_ = nullptr;
     QTimer* typingThrottleTimer_ = nullptr;
     bool hasLastMessage_ = false;
@@ -213,6 +256,11 @@ private:
     /// в конструкторе.
     bool stickToBottom_ = true;
     qint64 editingMessageId_ = -1;
+    /// Строки, ожидающие ответа на previewAttachmentRequested() (issue
+    /// #188) — QPointer, а не голый указатель, поскольку строка вполне
+    /// может исчезнуть (переключение канала -> clearLog(), удаление
+    /// сообщения) раньше, чем придёт ответ.
+    QHash<qint64, QPointer<ChatMessageRow>> pendingImagePreviewRows_;
 };
 
 }  // namespace devicehub

@@ -20,14 +20,15 @@ TEST(IconFactoryTest, PlusIconIsNotNull) {
     EXPECT_FALSE(icon.availableSizes().isEmpty());
 }
 
-TEST(IconFactoryTest, RefreshIconIsNotNull) {
-    const QIcon icon = ui_icons::refreshIcon();
-
-    EXPECT_FALSE(icon.isNull());
-}
-
 TEST(IconFactoryTest, CommunityAvatarIconIsNotNull) {
     const QIcon icon = ui_icons::communityAvatarIcon(QStringLiteral("A"));
+
+    EXPECT_FALSE(icon.isNull());
+    EXPECT_FALSE(icon.availableSizes().isEmpty());
+}
+
+TEST(IconFactoryTest, MembersIconIsNotNull) {
+    const QIcon icon = ui_icons::membersIcon(QColor("#ffffff"));
 
     EXPECT_FALSE(icon.isNull());
     EXPECT_FALSE(icon.availableSizes().isEmpty());

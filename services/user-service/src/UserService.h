@@ -30,6 +30,22 @@ public:
     /// См. UserRepository::resolveOtpIdentifier() (issue #156/#174).
     [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier);
 
+    /// См. UserRepository::sendFriendRequest() (issue #187).
+    [[nodiscard]] SendFriendRequestResult sendFriendRequest(const std::string& requesterLogin,
+                                                             const std::string& recipientLogin);
+    /// См. UserRepository::respondToFriendRequest().
+    [[nodiscard]] RespondToFriendRequestResult respondToFriendRequest(std::int64_t requestId,
+                                                                       const std::string& recipientLogin,
+                                                                       bool accept);
+    /// См. UserRepository::listIncomingFriendRequests().
+    [[nodiscard]] std::vector<FriendRequestInfo> listIncomingFriendRequests(const std::string& login);
+    /// См. UserRepository::listFriends().
+    [[nodiscard]] std::vector<std::string> listFriends(const std::string& login);
+    /// См. UserRepository::removeFriend().
+    [[nodiscard]] bool removeFriend(const std::string& loginA, const std::string& loginB);
+    /// См. UserRepository::areFriends() (issue #187, Фаза 2).
+    [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
+
 private:
     UserRepository& repository_;
 };

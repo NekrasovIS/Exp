@@ -14,6 +14,7 @@
 #include <QTabWidget>
 
 #include "devices/DeviceEnumerator.h"
+#include "ui/MemberListPanel.h"
 
 // Эти тесты намеренно никогда не нажимают кнопку, которая запускала бы
 // реальный захват (микрофон/камера/экран): у обычного CLI-бинарника
@@ -53,29 +54,26 @@ TEST(MainWindowUiTest, DeviceSettingsAreSeparateTabsInDialog) {
     EXPECT_EQ(tabs->count(), 4);
 }
 
-TEST(MainWindowUiTest, SidebarFooterAndAccountMenuExist) {
+TEST(MainWindowUiTest, SidebarAndFooterExist) {
     const MainWindow window;
 
     auto* sidebar = window.findChild<QWidget*>("sidebar");
     auto* mainContentPlaceholder = window.findChild<QLabel*>("mainContentPlaceholder");
     auto* footerProfileLabel = window.findChild<QLabel*>("footerProfileLabel");
     auto* footerSettingsButton = window.findChild<QPushButton*>("footerSettingsButton");
-    auto* accountMenuButton = window.findChild<QPushButton*>("accountMenuButton");
 
     ASSERT_NE(sidebar, nullptr);
     ASSERT_NE(mainContentPlaceholder, nullptr);
     ASSERT_NE(footerProfileLabel, nullptr);
     ASSERT_NE(footerSettingsButton, nullptr);
-    ASSERT_NE(accountMenuButton, nullptr);
 
     EXPECT_EQ(footerProfileLabel->text(), QStringLiteral("Not signed in"));
 }
 
-TEST(MainWindowUiTest, AvatarClickShowsAccountMenuWithDisabledActionsWhenSignedOut) {
-    // Issue #151: account settings move to a menu anchored on the
-    // footer avatar rather than living only in the top-right
-    // AccountMenu popup. Edit Profile/Sign Out only make sense once
-    // signed in, so both start disabled here.
+TEST(MainWindowUiTest, AvatarClickShowsAccountSettingsMenuWithDisabledActionsWhenSignedOut) {
+    // Issue #151: клик по аватару в футере открывает меню Edit
+    // Profile/Sign Out. Оба пункта имеют смысл только после входа,
+    // поэтому оба стартуют отключёнными.
     const MainWindow window;
 
     auto* avatar = window.findChild<QLabel*>("footerAvatar");
@@ -120,32 +118,35 @@ TEST(MainWindowUiTest, ActionControlsExistWithExpectedInitialLabels) {
     auto* toggleMicButton = window.findChild<QPushButton*>("toggleMicButton");
     auto* toggleCameraButton = window.findChild<QPushButton*>("toggleCameraButton");
     auto* toggleScreenCaptureButton = window.findChild<QPushButton*>("toggleScreenCaptureButton");
-    auto* requestTokenButton = window.findChild<QPushButton*>("requestTokenButton");
 
     ASSERT_NE(playToneButton, nullptr);
     ASSERT_NE(toggleMicButton, nullptr);
     ASSERT_NE(toggleCameraButton, nullptr);
     ASSERT_NE(toggleScreenCaptureButton, nullptr);
-    ASSERT_NE(requestTokenButton, nullptr);
 
     EXPECT_EQ(playToneButton->text(), QStringLiteral("Play test tone"));
     EXPECT_EQ(toggleMicButton->text(), QStringLiteral("Start capture"));
     EXPECT_EQ(toggleCameraButton->text(), QStringLiteral("Start camera"));
     EXPECT_EQ(toggleScreenCaptureButton->text(), QStringLiteral("Start screen capture"));
-    EXPECT_EQ(requestTokenButton->text(), QStringLiteral("Get token & verify"));
 }
 
-TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
+TEST(MainWindowUiTest, LoginWindowPasswordFieldsExistWithPasswordMasked) {
+    // Issue #177: вход/регистрация по паролю теперь часть LoginWindow
+    // (шаг "Sign in with password instead"), а не отдельного всплывающего
+    // AccountMenu.
     const MainWindow window;
 
-    auto* loginEdit = window.findChild<QLineEdit*>("loginEdit");
-    auto* passwordEdit = window.findChild<QLineEdit*>("passwordEdit");
-    auto* registerButton = window.findChild<QPushButton*>("registerButton");
+    auto* loginEdit = window.findChild<QLineEdit*>("loginPasswordLoginEdit");
+    auto* passwordEdit = window.findChild<QLineEdit*>("loginPasswordEdit");
+    auto* signInButton = window.findChild<QPushButton*>("passwordSignInButton");
+    auto* registerButton = window.findChild<QPushButton*>("loginRegisterButton");
 
     ASSERT_NE(loginEdit, nullptr);
     ASSERT_NE(passwordEdit, nullptr);
+    ASSERT_NE(signInButton, nullptr);
     ASSERT_NE(registerButton, nullptr);
     EXPECT_EQ(passwordEdit->echoMode(), QLineEdit::Password);
+    EXPECT_EQ(signInButton->text(), QStringLiteral("Sign In"));
     EXPECT_EQ(registerButton->text(), QStringLiteral("Register"));
 }
 
@@ -180,19 +181,22 @@ TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     ASSERT_NE(sendChatMessageButton, nullptr);
     ASSERT_NE(channelTitle, nullptr);
 
-    EXPECT_EQ(sendChatMessageButton->text(), QStringLiteral("Send"));
+    // Иконка без подписи (issue #182 — композер сообщения теперь
+    // "таблетка" с иконочными кнопками), но подсказка остаётся текстовой
+    // для доступности/тестируемости.
+    EXPECT_EQ(sendChatMessageButton->toolTip(), QStringLiteral("Send"));
 }
 
 TEST(MainWindowUiTest, AttachFileButtonExists) {
-    // #116: кнопка "Attach" расположена рядом с Send в строке отправки
-    // ChatView — про сценарий «загрузить, затем автоматически отправить» см.
+    // #116: кнопка "Attach" расположена в композере сообщения ChatView —
+    // про сценарий «загрузить, затем автоматически отправить» см.
     // MainWindow::onAttachFileClicked().
     const MainWindow window;
 
     auto* attachFileButton = window.findChild<QPushButton*>("attachFileButton");
 
     ASSERT_NE(attachFileButton, nullptr);
-    EXPECT_EQ(attachFileButton->text(), QStringLiteral("Attach"));
+    EXPECT_EQ(attachFileButton->toolTip(), QStringLiteral("Attach"));
 }
 
 TEST(MainWindowUiTest, CallControlsExistAndCallWindowStartsHidden) {
@@ -210,6 +214,26 @@ TEST(MainWindowUiTest, CallControlsExistAndCallWindowStartsHidden) {
     EXPECT_EQ(callToggleButton->text(), QStringLiteral("Call"));
     EXPECT_EQ(muteToggleButton->text(), QStringLiteral("Mute"));
     EXPECT_TRUE(muteToggleButton->window()->isHidden());
+}
+
+TEST(MainWindowUiTest, MemberListToggleButtonShowsAndHidesMemberListPanel) {
+    // #184: панель участников видна по умолчанию, но её можно
+    // свернуть/развернуть иконкой в шапке ChatView — сама MainWindow
+    // просто переключает видимость memberListPanel_ на каждый клик.
+    MainWindow window;
+
+    auto* toggleButton = window.findChild<QPushButton*>("memberListToggleButton");
+    auto* memberListPanel = window.findChild<MemberListPanel*>();
+
+    ASSERT_NE(toggleButton, nullptr);
+    ASSERT_NE(memberListPanel, nullptr);
+    EXPECT_FALSE(memberListPanel->isHidden());
+
+    toggleButton->click();
+    EXPECT_TRUE(memberListPanel->isHidden());
+
+    toggleButton->click();
+    EXPECT_FALSE(memberListPanel->isHidden());
 }
 
 TEST(MainWindowUiTest, VideoToggleButtonExists) {
@@ -251,17 +275,13 @@ TEST(MainWindowUiTest, CommunityAndChannelManagementControlsExist) {
 
     auto* communityList = window.findChild<QListWidget*>("communityList");
     auto* createCommunityButton = window.findChild<QPushButton*>("createCommunityButton");
-    auto* refreshCommunitiesButton = window.findChild<QPushButton*>("refreshCommunitiesButton");
     auto* channelList = window.findChild<QListWidget*>("channelList");
     auto* createChannelButton = window.findChild<QPushButton*>("createChannelButton");
-    auto* refreshChannelsButton = window.findChild<QPushButton*>("refreshChannelsButton");
 
     ASSERT_NE(communityList, nullptr);
     ASSERT_NE(createCommunityButton, nullptr);
-    ASSERT_NE(refreshCommunitiesButton, nullptr);
     ASSERT_NE(channelList, nullptr);
     ASSERT_NE(createChannelButton, nullptr);
-    ASSERT_NE(refreshChannelsButton, nullptr);
 
     EXPECT_EQ(communityList->count(), 0);
     EXPECT_EQ(channelList->count(), 0);

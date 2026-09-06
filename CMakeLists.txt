@@ -78,8 +78,16 @@ add_library(devicehub_core
     src/user/IdentityKeyStore.cpp
     src/ui/CommunitiesPanel.h
     src/ui/CommunitiesPanel.cpp
+    src/ui/CommunityConnectDialog.h
+    src/ui/CommunityConnectDialog.cpp
     src/ui/ChannelsPanel.h
     src/ui/ChannelsPanel.cpp
+    src/ui/MemberListPanel.h
+    src/ui/MemberListPanel.cpp
+    src/ui/FriendsPanel.h
+    src/ui/FriendsPanel.cpp
+    src/ui/DirectMessageView.h
+    src/ui/DirectMessageView.cpp
     src/ui/ChatView.h
     src/ui/ChatView.cpp
     src/ui/CallWindow.h
@@ -92,8 +100,6 @@ add_library(devicehub_core
     src/ui/ChatMessageGrouping.cpp
     src/ui/ChatBubble.h
     src/ui/ChatBubble.cpp
-    src/ui/AccountMenu.h
-    src/ui/AccountMenu.cpp
     src/ui/SettingsDialog.h
     src/ui/SettingsDialog.cpp
     src/ui/ProfileDialog.h
@@ -248,14 +254,19 @@ add_executable(devicehub_tests
     test/ToastBannerTest.cpp
     test/NotificationPolicyTest.cpp
     test/CommunitiesPanelTest.cpp
+    test/MemberListPanelTest.cpp
+    test/CommunityConnectDialogTest.cpp
     test/ChannelsPanelTest.cpp
+    test/FriendsPanelTest.cpp
+    test/DirectMessageViewTest.cpp
     test/ChatViewTest.cpp
     test/CallWindowTest.cpp
     test/DraggableVideoTileTest.cpp
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp
     test/FooterBarTest.cpp
-    test/AccountMenuTest.cpp
+    test/SettingsDialogTest.cpp
+    test/DesktopNotifierTest.cpp
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
     test/IdentityKeyStoreTest.cpp
