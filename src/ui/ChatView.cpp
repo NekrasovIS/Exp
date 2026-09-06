@@ -1,25 +1,24 @@
 #include "ui/ChatView.h"
 
+#include <QColor>
+#include <QDate>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPixmap>
+#include <QLocale>
 #include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
-#include <QSizePolicy>
-#include <QSplitter>
+#include <QSize>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <QVideoWidget>
-
-#include <utility>
 
 #include "ui/ChatMessageGrouping.h"
+#include "ui/IconFactory.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -27,9 +26,10 @@ namespace devicehub {
 namespace {
 constexpr int kPlaceholderPageIndex = 0;
 constexpr int kChannelPageIndex = 1;
-constexpr int kVideoTileSize = 160;
 constexpr int kTypingIndicatorHideMs = 3000;
 constexpr int kTypingThrottleMs = 2000;
+constexpr int kComposerIconButtonSize = 32;
+constexpr int kComposerIconGlyphSize = 18;
 /// Насколько близко к низу (в пикселях) всё ещё считается "внизу" для
 /// stickToBottom_ — небольшой запас, а не требование точного
 /// максимального значения, которое округление layout'а может промахнуть
@@ -98,69 +98,30 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     callToggleButton_->setObjectName(QStringLiteral("callToggleButton"));
     connect(callToggleButton_, &QPushButton::clicked, this, &ChatView::callToggleRequested);
 
-    muteToggleButton_ = new QPushButton(tr("Mute"), channelPage);
-    muteToggleButton_->setObjectName(QStringLiteral("muteToggleButton"));
-    muteToggleButton_->setEnabled(false);
-    connect(muteToggleButton_, &QPushButton::clicked, this, &ChatView::muteToggleRequested);
-
-    videoToggleButton_ = new QPushButton(tr("Enable Video"), channelPage);
-    videoToggleButton_->setObjectName(QStringLiteral("videoToggleButton"));
-    videoToggleButton_->setEnabled(false);
-    connect(videoToggleButton_, &QPushButton::clicked, this, &ChatView::videoToggleRequested);
-
-    screenShareToggleButton_ = new QPushButton(tr("Share Screen"), channelPage);
-    screenShareToggleButton_->setObjectName(QStringLiteral("screenShareToggleButton"));
-    screenShareToggleButton_->setEnabled(false);
-    connect(screenShareToggleButton_, &QPushButton::clicked, this, &ChatView::screenShareToggleRequested);
-
     searchButton_ = new QPushButton(tr("Search"), channelPage);
     searchButton_->setObjectName(QStringLiteral("searchButton"));
     connect(searchButton_, &QPushButton::clicked, this, &ChatView::openSearchRequested);
 
-    // Видна только во время звонка (issue #153) — позволяет области
-    // видео занять окно, не теряя доступ к чату насовсем.
-    toggleChatVisibilityButton_ = new QPushButton(tr("Hide Chat"), channelPage);
-    toggleChatVisibilityButton_->setObjectName(QStringLiteral("toggleChatVisibilityButton"));
-    toggleChatVisibilityButton_->setVisible(false);
-    connect(toggleChatVisibilityButton_, &QPushButton::clicked, this, &ChatView::onToggleChatVisibilityClicked);
+    // Иконка вместо текстовой кнопки (issue #184) — тот же плоский
+    // иконочный стиль, что и у композера/FooterBar. ChatView не хранит
+    // открыта ли сейчас MemberListPanel (ей не владеет), поэтому кнопка
+    // просто сигнализирует клик каждый раз, без переключения своего
+    // текста/вида.
+    memberListToggleButton_ = new QPushButton(channelPage);
+    memberListToggleButton_->setObjectName(QStringLiteral("memberListToggleButton"));
+    memberListToggleButton_->setToolTip(tr("Members"));
+    memberListToggleButton_->setProperty("flatIconButton", true);
+    memberListToggleButton_->setIcon(ui_icons::membersIcon(QColor(ui_theme::kMutedForeground)));
+    memberListToggleButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    memberListToggleButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(memberListToggleButton_, &QPushButton::clicked, this, &ChatView::memberListToggleRequested);
 
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
     headerRow->addWidget(callToggleButton_);
-    headerRow->addWidget(muteToggleButton_);
-    headerRow->addWidget(videoToggleButton_);
-    headerRow->addWidget(screenShareToggleButton_);
-    headerRow->addWidget(toggleChatVisibilityButton_);
     headerRow->addWidget(searchButton_);
-
-    callParticipantsLabel_ = new QLabel(channelPage);
-    callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));
-    callParticipantsLabel_->setWordWrap(true);
-    callParticipantsLabel_->setVisible(false);
-
-    // Локальное превью + по одной плитке на каждого удалённого
-    // участника, сейчас отправляющего видео (issue #91) — скрывается,
-    // когда показывать нечего (нет активного звонка или видео ещё не
-    // включено), тот же приём show/hide, что и у callParticipantsLabel_
-    // выше.
-    videoStrip_ = new QWidget(channelPage);
-    videoStripLayout_ = new QHBoxLayout(videoStrip_);
-    videoStripLayout_->setContentsMargins(0, 0, 0, 0);
-    videoStripLayout_->setSpacing(ui_theme::kSpacingSm);
-    videoStripLayout_->addStretch(1);
-
-    localVideoWidget_ = new QVideoWidget(videoStrip_);
-    localVideoWidget_->setObjectName(QStringLiteral("localVideoWidget"));
-    // Минимальный, а не фиксированный размер (issue #153) —
-    // chatSplitter_ отдаёт videoStrip_ большую часть окна во время
-    // звонка, и Expanding-политика размера позволяет плитке реально
-    // вырасти в это пространство, а не оставаться приколоченной к
-    // kVideoTileSize независимо от того, сколько места ей выделено.
-    localVideoWidget_->setMinimumSize(kVideoTileSize, kVideoTileSize);
-    localVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    videoStripLayout_->insertWidget(0, localVideoWidget_);
-    videoStrip_->setVisible(false);
+    headerRow->addWidget(memberListToggleButton_);
 
     loadOlderButton_ = new QPushButton(tr("Load older messages"), channelPage);
     loadOlderButton_->setObjectName(QStringLiteral("loadOlderMessagesButton"));
@@ -214,10 +175,29 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     typingThrottleTimer_->setSingleShot(true);
     typingThrottleTimer_->setInterval(kTypingThrottleMs);
 
-    auto* sendRow = new QHBoxLayout;
-    sendRow->setSpacing(ui_theme::kSpacingSm);
-    messageEdit_ = new QLineEdit(channelPage);
+    // Виден только в режиме редактирования (issue #182 — иконка "Send"
+    // теперь не может сама по себе сказать "Update", как раньше умел её
+    // текст, см. connectMessageRow()/cancelEditingMessage() ниже).
+    editingIndicatorLabel_ = new QLabel(tr("Editing message"), channelPage);
+    editingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    editingIndicatorLabel_->setVisible(false);
+
+    // Композер как единая "таблетка" (issue #182) —
+    // messageEdit_/attachButton_/sendButton_ рисуются
+    // без собственного фона/рамки (см. Theme.cpp) и сливаются в один
+    // скруглённый контейнер вместо трёх раздельных прямоугольных
+    // элементов управления в ряд.
+    auto* composer = new QWidget(channelPage);
+    composer->setObjectName(QStringLiteral("chatComposer"));
+    composer->setAttribute(Qt::WA_StyledBackground, true);
+    auto* composerLayout = new QHBoxLayout(composer);
+    composerLayout->setContentsMargins(ui_theme::kSpacingSm, ui_theme::kSpacingSm, ui_theme::kSpacingSm,
+                                        ui_theme::kSpacingSm);
+    composerLayout->setSpacing(ui_theme::kSpacingSm);
+
+    messageEdit_ = new QLineEdit(composer);
     messageEdit_->setObjectName(QStringLiteral("chatMessageEdit"));
+    messageEdit_->setProperty("composerInput", true);
     messageEdit_->setPlaceholderText(tr("Message"));
     connect(messageEdit_, &QLineEdit::textEdited, this, [this]() {
         if (typingThrottleTimer_->isActive()) {
@@ -227,47 +207,34 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
         emit typingRequested();
     });
 
-    attachButton_ = new QPushButton(tr("Attach"), channelPage);
+    attachButton_ = new QPushButton(composer);
     attachButton_->setObjectName(QStringLiteral("attachFileButton"));
+    attachButton_->setToolTip(tr("Attach"));
+    attachButton_->setProperty("flatIconButton", true);
+    attachButton_->setIcon(ui_icons::plusIcon(QColor(ui_theme::kMutedForeground)));
+    attachButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    attachButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(attachButton_, &QPushButton::clicked, this, &ChatView::attachFileRequested);
 
-    sendButton_ = new QPushButton(tr("Send"), channelPage);
+    sendButton_ = new QPushButton(composer);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
-    sendButton_->setProperty("accent", true);
+    sendButton_->setToolTip(tr("Send"));
+    sendButton_->setProperty("flatIconButton", true);
+    sendButton_->setIcon(ui_icons::sendIcon(QColor(ui_theme::kAccentGradientStart)));
+    sendButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
+    sendButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(messageEdit_, &QLineEdit::returnPressed, sendButton_, &QPushButton::click);
 
-    sendRow->addWidget(messageEdit_, /*stretch=*/1);
-    sendRow->addWidget(attachButton_);
-    sendRow->addWidget(sendButton_);
-
-    // История сообщений + строка ввода, сгруппированы в один виджет,
-    // чтобы быть одним дочерним элементом QSplitter вместе с videoStrip_
-    // (issue #153) — во время звонка область видео получает большую
-    // часть пространства, а эту панель можно свернуть через
-    // toggleChatVisibilityButton_ вместо того, чтобы она всегда занимала
-    // фиксированную долю окна.
-    chatPanel_ = new QWidget(channelPage);
-    auto* chatPanelLayout = new QVBoxLayout(chatPanel_);
-    chatPanelLayout->setContentsMargins(0, 0, 0, 0);
-    chatPanelLayout->setSpacing(ui_theme::kSpacingSm);
-    chatPanelLayout->addWidget(loadOlderButton_, /*stretch=*/0, Qt::AlignHCenter);
-    chatPanelLayout->addWidget(scrollArea_, /*stretch=*/1);
-    chatPanelLayout->addWidget(typingIndicatorLabel_);
-    chatPanelLayout->addLayout(sendRow);
-
-    chatSplitter_ = new QSplitter(Qt::Vertical, channelPage);
-    chatSplitter_->setObjectName(QStringLiteral("chatSplitter"));
-    chatSplitter_->setChildrenCollapsible(true);
-    chatSplitter_->addWidget(videoStrip_);
-    chatSplitter_->addWidget(chatPanel_);
-    // Вне звонка videoStrip_ скрыт (см. updateLocalVideoVisibility()), а
-    // chatPanel_ занимает всю область — так же, как и до issue #153;
-    // setCallState() пересчитывает разделение, как только звонок
-    // реально начинается.
-    chatSplitter_->setSizes({0, 1});
+    composerLayout->addWidget(attachButton_);
+    composerLayout->addWidget(messageEdit_, /*stretch=*/1);
+    composerLayout->addWidget(sendButton_);
 
     channelLayout->addLayout(headerRow);
-    channelLayout->addWidget(callParticipantsLabel_);
-    channelLayout->addWidget(chatSplitter_, /*stretch=*/1);
+    channelLayout->addWidget(loadOlderButton_, /*stretch=*/0, Qt::AlignHCenter);
+    channelLayout->addWidget(scrollArea_, /*stretch=*/1);
+    channelLayout->addWidget(typingIndicatorLabel_);
+    channelLayout->addWidget(editingIndicatorLabel_);
+    channelLayout->addWidget(composer);
 
     stack_->insertWidget(kPlaceholderPageIndex, placeholderPage);
     stack_->insertWidget(kChannelPageIndex, channelPage);
@@ -310,11 +277,15 @@ void ChatView::setCurrentUserLogin(const QString& login) {
 }
 
 void ChatView::appendMessage(const ChatMessage& message) {
+    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, message)) {
+        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(message.sentAt));
+    }
     const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
     auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
+    requestPreviewIfImageAttachment(message, row);
     lastMessage_ = message;
     hasLastMessage_ = true;
 }
@@ -331,16 +302,24 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
     // же пачке — не сравнивается с тем, что уже было самым старым
     // показанным сообщением, так что границы пагинации не дотягиваются
     // до уже отрисованной истории (см. doc-комментарий prependMessages()
-    // в ChatView.h).
+    // в ChatView.h). Тот же приём, что и у showHeaderForNext ниже —
+    // previousInBatch{} по умолчанию пуст, поэтому isDifferentCalendarDay()
+    // для самого первого сообщения пачки вернёт true сама по себе
+    // (пустая метка времени не разбирается) без отдельной проверки "это
+    // первая итерация?".
     bool showHeaderForNext = true;
     ChatMessage previousInBatch{};
     int insertIndex = 0;
     for (const ChatMessage& message : messages) {
         const bool showHeader =
             showHeaderForNext || !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, message);
+        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, message)) {
+            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(message.sentAt));
+        }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
         auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
         messagesLayout_->insertWidget(insertIndex++, row);
+        requestPreviewIfImageAttachment(message, row);
         previousInBatch = message;
         showHeaderForNext = false;
     }
@@ -376,10 +355,45 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
         editingMessageId_ = id;
         messageEdit_->setText(currentBody);
         messageEdit_->setFocus();
-        sendButton_->setText(tr("Update"));
+        editingIndicatorLabel_->setVisible(true);
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+}
+
+void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
+    if (message.attachmentId < 0 || !isImageAttachment(message.attachmentFilename)) {
+        return;
+    }
+    pendingImagePreviewRows_.insert(message.attachmentId, row);
+    emit previewAttachmentRequested(message.attachmentId);
+}
+
+void ChatView::setAttachmentPreview(qint64 attachmentId, const QImage& image) {
+    const QPointer<ChatMessageRow> row = pendingImagePreviewRows_.take(attachmentId);
+    if (row.isNull()) {
+        return;
+    }
+    row->setAttachmentPreview(image);
+}
+
+QLabel* ChatView::buildDateSeparatorLabel(const QString& sentAt) {
+    const QDateTime parsed = chat_message_grouping::parseSentAt(sentAt);
+    QString text;
+    if (!parsed.isValid()) {
+        text = tr("Unknown date");
+    } else if (const QDate date = parsed.date(); date == QDate::currentDate()) {
+        text = tr("Today");
+    } else if (date == QDate::currentDate().addDays(-1)) {
+        text = tr("Yesterday");
+    } else {
+        text = QLocale().toString(date, QStringLiteral("MMMM d, yyyy"));
+    }
+    auto* label = new QLabel(text, messagesContainer_);
+    label->setObjectName(QStringLiteral("chatDateSeparator"));
+    label->setProperty("sectionTitle", true);
+    label->setAlignment(Qt::AlignCenter);
+    return label;
 }
 
 void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
@@ -411,7 +425,7 @@ void ChatView::removeMessage(qint64 id) {
 void ChatView::cancelEditingMessage() {
     editingMessageId_ = -1;
     messageEdit_->clear();
-    sendButton_->setText(tr("Send"));
+    editingIndicatorLabel_->setVisible(false);
 }
 
 void ChatView::appendSystemLine(const QString& text) {
@@ -423,110 +437,8 @@ void ChatView::appendSystemLine(const QString& text) {
     hasLastMessage_ = false;
 }
 
-void ChatView::setCallState(bool inCall, bool muted) {
+void ChatView::setCallState(bool inCall) {
     callToggleButton_->setText(inCall ? tr("Leave call") : tr("Call"));
-    muteToggleButton_->setEnabled(inCall);
-    muteToggleButton_->setText(muted ? tr("Unmute") : tr("Mute"));
-    videoToggleButton_->setEnabled(inCall);
-    screenShareToggleButton_->setEnabled(inCall);
-    toggleChatVisibilityButton_->setVisible(inCall);
-    if (inCall) {
-        // Отдаём области видео большую часть окна вместо деления 50/50
-        // с чатом (issue #153) — setSizes() нужно только соотношение,
-        // Qt сам масштабирует его к реальному размеру сплиттера в
-        // пикселях.
-        chatPanelCollapsed_ = false;
-        toggleChatVisibilityButton_->setText(tr("Hide Chat"));
-        chatSplitter_->setSizes({3, 2});
-    } else {
-        callParticipantsLabel_->setVisible(false);
-        // Видео/демонстрация экрана не могут пережить звонок, которому
-        // принадлежат — сбрасываем оба здесь, чтобы каждое место
-        // вызова, связанное с выходом/переключением канала, получало
-        // это бесплатно, а не требовало отдельного вызова очистки.
-        setVideoEnabled(false);
-        setScreenShareEnabled(false);
-        for (QLabel* tile : std::as_const(remoteVideoTiles_)) {
-            delete tile;
-        }
-        remoteVideoTiles_.clear();
-        // Возврат к обычной, довызывной раскладке: чат получает всю
-        // область (videoStrip_ скрыт вызовами setVideoEnabled(false)/
-        // setScreenShareEnabled(false) выше, так что не занимает места
-        // независимо от соотношения, но 0/1 сохраняет состояние
-        // chatSplitter_ согласованным с тем, каким оно было до первого
-        // звонка).
-        chatPanelCollapsed_ = false;
-        chatSplitter_->setSizes({0, 1});
-    }
-}
-
-void ChatView::onToggleChatVisibilityClicked() {
-    chatPanelCollapsed_ = !chatPanelCollapsed_;
-    toggleChatVisibilityButton_->setText(chatPanelCollapsed_ ? tr("Show Chat") : tr("Hide Chat"));
-    chatSplitter_->setSizes(chatPanelCollapsed_ ? QList<int>{1, 0} : QList<int>{3, 2});
-}
-
-void ChatView::setCallParticipants(const QStringList& participants) {
-    if (participants.isEmpty()) {
-        callParticipantsLabel_->setVisible(false);
-        return;
-    }
-    callParticipantsLabel_->setText(tr("In call: %1").arg(participants.join(QStringLiteral(", "))));
-    callParticipantsLabel_->setVisible(true);
-}
-
-void ChatView::setVideoEnabled(bool enabled) {
-    videoToggleButton_->setText(enabled ? tr("Disable Video") : tr("Enable Video"));
-    videoActive_ = enabled;
-    updateLocalVideoVisibility();
-}
-
-void ChatView::setScreenShareEnabled(bool enabled) {
-    screenShareToggleButton_->setText(enabled ? tr("Stop Sharing") : tr("Share Screen"));
-    screenShareActive_ = enabled;
-    updateLocalVideoVisibility();
-}
-
-void ChatView::updateLocalVideoVisibility() {
-    // Камера и демонстрация экрана в CallManager взаимоисключающие, но
-    // MainWindow вызывает оба setVideoEnabled()/setScreenShareEnabled()
-    // после каждого переключения (какой бы из них ни стал true, другой
-    // становится false) — отслеживание обоих флагов здесь, а не
-    // доверие тому, какой сеттер вызывался последним, сохраняет
-    // корректность видимости локального превью независимо от порядка
-    // вызовов.
-    const bool anyActive = videoActive_ || screenShareActive_;
-    localVideoWidget_->setVisible(anyActive);
-    videoStrip_->setVisible(anyActive || !remoteVideoTiles_.isEmpty());
-}
-
-void ChatView::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame) {
-    QLabel* tile = remoteVideoTiles_.value(peerLogin, nullptr);
-    if (tile == nullptr) {
-        tile = new QLabel(videoStrip_);
-        tile->setObjectName(QStringLiteral("remoteVideoTile"));
-        // Минимальный, а не фиксированный размер — та же логика, что и
-        // у localVideoWidget_ выше (issue #153).
-        tile->setMinimumSize(kVideoTileSize, kVideoTileSize);
-        tile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        tile->setScaledContents(true);
-        videoStripLayout_->addWidget(tile);
-        remoteVideoTiles_.insert(peerLogin, tile);
-    }
-    tile->setPixmap(QPixmap::fromImage(frame));
-    videoStrip_->setVisible(true);
-}
-
-void ChatView::removeRemoteVideo(const QString& peerLogin) {
-    QLabel* tile = remoteVideoTiles_.take(peerLogin);
-    if (tile == nullptr) {
-        return;
-    }
-    delete tile;
-    if (remoteVideoTiles_.isEmpty() && !localVideoWidget_->isVisible()) {
-        videoStrip_->setVisible(false);
-    }
 }
 
 void ChatView::showTypingUser(const QString& login) {
@@ -548,6 +460,10 @@ void ChatView::clearLog() {
     // из другого канала), как только загрузятся сообщения нового
     // канала.
     cancelEditingMessage();
+    // Строки, на которые эти записи ссылались, только что удалены выше
+    // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
+    // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
+    pendingImagePreviewRows_.clear();
 }
 
 }  // namespace devicehub

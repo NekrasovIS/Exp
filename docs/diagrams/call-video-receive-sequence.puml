@@ -7,36 +7,45 @@ participant CallManager
 participant "RemoteVideoSink\n(remote peer)" as Sink
 participant "WebRTC decode\nthread" as Decode
 participant MainWindow
-participant ChatView
+participant CallWindow
 
 Signaling -> Observer : OnTrack(transceiver)
 Observer -> CallManager : invokeMethod(Qt::QueuedConnection)\n-> handleRemoteTrack(peerLogin, transceiver)
 
 group handleRemoteTrack (GUI thread)
   CallManager -> CallManager : track = transceiver->receiver()->track()
-  alt track is video and no sink yet for this peer
-    CallManager -> Sink : new RemoteVideoSink(*this, peerLogin)
-    CallManager -> CallManager : entry.remoteVideoSink = sink
+  CallManager -> CallManager : isScreenShare = (track->id() == kScreenShareTrackId)\n(issue #185 — camera and screen share are two\nindependent tracks, told apart by id)
+  alt track is video and no sink yet for this (peer, kind)
+    CallManager -> Sink : new RemoteVideoSink(*this, peerLogin, isScreenShare)
+    CallManager -> CallManager : entry.remoteCameraVideoSink or\nremoteScreenShareVideoSink = sink
     CallManager -> "VideoTrackInterface" as Track : AddOrUpdateSink(sink.get(), VideoSinkWants())
-  else already has a sink, or not video
+  else already has a sink for that kind, or not video
     CallManager -> CallManager : return (no-op)
   end
 end
 
-loop while the peer is sending video
+loop while the peer is sending this track
   Decode -> Sink : OnFrame(webrtc::VideoFrame)
   Sink -> Sink : I420 -> QImage\n(libyuv::I420ToARGB)
-  Sink -> CallManager : invokeMethod(Qt::QueuedConnection)\n-> handleRemoteVideoFrame(peerLogin, image)
-  CallManager -> MainWindow : emit remoteVideoFrameReceived(peerLogin, image)
-  MainWindow -> ChatView : showRemoteVideoFrame(peerLogin, image)
-  ChatView -> ChatView : tile (QLabel) = remoteVideoTiles_[peerLogin]\n(created lazily on first frame)
-  ChatView -> ChatView : tile->setPixmap(QPixmap::fromImage(image))
+  Sink -> CallManager : invokeMethod(Qt::QueuedConnection)\n-> handleRemoteVideoFrame(peerLogin, image, isScreenShare)
+  CallManager -> MainWindow : emit remoteVideoFrameReceived(peerLogin, image, isScreenShare)
+  MainWindow -> CallWindow : showRemoteVideoFrame(peerLogin, image, isScreenShare)
+  CallWindow -> CallWindow : key = peerLogin + "#camera" or "#screen"\ntile (QLabel) = remoteVideoTiles_[key]\n(created lazily on first frame of that kind)
+  CallWindow -> CallWindow : tile->setPixmap(QPixmap::fromImage(image))
 end
 
+note over CallManager, CallWindow
+  If the peer sends both camera and screen share at once,
+  the two loops above run independently — each has its own
+  RemoteVideoSink and its own tile, from "alice#camera" and
+  "alice#screen" running side by side, not one clobbering
+  the other.
+end note
+
 ... peer leaves the call ...
-CallManager -> CallManager : closePeerConnection(peerLogin)\n(entry, and its RemoteVideoSink, destroyed)
-CallManager -> MainWindow : emit remoteVideoTrackRemoved(peerLogin)
-MainWindow -> ChatView : removeRemoteVideo(peerLogin)
-ChatView -> ChatView : delete tile, drop from remoteVideoTiles_
+CallManager -> CallManager : closePeerConnection(peerLogin)\n(entry, and both RemoteVideoSinks, destroyed)
+CallManager -> MainWindow : emit remoteVideoTrackRemoved(peerLogin, false)\nemit remoteVideoTrackRemoved(peerLogin, true)
+MainWindow -> CallWindow : removeRemoteVideo(peerLogin, false)\nremoveRemoteVideo(peerLogin, true)
+CallWindow -> CallWindow : delete whichever tile(s) exist,\ndrop from remoteVideoTiles_
 
 @enduml

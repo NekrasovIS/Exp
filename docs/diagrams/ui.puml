@@ -8,8 +8,10 @@ class MainWindow {
   -onToggleMicClicked()
   -onToggleCameraClicked()
   -onToggleScreenCaptureClicked()
-  -onRequestTokenClicked()
-  -onRegisterClicked()
+  -onRequestOtpCodeClicked(identifier: QString)
+  -onVerifyOtpCodeClicked(identifier: QString, code: QString)
+  -onPasswordSignInClicked(login: QString, password: QString)
+  -onRegisterClicked(login: QString, password: QString)
   -onSendChatMessageClicked()
   -refreshCommunities()
   -refreshChannelsForSelectedCommunity()
@@ -48,7 +50,6 @@ class CommunitiesPanel {
   +setCurrentUserLogin(login: QString)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
-  +refreshButton() : QPushButton*
   +friendsButton() : QPushButton*
   +connectDialog() : CommunityConnectDialog*
   -showAddDialog()
@@ -129,13 +130,15 @@ class ChannelsPanel {
   +setChannels(channels: QList<ChatItem>)
   +selectChannelId(id: int64)
   +setCurrentUserLogin(login: QString)
+  +recordChannelActivity(channelId: int64, messageId: int64, previewText: QString, activityAt: QDateTime)
+  +setOpenChannelId(channelId: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
-  +refreshButton() : QPushButton*
   +filterEdit() : QLineEdit*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   -applyFilter()
+  -rebuildList()
   .. signals ..
   +createRequested(name: QString, isEncrypted: bool)
   +renameRequested(id: int64, newName: QString)
@@ -151,7 +154,49 @@ note right of ChannelsPanel
   в строке, но channelSelected()/rename
   всегда используют настоящее имя, а не
   отображаемый текст с префиксом.
+
+  Visual pass (issue #182): заголовок
+  "CHANNELS" заглавными (тот же паттерн
+  QLabel[sectionTitle="true"], что и
+  MemberListPanel), каждый канал получает
+  префикс "#" в отображаемом тексте — тоже
+  только косметика, kNameRole/rename её
+  не видят.
+
+  rebuildList() сортирует по activity_
+  (последняя активность — выше) и
+  накладывает превью второй строкой +
+  жирный/акцентный шрифт для
+  непрочитанного. "Прочитано" — id
+  последнего сообщения канала на момент
+  setOpenChannelId(); recordChannelActivity()
+  для открытого канала прямо сейчас
+  всегда продвигает эту метку вместе с
+  activity_, а не только в момент
+  открытия — иначе сообщение, реально
+  увиденное, зажигало бы непрочитанное
+  задним числом после переключения на
+  другой канал.
 end note
+
+class MemberListPanel {
+  +setMembers(logins: QStringList)
+  +titleLabel() : QLabel*
+  +listWidget() : QListWidget*
+}
+note right of MemberListPanel
+  Новый элемент раскладки (issue #182), которого
+  раньше не было вовсе: список участников выбранного
+  сообщества справа от ChatView (240px, тот
+  же аватар-круг, что и у CommunitiesPanel).
+  Заполняется через тот же REST-вызов
+  ChatRestClient::listMembers(), что уже
+  использовался для заворачивания ключей
+  зашифрованных каналов (issue #138) — теперь
+  ещё и для этой панели, независимо от того,
+  идёт ли сейчас настройка шифрования.
+end note
+MemberListPanel ..> IconFactory : communityAvatarIcon() (первая\nбуква логина) >
 
 class ChatView {
   +showPlaceholder()
@@ -163,60 +208,182 @@ class ChatView {
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
   +appendSystemLine(text: QString)
   +clearLog()
-  +setCallState(inCall: bool, muted: bool)
-  +setCallParticipants(participants: QStringList)
-  +setVideoEnabled(enabled: bool)
-  +setScreenShareEnabled(enabled: bool)
-  +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
-  +removeRemoteVideo(peerLogin: QString)
+  +setCallState(inCall: bool)
   +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
   +attachButton() : QPushButton*
   +callToggleButton() : QPushButton*
-  +muteToggleButton() : QPushButton*
-  +videoToggleButton() : QPushButton*
-  +screenShareToggleButton() : QPushButton*
   +searchButton() : QPushButton*
-  +callParticipantsLabel() : QLabel*
-  +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
-  +toggleChatVisibilityButton() : QPushButton*
+  +memberListToggleButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
-  -updateLocalVideoVisibility()
-  -onToggleChatVisibilityClicked()
+  -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
+  -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
-  +muteToggleRequested()
-  +videoToggleRequested()
-  +screenShareToggleRequested()
   +openSearchRequested()
+  +memberListToggleRequested()
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
+  +previewAttachmentRequested(attachmentId: qint64)
 }
 note right of ChatView
-  Issue #153: videoStrip_ и новый chatPanel_
-  (история + строка ввода) сидят в QSplitter
-  (chatSplitter_) вместо фиксированного
-  QVBoxLayout — во время звонка область видео
-  получает большую часть места
-  (setCallState(true, ...)), сворачивается
-  обратно во весь чат через
-  toggleChatVisibilityButton_. Видео-плитки
-  переключены с фиксированного размера на
-  минимальный + Expanding QSizePolicy, чтобы
-  реально расти в дополнительное пространство.
+  Issue #185: mute/видео/демонстрация экрана/
+  видео-плитки/список участников вынесены в
+  отдельный класс CallWindow (см. ниже) — здесь
+  остаётся только callToggleButton_ (Call/Leave
+  call), обычный QVBoxLayout вместо QSplitter
+  issue #153 (видео больше не делит место с
+  чатом внутри ChatView).
+
+  Visual pass (issue #182): messageEdit_/
+  attachButton_/sendButton_ теперь дети общего
+  QWidget#chatComposer (скруглённая "таблетка",
+  без своего фона/рамки у детей — см.
+  Theme.cpp), а не три раздельных прямоугольных
+  элемента подряд. sendButton_/attachButton_
+  стали иконками (IconFactory::sendIcon()/
+  plusIcon()) без подписи — у sendButton_
+  поэтому больше нет setText("Update") на время
+  редактирования сообщения, вместо этого виден
+  editingIndicatorLabel_ ("Editing message").
+
+  memberListToggleButton_ (issue #184) — иконка
+  "участники" в правом углу шапки, тот же
+  IconFactory::membersIcon() приём, что и у
+  остальных плоских иконочных кнопок. ChatView не
+  владеет MemberListPanel (та живёт в MainWindow
+  рядом с ChatView, не внутри неё), поэтому кнопка
+  только сигнализирует клик через
+  memberListToggleRequested() — MainWindow сама
+  решает, показать панель или скрыть, переключая
+  memberListPanel_->setVisible() (наравне со
+  скрытием той же панели в режиме друзей, issue
+  #187 — оба места переключают один и тот же флаг
+  по независимым причинам).
+
+  Issue #188: appendMessage()/prependMessages()
+  вставляют разделитель даты
+  (buildDateSeparatorLabel()) перед любым
+  сообщением, чей день отличается от
+  предыдущего показанного (isDifferentCalendarDay()
+  в chat_message_grouping) — включая самое
+  первое сообщение канала. Для вложений-
+  изображений (isImageAttachment() у
+  ChatMessageRow) появление строки сразу
+  запрашивает фоновую загрузку превью
+  (previewAttachmentRequested()) через
+  pendingImagePreviewRows_ — QHash<qint64,
+  QPointer<ChatMessageRow>>, QPointer вместо
+  голого указателя, поскольку строка может
+  исчезнуть (переключение канала, удаление
+  сообщения) раньше, чем придёт ответ.
+end note
+
+class CallWindow {
+  +setMuted(muted: bool)
+  +setVideoEnabled(enabled: bool)
+  +setScreenShareEnabled(enabled: bool)
+  +setCallParticipants(participants: QStringList)
+  +showRemoteVideoFrame(peerLogin: QString, frame: QImage, isScreenShare: bool)
+  +removeRemoteVideo(peerLogin: QString, isScreenShare: bool)
+  +resetForNewCall()
+  +muteToggleButton() : QPushButton*
+  +videoToggleButton() : QPushButton*
+  +screenShareToggleButton() : QPushButton*
+  +leaveCallButton() : QPushButton*
+  +callParticipantsLabel() : QLabel*
+  +localVideoWidget() : QVideoWidget*
+  +localScreenShareVideoWidget() : QVideoWidget*
+  -updateVideoStripVisibility()
+  -nextRemoteTileCascadePosition() : QPoint
+  .. signals ..
+  +muteToggleRequested()
+  +videoToggleRequested()
+  +screenShareToggleRequested()
+  +leaveCallRequested()
+}
+CallWindow "1" *-- "0..*" DraggableVideoTile : owns, wraps each local/remote\nvideo widget (issue #185)
+note right of CallWindow
+  Issue #185: реальное отдельное top-level окно
+  (setWindowFlag(Qt::Window, true) поверх
+  QWidget с parent — MainWindow всё ещё владеет
+  временем жизни через дерево QObject), а не
+  область внутри ChatView. MainWindow
+  show()/hide() её вместе с фактическим входом/
+  выходом из звонка (см. leaveCallIfActive()).
+  leaveCallRequested() и ChatView::
+  callToggleRequested() (когда уже в звонке)
+  подключены к одному и тому же слоту
+  MainWindow::onCallToggleClicked() — оба
+  означают "выйти из звонка".
+
+  Камера и демонстрация экрана больше не
+  взаимоисключают друг друга (тот же issue #185,
+  на уровне CallManager — см. chat.puml):
+  отдельная плитка локального превью на каждую
+  (localVideoWidget()/localScreenShareVideoWidget()),
+  и remoteVideoTiles_ теперь ключуется по
+  "<login>#camera"/"<login>#screen", а не просто
+  по login — камера и демонстрация экрана одного
+  участника получают разные плитки.
+
+  videoStrip_ (issue #185, последняя часть) —
+  canvas-QWidget без layout'а, а не QHBoxLayout:
+  каждая плитка внутри — DraggableVideoTile (см.
+  ниже), сама решающая своё место и размер по
+  перетаскиванию мышью. nextRemoteTileCascadePosition()
+  даёт только стартовую позицию новой удалённой
+  плитке (по диагонали, с переносом каждые 8 штук),
+  а не финальную — пользователь может перетащить
+  куда угодно сразу после появления.
+end note
+
+class DraggableVideoTile {
+  +content() : QWidget*
+  +resizeGrip() : QWidget*
+  #resizeEvent(event: QResizeEvent*)
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
+  -handleMouseEvent(watched: QObject*, event: QEvent*) : bool
+}
+note right of DraggableVideoTile
+  Issue #185: универсальная обёртка вокруг любого
+  content (QVideoWidget для локальных превью,
+  QLabel для удалённых плиток, issue #91) — сама
+  не знает, что внутри. content() растягивается на
+  весь клиентский прямоугольник плитки; маленький
+  resizeGrip() в правом нижнем углу лежит поверх
+  ОТДЕЛЬНЫМ дочерним виджетом, а не рисуется через
+  paintEvent() поверх content() — content() обычно
+  композитится (особенно QVideoWidget) и перекрыл
+  бы обычную QPainter-отрисовку родителя.
+
+  Перетаскивание/resize реализованы через
+  installEventFilter() на content()/resizeGrip()
+  (тот же приём, что уже использует FooterBar для
+  кликабельного avatarLabel_), а не переопределением
+  mousePress/Move/ReleaseEvent() у самой плитки —
+  иначе события мыши получал бы только тот из двух
+  виджетов, что реально под курсором, и до плитки
+  они бы не доходили. Resize считает новый размер
+  от глобальной позиции курсора (устойчиво к
+  собственному изменению размера между кадрами
+  событий), move — от локальной (совпадает у
+  content() и у плитки, поскольку content() всегда
+  стоит в (0, 0) её координат).
 end note
 
 struct ChatMessage {
@@ -257,13 +424,18 @@ class LoginWindow {
   +verifyCodeRequested(identifier: QString, code: QString)
 }
 note bottom of LoginWindow
-  issue #156: показывается MainWindow при
-  запуске (нет персистентности токена между
+  issue #156: единственное видимое окно при
+  запуске, пока пользователь не авторизован
+  (нет персистентности токена между
   перезапусками — сигнал = "всегда показывать
-  при старте"), скрывается на первом
-  tokenVerified(true, ...). Пароль в
-  AccountMenu (правый верхний угол) продолжает
-  работать как раньше, тоже закрывает это окно.
+  при старте"); MainWindow скрыт, пока это окно
+  не скроется на первом tokenVerified(true, ...).
+  Закрытие без входа завершает приложение
+  (QDialog::rejected -> QCoreApplication::quit).
+  Второй шаг (passwordSignInButton()/
+  registerButton()) заменил собой AccountMenu,
+  который раньше жил в правом верхнем углу
+  MainWindow — теперь удалён целиком.
 end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
@@ -271,6 +443,7 @@ class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
   +messageId() : qint64
   +updateBody(newBody: QString)
+  +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
@@ -288,28 +461,30 @@ note right of ChatMessageRow
   Own messages: right-click the bubble for a
   context menu (Edit/Delete) instead of
   always-visible buttons (issue #150).
+
+  Issue #188: isImageAttachment()/isVideoAttachment()
+  — свободные функции в namespace devicehub (по
+  расширению файла), не методы класса — ChatView
+  тоже вызывает isImageAttachment() напрямую, чтобы
+  решить, запрашивать ли превью, без дублирования
+  этой проверки. Изображение — плейсхолдер "Loading
+  preview…" сразу, реальная картинка приходит позже
+  через setAttachmentPreview() от ChatView; видео —
+  статичный значок-заглушка с именем файла, без
+  автозагрузки (нет дешёвого способа получить
+  превью-кадр видео без полной загрузки/декодирования
+  файла).
 end note
 
 package "devicehub::chat_message_grouping" <<Rectangle>> {
   class ChatMessageGrouping << (N,orchid) namespace >> {
     +parseSentAt(raw: QString) : QDateTime
     +shouldGroupWithPrevious(previous: ChatMessage, current: ChatMessage) : bool
+    +isDifferentCalendarDay(previous: ChatMessage, current: ChatMessage) : bool
   }
 }
-ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious() >
+ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious()/\nisDifferentCalendarDay() >
 ChatMessageRow ..> ChatMessageGrouping : parseSentAt() (time label) >
-
-class AccountMenu {
-  +loginEdit() : QLineEdit*
-  +passwordEdit() : QLineEdit*
-  +requestTokenButton() : QPushButton*
-  +registerButton() : QPushButton*
-  +editProfileButton() : QPushButton*
-  +statusLabel() : QLabel*
-  +toggleButton() : QPushButton*
-  +setEditProfileEnabled(enabled: bool)
-  -togglePopup()
-}
 
 class ProfileDialog {
   +setProfile(profile: UserProfile)
@@ -367,11 +542,12 @@ class FooterBar {
 note right of FooterBar
   Clicking the avatar opens MainWindow's
   account settings menu (Edit Profile /
-  Sign Out) instead of it living only in
-  the top-right AccountMenu popup (issue #151).
+  Sign Out) — issue #151. This is the only
+  account-settings entry point left in the
+  app now that AccountMenu (former top-right
+  popup) has been removed entirely (issue #156).
 end note
 MainWindow ..> FooterBar : accountSettingsRequested() >
-MainWindow ..> AccountMenu : editProfileButton()/registerButton()\nrequestTokenButton() >
 
 enum ToastVariant {
   kSuccess
@@ -402,8 +578,10 @@ DesktopNotifier ..> NotificationPolicy : shouldNotify() >
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
-    +refreshIcon() : QIcon
     +communityAvatarIcon(label: QString) : QIcon
+    +sendIcon(fillColor: QColor) : QIcon
+    +settingsIcon(fillColor: QColor) : QIcon
+    +membersIcon(fillColor: QColor) : QIcon
   }
 }
 
@@ -433,9 +611,10 @@ MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- FriendsPanel : owns (replaces ChannelsPanel\nin Friends mode, issue #187)
 MainWindow *-- ChatView : owns (main content area)
+MainWindow *-- CallWindow : owns (separate top-level\nwindow, issue #185)
+MainWindow *-- MemberListPanel : owns (right of ChatView, issue #182)
 MainWindow *-- DirectMessageView : owns (replaces ChatView\nin Friends mode, issue #187)
-MainWindow *-- AccountMenu : owns (top-right)
-MainWindow *-- ProfileDialog : owns (opened from\nAccountMenu, issue #110)
+MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
 MainWindow *-- ModeratorsDialog : owns (opened from\nCommunitiesPanel, issue #114)
@@ -471,10 +650,9 @@ MainWindow ..> UserProfileClient : sendFriendRequest()/listFriends()\naccept|dec
 MainWindow ..> ChatRestClient : openDmThread()/listDmThreads()\nsendDirectMessage()/listDirectMessages()\n(issue #187, Фаза 3) >
 FriendsPanel ..> MainWindow : friendSelected()/addFriendRequested()\naccept|declineRequestRequested()\nremoveFriendRequested() >
 DirectMessageView ..> MainWindow : sendMessageRequested() >
-MainWindow ..> AccountMenu : setEditProfileEnabled() >
 MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
 MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
-AccountMenu ..> MainWindow : editProfileButton().clicked() >
+MainWindow ..> MemberListPanel : setMembers() (from\nChatRestClient::membersListed()) >
 ProfileDialog ..> MainWindow : saveRequested() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinByCodeRequested()\nregenerateInviteCodeRequested()/communitySelected() >
@@ -484,20 +662,27 @@ CommunityConnectDialog ..> CommunitiesPanel : joinRequested()/createRequested() 
 ModeratorsDialog ..> MainWindow : promoteRequested()/demoteRequested() >
 MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestClient signals) >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
-CommunitiesPanel ..> IconFactory : plusIcon()/refreshIcon()\ncommunityAvatarIcon() >
-ChannelsPanel ..> IconFactory : plusIcon()/refreshIcon() >
+CommunitiesPanel ..> IconFactory : plusIcon()/communityAvatarIcon() >
+ChannelsPanel ..> IconFactory : plusIcon() >
+FooterBar ..> IconFactory : settingsIcon() >
+ChatView ..> IconFactory : plusIcon()/sendIcon()/membersIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
-MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
-MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >
+MainWindow ..> CallWindow : setMuted()/setVideoEnabled()/setScreenShareEnabled()\nsetCallParticipants() (issue #185) >
+MainWindow ..> CallWindow : showRemoteVideoFrame()/removeRemoteVideo()\nresetForNewCall() >
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
+ChatView ..> MainWindow : previewAttachmentRequested() -> ChatRestClient::\ndownloadAttachment() (issue #188) >
+ChatRestClient ..> MainWindow : attachmentDownloaded() -> decode QImage\n-> ChatView::setAttachmentPreview() (issue #188) >
 ChatView ..> MainWindow : openSearchRequested() -> show()/raise()\nSearchDialog (issue #118) >
 MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
 ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
 SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::scrollToMessage() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
-ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested()/screenShareToggleRequested() >
+ChatView ..> MainWindow : callToggleRequested() >
+CallWindow ..> MainWindow : muteToggleRequested()/videoToggleRequested()\nscreenShareToggleRequested()/leaveCallRequested() (issue #185) >
+ChatView ..> MainWindow : memberListToggleRequested() (issue #184) >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
 ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested() >
@@ -515,7 +700,7 @@ note right of MainWindow
   low-level Qt Multimedia API напрямую.
 
   Панели (CommunitiesPanel/ChannelsPanel/
-  ChatView/AccountMenu/SettingsDialog/
+  ChatView/MemberListPanel/SettingsDialog/
   FooterBar) — чистое представление:
   строят свои контролы и шлют
   request-сигналы. MainWindow остаётся
@@ -540,51 +725,48 @@ note right of MainWindow
   вместо легко пропускаемой строки внизу
   окна.
 
-  Call/Mute-кнопки в ChatView (issue #46
-  Phase 4) — чистые UI-сигналы, как и
-  остальные панели: сами не знают про
-  CallManager, только шлют
-  callToggleRequested()/muteToggleRequested(),
-  MainWindow решает join/leave по
-  CallManager::inCall() и зовёт назад
-  setCallState(). Mute — реальный per-track
-  mute (webrtc::AudioTrackInterface::
-  set_enabled), не UI-заглушка.
-  openChannel()/closeChatView() сначала
-  выходят из активного звонка — он
-  привязан к подписанному каналу.
+  Call-кнопка в ChatView (issue #46 Phase 4)
+  — чистый UI-сигнал: сама не знает про
+  CallManager, только шлёт
+  callToggleRequested(), MainWindow решает
+  join/leave по CallManager::inCall() и
+  зовёт назад setCallState(). При входе в
+  звонок MainWindow также показывает
+  CallWindow (issue #185) — дальнейшее
+  управление звонком (mute/видео/демонстрация
+  экрана/выход) идёт уже через неё, не через
+  ChatView. openChannel()/closeChatView()
+  сначала выходят из активного звонка через
+  leaveCallIfActive() — он привязан к
+  подписанному каналу.
 
-  Video-кнопка и полоска видео в ChatView
-  (issue #91) — тот же UI-сигнал/callback
-  паттерн: videoToggleRequested() ->
-  MainWindow решает enable/disable по
-  CallManager::videoEnabled(), зовёт назад
-  setVideoEnabled(). Локальное превью —
-  третий подписчик на CameraDevice::
-  frameAvailable() (рядом с превью в
-  SettingsDialog и CallManager::onCameraFrame()
-  — сигнал рассчитан на несколько
-  подписчиков сразу). Тайлы участников —
-  по QLabel/QPixmap на пира, создаются
-  лениво в showRemoteVideoFrame(). Выход
-  из звонка (setCallState(false, ...))
-  сбрасывает всю полоску разом — видео не
+  Mute/Video/Screen Share-кнопки живут в
+  CallWindow, не в ChatView (issue #185) —
+  тот же UI-сигнал/callback паттерн, что и
+  раньше, просто на другом виджете:
+  muteToggleRequested()/videoToggleRequested()/
+  screenShareToggleRequested() ->
+  MainWindow решает по CallManager
+  (inCall()/videoEnabled()/screenShareEnabled())
+  и зовёт назад setMuted()/setVideoEnabled()/
+  setScreenShareEnabled(). Mute — реальный
+  per-track mute (webrtc::AudioTrackInterface::
+  set_enabled), не UI-заглушка. Камера и
+  демонстрация экрана больше не
+  взаимоисключают друг друга на уровне
+  CallManager (issue #185, см. chat.puml) —
+  у каждой свой независимый трек и своя
+  плитка локального превью в CallWindow.
+  Локальное превью камеры — подписчик на
+  CameraDevice::frameAvailable() (рядом с
+  превью в SettingsDialog — сигнал рассчитан
+  на несколько подписчиков сразу). Тайлы
+  участников — по DraggableVideoTile на пару
+  "пир + вид (камера/экран)", создаются лениво
+  в showRemoteVideoFrame(). Выход из звонка
+  (leaveCallIfActive() -> resetForNewCall())
+  сбрасывает все плитки разом — видео не
   переживает звонок, которому принадлежит.
-
-  Screen Share-кнопка (issue #112) — тот же
-  паттерн рядом: screenShareToggleRequested()
-  -> CallManager::enableScreenShare()/
-  disableScreenShare(), взаимоисключающие с
-  video-кнопкой на стороне CallManager.
-  Локальное превью и videoStrip_ теперь
-  видны, если активно ЛИБО видео, ЛИБО шаринг
-  (updateLocalVideoVisibility(), на двух
-  собственных bool-флагах videoActive_/
-  screenShareActive_ — а не на последнем
-  вызванном setVideoEnabled()/
-  setScreenShareEnabled(), чтобы порядок двух
-  вызовов после взаимоисключающего тоггла не
-  влиял на итоговую видимость).
 
   DesktopNotifier (issue #92) shows a native
   QSystemTrayIcon notification for
