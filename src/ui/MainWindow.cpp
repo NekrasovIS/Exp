@@ -233,8 +233,12 @@ MainWindow::MainWindow(QWidget* parent)
         // (автовход) и доводит метку статуса до "Verified".
     });
 
+    // ChatView сама уже подключает messageEdit()->returnPressed() к
+    // sendButton()->click() у себя в конструкторе — повторное
+    // подключение здесь заставляло Enter вызывать click() дважды за
+    // одно нажатие (issue #211): первый клик отправлял набранный текст
+    // и очищал поле, второй — сразу вслед за ним отправлял уже пустое.
     connect(chatView_->sendButton(), &QPushButton::clicked, this, &MainWindow::onSendChatMessageClicked);
-    connect(chatView_->messageEdit(), &QLineEdit::returnPressed, chatView_->sendButton(), &QPushButton::click);
     connect(&chatClient_, &ChatClient::subscribed, this,
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
@@ -947,6 +951,9 @@ void MainWindow::onSendChatMessageClicked() {
         return;
     }
     const QString text = chatView_->messageEdit()->text();
+    if (text.isEmpty()) {
+        return;
+    }
     QString outgoing = text;
     if (currentChannelEncrypted_) {
         const auto it = channelKeys_.constFind(selectedChannelId_);
