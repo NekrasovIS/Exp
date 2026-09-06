@@ -78,13 +78,28 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   sanitizers:
-    # ASan+UBSan and ThreadSanitizer builds (issue #145). Advisory for
-    # now (continue-on-error), not a merge blocker — per issue #145, the
-    # sanitizer baseline needs to stabilize first; findings become their
-    # own tracked bugs rather than blocking whatever PR happens to
-    # surface them. Uses the runner's default GCC (sanitizers don't need
-    # LLVM-specific flags the way coverage/fuzzing do), so no extra
-    # compiler install step here.
+    # Сборки ASan+UBSan и ThreadSanitizer (issue #145). Пока
+    # рекомендательные (continue-on-error), не блокируют мерж — согласно
+    # issue #145, базовая линия санитайзеров должна сначала
+    # стабилизироваться; находки становятся отдельными отслеживаемыми
+    # багами, а не блокируют тот PR, который их случайно обнаружил.
+    # ASan+UBSan собираются GCC раннера по умолчанию — этой связке
+    # LLVM-специфичные флаги не нужны, в отличие от coverage/fuzzing.
+    #
+    # TSan, наоборот, собирается Clang (см. шаг "Install Clang" и
+    # -DCMAKE_CXX_COMPILER=clang++ ниже) — issue #170: под GCC-версией
+    # libtsan на этих раннерах TSan падает с
+    # "FATAL: ThreadSanitizer: unexpected memory mapping" ещё до начала
+    # любого реального теста (известная несовместимость более старой
+    # libtsan, поставляемой с GCC, с раскладкой адресного пространства
+    # современного ядра — не имеет отношения к коду самого проекта).
+    # Под Clang та же самая сборка (с тем же фиксом
+    # CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO чуть ниже, у себя в
+    # CMakeLists.txt) проходит чисто — подтверждено воспроизведением
+    # локально в Docker-контейнере на Ubuntu 24.04 под обоими
+    # компиляторами: GCC 13 стабильно ловит "unexpected memory mapping"
+    # на первом же тесте, реально поднимающем HTTP-клиент/сервер, Clang
+    # 18 — ни разу за 20 прогонов подряд.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -103,6 +118,12 @@ jobs:
 
       - name: Install autotools (needed by vcpkg's libsodium port, a user-service dependency)
         run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
+
+      # issue #170 — только для TSan-ветки матрицы, см. комментарий на
+      # уровне джобы выше о том, почему именно Clang.
+      - name: Install Clang (TSan only — issue #170)
+        if: matrix.sanitizer == 'tsan'
+        run: sudo apt-get install -y clang
 
       - name: Cache vcpkg binary cache
         uses: actions/cache@v4
@@ -125,7 +146,7 @@ jobs:
         if: matrix.sanitizer == 'tsan'
         run: >
           cmake -S services/${{ matrix.service }} -B services/${{ matrix.service }}/build-sanitizer
-          -DDEVICEHUB_ENABLE_TSAN=ON
+          -DCMAKE_CXX_COMPILER=clang++ -DDEVICEHUB_ENABLE_TSAN=ON
 
       - name: Build
         run: cmake --build services/${{ matrix.service }}/build-sanitizer --parallel
