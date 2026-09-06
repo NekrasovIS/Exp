@@ -317,7 +317,7 @@ jobs:
       matrix:
         include:
           - service: chat-service
-            targets: base64_fuzz json_guard_fuzz
+            targets: base64_fuzz json_guard_fuzz websocket_frame_fuzz
           - service: auth-service
             targets: token_verify_fuzz
 
