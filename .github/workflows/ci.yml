@@ -199,11 +199,25 @@ jobs:
 
       - name: Generate coverage report
         working-directory: services/${{ matrix.service }}/build-coverage
+        # Второй вызов llvm-cov report (-show-functions) — не для
+        # человека в логе, а источник per-функциональной детализации
+        # для дашборда (tools/ci-metrics/collect.py::
+        # parse_per_function_coverage()) — какая именно функция
+        # недопокрыта, а не только общий % по файлу/сервису.
+        # -show-functions требует явного списка файлов (в отличие от
+        # обычного report выше) — тот же список файлов, что уже
+        # implicitly покрыт -ignore-filename-regex у остальных вызовов.
+        # -Xdemangler=c++filt — иначе имена функций в логе (и в базе)
+        # были бы нечитаемым mangled-мусором вида "_ZN11chat_service...".
         run: |
           llvm-profdata merge -sparse *.profraw -o coverage.profdata
           llvm-cov report ./${{ matrix.test_binary }} \
             -instr-profile=coverage.profdata \
             -ignore-filename-regex='(/test/|/vcpkg_installed/)'
+          llvm-cov report ./${{ matrix.test_binary }} \
+            -instr-profile=coverage.profdata \
+            -show-functions -Xdemangler=c++filt \
+            $(find ../src -name '*.cpp' -o -name '*.h')
           llvm-cov show ./${{ matrix.test_binary }} \
             -instr-profile=coverage.profdata \
             -ignore-filename-regex='(/test/|/vcpkg_installed/)' \

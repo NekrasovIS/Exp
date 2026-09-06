@@ -46,6 +46,39 @@ CREATE TABLE IF NOT EXISTS ci_coverage (
     UNIQUE (run_id, service)
 );
 
+-- Построчная (per-file) детализация того же прогона llvm-cov report,
+-- что и агрегат ci_coverage выше, — одна запись на файл, участвовавший
+-- в конкретном coverage job'е конкретного сервиса. Позволяет находить
+-- наименее покрытые файлы, а не только итоговый % по сервису — см.
+-- doc-комментарий tools/ci-metrics/collect.py::parse_per_file_coverage().
+CREATE TABLE IF NOT EXISTS ci_coverage_files (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES ci_runs(run_id) ON DELETE CASCADE,
+    service TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    region_coverage_percent NUMERIC(5,2) NOT NULL,
+    function_coverage_percent NUMERIC(5,2) NOT NULL,
+    line_coverage_percent NUMERIC(5,2) NOT NULL,
+    UNIQUE (run_id, service, file_path)
+);
+
+-- Per-function детализация (llvm-cov report -show-functions) — какая
+-- именно функция и в каком файле недопокрыта, а не только "файл X
+-- покрыт на 60%". См. doc-комментарий
+-- tools/ci-metrics/collect.py::parse_per_function_coverage().
+CREATE TABLE IF NOT EXISTS ci_coverage_functions (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES ci_runs(run_id) ON DELETE CASCADE,
+    service TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    function_name TEXT NOT NULL,
+    region_coverage_percent NUMERIC(5,2) NOT NULL,
+    line_coverage_percent NUMERIC(5,2) NOT NULL,
+    UNIQUE (run_id, service, file_path, function_name)
+);
+
 CREATE INDEX IF NOT EXISTS ci_runs_created_at_idx ON ci_runs (created_at);
 CREATE INDEX IF NOT EXISTS ci_job_results_run_id_idx ON ci_job_results (run_id);
 CREATE INDEX IF NOT EXISTS ci_coverage_run_id_idx ON ci_coverage (run_id);
+CREATE INDEX IF NOT EXISTS ci_coverage_files_run_id_idx ON ci_coverage_files (run_id);
+CREATE INDEX IF NOT EXISTS ci_coverage_functions_run_id_idx ON ci_coverage_functions (run_id);

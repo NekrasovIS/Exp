@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Опрашивает GitHub Actions API за прогонами workflow CI и пишет
-per-job статус, число тестов и % покрытия кода в ci-metrics-postgres
-(issue #193) — источник данных для дашборда Grafana в этом каталоге.
+per-job статус, число тестов и % покрытия кода (итог по сервису, а
+также построчно по файлам и функциям — см. parse_per_file_coverage()/
+parse_per_function_coverage()) в ci-metrics-postgres (issue #193) —
+источник данных для дашборда Grafana в этом каталоге.
 
 Pull, а не push: раннеры GitHub Actions не имеют сетевого доступа к
 локальной машине разработчика, поэтому эта сторона (машина
@@ -37,6 +39,29 @@ TEST_SUMMARY_RE = re.compile(
 COVERAGE_TOTAL_RE = re.compile(
     r"TOTAL\s+\d+\s+\d+\s+(?P<region_pct>[\d.]+)%\s+"
     r"\d+\s+\d+\s+(?P<function_pct>[\d.]+)%\s+"
+    r"\d+\s+\d+\s+(?P<line_pct>[\d.]+)%"
+)
+# Та же таблица, что и COVERAGE_TOTAL_RE, но одна строка на файл вместо
+# итоговой строки TOTAL — из того же самого `llvm-cov report` без
+# -show-functions (ci.yml печатает оба сразу друг за другом в один и
+# тот же лог шага "Generate coverage report"). Применяется построчно
+# (re.match на каждой строке, не re.search по всему блобу) — иначе
+# `\s+` в паттерне мог бы случайно перепрыгнуть через границу строки.
+COVERAGE_PER_FILE_ROW_RE = re.compile(
+    r"^(?P<file>\S+)\s+\d+\s+\d+\s+(?P<region_pct>[\d.]+)%\s+"
+    r"\d+\s+\d+\s+(?P<function_pct>[\d.]+)%\s+"
+    r"\d+\s+\d+\s+(?P<line_pct>[\d.]+)%"
+)
+# `llvm-cov report -show-functions -Xdemangler=c++filt <files...>`
+# группирует вывод по файлам под заголовком `File '<path>':`, дальше —
+# одна строка на функцию с тем же набором колонок, что и выше, только
+# без колонки "Functions" (она здесь не нужна — строка уже про одну
+# функцию). Имя функции — нежадный `.+?`, потому что демангленная
+# сигнатура может содержать пробелы и запятые (например,
+# "operator<<(std::ostream&, Foo const&)").
+COVERAGE_FUNCTION_FILE_HEADER_RE = re.compile(r"^File '(?P<path>.+)':$")
+COVERAGE_PER_FUNCTION_ROW_RE = re.compile(
+    r"^(?P<name>.+?)\s+\d+\s+\d+\s+(?P<region_pct>[\d.]+)%\s+"
     r"\d+\s+\d+\s+(?P<line_pct>[\d.]+)%"
 )
 
@@ -97,6 +122,66 @@ def parse_coverage(log_text):
         "function": match.group("function_pct"),
         "line": match.group("line_pct"),
     }
+
+
+def shorten_path(path, service):
+    """Убирает раннер-специфичный абсолютный префикс пути
+    (/home/runner/work/Exp/Exp/services/<service>/...) до
+    репозиторий-относительного (services/<service>/...), чтобы путь в
+    таблице на дашборде можно было и прочитать, и найти в редакторе —
+    сырой путь llvm-cov бесполезен вне того раннера, где собран.
+    """
+    marker = f"services/{service}/"
+    index = path.find(marker)
+    if index == -1:
+        return path
+    return path[index:]
+
+
+def parse_per_file_coverage(log_text):
+    """Одна запись на файл — из обычного (без -show-functions) вывода
+    `llvm-cov report`, который печатается перед -show-functions'ным
+    вариантом в том же логе. См. doc-комментарий COVERAGE_PER_FILE_ROW_RE.
+    """
+    results = []
+    for line in log_text.splitlines():
+        match = COVERAGE_PER_FILE_ROW_RE.match(line.strip())
+        if match is None or match.group("file") in ("TOTAL", "Filename"):
+            continue
+        results.append({
+            "file": match.group("file"),
+            "region": match.group("region_pct"),
+            "function": match.group("function_pct"),
+            "line": match.group("line_pct"),
+        })
+    return results
+
+
+def parse_per_function_coverage(log_text):
+    """Одна запись на функцию — из вывода `llvm-cov report -show-functions`.
+    См. doc-комментарий COVERAGE_FUNCTION_FILE_HEADER_RE/
+    COVERAGE_PER_FUNCTION_ROW_RE о формате.
+    """
+    results = []
+    current_file = None
+    for line in log_text.splitlines():
+        stripped = line.strip()
+        header_match = COVERAGE_FUNCTION_FILE_HEADER_RE.match(stripped)
+        if header_match is not None:
+            current_file = header_match.group("path")
+            continue
+        if current_file is None:
+            continue
+        match = COVERAGE_PER_FUNCTION_ROW_RE.match(stripped)
+        if match is None or match.group("name") in ("TOTAL", "Name"):
+            continue
+        results.append({
+            "file": current_file,
+            "name": match.group("name"),
+            "region": match.group("region_pct"),
+            "line": match.group("line_pct"),
+        })
+    return results
 
 
 def sql_str(value):
@@ -200,6 +285,24 @@ def collect(repo, workflow, limit):
                         "function_coverage_percent, line_coverage_percent) VALUES ("
                         f"{run_id}, {sql_str(service)}, {coverage['region']}, {coverage['function']}, "
                         f"{coverage['line']}) ON CONFLICT (run_id, service) DO NOTHING;"
+                    )
+
+                for file_row in parse_per_file_coverage(log_text):
+                    statements.append(
+                        "INSERT INTO ci_coverage_files (run_id, service, file_path, "
+                        "region_coverage_percent, function_coverage_percent, line_coverage_percent) VALUES ("
+                        f"{run_id}, {sql_str(service)}, {sql_str(shorten_path(file_row['file'], service))}, "
+                        f"{file_row['region']}, {file_row['function']}, {file_row['line']}) "
+                        "ON CONFLICT (run_id, service, file_path) DO NOTHING;"
+                    )
+
+                for func_row in parse_per_function_coverage(log_text):
+                    statements.append(
+                        "INSERT INTO ci_coverage_functions (run_id, service, file_path, function_name, "
+                        "region_coverage_percent, line_coverage_percent) VALUES ("
+                        f"{run_id}, {sql_str(service)}, {sql_str(shorten_path(func_row['file'], service))}, "
+                        f"{sql_str(func_row['name'])}, {func_row['region']}, {func_row['line']}) "
+                        "ON CONFLICT (run_id, service, file_path, function_name) DO NOTHING;"
                     )
 
     apply_sql(statements)
