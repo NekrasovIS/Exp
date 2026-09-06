@@ -33,4 +33,13 @@ bool shouldGroupWithPrevious(const ChatMessage& previous, const ChatMessage& cur
     return qAbs(previousTime.secsTo(currentTime)) <= kGroupingWindowSeconds;
 }
 
+bool isDifferentCalendarDay(const ChatMessage& previous, const ChatMessage& current) {
+    const QDateTime previousTime = parseSentAt(previous.sentAt);
+    const QDateTime currentTime = parseSentAt(current.sentAt);
+    if (!previousTime.isValid() || !currentTime.isValid()) {
+        return true;
+    }
+    return previousTime.date() != currentTime.date();
+}
+
 }  // namespace devicehub::chat_message_grouping

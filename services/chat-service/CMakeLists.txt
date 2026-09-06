@@ -102,6 +102,12 @@ find_package(httplib CONFIG REQUIRED)
 find_package(ixwebsocket CONFIG REQUIRED)
 find_package(libpqxx CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+# Коды приглашений сообществ (issue #186) — RAND_bytes, не rand()/
+# std::mt19937: угадываемый код приглашения даёт доступ к чужому
+# сообществу в обход присоединения по явному списку, тот же класс
+# риска, что уже обосновывает RAND_bytes для OTP-кодов в auth-service
+# (см. OtpStore.cpp).
+find_package(OpenSSL REQUIRED)
 
 add_library(chat_service_core
     src/base64.h
@@ -114,6 +120,8 @@ add_library(chat_service_core
     src/ChatService.cpp
     src/AuthServiceClient.h
     src/AuthServiceClient.cpp
+    src/UserServiceClient.h
+    src/UserServiceClient.cpp
     src/HttpServer.h
     src/HttpServer.cpp
     src/WebSocketServer.h
@@ -125,6 +133,7 @@ target_link_libraries(chat_service_core PUBLIC
     ixwebsocket::ixwebsocket
     libpqxx::pqxx
     nlohmann_json::nlohmann_json
+    OpenSSL::Crypto
 )
 
 # vcpkg's ixwebsocket defaults to an mbedTLS backend on Windows (its own
@@ -150,6 +159,7 @@ add_executable(chat_service_tests
     test/WebSocketServerTest.cpp
     test/HttpServerTest.cpp
     test/AuthServiceClientTest.cpp
+    test/UserServiceClientTest.cpp
 )
 target_link_libraries(chat_service_tests PRIVATE
     chat_service_core
