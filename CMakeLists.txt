@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 
-# Dependencies (Qt6, GoogleTest) come from the vendored vcpkg submodule via
-# its manifest (vcpkg.json), not a system package manager — see CLAUDE.md.
-# Must be set before project().
+# Зависимости (Qt6, GoogleTest) приходят из вендоренного submodule'а
+# vcpkg через его манифест (vcpkg.json), а не через системный
+# пакетный менеджер — см. CLAUDE.md. Должно быть установлено до
+# project().
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
         CACHE STRING "Vcpkg toolchain file")
@@ -20,7 +21,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# Maximum warnings + pedantic mode for the whole project, not per-target.
+# Максимальный набор предупреждений + pedantic-режим на весь проект, а
+# не точечно на отдельные цели.
 if(MSVC)
     add_compile_options(/W4 /permissive-)
 else()
@@ -151,18 +153,20 @@ if(WIN32)
     target_link_libraries(devicehub_core PUBLIC d3d11 windowsapp)
 endif()
 
-# WebRTC's own build disables RTTI, so classes it exports (e.g.
-# AdaptedVideoTrackSource, used by CallVideoTrackSource, issue #72) have a
-# vtable but no typeinfo in libwebrtc.a. Any RTTI-enabled code that defines
-# a derived class's out-of-line virtuals — or instantiates
-# webrtc::RefCountedObject<T> for one via make_ref_counted<T>() — needs to
-# emit typeinfo referencing the base's, which doesn't exist, so the linker
-# fails. Scoped to just the files that define such classes (rather than
-# project-wide, as before): Qt itself is built with RTTI on, and disabling
-# it project-wide made every Qt-facing translation unit (MainWindow.cpp
-# included) disagree with Qt about RTTI, which crashes as soon as a
-# polymorphic exception/type crosses that boundary — MSVC's "Access
-# violation - no RTTI data!" (issue #104).
+# Собственная сборка WebRTC отключает RTTI, поэтому у классов, которые
+# она экспортирует (например, AdaptedVideoTrackSource, используемый
+# CallVideoTrackSource, issue #72), есть vtable, но нет typeinfo в
+# libwebrtc.a. Любой код со включённым RTTI, который определяет
+# внестрочные виртуальные функции производного класса — либо
+# инстанцирует под него webrtc::RefCountedObject<T> через
+# make_ref_counted<T>() — должен сгенерировать typeinfo, ссылающийся на
+# typeinfo базового класса, которого не существует, поэтому линковка
+# падает. Ограничено только файлами, определяющими такие классы (а не
+# всем проектом, как было раньше): сам Qt собран с включённым RTTI, и
+# отключение его на весь проект заставляло каждую единицу трансляции,
+# работающую с Qt (включая MainWindow.cpp), расходиться с Qt в вопросе
+# RTTI, что падало, как только полиморфное исключение/тип пересекал эту
+# границу — "Access violation - no RTTI data!" у MSVC (issue #104).
 set(devicehub_webrtc_derived_sources
     src/devices/CallAudioDeviceModule.cpp
     src/devices/CallVideoTrackSource.cpp
@@ -178,13 +182,13 @@ add_executable(DeviceHub MACOSX_BUNDLE
 )
 target_link_libraries(DeviceHub PRIVATE devicehub_core)
 
-# vcpkg's Qt6 is built statically, so plugins aren't picked up at
-# runtime unless explicitly linked in — the platform (cocoa) and
-# multimedia backend plugins ride along automatically as part of the
-# Widgets/Multimedia components, but the "permissions" category doesn't.
-# Without this, QCamera::start()/QMicrophonePermission silently report
-# "not granted" without ever asking macOS, because Qt can't even find a
-# permission plugin to check with.
+# Qt6 из vcpkg собран статически, поэтому плагины не подхватываются в
+# рантайме без явной линковки — платформенный (cocoa) и мультимедийный
+# backend-плагины подключаются автоматически как часть компонентов
+# Widgets/Multimedia, а вот категория "permissions" — нет. Без этого
+# QCamera::start()/QMicrophonePermission молча отвечают "not granted",
+# ни разу не спросив macOS, потому что Qt даже не может найти плагин
+# разрешений, чтобы у него спросить.
 if(APPLE)
     qt_import_plugins(DeviceHub
         INCLUDE
@@ -192,16 +196,16 @@ if(APPLE)
             Qt6::QDarwinMicrophonePermissionPlugin
     )
 
-    # macOS ties Camera/Microphone permission grants to the app's code
-    # signature. The default ad-hoc signature ("-") is derived from the
-    # binary's own content and changes on every rebuild, silently
-    # invalidating permissions granted to the previous build. Signing
-    # with a stable local identity instead (see README for how to
-    # create one in Keychain Access) keeps the signature — and granted
-    # permissions — the same across rebuilds. Left as "-" by default so
-    # this doesn't require every machine to have that identity set up;
-    # set once per machine with
-    # -DDEVICEHUB_CODESIGN_IDENTITY="<identity name>".
+    # macOS привязывает выдачу разрешений на камеру/микрофон к подписи
+    # кода приложения. Подпись ad-hoc по умолчанию ("-") выводится из
+    # содержимого самого бинарника и меняется при каждой пересборке,
+    # незаметно инвалидируя разрешения, выданные предыдущей сборке.
+    # Подпись стабильной локальной идентичностью вместо этого (см.
+    # README о том, как создать её в Keychain Access) сохраняет подпись —
+    # и выданные разрешения — одинаковыми между пересборками. По
+    # умолчанию оставлено "-", чтобы это не требовало от каждой машины
+    # иметь такую идентичность настроенной; задаётся один раз на машину
+    # через -DDEVICEHUB_CODESIGN_IDENTITY="<имя идентичности>".
     set(DEVICEHUB_CODESIGN_IDENTITY "-" CACHE STRING
         "Code signing identity for DeviceHub.app. \"-\" (default) is ad-hoc.")
     add_custom_command(TARGET DeviceHub POST_BUILD
@@ -212,18 +216,19 @@ if(APPLE)
     )
 endif()
 
-# vcpkg's Qt6 on Windows is a dynamic (DLL) build, unlike the static
-# macOS build the comment above describes — its plugins are never found
-# at runtime unless copied next to the executable. Without this,
-# DeviceHub.exe doesn't even start (no "windows" platform plugin) and
-# camera capture silently produces no frames instead of erroring (no
-# "multimedia" backend plugin). Screen capture itself no longer goes
-# through this plugin at all — issue #154 turned out to be a missing
-# QScreenCapture backend in this Qt build, not just missing plugins, so
-# it was replaced with a direct Windows.Graphics.Capture implementation
-# (see ScreenCaptureDevice's doc comment).
-# See cmake/DeployQtPluginsWindows.cmake for why this is a hand-rolled
-# copy rather than windeployqt (not a project dependency here).
+# Qt6 из vcpkg на Windows собран динамически (DLL), в отличие от
+# статической сборки для macOS, описанной в комментарии выше — его
+# плагины никогда не находятся в рантайме, если их не скопировать рядом
+# с исполняемым файлом. Без этого DeviceHub.exe даже не запускается (нет
+# платформенного плагина "windows"), а захват камеры молча не даёт
+# кадров вместо ошибки (нет мультимедийного backend-плагина). Сам захват
+# экрана больше вообще не идёт через этот плагин — issue #154 оказался
+# отсутствующим backend'ом QScreenCapture в этой сборке Qt, а не только
+# недостающими плагинами, поэтому его заменили на прямую реализацию
+# через Windows.Graphics.Capture (см. doc-комментарий
+# ScreenCaptureDevice). См. cmake/DeployQtPluginsWindows.cmake — почему
+# это самодельное копирование, а не windeployqt (не входит в зависимости
+# проекта здесь).
 if(WIN32)
     add_custom_command(TARGET DeviceHub POST_BUILD
         COMMAND ${CMAKE_COMMAND}

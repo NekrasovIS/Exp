@@ -1,27 +1,30 @@
 cmake_minimum_required(VERSION 3.21)
 
-# Independently buildable microservice — its own vcpkg.json (this
-# directory), sharing the vcpkg tool/cache vendored at the repo root.
+# Независимо собираемый микросервис — свой vcpkg.json (в этом
+# каталоге), использует общий инструмент/кэш vcpkg, вендоренный в корне
+# репозитория.
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../vcpkg/scripts/buildsystems/vcpkg.cmake"
         CACHE STRING "Vcpkg toolchain file")
 endif()
 
-# libpqxx's zview type publicly derives from std::string_view; MSVC's
-# dllexport propagates to inherited base-class members even when
-# they're plain STL inline functions, so building against the default
-# dynamic (DLL) triplet on Windows makes basic_string_view::size()/
-# data() get exported from pqxx.dll *and* locally instantiated by any
-# translation unit that includes the pqxx headers — a link-time
-# "already defined" for both. This class of MSVC DLL-boundary issue
-# doesn't exist on the dynamic triplets vcpkg picks for macOS/Linux, so
-# it's scoped to Windows only rather than switching linkage everywhere.
+# Тип zview у libpqxx публично наследуется от std::string_view; у MSVC
+# dllexport распространяется на унаследованные члены базового класса
+# даже когда это обычные inline-функции STL, поэтому сборка против
+# стандартного динамического (DLL) триплета на Windows заставляет
+# basic_string_view::size()/data() одновременно экспортироваться из
+# pqxx.dll *и* локально инстанцироваться в любой единице трансляции,
+# подключающей заголовки pqxx — "already defined" на этапе линковки для
+# обоих. Этот класс проблем с границей DLL у MSVC не существует на
+# динамических триплетах, которые vcpkg выбирает для macOS/Linux,
+# поэтому ограничиваем только Windows, а не меняем линковку везде.
 if(WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
     set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "Vcpkg triplet")
-    # x64-windows-static's packages are built against the static CRT
-    # (/MT, /MTd) — CMake defaults to the dynamic CRT (/MD, /MDd)
-    # otherwise, which links fine but then every object file disagrees
-    # with every vcpkg .lib on which CRT it wants (LNK2038).
+    # Пакеты x64-windows-static собраны против статического CRT
+    # (/MT, /MTd) — иначе CMake по умолчанию берёт динамический CRT
+    # (/MD, /MDd), который линкуется без ошибок, но затем каждый
+    # объектный файл расходится с каждой vcpkg .lib в том, какой CRT ему
+    # нужен (LNK2038).
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library")
 endif()
 
@@ -34,7 +37,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# Maximum warnings + pedantic mode — same project-wide rule as DeviceHub.
+# Максимальный набор предупреждений + pedantic-режим — то же правило,
+# что и во всём проекте (DeviceHub).
 if(MSVC)
     add_compile_options(/W4 /permissive-)
 else()
@@ -56,13 +60,14 @@ else()
     )
 endif()
 
-# Sanitizer builds (issue #145) — off by default, GCC/Clang only (MSVC
-# doesn't support -fsanitize=thread or a comparably complete UBSan).
-# ASan+UBSan are combinable in one binary; TSan needs its own build (its
-# shadow memory layout conflicts with ASan's), hence two separate options
-# rather than one. -fno-sanitize-recover=all makes a UBSan finding abort
-# the test process instead of just printing a diagnostic and continuing,
-# so a UB hit actually fails the CI job like any other test failure.
+# Сборки с санитайзерами (issue #145) — выключены по умолчанию, только
+# GCC/Clang (MSVC не поддерживает -fsanitize=thread и сравнимый по
+# полноте UBSan). ASan+UBSan совместимы в одном бинарнике; TSan нужна
+# отдельная сборка (её раскладка теневой памяти конфликтует с ASan),
+# отсюда два отдельных опциона, а не один. -fno-sanitize-recover=all
+# заставляет находку UBSan прерывать процесс теста вместо того, чтобы
+# просто напечатать диагностику и продолжить — так находка UB реально
+# роняет job CI, как и любой другой провал теста.
 option(DEVICEHUB_ENABLE_ASAN_UBSAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
 option(DEVICEHUB_ENABLE_TSAN "Build with ThreadSanitizer (GCC/Clang only; incompatible with DEVICEHUB_ENABLE_ASAN_UBSAN)" OFF)
 if(DEVICEHUB_ENABLE_ASAN_UBSAN AND DEVICEHUB_ENABLE_TSAN)
@@ -80,15 +85,41 @@ endif()
 if(DEVICEHUB_ENABLE_TSAN)
     add_compile_options(-fsanitize=thread)
     add_link_options(-fsanitize=thread)
+    # issue #170 — vcpkg-порт cpp-httplib по умолчанию включает
+    # CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO (см. её
+    # INTERFACE_COMPILE_DEFINITIONS в сгенерированном httplibTargets.cmake),
+    # которая на Linux/glibc заворачивает каждый запрос httplib::Client
+    # через внутренний пул потоков асинхронного резолвера getaddrinfo_a().
+    # Этот поток создаёт сам glibc, в обход обёртки pthread_create(),
+    # которую инструментирует TSan для настройки теневой памяти на поток —
+    # первый же malloc() в этом потоке (внутри собственных внутренностей
+    # getaddrinfo у glibc) падает в аллокаторе TSan, поскольку TSan никогда
+    # не видел создание этого потока. Именно поэтому под TSan падал любой
+    # тест, делающий хотя бы один исходящий HTTP-запрос (HttpServerTest/
+    # WebSocketServerTest/AuthServiceClientTest здесь — WebSocketServerTest
+    # ловит это транзитивно через вызовы AuthServiceClient к
+    # /auth/verify auth-service), тогда как тесты чистой логики без
+    # сетевого I/O (JsonGuardTest и т.п.) всегда проходили нормально —
+    # подтверждено локальным воспроизведением под
+    # `clang++ -fsanitize=thread` на Linux с идентичным падением внутри
+    # handle_requests()/generate_addrinfo() из glibc, которое исчезает,
+    # как только эта макро отменена для TSan-сборки. Отмена макро здесь
+    # откатывает на обычный синхронный вызов getaddrinfo() на том же
+    # потоке-вызывающем — без дополнительного потока, без несовместимости
+    # и без изменения поведения для сервиса, который всегда обращается
+    # только к 127.0.0.1 (реальные таймауты резолвинга имени никогда и не
+    # были нужны).
+    add_compile_options(-UCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO)
 endif()
 
-# Source-based code coverage (issue #146) — off by default, Clang-only
-# (LLVM's -fprofile-instr-generate/-fcoverage-mapping; GCC's --coverage
-# would need a different, gcov-based report pipeline). Applied project-
-# wide via add_compile_options()/add_link_options() before any target is
-# defined, so both chat_service_core and chat_service_tests are
-# instrumented consistently — coverage needs every object file that
-# participates in a test run built this way, not just the test binary.
+# Покрытие тестами на основе исходников (issue #146) — выключено по
+# умолчанию, только Clang (-fprofile-instr-generate/-fcoverage-mapping
+# из LLVM; --coverage у GCC потребовал бы другой, gcov-based конвейер
+# отчётов). Применяется на весь проект через
+# add_compile_options()/add_link_options() до определения любой цели,
+# поэтому и chat_service_core, и chat_service_tests инструментируются
+# согласованно — покрытию нужен каждый объектный файл, участвующий в
+# прогоне теста, собранный так, а не только сам тестовый бинарник.
 option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
 if(DEVICEHUB_ENABLE_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -136,12 +167,13 @@ target_link_libraries(chat_service_core PUBLIC
     OpenSSL::Crypto
 )
 
-# vcpkg's ixwebsocket defaults to an mbedTLS backend on Windows (its own
-# vcpkg.json maps the "ssl" feature to "mbedtls" for platform:windows —
-# macOS gets "sectransp" instead, which is why this never surfaced in
-# CI). mbedTLS's Windows entropy source calls BCryptGenRandom(), which
-# lives in bcrypt.dll — without linking against it, the final binary
-# fails with an unresolved external symbol.
+# vcpkg-порт ixwebsocket по умолчанию использует бэкенд mbedTLS на
+# Windows (его собственный vcpkg.json отображает фичу "ssl" на
+# "mbedtls" для platform:windows — macOS вместо этого получает
+# "sectransp", поэтому это никогда не всплывало в CI). Источник энтропии
+# mbedTLS на Windows вызывает BCryptGenRandom(), которая живёт в
+# bcrypt.dll — без линковки против неё финальный бинарник падает с
+# неразрешённым внешним символом.
 if(WIN32)
     target_link_libraries(chat_service_core PUBLIC bcrypt)
 endif()
@@ -167,12 +199,13 @@ target_link_libraries(chat_service_tests PRIVATE
     GTest::gtest_main
 )
 
-# Real coverage-guided fuzzing (issue #132/#133) — needs Clang's
-# libFuzzer; MSVC's cl.exe doesn't support -fsanitize=fuzzer (issue
-# #121's original blocker), so this is off by default and only usable
-# where Clang is the compiler (macOS CI, or clang-cl if installed
-# locally). Off by default so the ordinary build/test path (used
-# everywhere, including Windows dev machines) never needs Clang.
+# Настоящий coverage-guided fuzzing (issue #132/#133) — нужен libFuzzer
+# от Clang; cl.exe у MSVC не поддерживает -fsanitize=fuzzer (изначальный
+# блокер issue #121), поэтому выключено по умолчанию и годится только
+# там, где компилятор — Clang (macOS CI, либо clang-cl, если установлен
+# локально). Выключено по умолчанию, чтобы обычный путь сборки/тестов
+# (используемый везде, включая Windows-машины разработчиков) никогда не
+# требовал Clang.
 option(DEVICEHUB_ENABLE_FUZZING "Build libFuzzer targets (needs Clang)" OFF)
 if(DEVICEHUB_ENABLE_FUZZING)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

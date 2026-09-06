@@ -1,15 +1,16 @@
-# Copies the Qt plugin categories DeviceHub actually needs next to its
-# executable on Windows. vcpkg's Qt6 there is a dynamic (DLL) build, not
-# static — plugins live in a Qt6/plugins/ tree next to Qt6Core*.dll and
-# are never found at runtime unless copied alongside the exe. There's no
-# windeployqt.exe available (qttools isn't a project dependency), and no
-# qt.conf pointing back into the vcpkg tree, so this script does the
-# minimal equivalent by hand.
+# Копирует категории Qt-плагинов, реально нужные DeviceHub, рядом с его
+# исполняемым файлом на Windows. Qt6 из vcpkg там собран динамически
+# (DLL), не статически — плагины лежат в дереве Qt6/plugins/ рядом с
+# Qt6Core*.dll и никогда не находятся в рантайме, если их не скопировать
+# рядом с exe. windeployqt.exe недоступен (qttools не входит в
+# зависимости проекта), и qt.conf, указывающего обратно в дерево vcpkg,
+# тоже нет, поэтому этот скрипт вручную делает минимальный эквивалент.
 #
-# Invoked as: cmake -DQT6_CORE_DLL=<path> -DDEST_DIR=<path> -P this-file
-# QT6_CORE_DLL is Qt6::Core's own DLL ($<TARGET_FILE:Qt6::Core>) so the
-# plugin root is derived from it rather than a hardcoded vcpkg path —
-# stays correct for both Debug/Release configs and any vcpkg layout.
+# Вызывается как: cmake -DQT6_CORE_DLL=<путь> -DDEST_DIR=<путь> -P этот-файл
+# QT6_CORE_DLL — это сама DLL Qt6::Core ($<TARGET_FILE:Qt6::Core>), так
+# что корень плагинов выводится из неё, а не берётся из захардкоженного
+# пути vcpkg — остаётся верным и для Debug/Release, и для любой
+# раскладки vcpkg.
 
 if(NOT DEFINED QT6_CORE_DLL OR NOT DEFINED DEST_DIR)
     message(FATAL_ERROR "DeployQtPluginsWindows.cmake requires -DQT6_CORE_DLL=... -DDEST_DIR=...")
@@ -19,13 +20,14 @@ cmake_path(GET QT6_CORE_DLL PARENT_PATH _qt6_bin_dir)
 cmake_path(GET _qt6_bin_dir PARENT_PATH _qt6_prefix_dir)
 set(_qt6_plugins_dir "${_qt6_prefix_dir}/Qt6/plugins")
 
-# platforms: mandatory just to start (QGuiApplication can't init without
-# a platform plugin, DeviceHub fails at launch with none deployed).
-# multimedia: camera/screen-capture backend (ffmpeg/Windows Media
-# Foundation) — without it QCamera/QScreenCapture silently produce no
-# frames instead of erroring, which is what issue #154 turned out to be.
-# tls: needed for HTTPS/WSS connections to the backend services.
-# imageformats: decoding PNG/JPEG avatar and attachment images.
+# platforms: обязателен просто для старта (QGuiApplication не может
+# инициализироваться без платформенного плагина, DeviceHub падает при
+# запуске, если ни один не развёрнут).
+# multimedia: backend камеры/захвата экрана (ffmpeg/Windows Media
+# Foundation) — без него QCamera/QScreenCapture молча не дают кадров
+# вместо ошибки, чем в итоге и оказался issue #154.
+# tls: нужен для HTTPS/WSS-соединений с backend-сервисами.
+# imageformats: декодирование PNG/JPEG для аватаров и вложений.
 foreach(_category IN ITEMS platforms multimedia tls imageformats)
     set(_src "${_qt6_plugins_dir}/${_category}")
     if(EXISTS "${_src}")
