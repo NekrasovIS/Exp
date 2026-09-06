@@ -11,6 +11,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QSignalSpy>
 #include <QTabWidget>
 
 #include "devices/DeviceEnumerator.h"
@@ -185,6 +186,26 @@ TEST(MainWindowUiTest, ChatMessagingControlsExist) {
     // "таблетка" с иконочными кнопками), но подсказка остаётся текстовой
     // для доступности/тестируемости.
     EXPECT_EQ(sendChatMessageButton->toolTip(), QStringLiteral("Send"));
+}
+
+// issue #211 — MainWindow подключала messageEdit()->returnPressed() к
+// sendButton()->click() в дополнение к тому же подключению, которое
+// ChatView уже делает сама у себя в конструкторе; Qt не считает второе
+// одинаковое подключение дубликатом первого, поэтому Enter вызывал
+// click() дважды за одно нажатие — второй раз с уже очищенным полем,
+// отправляя пустое сообщение сразу вслед за настоящим.
+TEST(MainWindowUiTest, PressingEnterInChatMessageEditClicksSendButtonExactlyOnce) {
+    MainWindow window;
+
+    auto* chatMessageEdit = window.findChild<QLineEdit*>("chatMessageEdit");
+    auto* sendChatMessageButton = window.findChild<QPushButton*>("sendChatMessageButton");
+    ASSERT_NE(chatMessageEdit, nullptr);
+    ASSERT_NE(sendChatMessageButton, nullptr);
+
+    QSignalSpy clickedSpy(sendChatMessageButton, &QPushButton::clicked);
+    emit chatMessageEdit->returnPressed();
+
+    EXPECT_EQ(clickedSpy.count(), 1);
 }
 
 TEST(MainWindowUiTest, AttachFileButtonExists) {
