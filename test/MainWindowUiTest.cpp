@@ -53,29 +53,26 @@ TEST(MainWindowUiTest, DeviceSettingsAreSeparateTabsInDialog) {
     EXPECT_EQ(tabs->count(), 4);
 }
 
-TEST(MainWindowUiTest, SidebarFooterAndAccountMenuExist) {
+TEST(MainWindowUiTest, SidebarAndFooterExist) {
     const MainWindow window;
 
     auto* sidebar = window.findChild<QWidget*>("sidebar");
     auto* mainContentPlaceholder = window.findChild<QLabel*>("mainContentPlaceholder");
     auto* footerProfileLabel = window.findChild<QLabel*>("footerProfileLabel");
     auto* footerSettingsButton = window.findChild<QPushButton*>("footerSettingsButton");
-    auto* accountMenuButton = window.findChild<QPushButton*>("accountMenuButton");
 
     ASSERT_NE(sidebar, nullptr);
     ASSERT_NE(mainContentPlaceholder, nullptr);
     ASSERT_NE(footerProfileLabel, nullptr);
     ASSERT_NE(footerSettingsButton, nullptr);
-    ASSERT_NE(accountMenuButton, nullptr);
 
     EXPECT_EQ(footerProfileLabel->text(), QStringLiteral("Not signed in"));
 }
 
-TEST(MainWindowUiTest, AvatarClickShowsAccountMenuWithDisabledActionsWhenSignedOut) {
-    // Issue #151: account settings move to a menu anchored on the
-    // footer avatar rather than living only in the top-right
-    // AccountMenu popup. Edit Profile/Sign Out only make sense once
-    // signed in, so both start disabled here.
+TEST(MainWindowUiTest, AvatarClickShowsAccountSettingsMenuWithDisabledActionsWhenSignedOut) {
+    // Issue #151: клик по аватару в футере открывает меню Edit
+    // Profile/Sign Out. Оба пункта имеют смысл только после входа,
+    // поэтому оба стартуют отключёнными.
     const MainWindow window;
 
     auto* avatar = window.findChild<QLabel*>("footerAvatar");
@@ -120,32 +117,35 @@ TEST(MainWindowUiTest, ActionControlsExistWithExpectedInitialLabels) {
     auto* toggleMicButton = window.findChild<QPushButton*>("toggleMicButton");
     auto* toggleCameraButton = window.findChild<QPushButton*>("toggleCameraButton");
     auto* toggleScreenCaptureButton = window.findChild<QPushButton*>("toggleScreenCaptureButton");
-    auto* requestTokenButton = window.findChild<QPushButton*>("requestTokenButton");
 
     ASSERT_NE(playToneButton, nullptr);
     ASSERT_NE(toggleMicButton, nullptr);
     ASSERT_NE(toggleCameraButton, nullptr);
     ASSERT_NE(toggleScreenCaptureButton, nullptr);
-    ASSERT_NE(requestTokenButton, nullptr);
 
     EXPECT_EQ(playToneButton->text(), QStringLiteral("Play test tone"));
     EXPECT_EQ(toggleMicButton->text(), QStringLiteral("Start capture"));
     EXPECT_EQ(toggleCameraButton->text(), QStringLiteral("Start camera"));
     EXPECT_EQ(toggleScreenCaptureButton->text(), QStringLiteral("Start screen capture"));
-    EXPECT_EQ(requestTokenButton->text(), QStringLiteral("Get token & verify"));
 }
 
-TEST(MainWindowUiTest, AuthFieldsExistWithPasswordMasked) {
+TEST(MainWindowUiTest, LoginWindowPasswordFieldsExistWithPasswordMasked) {
+    // Issue #177: вход/регистрация по паролю теперь часть LoginWindow
+    // (шаг "Sign in with password instead"), а не отдельного всплывающего
+    // AccountMenu.
     const MainWindow window;
 
-    auto* loginEdit = window.findChild<QLineEdit*>("loginEdit");
-    auto* passwordEdit = window.findChild<QLineEdit*>("passwordEdit");
-    auto* registerButton = window.findChild<QPushButton*>("registerButton");
+    auto* loginEdit = window.findChild<QLineEdit*>("loginPasswordLoginEdit");
+    auto* passwordEdit = window.findChild<QLineEdit*>("loginPasswordEdit");
+    auto* signInButton = window.findChild<QPushButton*>("passwordSignInButton");
+    auto* registerButton = window.findChild<QPushButton*>("loginRegisterButton");
 
     ASSERT_NE(loginEdit, nullptr);
     ASSERT_NE(passwordEdit, nullptr);
+    ASSERT_NE(signInButton, nullptr);
     ASSERT_NE(registerButton, nullptr);
     EXPECT_EQ(passwordEdit->echoMode(), QLineEdit::Password);
+    EXPECT_EQ(signInButton->text(), QStringLiteral("Sign In"));
     EXPECT_EQ(registerButton->text(), QStringLiteral("Register"));
 }
 

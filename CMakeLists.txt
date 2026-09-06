@@ -94,8 +94,6 @@ add_library(devicehub_core
     src/ui/ChatMessageGrouping.cpp
     src/ui/ChatBubble.h
     src/ui/ChatBubble.cpp
-    src/ui/AccountMenu.h
-    src/ui/AccountMenu.cpp
     src/ui/SettingsDialog.h
     src/ui/SettingsDialog.cpp
     src/ui/ProfileDialog.h
@@ -258,7 +256,6 @@ add_executable(devicehub_tests
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp
     test/FooterBarTest.cpp
-    test/AccountMenuTest.cpp
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
     test/IdentityKeyStoreTest.cpp
