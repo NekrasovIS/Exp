@@ -15,65 +15,71 @@
 namespace chat_service {
 
 /**
- * @brief Real-time delivery of new messages over WebSocket, plus call
- *        signaling relay for group voice calls (issue #46).
+ * @brief Доставка новых сообщений в реальном времени по WebSocket, а
+ *        также ретрансляция сигналинга для групповых голосовых звонков
+ *        (issue #46).
  *
- * Protocol: the first message a client sends must be
- * `{"token": "...", "channel_id": N}` — verified against auth-service
- * (AuthServiceClient) before the connection is subscribed to that
- * channel. Every message after that is one of:
- *   - `{"body": "...", "attachment_id": N}` — chat message, optionally
- *     referencing a file already uploaded via HttpServer's
- *     POST /channels/{id}/attachments (issue #116) — attachment_id is
- *     optional; persisted via ChatService, then broadcast as JSON to
- *     every connection subscribed to the same channel (including the
- *     sender, so all clients render off the same real-time stream
- *     rather than optimistically local-echoing).
- *   - `{"call_join": true}` — join the voice call for the subscribed
- *     channel; replies with `{"call_roster": [...]}` (existing call
- *     participants, not persisted, ephemeral to this process) and
- *     broadcasts `{"call_peer_joined": "<login>"}` to them.
- *   - `{"call_leave": true}` — leave the call; broadcasts
- *     `{"call_peer_left": "<login>"}` to the remaining participants.
- *     Disconnecting (Close/Error) without an explicit leave has the
- *     same effect.
- *   - `{"call_signal": {"to": "<login>", "payload": {...}}}` — opaque
- *     signaling data (SDP offer/answer, ICE candidate) relayed
- *     verbatim to the named participant as
- *     `{"call_signal": {"from": "<login>", "payload": {...}}}` — this
- *     class never inspects `payload`. Replies `{"error": "peer not in
- *     call"}` to the sender if `to` isn't a current call participant.
- *   - `{"typing": true}` — issue #96: broadcasts
- *     `{"user_typing": "<login>"}` to every other subscriber of the
- *     same channel (never back to the sender). Ephemeral, like call
- *     presence — nothing persisted, no explicit "stopped typing"
- *     message; the client side times the indicator out on its own.
+ * Протокол: первое сообщение, которое отправляет клиент, должно быть
+ * `{"token": "...", "channel_id": N}` — проверяется через auth-service
+ * (AuthServiceClient), прежде чем соединение будет подписано на этот
+ * канал. Каждое следующее сообщение — одно из:
+ *   - `{"body": "...", "attachment_id": N}` — сообщение чата,
+ *     опционально ссылающееся на файл, уже загруженный через
+ *     POST /channels/{id}/attachments из HttpServer (issue #116) —
+ *     attachment_id опционален; сохраняется через ChatService, затем
+ *     рассылается как JSON каждому соединению, подписанному на тот же
+ *     канал (включая отправителя, чтобы все клиенты отрисовывали данные
+ *     из одного и того же потока реального времени, а не делали
+ *     оптимистичное локальное эхо).
+ *   - `{"call_join": true}` — присоединиться к голосовому звонку для
+ *     подписанного канала; отвечает `{"call_roster": [...]}`
+ *     (существующие участники звонка, не сохраняются, эфемерны в
+ *     пределах этого процесса) и рассылает им
+ *     `{"call_peer_joined": "<login>"}`.
+ *   - `{"call_leave": true}` — покинуть звонок; рассылает
+ *     `{"call_peer_left": "<login>"}` оставшимся участникам.
+ *     Отключение (Close/Error) без явного выхода даёт тот же эффект.
+ *   - `{"call_signal": {"to": "<login>", "payload": {...}}}` —
+ *     непрозрачные данные сигналинга (SDP offer/answer, ICE-кандидат),
+ *     ретранслируемые дословно указанному участнику как
+ *     `{"call_signal": {"from": "<login>", "payload": {...}}}` — этот
+ *     класс никогда не заглядывает внутрь `payload`. Отвечает
+ *     `{"error": "peer not in call"}` отправителю, если `to` не является
+ *     текущим участником звонка.
+ *   - `{"typing": true}` — issue #96: рассылает
+ *     `{"user_typing": "<login>"}` каждому другому подписчику того же
+ *     канала (никогда не отправителю обратно). Эфемерно, как и
+ *     присутствие в звонке — ничего не сохраняется, нет явного
+ *     сообщения "перестал печатать"; клиентская сторона сама сбрасывает
+ *     индикатор по таймауту.
  *   - `{"edit_message": {"id": N, "body": "..."}}` (issue #107) —
- *     broadcasts `{"message_edited": {"id", "body", "edited_at"}}` to
- *     every *chat* subscriber (including the editor). Only the
- *     message's own author may edit it, even after roles/moderation
- *     (issue #114) — see ChatRepository::editMessage()'s doc comment
- *     for why moderator power stops at deletion. Replies `{"error":
- *     ...}` to the sender (not broadcast) on 404/403.
- *   - `{"delete_message": {"id": N}}` — wider than edit_message's rule
- *     (issue #114): the message's own author, the channel/community
- *     owner, or a community moderator may all delete it. Broadcasts
- *     `{"message_deleted": {"id"}}` on success.
+ *     рассылает `{"message_edited": {"id", "body", "edited_at"}}`
+ *     каждому подписчику *чата* (включая редактора). Редактировать
+ *     сообщение может только его собственный автор, даже после введения
+ *     ролей/модерации (issue #114) — см. doc-комментарий
+ *     ChatRepository::editMessage() о том, почему полномочия модератора
+ *     не распространяются на редактирование, только на удаление.
+ *     Отвечает `{"error": ...}` отправителю (не рассылка) при 404/403.
+ *   - `{"delete_message": {"id": N}}` — правило шире, чем у edit_message
+ *     (issue #114): удалить сообщение может собственный автор сообщения,
+ *     владелец канала/сообщества либо модератор сообщества. При успехе
+ *     рассылает `{"message_deleted": {"id"}}`.
  *
 
- * REST (HttpServer) stays the source of truth for history/CRUD; this
- * class only pushes what's posted while a client is connected, and
- * only relays call signaling — it never decodes SDP/ICE content.
+ * REST (HttpServer) остаётся источником истины для истории/CRUD; этот
+ * класс только проталкивает то, что отправлено, пока клиент подключён,
+ * и только ретранслирует сигналинг звонков — он никогда не декодирует
+ * содержимое SDP/ICE.
  */
 class WebSocketServer {
 public:
     WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient, int port,
                      const std::string& host = "127.0.0.1");
 
-    /// Starts accepting connections; returns once listening (async from there).
+    /// Начинает принимать соединения; возвращает управление после начала прослушивания (дальше асинхронно).
     bool start();
 
-    /// Stops accepting connections and closes existing ones.
+    /// Прекращает принимать соединения и закрывает существующие.
     void stop();
 
 private:
@@ -94,18 +100,18 @@ private:
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleTyping(ix::WebSocket& webSocket, const Subscription& subscription);
     void removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket);
-    /// Sends @p json to every socket subscribed to @p channelId's chat,
-    /// except @p excludeSocket (nullptr — the default — excludes none,
-    /// which is what a normal chat message broadcast wants; typing
-    /// notifications pass the sender here so they don't see their own
-    /// "typing" echoed back).
+    /// Отправляет @p json каждому сокету, подписанному на чат @p channelId,
+    /// кроме @p excludeSocket (nullptr — значение по умолчанию — не
+    /// исключает никого, что и нужно обычной рассылке сообщения чата;
+    /// уведомления о наборе текста передают сюда отправителя, чтобы он
+    /// не видел эхо собственного "typing").
     void broadcastToChannel(std::int64_t channelId, const std::string& json, const ix::WebSocket* excludeSocket = nullptr);
-    /// Unlike broadcastToChannel (all channel *chat* subscribers), this
-    /// only reaches sockets actually in callParticipants_[channelId] —
-    /// someone subscribed to the channel's text chat but not in the
-    /// call shouldn't see call presence traffic. Never sends to @p
-    /// excludeSocket (typically the participant who just triggered the
-    /// notification).
+    /// В отличие от broadcastToChannel (все подписчики *чата* канала),
+    /// это достигает только сокетов, реально находящихся в
+    /// callParticipants_[channelId] — тот, кто подписан на текстовый чат
+    /// канала, но не в звонке, не должен видеть трафик присутствия в
+    /// звонке. Никогда не отправляет @p excludeSocket (как правило,
+    /// участнику, который только что вызвал уведомление).
     void broadcastToCallParticipants(std::int64_t channelId, const std::string& json,
                                       const ix::WebSocket* excludeSocket);
 
@@ -115,9 +121,9 @@ private:
 
     std::mutex subscriptionsMutex_;
     std::unordered_map<ix::WebSocket*, Subscription> subscriptions_;
-    // channelId -> login -> socket. Ephemeral call presence, separate
-    // from channel *chat* subscription above — a client can be
-    // subscribed to a channel's text chat without being in its call.
+    // channelId -> login -> socket. Эфемерное присутствие в звонке,
+    // отдельно от подписки на *чат* канала выше — клиент может быть
+    // подписан на текстовый чат канала, не будучи в его звонке.
     std::unordered_map<std::int64_t, std::unordered_map<std::string, ix::WebSocket*>> callParticipants_;
 };
 

@@ -11,14 +11,16 @@ class QIODevice;
 namespace devicehub {
 
 /**
- * @brief Captures audio from a microphone and reports its input level.
+ * @brief Захватывает аудио с микрофона и сообщает его уровень входного
+ *        сигнала.
  *
- * Wraps QAudioSource; reads raw PCM as it arrives and emits levelChanged()
- * with a normalized [0, 1] amplitude so the UI can drive a level meter,
- * plus pcmDataAvailable() with the raw buffer for consumers that need
- * actual samples (e.g. CallManager). One QAudioSource at a time — a
- * second start() (from either the settings mic test or a call) stops
- * whatever was capturing before it.
+ * Оборачивает QAudioSource; читает сырой PCM по мере поступления и
+ * испускает levelChanged() с нормализованной амплитудой [0, 1], чтобы UI
+ * мог управлять индикатором уровня, а также pcmDataAvailable() с сырым
+ * буфером для потребителей, которым нужны настоящие сэмплы (например,
+ * CallManager). Одновременно только один QAudioSource — второй вызов
+ * start() (будь то из mic-теста в настройках или из звонка) останавливает
+ * то, что захватывалось до него.
  */
 class AudioInputDevice : public QObject {
     Q_OBJECT
@@ -27,25 +29,28 @@ public:
     explicit AudioInputDevice(QObject* parent = nullptr);
     ~AudioInputDevice() override;
 
-    /// Starts capturing from @p device.
+    /// Начинает захват с @p device.
     void start(const QAudioDevice& device);
 
-    /// Stops capturing if in progress.
+    /// Останавливает захват, если он выполняется.
     void stop();
 
-    /// @return True while actively capturing.
+    /// @return True, пока идёт активный захват.
     [[nodiscard]] bool isCapturing() const;
 
 signals:
-    /// Emitted as new audio arrives, level normalized to [0, 1].
+    /// Испускается по мере поступления нового аудио, уровень
+    /// нормализован в [0, 1].
     void levelChanged(float level);
 
-    /// Emitted alongside levelChanged(), same raw buffer — for
-    /// consumers that need actual samples (e.g. CallManager forwarding
-    /// captured audio into a call), not just a level meter.
+    /// Испускается вместе с levelChanged(), тот же сырой буфер — для
+    /// потребителей, которым нужны настоящие сэмплы (например,
+    /// CallManager, пересылающий захваченное аудио в звонок), а не
+    /// просто индикатор уровня.
     void pcmDataAvailable(const QByteArray& data, const QAudioFormat& format);
 
-    /// Emitted when capture can't start (including permission denial).
+    /// Испускается, когда захват не может начаться (включая отказ в
+    /// разрешении).
     void errorOccurred(const QString& message);
 
 private slots:

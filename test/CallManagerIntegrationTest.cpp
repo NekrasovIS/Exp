@@ -25,19 +25,19 @@
 
 #include <cstdlib>
 
-// Requires the full live stack: auth-service, user-service, chat-service
-// (REST + WebSocket), and both Postgres instances (see docker-compose.yml),
-// plus real network access to gather ICE candidates. Skips itself rather
-// than failing when the stack isn't running — same convention as
+// Требует полного живого стека: auth-service, user-service, chat-service
+// (REST + WebSocket) и оба экземпляра Postgres (см. docker-compose.yml), а
+// также реальный доступ в сеть для сбора ICE-кандидатов. Пропускает себя
+// вместо падения, если стек не запущен — та же конвенция, что и в
 // ChatClientIntegrationTest.
 //
-// This exercises the real offer/answer/signaling round trip (SDP
-// generation, relay through live chat-service, parsing, auto-answer) via
-// CallManager::callError — it does NOT wait for full ICE/DTLS
-// connectivity, since that depends on STUN reachability and timing that
-// would make the test flaky in a sandboxed CI environment; the signaling
-// correctness it does verify is the part actually implemented in this
-// change.
+// Этот тест прогоняет реальный цикл обмена offer/answer/сигналинга
+// (генерацию SDP, ретрансляцию через живой chat-service, разбор,
+// авто-ответ) через CallManager::callError — он НЕ дожидается полной
+// связности ICE/DTLS, поскольку она зависит от доступности STUN и таймингов,
+// которые сделали бы тест нестабильным (flaky) в изолированном окружении
+// CI; проверяется корректность именно той части сигналинга, что реально
+// реализована в данном изменении.
 
 namespace devicehub {
 namespace {
@@ -151,11 +151,12 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         ASSERT_TRUE(subscribed);
     }
 
-    // Real enumerated devices, not a default-constructed QAudioDevice —
-    // CallManager::joinCall() treats a null device as "none selected"
-    // and skips it with a callError() rather than crashing, which would
-    // make this test pass for the wrong reason (never actually
-    // exercising the real device wiring this test is meant to cover).
+    // Реальные перечисленные устройства, а не QAudioDevice, созданный по
+    // умолчанию — CallManager::joinCall() трактует нулевое устройство как
+    // «ничего не выбрано» и пропускает его с callError() вместо падения, что
+    // заставило бы этот тест проходить по неверной причине (реально не
+    // проверяя ту работу с реальными устройствами, ради которой тест и
+    // задуман).
     DeviceEnumerator enumerator;
     const QList<QAudioDevice> outputs = enumerator.audioOutputs();
     const QList<QAudioDevice> inputs = enumerator.audioInputs();
@@ -192,8 +193,9 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
     callManagerA.joinCall(inputDevice, outputDevice);
 
     {
-        // A joined alone (empty roster) — nothing to negotiate yet, just
-        // give the join frame time to round-trip before B joins.
+        // A присоединился один (пустой список участников) — согласовывать
+        // пока нечего, просто даём кадру присоединения время дойти туда и
+        // обратно, прежде чем присоединится B.
         QEventLoop loop;
         QTimer::singleShot(500, &loop, &QEventLoop::quit);
         loop.exec();
@@ -202,8 +204,8 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
     callManagerB.joinCall(inputDevice, outputDevice);
 
     {
-        // Wait for the offer/answer/signaling exchange (relayed through
-        // live chat-service) to settle.
+        // Ждём, пока устаканится обмен offer/answer/сигналинга (ретранслируемый
+        // через живой chat-service).
         QEventLoop loop;
         QTimer::singleShot(4000, &loop, &QEventLoop::quit);
         loop.exec();
@@ -217,16 +219,16 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
     if (cameras.isEmpty()) {
         GTEST_LOG_(INFO) << "No camera available — skipping the video-renegotiation part of this test.";
     } else {
-        // Adding a video track to an already-negotiated connection
-        // (issue #72) triggers OnRenegotiationNeeded() -> negotiateLocal()
-        // -> a fresh offer/answer round trip through the same live
-        // chat-service relay — verifies that path works end to end, not
-        // just the initial join negotiation covered above.
+        // Добавление видеодорожки к уже согласованному соединению (issue #72)
+        // запускает OnRenegotiationNeeded() -> negotiateLocal() -> новый цикл
+        // offer/answer через тот же живой ретранслятор chat-service —
+        // проверяет, что этот путь работает целиком, от начала до конца, а не
+        // только начальное согласование при присоединении, покрытое выше.
         //
-        // issue #91: negotiation succeeding isn't proof B actually
-        // decodes A's video — PeerObserver::OnTrack() /
-        // RemoteVideoSink::OnFrame() need to be exercised for real, so
-        // this also waits for at least one decoded frame on B's side.
+        // issue #91: успешное согласование само по себе не доказывает, что B
+        // реально декодирует видео от A — нужно по-настоящему прогнать
+        // PeerObserver::OnTrack() / RemoteVideoSink::OnFrame(), поэтому здесь
+        // ещё и ждём как минимум один декодированный кадр на стороне B.
         QImage receivedFrame;
         QObject::connect(&callManagerB, &CallManager::remoteVideoFrameReceived,
                           [&](const QString& login, const QImage& frame) {

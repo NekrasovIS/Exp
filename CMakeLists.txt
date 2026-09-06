@@ -77,8 +77,14 @@ add_library(devicehub_core
     src/user/IdentityKeyStore.cpp
     src/ui/CommunitiesPanel.h
     src/ui/CommunitiesPanel.cpp
+    src/ui/CommunityConnectDialog.h
+    src/ui/CommunityConnectDialog.cpp
     src/ui/ChannelsPanel.h
     src/ui/ChannelsPanel.cpp
+    src/ui/FriendsPanel.h
+    src/ui/FriendsPanel.cpp
+    src/ui/DirectMessageView.h
+    src/ui/DirectMessageView.cpp
     src/ui/ChatView.h
     src/ui/ChatView.cpp
     src/ui/ChatMessageRow.h
@@ -97,6 +103,8 @@ add_library(devicehub_core
     src/ui/ModeratorsDialog.cpp
     src/ui/SearchDialog.h
     src/ui/SearchDialog.cpp
+    src/ui/LoginWindow.h
+    src/ui/LoginWindow.cpp
     src/ui/FooterBar.h
     src/ui/FooterBar.cpp
     src/ui/Theme.h
@@ -184,6 +192,26 @@ if(APPLE)
     )
 endif()
 
+# vcpkg's Qt6 on Windows is a dynamic (DLL) build, unlike the static
+# macOS build the comment above describes — its plugins are never found
+# at runtime unless copied next to the executable. Without this,
+# DeviceHub.exe doesn't even start (no "windows" platform plugin) and,
+# even patched around that, camera/screen capture silently produce no
+# frames instead of erroring (no "multimedia" backend plugin — this was
+# the real cause behind issue #154's "screen sharing doesn't work").
+# See cmake/DeployQtPluginsWindows.cmake for why this is a hand-rolled
+# copy rather than windeployqt (not a project dependency here).
+if(WIN32)
+    add_custom_command(TARGET DeviceHub POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+                -DQT6_CORE_DLL=$<TARGET_FILE:Qt6::Core>
+                -DDEST_DIR=$<TARGET_FILE_DIR:DeviceHub>
+                -P "${CMAKE_SOURCE_DIR}/cmake/DeployQtPluginsWindows.cmake"
+        COMMENT "Deploying Qt plugins next to DeviceHub.exe"
+        VERBATIM
+    )
+endif()
+
 set_target_properties(DeviceHub PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist.in"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.devicehub.app"
@@ -203,7 +231,10 @@ add_executable(devicehub_tests
     test/ToastBannerTest.cpp
     test/NotificationPolicyTest.cpp
     test/CommunitiesPanelTest.cpp
+    test/CommunityConnectDialogTest.cpp
     test/ChannelsPanelTest.cpp
+    test/FriendsPanelTest.cpp
+    test/DirectMessageViewTest.cpp
     test/ChatViewTest.cpp
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp
@@ -221,6 +252,7 @@ add_executable(devicehub_tests
     test/ChatViewTypingIndicatorTest.cpp
     test/ChatViewMessageHistoryTest.cpp
     test/SearchDialogTest.cpp
+    test/LoginWindowTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
     test/ChatRestClientTest.cpp

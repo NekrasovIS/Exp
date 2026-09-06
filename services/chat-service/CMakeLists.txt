@@ -56,10 +56,58 @@ else()
     )
 endif()
 
+# Sanitizer builds (issue #145) — off by default, GCC/Clang only (MSVC
+# doesn't support -fsanitize=thread or a comparably complete UBSan).
+# ASan+UBSan are combinable in one binary; TSan needs its own build (its
+# shadow memory layout conflicts with ASan's), hence two separate options
+# rather than one. -fno-sanitize-recover=all makes a UBSan finding abort
+# the test process instead of just printing a diagnostic and continuing,
+# so a UB hit actually fails the CI job like any other test failure.
+option(DEVICEHUB_ENABLE_ASAN_UBSAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
+option(DEVICEHUB_ENABLE_TSAN "Build with ThreadSanitizer (GCC/Clang only; incompatible with DEVICEHUB_ENABLE_ASAN_UBSAN)" OFF)
+if(DEVICEHUB_ENABLE_ASAN_UBSAN AND DEVICEHUB_ENABLE_TSAN)
+    message(FATAL_ERROR "DEVICEHUB_ENABLE_ASAN_UBSAN and DEVICEHUB_ENABLE_TSAN cannot be combined in one build")
+endif()
+if(DEVICEHUB_ENABLE_ASAN_UBSAN OR DEVICEHUB_ENABLE_TSAN)
+    if(MSVC)
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_ASAN_UBSAN/DEVICEHUB_ENABLE_TSAN require GCC or Clang, not MSVC")
+    endif()
+endif()
+if(DEVICEHUB_ENABLE_ASAN_UBSAN)
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+if(DEVICEHUB_ENABLE_TSAN)
+    add_compile_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread)
+endif()
+
+# Source-based code coverage (issue #146) — off by default, Clang-only
+# (LLVM's -fprofile-instr-generate/-fcoverage-mapping; GCC's --coverage
+# would need a different, gcov-based report pipeline). Applied project-
+# wide via add_compile_options()/add_link_options() before any target is
+# defined, so both chat_service_core and chat_service_tests are
+# instrumented consistently — coverage needs every object file that
+# participates in a test run built this way, not just the test binary.
+option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
+if(DEVICEHUB_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "DEVICEHUB_ENABLE_COVERAGE requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
+    endif()
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 find_package(httplib CONFIG REQUIRED)
 find_package(ixwebsocket CONFIG REQUIRED)
 find_package(libpqxx CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+# Коды приглашений сообществ (issue #186) — RAND_bytes, не rand()/
+# std::mt19937: угадываемый код приглашения даёт доступ к чужому
+# сообществу в обход присоединения по явному списку, тот же класс
+# риска, что уже обосновывает RAND_bytes для OTP-кодов в auth-service
+# (см. OtpStore.cpp).
+find_package(OpenSSL REQUIRED)
 
 add_library(chat_service_core
     src/base64.h
@@ -72,6 +120,8 @@ add_library(chat_service_core
     src/ChatService.cpp
     src/AuthServiceClient.h
     src/AuthServiceClient.cpp
+    src/UserServiceClient.h
+    src/UserServiceClient.cpp
     src/HttpServer.h
     src/HttpServer.cpp
     src/WebSocketServer.h
@@ -83,6 +133,7 @@ target_link_libraries(chat_service_core PUBLIC
     ixwebsocket::ixwebsocket
     libpqxx::pqxx
     nlohmann_json::nlohmann_json
+    OpenSSL::Crypto
 )
 
 # vcpkg's ixwebsocket defaults to an mbedTLS backend on Windows (its own
@@ -108,6 +159,7 @@ add_executable(chat_service_tests
     test/WebSocketServerTest.cpp
     test/HttpServerTest.cpp
     test/AuthServiceClientTest.cpp
+    test/UserServiceClientTest.cpp
 )
 target_link_libraries(chat_service_tests PRIVATE
     chat_service_core

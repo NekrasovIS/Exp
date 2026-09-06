@@ -16,7 +16,7 @@ TEST(JsonGuardTest, EmptyPayloadIsWithinLimit) {
 }
 
 TEST(JsonGuardTest, NestingExactlyAtLimitIsWithinLimit) {
-    // 32 levels of '[' — depth reaches exactly maxDepth, not beyond it.
+    // 32 уровня '[' — глубина достигает ровно maxDepth, не превышая его.
     const std::string payload(32, '[');
     EXPECT_FALSE(exceedsMaxNestingDepth(payload, 32));
 }
@@ -40,16 +40,17 @@ TEST(JsonGuardTest, MixedBracketAndBraceNestingExceedsLimit) {
 }
 
 TEST(JsonGuardTest, BracketsInsideStringLiteralsAreNotCounted) {
-    // A string value containing '[' characters shouldn't count toward
-    // nesting depth — only structural brackets/braces do.
+    // Строковое значение, содержащее символы '[', не должно учитываться
+    // в глубине вложенности — только структурные скобки/фигурные скобки.
     const std::string payload = R"({"body":"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[["})";
     EXPECT_FALSE(exceedsMaxNestingDepth(payload, 32));
 }
 
 TEST(JsonGuardTest, EscapedQuoteInsideStringDoesNotEndStringEarly) {
-    // If the escaped quote were mishandled, the string would appear to
-    // end early and the following '[' characters (still logically inside
-    // the string) would be miscounted as structural nesting.
+    // Если бы экранированная кавычка обрабатывалась неверно, строка
+    // выглядела бы завершившейся раньше времени, и следующие символы '['
+    // (всё ещё логически внутри строки) были бы ошибочно засчитаны как
+    // структурная вложенность.
     std::string payload = R"({"body":"a\")";
     for (int i = 0; i < 50; ++i) {
         payload += "[";

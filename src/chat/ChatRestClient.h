@@ -8,21 +8,26 @@
 
 namespace devicehub {
 
-/// A community or channel as returned by chat-service's REST API.
-/// isEncrypted is meaningless (always false) for a community — only
-/// channels can be encrypted (issue #138).
+/// Сообщество или канал, как их возвращает REST API chat-service.
+/// isEncrypted не имеет смысла (всегда false) для сообщества — только
+/// каналы могут быть зашифрованы (issue #138). inviteCode (issue #186)
+/// заполнен только для собственных сообществ (listCommunities(), см. её
+/// doc-комментарий) — сервер не отдаёт его в местах, где вызывающая
+/// сторона ещё не подтвердила членство, и никогда для каналов.
 struct ChatItem {
     qint64 id = 0;
     QString name;
     QString ownerLogin;
     bool isEncrypted = false;
+    QString inviteCode;
 };
 
-/// A chat message as returned by chat-service's REST history endpoint —
-/// same shape as ChatClient's live messageReceived() fields, plus the
-/// id needed to page further back in history (see listMessages()'s
-/// beforeId). @p attachmentId is -1 and @p attachmentFilename empty when
-/// the message has no attachment (issue #116).
+/// Сообщение чата, как его возвращает REST-эндпоинт истории
+/// chat-service — та же форма, что и поля messageReceived() у ChatClient
+/// в реальном времени, плюс id, нужный для постраничной прокрутки
+/// истории дальше назад (см. beforeId у listMessages()). @p attachmentId
+/// равен -1, а @p attachmentFilename пуст, когда у сообщения нет
+/// вложения (issue #116).
 struct ChatMessageInfo {
     qint64 id = 0;
     QString author;
@@ -32,14 +37,32 @@ struct ChatMessageInfo {
     QString attachmentFilename;
 };
 
+/// Диалог личных сообщений, как его возвращает REST API chat-service
+/// (issue #187, Фаза 2).
+struct DirectMessageThreadInfo {
+    qint64 id = 0;
+    QString otherLogin;
+    QString createdAt;
+};
+
+/// Сообщение в диалоге личных сообщений — без вложений/edited_at в
+/// этой фазе, в отличие от ChatMessageInfo (см. doc-комментарий
+/// direct_messages в init.sql на стороне chat-service).
+struct DirectMessageInfo {
+    qint64 id = 0;
+    QString author;
+    QString body;
+    QString sentAt;
+};
+
 /**
- * @brief REST client for chat-service's community/channel management:
- *        create/list communities, join, create/list channels.
+ * @brief REST-клиент для управления сообществами/каналами chat-service:
+ *        создание/список сообществ, вступление, создание/список каналов.
  *
- * Deliberately separate from ChatClient (WebSocket real-time messaging)
- * — CRUD/management and the live message stream are different
- * responsibilities. Async via signals, like AuthClient — never blocks
- * the GUI thread on a network round trip.
+ * Намеренно отделён от ChatClient (обмен сообщениями в реальном времени
+ * через WebSocket) — CRUD/управление и живой поток сообщений — разные
+ * зоны ответственности. Асинхронно через сигналы, как AuthClient —
+ * никогда не блокирует GUI-поток на сетевом round trip.
  */
 class ChatRestClient : public QObject {
     Q_OBJECT
@@ -48,67 +71,110 @@ public:
     explicit ChatRestClient(QUrl baseUrl, QObject* parent = nullptr);
 
     void createCommunity(const QString& token, const QString& name);
+    /// Issue #186: только сообщества, в которых вызывающая сторона уже
+    /// состоит (GET /communities/mine на стороне chat-service, не
+    /// GET /communities) — подключение к новому сообществу теперь идёт
+    /// по коду приглашения (joinCommunityByCode()), а не выбором из
+    /// общего списка всех существующих.
     void listCommunities(const QString& token);
     void renameCommunity(const QString& token, qint64 communityId, const QString& newName);
     void deleteCommunity(const QString& token, qint64 communityId);
     void joinCommunity(const QString& token, qint64 communityId);
-    /// @p isEncrypted (issue #138) is fixed at creation — see
-    /// Channel::isEncrypted's doc comment on the chat-service side for
-    /// why there's no way to change it afterwards.
+    /// Присоединяет к сообществу по его коду приглашения (issue #186), а
+    /// не по известному id — вызывает joinedCommunityByCode() при успехе
+    /// (сообщает и id, и name сразу, поскольку до этого момента
+    /// вызывающая сторона не знала ни того, ни другого) или
+    /// errorOccurred() с "invalid invite code", если такого кода нет.
+    void joinCommunityByCode(const QString& token, const QString& code);
+    /// Только для владельца @p communityId (issue #186) — прежний код
+    /// сразу перестаёт работать. Вызывает inviteCodeRegenerated() при
+    /// успехе.
+    void regenerateInviteCode(const QString& token, qint64 communityId);
+    /// @p isEncrypted (issue #138) фиксируется при создании — почему
+    /// изменить его впоследствии невозможно, см. doc-комментарий
+    /// Channel::isEncrypted на стороне chat-service.
     void createChannel(const QString& token, qint64 communityId, const QString& name, bool isEncrypted = false);
     void listChannels(const QString& token, qint64 communityId);
 
-    /// Every current member's login for @p communityId (issue #138) —
-    /// needed to know who an encrypted channel's key must be wrapped for.
+    /// Логины всех текущих участников @p communityId (issue #138) —
+    /// нужны, чтобы знать, для кого должен быть запечатан ключ
+    /// зашифрованного канала.
     void listMembers(const QString& token, qint64 communityId);
 
-    /// Stores @p wrappedKey (already sealed client-side for
-    /// @p memberLogin's public key — see ChannelCrypto) as their copy of
-    /// @p channelId's symmetric key. Only the channel/community owner or
-    /// a community moderator may call this (server-enforced).
+    /// Сохраняет @p wrappedKey (уже запечатанный на стороне клиента для
+    /// публичного ключа @p memberLogin — см. ChannelCrypto) как их
+    /// копию симметричного ключа @p channelId. Вызывать это может
+    /// только владелец канала/сообщества или модератор сообщества
+    /// (проверяется на сервере).
     void setChannelKey(const QString& token, qint64 channelId, const QString& memberLogin, const QString& wrappedKey);
 
-    /// Fetches the caller's own wrapped copy of @p channelId's key.
-    /// myChannelKeyNotFound() fires (not errorOccurred()) when none has
-    /// been set yet — an expected state (e.g. joined after creation),
-    /// not a failure.
+    /// Получает собственную запечатанную копию ключа @p channelId для
+    /// вызывающего. myChannelKeyNotFound() срабатывает (не
+    /// errorOccurred()), когда ключ ещё не был задан — это ожидаемое
+    /// состояние (например, вступил после создания), а не сбой.
     void fetchMyChannelKey(const QString& token, qint64 channelId);
     void renameChannel(const QString& token, qint64 channelId, const QString& newName);
     void deleteChannel(const QString& token, qint64 channelId);
 
-    /// Owner-only server-side (issue #114) — @p targetLogin doesn't need
-    /// to already be a member, promoting joins them implicitly.
+    /// Только для владельца на стороне сервера (issue #114) —
+    /// @p targetLogin не обязан уже быть участником, повышение неявно
+    /// добавляет его в состав.
     void promoteModerator(const QString& token, qint64 communityId, const QString& targetLogin);
-    /// Owner-only. Idempotent — demoting a non-moderator succeeds too.
+    /// Только для владельца. Идемпотентно — понижение того, кто не
+    /// модератор, тоже завершается успехом.
     void demoteModerator(const QString& token, qint64 communityId, const QString& targetLogin);
     void listModerators(const QString& token, qint64 communityId);
 
-    /// Fetches a chronological page of up to @p limit messages, ending
-    /// just before @p beforeId (or at the newest message if @p beforeId
-    /// is negative — the default, for the initial history load).
+    /// Получает хронологическую страницу до @p limit сообщений,
+    /// заканчивающуюся непосредственно перед @p beforeId (или на самом
+    /// новом сообщении, если @p beforeId отрицателен — значение по
+    /// умолчанию, для изначальной загрузки истории).
     void listMessages(const QString& token, qint64 channelId, int limit, qint64 beforeId = -1);
 
-    /// Uploads @p data (raw bytes, base64-encoded on the wire) as a new
-    /// attachment on @p channelId (issue #116); triggers attachmentUploaded()
-    /// with the id to then pass to ChatClient::sendMessage().
+    /// Загружает @p data (сырые байты, на проводе в виде base64) как
+    /// новое вложение в @p channelId (issue #116); вызывает
+    /// attachmentUploaded() с id, который затем передаётся в
+    /// ChatClient::sendMessage().
     void uploadAttachment(const QString& token, qint64 channelId, const QString& filename,
                            const QString& contentType, const QByteArray& data);
 
-    /// Downloads the raw bytes of attachment @p attachmentId; triggers
+    /// Скачивает сырые байты вложения @p attachmentId; вызывает
     /// attachmentDownloaded().
     void downloadAttachment(const QString& token, qint64 attachmentId);
 
-    /// Searches @p channelId's message bodies for a case-insensitive
-    /// substring match on @p query (issue #118), newest match first, up
-    /// to @p limit results.
+    /// Ищет в телах сообщений @p channelId регистронезависимое
+    /// совпадение подстроки с @p query (issue #118), самое новое
+    /// совпадение первым, до @p limit результатов.
     void searchMessages(const QString& token, qint64 channelId, const QString& query, int limit = 20);
 
+    /// Открывает диалог с @p recipientLogin (issue #187, Фаза 2) —
+    /// идемпотентно, тот же id при повторном вызове; вызывает
+    /// dmThreadOpened(), либо errorOccurred() (403 "can only message
+    /// friends", если получатель не друг, или 400 при попытке написать
+    /// самому себе).
+    void openDmThread(const QString& token, const QString& recipientLogin);
+
+    void listDmThreads(const QString& token);
+
+    void sendDirectMessage(const QString& token, qint64 threadId, const QString& body);
+
+    /// Тот же постраничный контракт, что и у listMessages().
+    void listDirectMessages(const QString& token, qint64 threadId, int limit, qint64 beforeId = -1);
+
 signals:
-    void communityCreated(qint64 id, const QString& name);
+    /// @p inviteCode (issue #186) — создатель сразу видит код, который
+    /// предстоит раздавать, без отдельного запроса.
+    void communityCreated(qint64 id, const QString& name, const QString& inviteCode);
     void communitiesListed(const QList<ChatItem>& communities);
     void communityRenamed(qint64 id, const QString& newName);
     void communityDeleted(qint64 id);
     void communityJoined(qint64 communityId);
+    /// Ответ на joinCommunityByCode() (issue #186) — @p id/@p name, а не
+    /// только id, как у communityJoined(): до этого вызова вызывающая
+    /// сторона не знала ни того, ни другого.
+    void joinedCommunityByCode(qint64 id, const QString& name);
+    /// Ответ на regenerateInviteCode() (issue #186).
+    void inviteCodeRegenerated(qint64 communityId, const QString& inviteCode);
     void channelCreated(qint64 id, const QString& name, bool isEncrypted);
     void channelsListed(const QList<ChatItem>& channels);
     void channelRenamed(qint64 id, const QString& newName);
@@ -120,20 +186,31 @@ signals:
     void moderatorPromoted(qint64 communityId, const QString& login);
     void moderatorDemoted(qint64 communityId, const QString& login);
     void moderatorsListed(qint64 communityId, const QStringList& logins);
-    /// Reply to listMessages() — @p messages is chronological (oldest
-    /// to newest), possibly empty if there's no more history.
+    /// Ответ на listMessages() — @p messages в хронологическом порядке
+    /// (от самых старых к самым новым), возможно пуст, если больше нет
+    /// истории.
     void messagesListed(qint64 channelId, const QList<ChatMessageInfo>& messages);
 
-    /// Reply to uploadAttachment().
+    /// Ответ на uploadAttachment().
     void attachmentUploaded(qint64 id, const QString& filename);
 
-    /// Reply to downloadAttachment() — @p data is the raw (decoded)
-    /// attachment bytes.
+    /// Ответ на downloadAttachment() — @p data — сырые (декодированные)
+    /// байты вложения.
     void attachmentDownloaded(qint64 attachmentId, const QByteArray& data);
 
-    /// Reply to searchMessages() — @p matches is newest-first, possibly
-    /// empty.
+    /// Ответ на searchMessages() — @p matches отсортирован от самых
+    /// новых, возможно пуст.
     void messagesFound(qint64 channelId, const QString& query, const QList<ChatMessageInfo>& matches);
+
+    /// Ответ на openDmThread() — @p otherLogin переносится из вызова
+    /// (сервер отвечает только id, не логин собеседника — вызывающая
+    /// сторона его и так уже знает).
+    void dmThreadOpened(qint64 id, const QString& otherLogin);
+    void dmThreadsListed(const QList<DirectMessageThreadInfo>& threads);
+    void directMessageSent(qint64 threadId, const DirectMessageInfo& message);
+    /// Ответ на listDirectMessages() — тот же хронологический порядок,
+    /// что и у messagesListed().
+    void directMessagesListed(qint64 threadId, const QList<DirectMessageInfo>& messages);
 
     void errorOccurred(const QString& message);
 

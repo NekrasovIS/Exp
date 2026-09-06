@@ -9,24 +9,25 @@ class QScreen;
 namespace devicehub {
 
 /**
- * @brief Lists the audio and video capture/playback devices currently
- *        available on the system.
+ * @brief Перечисляет устройства захвата/воспроизведения аудио и видео,
+ *        доступные в системе на данный момент.
  *
- * Thin wrapper around QMediaDevices so the rest of the codebase depends on
- * a single, testable seam instead of Qt's global device API directly.
+ * Тонкая обёртка вокруг QMediaDevices, чтобы остальной код зависел от
+ * единого, тестируемого шва, а не напрямую от глобального API устройств
+ * Qt.
  */
 class DeviceEnumerator {
 public:
-    /// @return All available audio output (speaker/headphone) devices.
+    /// @return Все доступные устройства аудиовывода (динамики/наушники).
     [[nodiscard]] QList<QAudioDevice> audioOutputs() const;
 
-    /// @return All available audio input (microphone) devices.
+    /// @return Все доступные устройства аудиоввода (микрофоны).
     [[nodiscard]] QList<QAudioDevice> audioInputs() const;
 
-    /// @return All available camera devices.
+    /// @return Все доступные устройства камер.
     [[nodiscard]] QList<QCameraDevice> cameras() const;
 
-    /// @return All available screens (monitors) that can be captured.
+    /// @return Все доступные экраны (мониторы), которые можно захватить.
     [[nodiscard]] QList<QScreen*> screens() const;
 };
 

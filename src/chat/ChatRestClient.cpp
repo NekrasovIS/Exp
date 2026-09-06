@@ -29,15 +29,16 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
         items.push_back(ChatItem{.id = object.value("id").toVariant().toLongLong(),
                                   .name = object.value("name").toString(),
                                   .ownerLogin = object.value("owner").toString(),
-                                  .isEncrypted = object.value("is_encrypted").toBool()});
+                                  .isEncrypted = object.value("is_encrypted").toBool(),
+                                  .inviteCode = object.value("invite_code").toString()});
     }
     return items;
 }
 
-// chat-service reports the actual failure reason (e.g. "no such community,
-// or channel name already taken") in the response body — falling back to
-// reply->errorString() alone only ever shows a generic "server replied:
-// Not Found", which hides why the request actually failed.
+// chat-service сообщает настоящую причину сбоя (например, «нет такого
+// сообщества, или имя канала уже занято») в теле ответа — откат к одному
+// лишь reply->errorString() всегда показывает лишь общее «server replied:
+// Not Found», что скрывает, почему запрос на самом деле не удался.
 QString extractErrorMessage(QNetworkReply* reply) {
     const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
     const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
@@ -58,12 +59,14 @@ void ChatRestClient::createCommunity(const QString& token, const QString& name) 
             return;
         }
         const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
-        emit communityCreated(object.value("id").toVariant().toLongLong(), object.value("name").toString());
+        emit communityCreated(object.value("id").toVariant().toLongLong(), object.value("name").toString(),
+                               object.value("invite_code").toString());
     });
 }
 
 void ChatRestClient::listCommunities(const QString& token) {
-    QNetworkReply* reply = networkManager_.get(buildRequest(baseUrl_.resolved(QUrl(QStringLiteral("/communities"))), token));
+    QNetworkReply* reply =
+        networkManager_.get(buildRequest(baseUrl_.resolved(QUrl(QStringLiteral("/communities/mine"))), token));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
@@ -111,6 +114,35 @@ void ChatRestClient::joinCommunity(const QString& token, qint64 communityId) {
             return;
         }
         emit communityJoined(communityId);
+    });
+}
+
+void ChatRestClient::joinCommunityByCode(const QString& token, const QString& code) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/join-by-code")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token), QJsonDocument(QJsonObject{{"code", code}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit joinedCommunityByCode(object.value("id").toVariant().toLongLong(), object.value("name").toString());
+    });
+}
+
+void ChatRestClient::regenerateInviteCode(const QString& token, qint64 communityId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/invite/regenerate").arg(communityId)));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit inviteCodeRegenerated(communityId, object.value("invite_code").toString());
     });
 }
 
@@ -284,10 +316,10 @@ void ChatRestClient::promoteModerator(const QString& token, qint64 communityId, 
 }
 
 void ChatRestClient::demoteModerator(const QString& token, qint64 communityId, const QString& targetLogin) {
-    // Percent-encode the login into its own path segment — logins aren't
-    // charset-restricted server-side, and this is the first place one
-    // gets embedded directly in a URL path rather than a query param or
-    // JSON body.
+    // Percent-кодируем логин в его собственный сегмент пути — логины на
+    // стороне сервера не ограничены по набору символов, и это первое
+    // место, где логин встраивается прямо в путь URL, а не в query-параметр
+    // или тело JSON.
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/moderators/%2")
                                                  .arg(communityId)
                                                  .arg(QString::fromUtf8(QUrl::toPercentEncoding(targetLogin)))));
@@ -367,8 +399,9 @@ void ChatRestClient::fetchMyChannelKey(const QString& token, qint64 channelId) {
     connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
         reply->deleteLater();
         if (reply->error() == QNetworkReply::ContentNotFoundError) {
-            // Expected state (no key wrapped for this login yet) — not
-            // an error worth surfacing through errorOccurred().
+            // Ожидаемое состояние (для этого логина ещё не запечатан
+            // ключ) — не ошибка, о которой стоит сообщать через
+            // errorOccurred().
             emit myChannelKeyNotFound(channelId);
             return;
         }
@@ -378,6 +411,94 @@ void ChatRestClient::fetchMyChannelKey(const QString& token, qint64 channelId) {
         }
         const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
         emit myChannelKeyFetched(channelId, object.value("wrapped_key").toString());
+    });
+}
+
+void ChatRestClient::openDmThread(const QString& token, const QString& recipientLogin) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token),
+        QJsonDocument(QJsonObject{{"recipient_login", recipientLogin}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, recipientLogin]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit dmThreadOpened(object.value("id").toVariant().toLongLong(), recipientLogin);
+    });
+}
+
+void ChatRestClient::listDmThreads(const QString& token) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads")));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<DirectMessageThreadInfo> threads;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                threads.push_back(DirectMessageThreadInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                            .otherLogin = object.value("other_login").toString(),
+                                                            .createdAt = object.value("created_at").toString()});
+            }
+        }
+        emit dmThreadsListed(threads);
+    });
+}
+
+void ChatRestClient::sendDirectMessage(const QString& token, qint64 threadId, const QString& body) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads/%1/messages").arg(threadId)));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token),
+                                                 QJsonDocument(QJsonObject{{"body", body}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, threadId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit directMessageSent(threadId, DirectMessageInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                             .author = object.value("author").toString(),
+                                                             .body = object.value("body").toString(),
+                                                             .sentAt = object.value("sent_at").toString()});
+    });
+}
+
+void ChatRestClient::listDirectMessages(const QString& token, qint64 threadId, int limit, qint64 beforeId) {
+    QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads/%1/messages").arg(threadId)));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    if (beforeId >= 0) {
+        query.addQueryItem(QStringLiteral("before_id"), QString::number(beforeId));
+    }
+    url.setQuery(query);
+
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, threadId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<DirectMessageInfo> messages;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                messages.push_back(DirectMessageInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                       .author = object.value("author").toString(),
+                                                       .body = object.value("body").toString(),
+                                                       .sentAt = object.value("sent_at").toString()});
+            }
+        }
+        emit directMessagesListed(threadId, messages);
     });
 }
 

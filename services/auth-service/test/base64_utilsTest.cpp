@@ -28,8 +28,8 @@ TEST(Base64UtilsTest, RoundTripsTwoRemainderBytes) {
 }
 
 TEST(Base64UtilsTest, EncodedOutputUsesUrlSafeAlphabetOnly) {
-    // Bytes chosen so standard base64 would emit '+'/'/' if this used
-    // the non-URL-safe alphabet.
+    // Байты подобраны так, что стандартный base64 выдал бы '+'/'/', если
+    // бы использовался не URL-safe алфавит.
     const std::vector<uint8_t> data{0xFB, 0xFF, 0xBF};
 
     const std::string encoded = encodeUrl(data);

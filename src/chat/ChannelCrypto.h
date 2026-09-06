@@ -7,36 +7,40 @@
 
 namespace devicehub::channel_crypto {
 
-/// Generates a fresh random symmetric key for an encrypted channel
-/// (issue #138) — crypto_secretbox_KEYBYTES (32) random bytes. Called
-/// once by whoever creates the channel; never reused across channels.
+/// Генерирует свежий случайный симметричный ключ для зашифрованного
+/// канала (issue #138) — crypto_secretbox_KEYBYTES (32) случайных
+/// байта. Вызывается один раз тем, кто создаёт канал; никогда не
+/// переиспользуется между каналами.
 [[nodiscard]] QByteArray generateChannelKey();
 
-/// Encrypts @p plaintext with @p channelKey (libsodium crypto_secretbox,
-/// random nonce per call). @return base64(nonce || ciphertext) — the
-/// nonce travels alongside the ciphertext since it isn't secret, only
-/// required to be unique per message under the same key.
+/// Шифрует @p plaintext с помощью @p channelKey (libsodium
+/// crypto_secretbox, случайный nonce на каждый вызов). @return
+/// base64(nonce || ciphertext) — nonce передаётся вместе с шифротекстом,
+/// поскольку он не секретен, требуется лишь его уникальность на
+/// сообщение при одном и том же ключе.
 [[nodiscard]] QString encryptMessage(const QString& plaintext, const QByteArray& channelKey);
 
-/// Reverses encryptMessage(). @return std::nullopt if @p ciphertextBase64
-/// is malformed (wrong length, invalid base64) or fails authentication
-/// under @p channelKey (wrong key, or the bytes were tampered with) —
-/// crypto_secretbox is an AEAD construction, so a wrong key doesn't
-/// silently produce garbage plaintext, it fails outright.
+/// Обращает encryptMessage(). @return std::nullopt, если
+/// @p ciphertextBase64 некорректен (неверная длина, невалидный base64)
+/// или не проходит аутентификацию под @p channelKey (неверный ключ, или
+/// байты были подделаны) — crypto_secretbox является AEAD-конструкцией,
+/// поэтому неверный ключ не приводит к молчаливому получению
+/// бессмысленного plaintext, а даёт явный отказ.
 [[nodiscard]] std::optional<QString> decryptMessage(const QString& ciphertextBase64, const QByteArray& channelKey);
 
-/// Seals @p channelKey so only the holder of the matching X25519 secret
-/// key (@p recipientPublicKey's other half) can recover it (libsodium
-/// crypto_box_seal — anonymous public-key encryption, no reply channel
-/// or shared session needed). @return base64 — this is what gets stored
-/// server-side as one member's "wrapped_key" (see chat-service's
-/// channel_keys table).
+/// Запечатывает @p channelKey так, что восстановить его может только
+/// обладатель соответствующего секретного ключа X25519 (другой половины
+/// @p recipientPublicKey) (libsodium crypto_box_seal — анонимное
+/// шифрование с открытым ключом, не нужен ни обратный канал, ни общая
+/// сессия). @return base64 — именно это хранится на сервере как
+/// "wrapped_key" одного из участников (см. таблицу channel_keys в
+/// chat-service).
 [[nodiscard]] QString wrapKeyForRecipient(const QByteArray& channelKey, const QByteArray& recipientPublicKey);
 
-/// Reverses wrapKeyForRecipient() using the caller's own identity
-/// keypair (see IdentityKeyStore). @return std::nullopt if
-/// @p wrappedKeyBase64 is malformed or wasn't sealed for this exact
-/// keypair.
+/// Обращает wrapKeyForRecipient(), используя собственную пару ключей
+/// идентичности вызывающего (см. IdentityKeyStore). @return
+/// std::nullopt, если @p wrappedKeyBase64 некорректен или не был
+/// запечатан именно для этой пары ключей.
 [[nodiscard]] std::optional<QByteArray> unwrapKey(const QString& wrappedKeyBase64, const QByteArray& ownPublicKey,
                                                    const QByteArray& ownSecretKey);
 

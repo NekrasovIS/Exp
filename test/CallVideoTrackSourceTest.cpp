@@ -42,7 +42,7 @@ TEST(CallVideoTrackSourceTest, ConvertsSolidColorFrameToCorrectSizeAndApproximat
     sourceInterface.AddOrUpdateSink(&sink, webrtc::VideoSinkWants{});
 
     QImage image(16, 12, QImage::Format_ARGB32);
-    image.fill(QColor(255, 0, 0));  // pure red
+    image.fill(QColor(255, 0, 0));  // чистый красный
 
     source->pushFrame(QVideoFrame(image));
 
@@ -52,9 +52,9 @@ TEST(CallVideoTrackSourceTest, ConvertsSolidColorFrameToCorrectSizeAndApproximat
     EXPECT_EQ(frame.width(), 16);
     EXPECT_EQ(frame.height(), 12);
 
-    // Pure red in YUV (BT.601, libyuv's default conversion): high V,
-    // low U — enough to confirm real color data made it through the
-    // ARGB->I420 conversion, without pinning down exact Y/U/V values.
+    // Чистый красный в YUV (BT.601, конверсия по умолчанию в libyuv): высокий V,
+    // низкий U — этого достаточно, чтобы подтвердить, что реальные цветовые
+    // данные прошли через конверсию ARGB->I420, не фиксируя точные значения Y/U/V.
     const webrtc::scoped_refptr<webrtc::I420BufferInterface> buffer = frame.video_frame_buffer()->ToI420();
     EXPECT_LT(buffer->DataU()[0], 128);
     EXPECT_GT(buffer->DataV()[0], 128);
@@ -72,8 +72,9 @@ TEST(CallVideoTrackSourceTest, IsScreencastReflectsConstructorArgument) {
 }
 
 TEST(CallVideoTrackSourceTest, SetIsScreencastFlipsTheHintAfterConstruction) {
-    // Issue #112: CallManager shares one source between camera video and
-    // screen share, flipping this hint when it switches which one is active.
+    // Issue #112: CallManager использует один и тот же источник и для видео с
+    // камеры, и для демонстрации экрана, переключая этот флаг при смене
+    // активного режима.
     const webrtc::scoped_refptr<CallVideoTrackSource> source =
         webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
     ASSERT_FALSE(source->is_screencast());
@@ -92,7 +93,7 @@ TEST(CallVideoTrackSourceTest, PushFrameDropsInvalidFrame) {
     FakeVideoSink sink;
     sourceInterface.AddOrUpdateSink(&sink, webrtc::VideoSinkWants{});
 
-    source->pushFrame(QVideoFrame());  // default-constructed: !isValid()
+    source->pushFrame(QVideoFrame());  // создан по умолчанию: !isValid()
 
     EXPECT_EQ(sink.frameCount(), 0);
     sourceInterface.RemoveSink(&sink);
@@ -104,14 +105,14 @@ TEST(CallVideoTrackSourceTest, PushFrameWithNoInterestedSinksIsDropped) {
     QImage image(16, 12, QImage::Format_ARGB32);
     image.fill(QColor(0, 255, 0));
 
-    // No AddOrUpdateSink() call at all — AdaptFrame() should report no
-    // interested sinks and pushFrame() should drop the frame instead of
-    // converting it for no one.
+    // AddOrUpdateSink() вообще не вызывается — AdaptFrame() должен сообщить об
+    // отсутствии заинтересованных получателей, а pushFrame() должен отбросить
+    // кадр вместо того, чтобы конвертировать его впустую.
     source->pushFrame(QVideoFrame(image));
 
-    // Nothing to assert on directly (no sink to have received a frame);
-    // this test's value is that pushFrame() doesn't crash or throw when
-    // AdaptFrame() returns false for this reason.
+    // Проверять напрямую нечего (нет получателя, который мог бы принять кадр);
+    // ценность этого теста в том, что pushFrame() не падает и не бросает
+    // исключение, когда AdaptFrame() по этой причине возвращает false.
     SUCCEED();
 }
 

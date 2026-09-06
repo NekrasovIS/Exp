@@ -5,11 +5,11 @@
 namespace chat_service {
 
 /**
- * @brief Business logic for communities/channels/messages.
+ * @brief Бизнес-логика для сообществ/каналов/сообщений.
  *
- * Delegates storage to ChatRepository; callers must already be
- * authenticated (see AuthServiceClient) — this class only knows about
- * a "login" string, not tokens.
+ * Делегирует хранение ChatRepository; вызывающая сторона уже должна быть
+ * аутентифицирована (см. AuthServiceClient) — этот класс знает только
+ * строку "login", а не токены.
  */
 class ChatService {
 public:
@@ -17,6 +17,10 @@ public:
 
     [[nodiscard]] Community createCommunity(const std::string& name, const std::string& ownerLogin);
     [[nodiscard]] std::vector<Community> listCommunities();
+    [[nodiscard]] std::vector<Community> listCommunitiesForMember(const std::string& login);
+    [[nodiscard]] std::optional<Community> findCommunityByInviteCode(const std::string& code);
+    [[nodiscard]] RegenerateInviteCodeResult regenerateInviteCode(std::int64_t communityId,
+                                                                    const std::string& requesterLogin);
     [[nodiscard]] MutationResult renameCommunity(std::int64_t id, const std::string& newName,
                                                   const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);
@@ -57,6 +61,17 @@ public:
     [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
                                                                        const AttachmentUpload& upload);
     [[nodiscard]] std::optional<AttachmentData> findAttachmentData(std::int64_t attachmentId);
+
+    /// См. ChatRepository::findOrCreateThread() (issue #187, Фаза 2) —
+    /// дружба проверяется в HttpServer до вызова этого метода.
+    [[nodiscard]] std::int64_t findOrCreateThread(const std::string& loginA, const std::string& loginB);
+    [[nodiscard]] std::vector<DirectMessageThread> listMyThreads(const std::string& login);
+    [[nodiscard]] bool isThreadParticipant(std::int64_t threadId, const std::string& login);
+    [[nodiscard]] std::optional<DirectMessage> postDirectMessage(std::int64_t threadId,
+                                                                  const std::string& authorLogin,
+                                                                  const std::string& body);
+    [[nodiscard]] std::vector<DirectMessage> listDirectMessages(std::int64_t threadId, int limit,
+                                                                 std::optional<std::int64_t> beforeId = std::nullopt);
 
 private:
     ChatRepository& repository_;

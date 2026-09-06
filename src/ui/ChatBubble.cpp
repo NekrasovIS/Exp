@@ -6,6 +6,8 @@
 #include <QPainter>
 #include <QPainterPath>
 
+#include "ui/Theme.h"
+
 namespace devicehub {
 
 namespace {
@@ -25,11 +27,11 @@ void ChatBubble::paintEvent(QPaintEvent* /*event*/) {
 
     if (isOwnMessage_) {
         QLinearGradient gradient(rect().topLeft(), rect().bottomRight());
-        gradient.setColorAt(0, QColor("#34d399"));
-        gradient.setColorAt(1, QColor("#059669"));
+        gradient.setColorAt(0, QColor(ui_theme::kAccentGradientStart));
+        gradient.setColorAt(1, QColor(ui_theme::kAccentGradientEnd));
         painter.fillPath(path, gradient);
     } else {
-        painter.fillPath(path, QColor("#2a2d31"));
+        painter.fillPath(path, QColor(ui_theme::kBubbleOtherBackground));
     }
 }
 

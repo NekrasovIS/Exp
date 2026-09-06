@@ -9,10 +9,10 @@
 #include <stdexcept>
 #include <string>
 
-// Requires a live Postgres (see docker-compose.yml, chat-service-postgres)
-// reachable at CHAT_SERVICE_DATABASE_URL (default matches
-// docker-compose.yml). Skips itself rather than failing when it isn't
-// running.
+// Требует работающий Postgres (см. docker-compose.yml,
+// chat-service-postgres), доступный по CHAT_SERVICE_DATABASE_URL
+// (значение по умолчанию соответствует docker-compose.yml). Пропускает
+// себя, а не падает, если он не запущен.
 
 namespace chat_service {
 namespace {
@@ -56,15 +56,15 @@ TEST(ChatServiceIntegrationTest, CommunityChannelMembershipAndMessageRoundTrip) 
 
     const std::string login = "integration-test-user-" + suffix;
     EXPECT_TRUE(service.joinCommunity(community.id, login));
-    EXPECT_TRUE(service.joinCommunity(community.id, login));  // idempotent
-    EXPECT_FALSE(service.joinCommunity(-1, login));           // no such community
+    EXPECT_TRUE(service.joinCommunity(community.id, login));  // идемпотентно
+    EXPECT_FALSE(service.joinCommunity(-1, login));           // нет такого сообщества
 
     const std::optional<Message> posted = service.postMessage(*channelId, login, "hello, chat-service");
     ASSERT_TRUE(posted.has_value());
     EXPECT_EQ(posted->authorLogin, login);
     EXPECT_EQ(posted->body, "hello, chat-service");
 
-    EXPECT_FALSE(service.postMessage(-1, login, "nowhere").has_value());  // no such channel
+    EXPECT_FALSE(service.postMessage(-1, login, "nowhere").has_value());  // нет такого канала
 
     const std::vector<Message> messages = service.recentMessages(*channelId, 10);
     ASSERT_EQ(messages.size(), 1U);
@@ -89,23 +89,23 @@ TEST(ChatServiceIntegrationTest, RecentMessagesWithBeforeIdPagesBackwardThroughH
     const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
     ASSERT_TRUE(channelId.has_value());
 
-    // Three messages, oldest to newest: "one", "two", "three".
+    // Три сообщения, от старых к новым: "one", "two", "three".
     ASSERT_TRUE(service.postMessage(*channelId, owner, "one").has_value());
     ASSERT_TRUE(service.postMessage(*channelId, owner, "two").has_value());
     const std::optional<Message> three = service.postMessage(*channelId, owner, "three");
     ASSERT_TRUE(three.has_value());
 
-    // Newest page, limit 1: just "three".
+    // Самая новая страница, limit 1: только "three".
     const std::vector<Message> newestPage = service.recentMessages(*channelId, 1);
     ASSERT_EQ(newestPage.size(), 1U);
     EXPECT_EQ(newestPage[0].body, "three");
 
-    // Page before "three", limit 1: "two" — beforeId pages backward.
+    // Страница до "three", limit 1: "two" — beforeId листает историю назад.
     const std::vector<Message> olderPage = service.recentMessages(*channelId, 1, three->id);
     ASSERT_EQ(olderPage.size(), 1U);
     EXPECT_EQ(olderPage[0].body, "two");
 
-    // Page before the oldest message: nothing left.
+    // Страница до самого старого сообщения: ничего не осталось.
     const std::vector<Message> oneMessagePage = service.recentMessages(*channelId, 10, newestPage[0].id);
     ASSERT_EQ(oneMessagePage.size(), 2U);
     const std::vector<Message> beforeOldest = service.recentMessages(*channelId, 10, oneMessagePage[0].id);
@@ -132,24 +132,24 @@ TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
     ASSERT_TRUE(channelId.has_value());
 
-    // Non-owners are forbidden, not just silently ignored.
+    // Не-владельцам запрещено, а не просто молча игнорируется.
     EXPECT_EQ(service.renameCommunity(community.id, "hijacked", intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.deleteCommunity(community.id, intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.renameChannel(*channelId, "hijacked", intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.deleteChannel(*channelId, intruder), MutationResult::kForbidden);
 
-    // Nonexistent ids are reported distinctly from "forbidden".
+    // Несуществующие id сообщаются отдельно от "forbidden".
     EXPECT_EQ(service.renameCommunity(-1, "nowhere", owner), MutationResult::kNotFound);
     EXPECT_EQ(service.deleteCommunity(-1, owner), MutationResult::kNotFound);
     EXPECT_EQ(service.renameChannel(-1, "nowhere", owner), MutationResult::kNotFound);
     EXPECT_EQ(service.deleteChannel(-1, owner), MutationResult::kNotFound);
 
-    // Renaming a channel to a name already taken in the same community conflicts.
+    // Переименование канала в имя, уже занятое в том же сообществе, даёт конфликт.
     const std::optional<std::int64_t> secondChannelId = service.createChannel(community.id, "random", owner);
     ASSERT_TRUE(secondChannelId.has_value());
     EXPECT_EQ(service.renameChannel(*secondChannelId, "general", owner), MutationResult::kConflict);
 
-    // The owner can actually rename and delete.
+    // Владелец действительно может переименовывать и удалять.
     EXPECT_EQ(service.renameChannel(*channelId, "renamed-by-owner", owner), MutationResult::kSuccess);
     const std::vector<Channel> channelsAfterRename = service.listChannels(community.id);
     EXPECT_TRUE(std::any_of(channelsAfterRename.begin(), channelsAfterRename.end(),
@@ -159,7 +159,7 @@ TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     EXPECT_EQ(service.renameCommunity(community.id, "renamed-by-owner-community", owner), MutationResult::kSuccess);
     EXPECT_EQ(service.deleteCommunity(community.id, owner), MutationResult::kSuccess);
 
-    // Deleting the community cascades to its remaining channel too.
+    // Удаление сообщества каскадно затрагивает и оставшийся канал.
     EXPECT_EQ(service.renameChannel(*secondChannelId, "anything", owner), MutationResult::kNotFound);
 }
 
@@ -182,6 +182,72 @@ TEST(ChatServiceIntegrationTest, ListCommunitiesIncludesCreatedCommunity) {
 
     EXPECT_TRUE(std::any_of(communities.begin(), communities.end(),
                              [&](const Community& community) { return community.id == created.id; }));
+}
+
+TEST(ChatServiceIntegrationTest, CreatedCommunityHasAUniqueInviteCodeUsableToJoin) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    const std::string member = "integration-test-member-" + suffix;
+    Community created{};
+    try {
+        created = service.createCommunity("integration-test-invite-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    ASSERT_TRUE(created.inviteCode.has_value());
+    EXPECT_FALSE(created.inviteCode->empty());
+
+    const std::optional<Community> found = service.findCommunityByInviteCode(*created.inviteCode);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->id, created.id);
+
+    EXPECT_TRUE(service.joinCommunity(found->id, member));
+    const std::vector<Community> memberCommunities = service.listCommunitiesForMember(member);
+    EXPECT_TRUE(std::any_of(memberCommunities.begin(), memberCommunities.end(),
+                             [&](const Community& community) { return community.id == created.id; }));
+
+    EXPECT_FALSE(service.findCommunityByInviteCode("not-a-real-code").has_value());
+}
+
+TEST(ChatServiceIntegrationTest, RegenerateInviteCodeIsOwnerOnlyAndInvalidatesThePreviousCode) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-owner-" + suffix;
+    const std::string other = "integration-test-other-" + suffix;
+    Community created{};
+    try {
+        created = service.createCommunity("integration-test-regen-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::string originalCode = *created.inviteCode;
+
+    const RegenerateInviteCodeResult forbidden = service.regenerateInviteCode(created.id, other);
+    EXPECT_EQ(forbidden.result, MutationResult::kForbidden);
+
+    const RegenerateInviteCodeResult success = service.regenerateInviteCode(created.id, owner);
+    ASSERT_EQ(success.result, MutationResult::kSuccess);
+    EXPECT_NE(success.inviteCode, originalCode);
+
+    EXPECT_FALSE(service.findCommunityByInviteCode(originalCode).has_value());
+    const std::optional<Community> found = service.findCommunityByInviteCode(success.inviteCode);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->id, created.id);
+
+    EXPECT_EQ(service.regenerateInviteCode(-1, owner).result, MutationResult::kNotFound);
 }
 
 TEST(ChatServiceIntegrationTest, CreateChannelRejectsNonexistentCommunity) {
@@ -316,17 +382,17 @@ TEST(ChatServiceIntegrationTest, EditAndDeleteMessageAreRestrictedToTheAuthor) {
     ASSERT_TRUE(posted.has_value());
     EXPECT_FALSE(posted->editedAt.has_value());
 
-    // Even the channel's own owner (author here too, but the point is
-    // the rule is authorship, not ownership) can't edit/delete on
-    // someone else's behalf — simulate that with a different login.
+    // Даже собственный владелец канала (здесь он же и автор, но суть в
+    // том, что правило — авторство, а не владение) не может
+    // редактировать/удалять от чужого имени — эмулируем это другим логином.
     EXPECT_EQ(service.editMessage(posted->id, *channelId, intruder, "hijacked").result, MutationResult::kForbidden);
     EXPECT_EQ(service.deleteMessage(posted->id, *channelId, intruder), MutationResult::kForbidden);
 
-    // Nonexistent id, and a real id but wrong channel, are both "not found".
+    // Несуществующий id и реальный id, но не тот канал, — оба "not found".
     EXPECT_EQ(service.editMessage(-1, *channelId, author, "nowhere").result, MutationResult::kNotFound);
     EXPECT_EQ(service.editMessage(posted->id, -1, author, "wrong channel").result, MutationResult::kNotFound);
 
-    // The author can actually edit.
+    // Автор действительно может редактировать.
     const EditMessageResult edited = service.editMessage(posted->id, *channelId, author, "edited body");
     EXPECT_EQ(edited.result, MutationResult::kSuccess);
     EXPECT_FALSE(edited.editedAt.empty());
@@ -336,10 +402,10 @@ TEST(ChatServiceIntegrationTest, EditAndDeleteMessageAreRestrictedToTheAuthor) {
     EXPECT_EQ(messagesAfterEdit[0].body, "edited body");
     ASSERT_TRUE(messagesAfterEdit[0].editedAt.has_value());
 
-    // The author can actually delete.
+    // Автор действительно может удалять.
     EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kSuccess);
     EXPECT_TRUE(service.recentMessages(*channelId, 10).empty());
-    EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kNotFound);  // already gone
+    EXPECT_EQ(service.deleteMessage(posted->id, *channelId, author), MutationResult::kNotFound);  // уже удалено
 }
 
 TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwner) {
@@ -364,8 +430,8 @@ TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwne
     EXPECT_EQ(service.promoteModerator(community.id, target, intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.promoteModerator(-1, target, owner), MutationResult::kNotFound);
 
-    // The owner can promote — target doesn't need to already be a
-    // member (promoteModerator() joins them implicitly).
+    // Владелец может назначить модератора — цель не обязана уже быть
+    // участником (promoteModerator() неявно добавляет её в сообщество).
     EXPECT_EQ(service.promoteModerator(community.id, target, owner), MutationResult::kSuccess);
     EXPECT_EQ(service.listModerators(community.id), std::vector<std::string>{target});
 
@@ -373,7 +439,7 @@ TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwne
     EXPECT_EQ(service.demoteModerator(community.id, target, owner), MutationResult::kSuccess);
     EXPECT_TRUE(service.listModerators(community.id).empty());
 
-    // Demoting someone who was never a moderator is a harmless no-op.
+    // Снятие с должности того, кто никогда не был модератором, — безобидная операция без эффекта.
     EXPECT_EQ(service.demoteModerator(community.id, "never-was-a-mod-" + suffix, owner), MutationResult::kSuccess);
 }
 
@@ -401,17 +467,17 @@ TEST(ChatServiceIntegrationTest, ModeratorsCanDeleteMessagesAndManageChannelsBut
     const std::optional<Message> posted = service.postMessage(*channelId, author, "original");
     ASSERT_TRUE(posted.has_value());
 
-    // A moderator may not edit someone else's message — deletion only.
+    // Модератор не может редактировать чужое сообщение — только удаление.
     EXPECT_EQ(service.editMessage(posted->id, *channelId, moderator, "hijacked").result, MutationResult::kForbidden);
 
-    // A moderator may not rename/delete the community itself.
+    // Модератор не может переименовывать/удалять само сообщество.
     EXPECT_EQ(service.renameCommunity(community.id, "hijacked", moderator), MutationResult::kForbidden);
     EXPECT_EQ(service.deleteCommunity(community.id, moderator), MutationResult::kForbidden);
 
-    // A moderator CAN rename/delete a channel they didn't create.
+    // Модератор МОЖЕТ переименовать/удалить канал, который не создавал.
     EXPECT_EQ(service.renameChannel(*channelId, "renamed-by-moderator", moderator), MutationResult::kSuccess);
 
-    // A moderator CAN delete a message they didn't author.
+    // Модератор МОЖЕТ удалить сообщение, автором которого не является.
     EXPECT_EQ(service.deleteMessage(posted->id, *channelId, moderator), MutationResult::kSuccess);
     EXPECT_TRUE(service.recentMessages(*channelId, 10).empty());
 
@@ -436,8 +502,8 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
     ASSERT_TRUE(channelId.has_value());
 
-    // "Hello" base64-encoded — no need for a real decoder here, this
-    // level never decodes, only stores/retrieves verbatim.
+    // "Hello" в base64 — здесь не нужен настоящий декодер, этот уровень
+    // никогда не декодирует, только хранит/возвращает дословно.
     const std::optional<AttachmentMetadata> attachment = service.createAttachment(
         *channelId, AttachmentUpload{.uploaderLogin = owner,
                                       .filename = "greeting.txt",
@@ -473,11 +539,11 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     ASSERT_TRUE(posted->attachmentFilename.has_value());
     EXPECT_EQ(*posted->attachmentFilename, "greeting.txt");
 
-    // A nonexistent attachment id is rejected the same way a nonexistent
-    // channel id already is (foreign_key_violation -> nullopt).
+    // Несуществующий id вложения отклоняется так же, как уже отклоняется
+    // несуществующий id канала (foreign_key_violation -> nullopt).
     EXPECT_FALSE(service.postMessage(*channelId, owner, "broken reference", 999999999).has_value());
 
-    // recentMessages() (LEFT JOIN) surfaces the same attachment fields.
+    // recentMessages() (LEFT JOIN) показывает те же поля вложения.
     const std::vector<Message> messages = service.recentMessages(*channelId, 10);
     ASSERT_EQ(messages.size(), 1U);
     ASSERT_TRUE(messages[0].attachmentId.has_value());
@@ -580,10 +646,10 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     const std::string outsider = "integration-test-outsider-" + suffix;
     ASSERT_TRUE(service.joinCommunity(community.id, member));
 
-    // No key set yet — nothing to find.
+    // Ключ ещё не установлен — искать нечего.
     EXPECT_FALSE(service.findChannelKey(*channelId, owner).has_value());
 
-    // Owner wraps the key for themselves and for member.
+    // Владелец оборачивает ключ для себя и для member.
     EXPECT_EQ(service.setChannelKey(*channelId, owner, owner, "wrapped-for-owner"), MutationResult::kSuccess);
     EXPECT_EQ(service.setChannelKey(*channelId, member, owner, "wrapped-for-member"), MutationResult::kSuccess);
 
@@ -594,19 +660,125 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     ASSERT_TRUE(memberKey.has_value());
     EXPECT_EQ(*memberKey, "wrapped-for-member");
 
-    // Nobody has wrapped a key for outsider.
+    // Никто не обернул ключ для outsider.
     EXPECT_FALSE(service.findChannelKey(*channelId, outsider).has_value());
 
-    // outsider has no authority to set anyone's key on this channel.
+    // У outsider нет полномочий устанавливать чей-либо ключ в этом канале.
     EXPECT_EQ(service.setChannelKey(*channelId, member, outsider, "forged"), MutationResult::kForbidden);
 
-    // Overwriting an existing key succeeds (ON CONFLICT DO UPDATE).
+    // Перезапись существующего ключа успешна (ON CONFLICT DO UPDATE).
     EXPECT_EQ(service.setChannelKey(*channelId, member, owner, "re-wrapped-for-member"), MutationResult::kSuccess);
     const std::optional<std::string> updatedMemberKey = service.findChannelKey(*channelId, member);
     ASSERT_TRUE(updatedMemberKey.has_value());
     EXPECT_EQ(*updatedMemberKey, "re-wrapped-for-member");
 
     EXPECT_EQ(service.setChannelKey(-1, member, owner, "irrelevant"), MutationResult::kNotFound);
+}
+
+TEST(ChatServiceIntegrationTest, FindOrCreateThreadIsIdempotentAndArgumentOrderIndependent) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-a-" + suffix;
+    const std::string loginB = "dm-test-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_EQ(service.findOrCreateThread(loginB, loginA), threadId);
+    EXPECT_EQ(service.findOrCreateThread(loginA, loginB), threadId);
+}
+
+TEST(ChatServiceIntegrationTest, ListMyThreadsShowsTheOtherLoginForBothParticipants) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-list-a-" + suffix;
+    const std::string loginB = "dm-test-list-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::vector<DirectMessageThread> threadsForA = service.listMyThreads(loginA);
+    const std::vector<DirectMessageThread> threadsForB = service.listMyThreads(loginB);
+    ASSERT_TRUE(std::any_of(threadsForA.begin(), threadsForA.end(),
+                             [&](const DirectMessageThread& t) { return t.id == threadId && t.otherLogin == loginB; }));
+    ASSERT_TRUE(std::any_of(threadsForB.begin(), threadsForB.end(),
+                             [&](const DirectMessageThread& t) { return t.id == threadId && t.otherLogin == loginA; }));
+}
+
+TEST(ChatServiceIntegrationTest, IsThreadParticipantReflectsMembership) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-participant-a-" + suffix;
+    const std::string loginB = "dm-test-participant-b-" + suffix;
+    const std::string stranger = "dm-test-participant-stranger-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_TRUE(service.isThreadParticipant(threadId, loginA));
+    EXPECT_TRUE(service.isThreadParticipant(threadId, loginB));
+    EXPECT_FALSE(service.isThreadParticipant(threadId, stranger));
+    EXPECT_FALSE(service.isThreadParticipant(-1, loginA));
+}
+
+TEST(ChatServiceIntegrationTest, PostDirectMessageAndListDirectMessagesRoundTrip) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "dm-test-post-a-" + suffix;
+    const std::string loginB = "dm-test-post-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::optional<DirectMessage> first = service.postDirectMessage(threadId, loginA, "hello");
+    ASSERT_TRUE(first.has_value());
+    const std::optional<DirectMessage> second = service.postDirectMessage(threadId, loginB, "hi back");
+    ASSERT_TRUE(second.has_value());
+
+    const std::vector<DirectMessage> messages = service.listDirectMessages(threadId, 10);
+    ASSERT_EQ(messages.size(), 2);
+    EXPECT_EQ(messages[0].authorLogin, loginA);
+    EXPECT_EQ(messages[0].body, "hello");
+    EXPECT_EQ(messages[1].authorLogin, loginB);
+    EXPECT_EQ(messages[1].body, "hi back");
+
+    EXPECT_FALSE(service.postDirectMessage(-1, loginA, "into the void").has_value());
 }
 
 }  // namespace

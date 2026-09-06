@@ -31,4 +31,27 @@ bool UserServiceClient::registerUser(const std::string& login, const std::string
     return result && result->status == 201;
 }
 
+std::optional<OtpIdentity> UserServiceClient::resolveOtpIdentifier(const std::string& identifier) const {
+    httplib::Client client(host_, port_);
+
+    const nlohmann::json body{{"identifier", identifier}};
+    const httplib::Result result = client.Post("/users/resolve-otp-identifier", body.dump(), "application/json");
+    if (!result || result->status != 200) {
+        return std::nullopt;
+    }
+
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded() || !response.value("found", false)) {
+        return std::nullopt;
+    }
+    return OtpIdentity{
+        .login = response.value("login", std::string()),
+        .email = response.contains("email") && response["email"].is_string()
+                     ? std::make_optional(response["email"].get<std::string>())
+                     : std::nullopt,
+        .telegramChatId = response.contains("telegram_chat_id") && response["telegram_chat_id"].is_string()
+                               ? std::make_optional(response["telegram_chat_id"].get<std::string>())
+                               : std::nullopt};
+}
+
 }  // namespace auth_service

@@ -5,15 +5,16 @@
 namespace devicehub::ui_theme {
 
 QString discordDarkStyleSheet() {
-    // Accent is a green gradient (emerald-ish: #34d399 -> #059669), with a
-    // brighter variant on hover and a darker one when pressed — QSS can't
-    // algorithmically lighten/darken a gradient, so each state spells out
-    // its own stops.
+    // Акцент — зелёный градиент (в духе изумрудного: #34d399 -> #059669),
+    // с более светлым вариантом при наведении и более тёмным при
+    // нажатии — QSS не умеет алгоритмически осветлять/затемнять
+    // градиент, поэтому каждое состояние прописывает свои собственные
+    // stop-точки.
     //
-    // Paddings below are %1/%2/%3 placeholders for kSpacingSm/Md/Lg
-    // (filled in via .arg() at the end) rather than hardcoded numbers,
-    // so QSS spacing can't silently drift from the same scale the C++
-    // layout code uses.
+    // Отступы (padding) ниже — это плейсхолдеры %1/%2/%3 для
+    // kSpacingSm/Md/Lg (подставляются через .arg() в конце), а не
+    // зашитые числа, так что отступы в QSS не могут незаметно
+    // разойтись с той же шкалой, которую использует код layout'а на C++.
     return QStringLiteral(R"(
         QMainWindow, QDialog {
             background-color: #1c1e21;

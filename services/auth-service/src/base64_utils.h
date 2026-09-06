@@ -6,12 +6,12 @@
 
 namespace base64_utils {
 
-/// Encodes @p data as unpadded base64url (RFC 4648 §5), as used in the
-/// token format: '+' -> '-', '/' -> '_', no trailing '='.
+/// Кодирует @p data в base64url без дополнения (RFC 4648 §5), как это
+/// используется в формате токена: '+' -> '-', '/' -> '_', без завершающего '='.
 [[nodiscard]] std::string encodeUrl(const std::vector<uint8_t>& data);
 
-/// Decodes unpadded base64url text produced by encodeUrl().
-/// @return The decoded bytes, or an empty vector if @p text is malformed.
+/// Декодирует base64url-текст без дополнения, произведённый encodeUrl().
+/// @return Декодированные байты, либо пустой вектор, если @p text некорректен.
 [[nodiscard]] std::vector<uint8_t> decodeUrl(const std::string& text);
 
 }  // namespace base64_utils

@@ -17,11 +17,11 @@
 
 #include <cstdlib>
 
-// Requires the full live stack: auth-service, user-service, chat-service
-// (REST + WebSocket), and both Postgres instances (see docker-compose.yml).
-// Skips itself rather than failing when it isn't running — CI doesn't
-// currently orchestrate all of this together, so this is a manual/local
-// end-to-end check.
+// Требует полного живого стека: auth-service, user-service, chat-service
+// (REST + WebSocket) и оба экземпляра Postgres (см. docker-compose.yml).
+// Пропускает себя вместо падения, если стек не запущен — CI сейчас не
+// оркестрирует всё это вместе, поэтому это ручная/локальная сквозная
+// (end-to-end) проверка.
 
 namespace devicehub {
 namespace {
@@ -31,8 +31,9 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
     return value != nullptr ? std::string(value) : defaultValue;
 }
 
-// user-service registration isn't part of ChatRestClient's scope (that
-// client only talks to chat-service), so this stays a one-off helper.
+// Регистрация в user-service не входит в зону ответственности ChatRestClient
+// (этот клиент общается только с chat-service), поэтому остаётся отдельным
+// одноразовым хэлпером.
 bool registerTestUser(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& login,
                        const QString& password) {
     QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/register"))));
@@ -149,8 +150,8 @@ TEST(ChatClientIntegrationTest, ConnectSendAndReceiveRoundTrip) {
     EXPECT_EQ(receivedBody, QStringLiteral("hello from ChatClientIntegrationTest"));
     ASSERT_GT(receivedId, 0);
 
-    // issue #107: editing and deleting that same message round-trips
-    // through the live server too.
+    // issue #107: редактирование и удаление того же сообщения тоже проходит
+    // полный цикл через живой сервер.
     QString editedBody;
     QString editedAt;
     {
@@ -354,7 +355,7 @@ TEST(ChatClientIntegrationTest, SearchMessagesFindsPostedMessageAgainstLiveStack
         loop.exec();
     }
 
-    // Post two messages, only one of which contains the search term.
+    // Отправляем два сообщения, из которых искомый термин содержит только одно.
     {
         QEventLoop loop;
         QTimer::singleShot(3000, &loop, &QEventLoop::quit);
@@ -482,7 +483,7 @@ TEST(ChatClientIntegrationTest, DisconnectFromChannelStopsFurtherMessageDelivery
 
     chatClientA.disconnectFromChannel();
 
-    // Give the disconnect a moment to actually take effect before B posts.
+    // Даём отключению немного времени реально вступить в силу, прежде чем B отправит сообщение.
     {
         QEventLoop loop;
         QTimer::singleShot(300, &loop, &QEventLoop::quit);
@@ -512,9 +513,9 @@ TEST(ChatClientIntegrationTest, DisconnectFromChannelStopsFurtherMessageDelivery
 }
 
 TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly) {
-    // Exercises joinCall/leaveCall/sendCallSignal and their matching
-    // signals directly on ChatClient — decoupled from CallManager/WebRTC
-    // and real audio/camera hardware, unlike CallManagerIntegrationTest.
+    // Проверяет joinCall/leaveCall/sendCallSignal и соответствующие им
+    // сигналы напрямую на ChatClient — в отрыве от CallManager/WebRTC и
+    // реального аудио/камера-железа, в отличие от CallManagerIntegrationTest.
     const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
     const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
     const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
@@ -600,7 +601,7 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
         loop.exec();
     }
 
-    // A joins the call first — empty roster.
+    // A присоединяется к звонку первым — список участников пуст.
     QStringList rosterForA;
     bool rosterForAFired = false;
     {
@@ -617,7 +618,7 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
     ASSERT_TRUE(rosterForAFired);
     EXPECT_TRUE(rosterForA.isEmpty());
 
-    // B joins second — sees A, and A is notified of B.
+    // B присоединяется вторым — видит A, а A получает уведомление о B.
     QString peerJoinedOnA;
     QObject::connect(&chatClientA, &ChatClient::callPeerJoined, &chatClientA,
                       [&](const QString& login) { peerJoinedOnA = login; });
@@ -635,7 +636,7 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
     ASSERT_EQ(rosterForB.size(), 1);
     EXPECT_EQ(rosterForB[0], loginA);
 
-    // Give A's queued callPeerJoined a moment to arrive.
+    // Даём поставленному в очередь callPeerJoined у A время дойти.
     {
         QEventLoop loop;
         QTimer::singleShot(300, &loop, &QEventLoop::quit);
@@ -643,7 +644,7 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
     }
     EXPECT_EQ(peerJoinedOnA, loginB);
 
-    // B signals A directly — A receives it via callSignalReceived.
+    // B сигналит A напрямую — A получает это через callSignalReceived.
     QString signalFrom;
     QJsonObject signalPayload;
     {
@@ -661,7 +662,7 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
     EXPECT_EQ(signalFrom, loginB);
     EXPECT_EQ(signalPayload.value("sdp").toString(), QStringLiteral("fake-sdp-direct-test"));
 
-    // B leaves — A is notified.
+    // B выходит из звонка — A получает уведомление.
     QString peerLeftOnA;
     {
         QEventLoop loop;

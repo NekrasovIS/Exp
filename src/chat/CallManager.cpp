@@ -26,11 +26,12 @@
 
 namespace devicehub {
 
-/// webrtc::PeerConnectionObserver adapter — every callback fires on
-/// WebRTC's signaling thread and immediately hops back to CallManager's
-/// own (GUI) thread via QMetaObject::invokeMethod before touching any
-/// shared state; see the class doc comment on CallManager for why that's
-/// safe even if CallManager is destroyed mid-flight.
+/// Адаптер webrtc::PeerConnectionObserver — каждый колбэк срабатывает на
+/// signaling-потоке WebRTC и немедленно перепрыгивает обратно на
+/// собственный (GUI) поток CallManager через QMetaObject::invokeMethod
+/// прежде чем трогать какое-либо общее состояние; почему это безопасно
+/// даже если CallManager будет разрушен в процессе — см. doc-комментарий
+/// класса CallManager.
 class CallManager::PeerObserver : public webrtc::PeerConnectionObserver {
 public:
     PeerObserver(CallManager& manager, QString peerLogin) : manager_(manager), peerLogin_(std::move(peerLogin)) {}
@@ -39,15 +40,16 @@ public:
     void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface> /*dataChannel*/) override {}
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState /*newState*/) override {}
 
-    // OnRenegotiationNeeded() is deliberately left at its inherited
-    // no-op: CallManager always knows exactly when it changed a
-    // connection's tracks (it's the one calling AddTrack()), so it
-    // negotiates explicitly right there instead — see enableVideo().
-    // Reacting to this notification too raced with that explicit call
-    // for the very first AddTrack() in ensurePeerConnection() (both
-    // land on negotiateLocal() for the same peer moments apart),
-    // stacking a second offer on top of the first and corrupting the
-    // exchange — caught by live testing, not just theorized.
+    // OnRenegotiationNeeded() намеренно оставлен унаследованным no-op:
+    // CallManager всегда точно знает, когда он изменил треки
+    // соединения (это именно он вызывает AddTrack()), поэтому вместо
+    // этого он согласовывает явно прямо там же — см. enableVideo().
+    // Реакция ещё и на это уведомление создавала гонку с этим явным
+    // вызовом для самого первого AddTrack() в ensurePeerConnection()
+    // (оба попадают в negotiateLocal() для одного и того же пира с
+    // разницей в мгновения), накладывая второй offer поверх первого и
+    // повреждая обмен — обнаружено живым тестированием, а не просто
+    // предполагалось теоретически.
 
     void OnIceCandidate(const webrtc::IceCandidate* candidate) override {
         const QJsonObject payload{
@@ -63,9 +65,10 @@ public:
             Qt::QueuedConnection);
     }
 
-    // Fires when a remote track (audio or video) is added to this
-    // connection — issue #91 only cares about video, handleRemoteTrack()
-    // filters for it. Same GUI-thread hop as every other callback here.
+    // Срабатывает, когда к этому соединению добавляется удалённый трек
+    // (аудио или видео) — issue #91 интересует только видео,
+    // handleRemoteTrack() фильтрует именно по нему. Тот же переход на
+    // GUI-поток, что и у любого другого колбэка здесь.
     void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override {
         CallManager* manager = &manager_;
         const QString peerLogin = peerLogin_;
@@ -79,12 +82,13 @@ private:
     QString peerLogin_;
 };
 
-/// webrtc::VideoSinkInterface adapter for a remote peer's incoming video
-/// track (issue #91) — the receive-side counterpart to
-/// CallVideoTrackSource's send-side ARGBToI420 conversion. OnFrame()
-/// fires on a WebRTC decode/render thread, not the GUI thread, so —
-/// same as PeerObserver above — it hops back via
-/// QMetaObject::invokeMethod before touching CallManager.
+/// Адаптер webrtc::VideoSinkInterface для входящего видеотрека
+/// удалённого пира (issue #91) — приёмный аналог отправляющей
+/// конвертации ARGBToI420 из CallVideoTrackSource. OnFrame()
+/// срабатывает на потоке декодирования/рендеринга WebRTC, а не на
+/// GUI-потоке, поэтому — так же, как PeerObserver выше — он
+/// перепрыгивает обратно через QMetaObject::invokeMethod прежде чем
+/// трогать CallManager.
 class CallManager::RemoteVideoSink : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
     RemoteVideoSink(CallManager& manager, QString peerLogin) : manager_(manager), peerLogin_(std::move(peerLogin)) {}
@@ -176,12 +180,13 @@ void CallManager::joinCall(const QAudioDevice& inputDevice, const QAudioDevice& 
     }
     ensureFactory();
 
-    // A null device (e.g. nothing selected/enumerated) has an all-zero
-    // preferredFormat() — feeding a 0 channel count into WebRTC's audio
-    // pipeline is a hard crash there (fatal CHECK), not a graceful
-    // failure, so this has to be caught here first. The call still
-    // proceeds without local audio playout — mesh signaling doesn't
-    // depend on it.
+    // У null-устройства (например, ничего не выбрано/не перечислено)
+    // preferredFormat() полностью нулевой — передача количества
+    // каналов 0 в аудио-конвейер WebRTC там приводит к жёсткому крашу
+    // (фатальный CHECK), а не к плавному отказу, поэтому это нужно
+    // отловить здесь заранее. Звонок при этом всё равно продолжается
+    // без локального воспроизведения аудио — mesh-сигналинг от него не
+    // зависит.
     if (outputDevice.isNull()) {
         emit callError(tr("No audio output device selected — call will be silent"));
     } else {
@@ -232,24 +237,26 @@ void CallManager::ensureLocalVideoTrack() {
     }
     videoTrackSource_ = webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
     localVideoTrack_ = peerConnectionFactory_->CreateVideoTrack(videoTrackSource_, "call-video0");
-    // First-ever enableVideo()/enableScreenShare() call: attach the
-    // (new) track to every peer connection that already exists, and
-    // negotiate that change explicitly right here (the same pattern
-    // ensurePeerConnection()/onCallRosterReceived() already use for the
-    // initial audio track — see the class doc comment for why this
-    // stays explicit rather than reacting to WebRTC's own
-    // OnRenegotiationNeeded() notification). Any connection created
-    // after this point picks up the track as part of its own initial
-    // offer/answer instead (see ensurePeerConnection()).
+    // Самый первый вызов enableVideo()/enableScreenShare(): подключаем
+    // (новый) трек ко всем уже существующим соединениям с пирами и
+    // явно согласовываем это изменение прямо здесь (тот же паттерн,
+    // что уже используют ensurePeerConnection()/onCallRosterReceived()
+    // для изначального аудиотрека — почему это остаётся явным, а не
+    // реакцией на собственное уведомление WebRTC
+    // OnRenegotiationNeeded(), см. doc-комментарий класса). Любое
+    // соединение, созданное после этого момента, вместо этого
+    // подхватывает трек как часть своего собственного изначального
+    // offer/answer (см. ensurePeerConnection()).
     //
-    // Later toggles just flip set_enabled() below, deliberately never
-    // removing the track again — RemoveTrackOrError() hit a real fatal
-    // assertion inside WebRTC's own codec-list handling during live
-    // testing (media/base/codec_list.cc, "Check failed: present_codec
-    // == codec"). set_enabled(false) achieves the same practical effect
-    // (no video sent) via the exact mechanism setMuted() already uses
-    // for audio, without touching tracks (and thus needing
-    // renegotiation) at all.
+    // Последующие переключения просто дёргают set_enabled() ниже,
+    // намеренно никогда больше не удаляя трек — RemoveTrackOrError()
+    // приводил к реальному фатальному assert внутри обработки списка
+    // кодеков самого WebRTC при живом тестировании
+    // (media/base/codec_list.cc, "Check failed: present_codec ==
+    // codec"). set_enabled(false) достигает того же практического
+    // эффекта (видео не отправляется) через тот же самый механизм,
+    // который setMuted() уже использует для аудио, вообще не трогая
+    // треки (и, соответственно, не требуя renegotiation).
     for (auto& [login, entry] : peers_) {
         attachVideoTrack(entry);
         negotiateLocal(QString::fromStdString(login));
@@ -314,9 +321,10 @@ void CallManager::ensureFactory() {
     signalingThread_ = webrtc::Thread::Create();
     signalingThread_->Start();
 
-    // Fires on the ADM's own playout thread (never the Qt GUI thread) —
-    // hop back via invokeMethod before touching audioOutput_, same
-    // pattern as the PeerConnection observer callbacks below.
+    // Срабатывает на собственном потоке воспроизведения ADM (никогда
+    // на GUI-потоке Qt) — перепрыгиваем обратно через invokeMethod
+    // прежде чем трогать audioOutput_, тот же паттерн, что и у колбэков
+    // observer'а PeerConnection ниже.
     audioDeviceModule_ = webrtc::make_ref_counted<CallAudioDeviceModule>(
         [this](const int16_t* samples, size_t frameCount, int /*sampleRateHz*/, size_t channels) {
             QByteArray pcm(reinterpret_cast<const char*>(samples),
@@ -331,12 +339,13 @@ void CallManager::ensureFactory() {
         webrtc::CreateBuiltinVideoEncoderFactory(), webrtc::CreateBuiltinVideoDecoderFactory(),
         /*audio_mixer=*/nullptr, /*audio_processing=*/nullptr);
 
-    // WebRTC's echo canceller needs an accurate render-signal delay
-    // estimate to time-align what it's currently playing out against
-    // what the mic just captured — feeding it 0 (this class used to)
-    // is worse than disabling it outright when there's real playout
-    // buffering, which there is (AudioOutputDevice's streaming path).
-    // Left at APM defaults (enabled) now that the delay is reported.
+    // Эхоподавителю WebRTC нужна точная оценка задержки render-сигнала,
+    // чтобы синхронизировать по времени то, что сейчас воспроизводится,
+    // с тем, что микрофон только что захватил — передавать ему 0 (как
+    // раньше делал этот класс) хуже, чем вовсе отключить его, когда
+    // реальная буферизация воспроизведения есть (а она есть — потоковый
+    // путь AudioOutputDevice). Оставлено на значениях APM по умолчанию
+    // (включено), раз теперь задержка сообщается.
     audioDeviceModule_->setTotalDelayMs(AudioOutputDevice::streamingBufferDurationMs());
 
     const webrtc::scoped_refptr<webrtc::AudioSourceInterface> audioSource =
@@ -381,10 +390,10 @@ CallManager::PeerConnectionEntry* CallManager::ensurePeerConnection(const QStrin
     }
 
     PeerConnectionEntry& insertedEntry = peers_.emplace(key, std::move(entry)).first->second;
-    // Part of this connection's initial offer/answer, not a separate
-    // renegotiation — if the video track already exists (even
-    // currently disabled), a new peer's connection includes it from
-    // the start.
+    // Часть изначального offer/answer этого соединения, а не отдельная
+    // renegotiation — если видеотрек уже существует (даже сейчас
+    // выключенный), соединение нового пира включает его с самого
+    // начала.
     attachVideoTrack(insertedEntry);
     return &insertedEntry;
 }
@@ -395,9 +404,10 @@ void CallManager::closePeerConnection(const QString& peerLogin) {
         return;
     }
     if (it->second.connection) {
-        // Synchronous per webrtc's contract: no further observer
-        // callbacks occur once Close() returns, so it's then safe to
-        // destroy the observer (via peers_.erase() below).
+        // Синхронно согласно контракту webrtc: после возврата из
+        // Close() дальнейших колбэков observer'а не происходит, поэтому
+        // после этого безопасно разрушить observer (через peers_.erase()
+        // ниже).
         it->second.connection->Close();
     }
     peers_.erase(it);
@@ -408,16 +418,17 @@ void CallManager::negotiateLocal(const QString& peerLogin) {
     if (it == peers_.end() || !it->second.connection) {
         return;
     }
-    // Only stable (nothing pending -> creates an offer) or
-    // have-remote-offer (we just received one -> creates an answer) are
-    // safe states to (re)negotiate from. Skip otherwise — in
-    // particular, have-local-offer means an offer from this function is
-    // already in flight (e.g. AddTrack() firing PeerObserver's
-    // OnRenegotiationNeeded() while an explicit negotiateLocal() call
-    // for the same change is already underway, as happens for the very
-    // first AddTrack() in ensurePeerConnection()) — calling
-    // SetLocalDescription() again on top of it stacks a second offer
-    // and corrupts the exchange, which real live testing caught.
+    // Безопасно (пере)согласовывать только из состояний stable (ничего
+    // не в ожидании -> создаёт offer) или have-remote-offer (мы только
+    // что его получили -> создаёт answer). В остальных случаях
+    // пропускаем — в частности, have-local-offer означает, что offer от
+    // этой функции уже в полёте (например, AddTrack() вызывает
+    // PeerObserver::OnRenegotiationNeeded(), пока явный вызов
+    // negotiateLocal() для того же изменения уже выполняется, как
+    // происходит для самого первого AddTrack() в
+    // ensurePeerConnection()) — повторный вызов SetLocalDescription()
+    // поверх него накладывает второй offer и повреждает обмен, что и
+    // обнаружило живое тестирование.
     const webrtc::PeerConnectionInterface::SignalingState state = it->second.connection->signaling_state();
     if (state != webrtc::PeerConnectionInterface::kStable &&
         state != webrtc::PeerConnectionInterface::kHaveRemoteOffer) {
@@ -456,10 +467,11 @@ void CallManager::handleRemoteDescriptionSet(const QString& peerLogin, bool ok, 
     if (it == peers_.end() || !it->second.connection) {
         return;
     }
-    // We just applied a remote offer — respond with an auto-created
-    // answer. If instead we just applied a remote answer to our own
-    // earlier offer, signaling state is back to stable and there's
-    // nothing further to do.
+    // Мы только что применили удалённый offer — отвечаем
+    // автоматически созданным answer. Если же мы вместо этого только
+    // что применили удалённый answer на наш собственный более ранний
+    // offer, signaling-состояние возвращается в stable и делать больше
+    // нечего.
     if (it->second.connection->signaling_state() == webrtc::PeerConnectionInterface::kHaveRemoteOffer) {
         negotiateLocal(peerLogin);
     }
@@ -530,8 +542,9 @@ void CallManager::attachVideoTrack(PeerConnectionEntry& entry) {
 }
 
 void CallManager::onCallRosterReceived(const QStringList& participants) {
-    // New-joiner-always-offers rule: we just joined, so we initiate to
-    // everyone already present.
+    // Правило «новый участник всегда отправляет offer»: мы только что
+    // присоединились, поэтому инициируем соединение со всеми, кто уже
+    // присутствует.
     for (const QString& peerLogin : participants) {
         if (ensurePeerConnection(peerLogin) != nullptr) {
             negotiateLocal(peerLogin);
@@ -540,8 +553,8 @@ void CallManager::onCallRosterReceived(const QStringList& participants) {
 }
 
 void CallManager::onCallPeerJoined(const QString& login) {
-    // Purely informational — the new joiner initiates, we just wait for
-    // their offer via onCallSignalReceived().
+    // Чисто информационно — новый участник инициирует сам, мы просто
+    // ждём его offer через onCallSignalReceived().
     emit participantJoined(login);
 }
 

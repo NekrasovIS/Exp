@@ -10,9 +10,10 @@ namespace password_hash {
 namespace {
 
 void ensureSodiumInitialized() {
-    // sodium_init() is safe to call multiple times; guard with a static
-    // local so concurrent callers only pay for it once (C++11 guarantees
-    // thread-safe initialization of function-local statics).
+    // sodium_init() безопасно вызывать несколько раз; используем статическую
+    // локальную переменную, чтобы конкурентные вызовы оплачивали инициализацию
+    // только один раз (C++11 гарантирует потокобезопасную инициализацию
+    // локальных статических переменных функции).
     static const bool initialized = [] {
         if (sodium_init() < 0) {
             throw std::runtime_error("libsodium failed to initialize");
@@ -30,8 +31,8 @@ std::string hash(const std::string& password) {
     std::array<char, crypto_pwhash_STRBYTES> out{};
     if (crypto_pwhash_str(out.data(), password.c_str(), password.size(), crypto_pwhash_OPSLIMIT_INTERACTIVE,
                            crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0) {
-        // Only fails on resource exhaustion (e.g., can't allocate the
-        // memlimit); not something callers can meaningfully recover from.
+        // Отказывает только при исчерпании ресурсов (например, не удаётся
+        // выделить memlimit); вызывающий код не может осмысленно это исправить.
         throw std::runtime_error("password hashing failed (out of memory)");
     }
 

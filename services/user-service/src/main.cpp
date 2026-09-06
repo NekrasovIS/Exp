@@ -17,8 +17,8 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
 }  // namespace
 
 int main() {
-    // Matches docker-compose.yml's default local Postgres — override for
-    // anything beyond a throwaway local instance.
+    // Соответствует локальному Postgres по умолчанию из docker-compose.yml —
+    // переопределяйте для чего-либо помимо одноразового локального экземпляра.
     const std::string connectionString = envOrDefault(
         "USER_SERVICE_DATABASE_URL", "postgresql://user_service:dev-only-password@localhost:5433/user_service");
     const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");

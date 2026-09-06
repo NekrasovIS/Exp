@@ -32,10 +32,11 @@ void CameraDevice::start() {
         return;
     }
 
-    // Qt only checks camera permission status on its own — it never shows
-    // the macOS prompt unless the app explicitly requests it. Without this,
-    // an Undetermined status just leaves the camera refusing to start with
-    // no error and no prompt ever appearing.
+    // Qt сам по себе только проверяет статус разрешения на камеру — он
+    // никогда не показывает диалог macOS, если приложение явно не
+    // запросит его. Без этого статус Undetermined просто оставляет
+    // камеру отказывающейся запускаться, без ошибки и без появления
+    // диалога.
     switch (qApp->checkPermission(QCameraPermission{})) {
         case Qt::PermissionStatus::Undetermined:
             qApp->requestPermission(QCameraPermission{}, this, [this](const QPermission& permission) {

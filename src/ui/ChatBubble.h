@@ -7,17 +7,19 @@ class QPaintEvent;
 namespace devicehub {
 
 /**
- * @brief Rounded background container for one message bubble's
- *        content — paints its own fill directly with QPainter rather
- *        than relying on QSS, so the corner radius can be derived
- *        from the current font size (em-relative) instead of a fixed
- *        pixel constant baked into a stylesheet.
+ * @brief Контейнер со скруглённым фоном для содержимого одного
+ *        пузыря сообщения — рисует свою заливку напрямую через
+ *        QPainter, а не полагается на QSS, чтобы радиус скругления
+ *        можно было выводить из текущего размера шрифта (в em),
+ *        а не из фиксированной пиксельной константы, зашитой в
+ *        таблицу стилей.
  *
- * Own messages (@p isOwnMessage true) get the app's green accent
- * gradient; everyone else's get a neutral dark surface color. Content
- * (author/time/body labels) is added as normal child widgets in a
- * layout set on this widget by the caller (ChatMessageRow) — this
- * class only owns the background.
+ * Собственные сообщения (@p isOwnMessage true) получают зелёный
+ * акцентный градиент приложения; чужие — нейтральный тёмный цвет
+ * поверхности. Содержимое (метки автора/времени/текста) добавляется
+ * как обычные дочерние виджеты в layout, который вызывающий код
+ * (ChatMessageRow) устанавливает на этом виджете — сам класс отвечает
+ * только за фон.
  */
 class ChatBubble : public QWidget {
     Q_OBJECT

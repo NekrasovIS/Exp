@@ -13,16 +13,17 @@ namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
 constexpr int kDefaultMessageLimit = 50;
-/// Enforced on the *decoded* byte count, not the base64 wire payload
-/// (issue #116) — see ChatRepository's class doc comment for why
-/// attachments are stored as base64 TEXT rather than BYTEA/on-disk.
+/// Применяется к количеству байт *после декодирования*, а не к
+/// передаваемому по проводу base64-payload (issue #116) — см.
+/// doc-комментарий класса ChatRepository о том, почему вложения
+/// хранятся как base64 TEXT, а не как BYTEA/на диске.
 constexpr std::size_t kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
 constexpr int kDefaultSearchLimit = 20;
 
-// Attachment filenames come from an untrusted client (issue #116) and
-// get embedded verbatim into a Content-Disposition response header —
-// strips CR/LF (header/response-splitting injection) and '"' (would
-// otherwise break out of the quoted filename value) before that happens.
+// Имена файлов вложений приходят от недоверенного клиента (issue #116)
+// и встраиваются дословно в заголовок ответа Content-Disposition —
+// перед этим вырезает CR/LF (инъекция типа header/response-splitting) и
+// '"' (иначе позволило бы вырваться из значения имени файла в кавычках).
 std::string sanitizeForHeaderValue(const std::string& value) {
     std::string sanitized;
     sanitized.reserve(value.size());
@@ -34,8 +35,18 @@ std::string sanitizeForHeaderValue(const std::string& value) {
     return sanitized;
 }
 
-nlohmann::json toJson(const Community& community) {
-    return nlohmann::json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
+/// @p includeInviteCode — только для ответов, где вызывающая сторона уже
+/// имеет право знать код (создатель сразу после создания, участник в
+/// GET /communities/mine, issue #186) — не для устаревшего
+/// GET /communities (см. handleListCommunities()), который отдаёт все
+/// сообщества без проверки членства.
+nlohmann::json toJson(const Community& community, bool includeInviteCode) {
+    nlohmann::json json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
+    if (includeInviteCode) {
+        json["invite_code"] =
+            community.inviteCode.has_value() ? nlohmann::json(*community.inviteCode) : nlohmann::json(nullptr);
+    }
+    return json;
 }
 
 nlohmann::json toJson(const Channel& channel) {
@@ -58,10 +69,41 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
                                                                         : nlohmann::json(nullptr)}};
 }
+
+nlohmann::json toJson(const DirectMessageThread& thread) {
+    return nlohmann::json{{"id", thread.id}, {"other_login", thread.otherLogin}, {"created_at", thread.createdAt}};
+}
+
+nlohmann::json toJson(const DirectMessage& message) {
+    return nlohmann::json{{"id", message.id}, {"author", message.authorLogin}, {"body", message.body}, {"sent_at", message.sentAt}};
+}
+
+std::optional<std::string> parseRecipientLogin(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("recipient_login") || !json["recipient_login"].is_string()) {
+        return std::nullopt;
+    }
+    return json["recipient_login"].get<std::string>();
+}
+
+std::optional<std::string> parseMessageBody(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("body") || !json["body"].is_string()) {
+        return std::nullopt;
+    }
+    return json["body"].get<std::string>();
+}
 }  // namespace
 
-HttpServer::HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient)
-    : chatService_(chatService), authServiceClient_(authServiceClient) {
+HttpServer::HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                        const UserServiceClient& userServiceClient)
+    : chatService_(chatService), authServiceClient_(authServiceClient), userServiceClient_(userServiceClient) {
     registerRoutes();
 }
 
@@ -80,6 +122,18 @@ void HttpServer::registerRoutes() {
     server_.Get("/communities", [this](const httplib::Request& request, httplib::Response& response) {
         handleListCommunities(request, response);
     });
+    // Issue #186 — регистрируется раньше /communities/(\d+)/... ниже,
+    // иначе "mine" никогда бы не совпало с ними первым, но здесь это не
+    // играет роли: "mine" — не число, ни один из \d+-маршрутов на него
+    // и не претендует. Порядок сохранён для читаемости (рядом с
+    // остальными /communities-маршрутами), а не по необходимости.
+    server_.Get("/communities/mine", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListMyCommunities(request, response);
+    });
+    server_.Post("/communities/join-by-code",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleJoinCommunityByCode(request, response);
+                  });
     server_.Patch(R"(/communities/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
         handleRenameCommunity(request, response);
     });
@@ -89,6 +143,10 @@ void HttpServer::registerRoutes() {
     server_.Post(R"(/communities/(\d+)/join)",
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleJoinCommunity(request, response);
+                  });
+    server_.Post(R"(/communities/(\d+)/invite/regenerate)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleRegenerateInviteCode(request, response);
                   });
     server_.Post(R"(/communities/(\d+)/channels)",
                   [this](const httplib::Request& request, httplib::Response& response) {
@@ -143,6 +201,20 @@ void HttpServer::registerRoutes() {
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleGetMyChannelKey(request, response);
                  });
+    server_.Post("/dm/threads", [this](const httplib::Request& request, httplib::Response& response) {
+        handleOpenThread(request, response);
+    });
+    server_.Get("/dm/threads", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListMyThreads(request, response);
+    });
+    server_.Post(R"(/dm/threads/(\d+)/messages)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handlePostDirectMessage(request, response);
+                  });
+    server_.Get(R"(/dm/threads/(\d+)/messages)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleListDirectMessages(request, response);
+                 });
 }
 
 void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib::Response& response) {
@@ -166,7 +238,9 @@ void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib:
 
     const Community community = chatService_.createCommunity(body["name"].get<std::string>(), *login);
     response.status = 201;
-    response.set_content(toJson(community).dump(), kJsonContentType);
+    // Создатель сразу видит код приглашения — ему и предстоит его
+    // раздавать (issue #186).
+    response.set_content(toJson(community, /*includeInviteCode=*/true).dump(), kJsonContentType);
 }
 
 void HttpServer::handleListCommunities(const httplib::Request& request, httplib::Response& response) {
@@ -177,9 +251,77 @@ void HttpServer::handleListCommunities(const httplib::Request& request, httplib:
 
     nlohmann::json communities = nlohmann::json::array();
     for (const Community& community : chatService_.listCommunities()) {
-        communities.push_back(toJson(community));
+        communities.push_back(toJson(community, /*includeInviteCode=*/false));
     }
     response.set_content(communities.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListMyCommunities(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json communities = nlohmann::json::array();
+    for (const Community& community : chatService_.listCommunitiesForMember(*login)) {
+        communities.push_back(toJson(community, /*includeInviteCode=*/true));
+    }
+    response.set_content(communities.dump(), kJsonContentType);
+}
+
+void HttpServer::handleJoinCommunityByCode(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("code") || !body["code"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'code' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<Community> community = chatService_.findCommunityByInviteCode(body["code"].get<std::string>());
+    if (!community.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "invalid invite code"}}.dump(), kJsonContentType);
+        return;
+    }
+    // findCommunityByInviteCode() уже подтвердил, что сообщество
+    // существует, так что false здесь означало бы только состояние
+    // гонки — сообщество удалили в промежутке между этими двумя
+    // вызовами — тот же 404, что и на невалидный код изначально, а не
+    // отдельный класс ошибки, который стоило бы различать для клиента.
+    if (!chatService_.joinCommunity(community->id, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "invalid invite code"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(toJson(*community, /*includeInviteCode=*/false).dump(), kJsonContentType);
+}
+
+void HttpServer::handleRegenerateInviteCode(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    const RegenerateInviteCodeResult result = chatService_.regenerateInviteCode(communityId, *login);
+    if (result.result != MutationResult::kSuccess) {
+        writeMutationResult(result.result, response);
+        return;
+    }
+    response.set_content(nlohmann::json{{"invite_code", result.inviteCode}}.dump(), kJsonContentType);
 }
 
 void HttpServer::writeMutationResult(MutationResult result, httplib::Response& response) {
@@ -445,9 +587,9 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
     const auto channelId = std::stoll(request.matches[1].str());
     const std::optional<Channel> channel = chatService_.findChannel(channelId);
     if (channel.has_value() && channel->isEncrypted) {
-        // Attachments aren't encrypted client-side yet in this phase
-        // (issue #138) — rejecting rather than silently storing
-        // plaintext in a channel the UI presents as encrypted.
+        // Вложения ещё не шифруются на стороне клиента на этом этапе
+        // (issue #138) — отклоняем вместо того, чтобы молча хранить
+        // открытый текст в канале, который UI представляет как зашифрованный.
         response.status = 400;
         response.set_content(
             nlohmann::json{{"error", "attachments aren't supported in encrypted channels yet"}}.dump(),
@@ -490,10 +632,11 @@ void HttpServer::handleDownloadAttachment(const httplib::Request& request, httpl
         return;
     }
 
-    // Decoded here rather than stored raw (see ChatRepository's doc
-    // comment) — response.set_content() is binary-safe (tracks length
-    // explicitly, not null-terminated), so the decoded bytes reach the
-    // client exactly as uploaded regardless of content.
+    // Декодируется здесь, а не хранится в сыром виде (см. doc-комментарий
+    // ChatRepository) — response.set_content() бинарно-безопасен (явно
+    // отслеживает длину, а не полагается на null-терминатор), поэтому
+    // декодированные байты доходят до клиента ровно в том виде, в каком
+    // были загружены, независимо от содержимого.
     const std::optional<std::string> decoded = base64::decode(attachment->data);
     if (!decoded.has_value()) {
         response.status = 500;
@@ -521,9 +664,9 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
     const auto channelId = std::stoll(request.matches[1].str());
     const std::optional<Channel> channel = chatService_.findChannel(channelId);
     if (channel.has_value() && channel->isEncrypted) {
-        // Server-side search needs plaintext bodies to match against —
-        // an encrypted channel's stored body is ciphertext, so there's
-        // nothing meaningful to search here (issue #138).
+        // Поиску на стороне сервера нужны открытые тела для сопоставления
+        // — сохранённое тело зашифрованного канала является шифротекстом,
+        // так что искать здесь по существу нечего (issue #138).
         response.status = 400;
         response.set_content(nlohmann::json{{"error", "search isn't available for encrypted channels"}}.dump(),
                               kJsonContentType);
@@ -596,6 +739,121 @@ void HttpServer::handleGetMyChannelKey(const httplib::Request& request, httplib:
         return;
     }
     response.set_content(nlohmann::json{{"wrapped_key", *wrappedKey}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleOpenThread(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const std::optional<std::string> recipientLogin = parseRecipientLogin(request.body);
+    if (!recipientLogin.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'recipient_login' string"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+    if (*recipientLogin == *login) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "cannot message yourself"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    // Дружба принадлежит user-service, не этой базе (issue #187, Фаза
+    // 2) — уже открытый диалог продолжает работать, даже если дружба
+    // позже разорвётся, поэтому проверка только здесь, не в
+    // handlePostDirectMessage()/handleListDirectMessages().
+    if (!userServiceClient_.areFriends(*login, *recipientLogin)) {
+        response.status = 403;
+        response.set_content(nlohmann::json{{"error", "can only message friends"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::int64_t threadId = chatService_.findOrCreateThread(*login, *recipientLogin);
+    response.set_content(nlohmann::json{{"id", threadId}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListMyThreads(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json threads = nlohmann::json::array();
+    for (const DirectMessageThread& thread : chatService_.listMyThreads(*login)) {
+        threads.push_back(toJson(thread));
+    }
+    response.set_content(threads.dump(), kJsonContentType);
+}
+
+void HttpServer::handlePostDirectMessage(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto threadId = std::stoll(request.matches[1].str());
+    // 404, а не 403, для не-участника — не подтверждает существование
+    // чужого диалога (тот же приём приватности, что и у findChannelKey()
+    // выше, просто на уровень строже, поскольку личный диалог — не
+    // полу-публичный канал сообщества).
+    if (!chatService_.isThreadParticipant(threadId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such thread"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> body = parseMessageBody(request.body);
+    if (!body.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'body' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<DirectMessage> message = chatService_.postDirectMessage(threadId, *login, *body);
+    if (!message.has_value()) {
+        // Не должно происходить — isThreadParticipant() выше уже
+        // подтвердил, что threadId существует, а удалить диалог через
+        // этот API нельзя (ни один эндпоинт этого не делает) — но
+        // optional сигнализирует о возможности сбоя, и разыменовывать
+        // его без проверки было бы неопределённым поведением, если это
+        // когда-нибудь перестанет быть верным.
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such thread"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.status = 201;
+    response.set_content(toJson(*message).dump(), kJsonContentType);
+}
+
+void HttpServer::handleListDirectMessages(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto threadId = std::stoll(request.matches[1].str());
+    if (!chatService_.isThreadParticipant(threadId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such thread"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultMessageLimit;
+    const std::optional<std::int64_t> beforeId =
+        request.has_param("before_id") ? std::make_optional(std::stoll(request.get_param_value("before_id")))
+                                        : std::nullopt;
+
+    nlohmann::json messages = nlohmann::json::array();
+    for (const DirectMessage& message : chatService_.listDirectMessages(threadId, limit, beforeId)) {
+        messages.push_back(toJson(message));
+    }
+    response.set_content(messages.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

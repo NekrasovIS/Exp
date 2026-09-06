@@ -122,10 +122,11 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         return;
     }
 
-    // Call-signaling keys are checked first, same key-presence dispatch
-    // style as the rest of this protocol (see ChatClient::onTextMessageReceived
-    // on the DeviceHub side) — falls through to the chat-message path
-    // (expects {"body"}) for anything that isn't one of these.
+    // Ключи сигналинга звонка проверяются первыми, тот же стиль
+    // диспетчеризации по наличию ключа, что и в остальной части этого
+    // протокола (см. ChatClient::onTextMessageReceived на стороне
+    // DeviceHub) — при отсутствии совпадения проваливается в путь
+    // сообщения чата (ожидает {"body"}).
     if (body.contains("call_join")) {
         handleCallJoin(webSocket, subscription);
     } else if (body.contains("call_leave")) {
@@ -150,11 +151,12 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
         return;
     }
 
-    // "attachment_id" (issue #116) is optional — the attachment itself
-    // is uploaded separately over REST (HttpServer::handleUploadAttachment())
-    // first; this frame only references it by id. No ownership check
-    // that the id belongs to this sender/channel — same trust level as
-    // the rest of this protocol (a valid token is the only gate).
+    // "attachment_id" (issue #116) опционален — само вложение
+    // загружается отдельно через REST (HttpServer::handleUploadAttachment())
+    // заранее; этот кадр только ссылается на него по id. Нет проверки
+    // принадлежности, что id относится к этому отправителю/каналу — тот
+    // же уровень доверия, что и в остальной части этого протокола
+    // (действительный токен — единственный барьер).
     const std::optional<std::int64_t> attachmentId =
         (body.contains("attachment_id") && body["attachment_id"].is_number_integer())
             ? std::make_optional(body["attachment_id"].get<std::int64_t>())
@@ -171,12 +173,13 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
 }
 
 namespace {
-/// Shared by handleEditMessage()/handleDeleteMessage(): kNotFound and
-/// kForbidden both go back to the sender only, never broadcast — a
-/// failed edit/delete attempt isn't something other subscribers need
-/// to know about. @p forbiddenMessage differs between the two callers
-/// (issue #114 widened who may delete, but not who may edit — see
-/// ChatRepository::editMessage()'s doc comment).
+/// Используется совместно handleEditMessage()/handleDeleteMessage():
+/// kNotFound и kForbidden оба отправляются только обратно отправителю,
+/// никогда не рассылаются — неудачная попытка редактирования/удаления
+/// не то, о чём нужно знать другим подписчикам. @p forbiddenMessage
+/// различается у двух вызывающих сторон (issue #114 расширил круг тех,
+/// кто может удалять, но не тех, кто может редактировать — см.
+/// doc-комментарий ChatRepository::editMessage()).
 bool respondIfMutationFailed(ix::WebSocket& webSocket, MutationResult result, const char* forbiddenMessage) {
     switch (result) {
         case MutationResult::kNotFound:
@@ -308,12 +311,13 @@ void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix
 
 void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::string& json,
                                           const ix::WebSocket* excludeSocket) {
-    // Collect the target list under the lock, then send() outside it (CP.22:
-    // never call unknown/third-party code — ix::WebSocket::send() does
-    // network I/O — while holding a lock; also CP.43, minimize time in a
-    // critical section). shared_ptr copies keep each target alive
-    // regardless of what happens to subscriptions_/server_'s own client
-    // list between releasing the lock and sending.
+    // Собираем список адресатов под локом, затем вызываем send() уже вне
+    // его (CP.22: никогда не вызывать неизвестный/сторонний код —
+    // ix::WebSocket::send() выполняет сетевой I/O — удерживая лок; также
+    // CP.43, минимизировать время в критической секции). Копии shared_ptr
+    // удерживают каждый адресат живым независимо от того, что происходит
+    // с subscriptions_/собственным списком клиентов server_ между
+    // освобождением лока и отправкой.
     std::vector<std::shared_ptr<ix::WebSocket>> targets;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
@@ -334,13 +338,14 @@ void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::stri
 
 void WebSocketServer::broadcastToCallParticipants(std::int64_t channelId, const std::string& json,
                                                    const ix::WebSocket* excludeSocket) {
-    // Same CP.22/CP.43 reasoning as broadcastToChannel() above. Unlike
-    // there, callParticipants_ stores non-owning ix::WebSocket* (see its
-    // doc comment) rather than shared_ptr, so this doesn't extend that
-    // pointer's validity window beyond what the rest of this class
-    // already assumes elsewhere (e.g. removeCallParticipant() also acts
-    // on a raw socket pointer after releasing this same lock) — only
-    // narrows how long subscriptionsMutex_ itself stays held.
+    // То же рассуждение CP.22/CP.43, что и у broadcastToChannel() выше.
+    // В отличие от него, callParticipants_ хранит не владеющий
+    // ix::WebSocket* (см. её doc-комментарий), а не shared_ptr, поэтому
+    // это не расширяет окно действительности этого указателя сверх того,
+    // что остальная часть класса уже предполагает в других местах
+    // (например, removeCallParticipant() тоже оперирует сырым указателем
+    // на сокет после освобождения того же лока) — лишь сокращает время,
+    // в течение которого удерживается сам subscriptionsMutex_.
     std::vector<ix::WebSocket*> targets;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);

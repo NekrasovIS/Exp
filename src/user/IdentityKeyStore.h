@@ -7,27 +7,31 @@
 
 namespace devicehub {
 
-/// Generates and persists this account's long-term X25519 identity
-/// keypair locally (issue #136, E2E encryption Phase 1) — the private
-/// key never leaves this store; only publicKeyBase64() is meant to be
-/// sent anywhere (via UserProfileClient::publishPublicKey()).
+/// Генерирует и сохраняет локально долгоживущую пару ключей идентичности
+/// X25519 этого аккаунта (issue #136, E2E-шифрование, Phase 1) —
+/// приватный ключ никогда не покидает это хранилище; отправлять куда-либо
+/// предназначен только publicKeyBase64() (через
+/// UserProfileClient::publishPublicKey()).
 ///
-/// One keypair per login, stored under a caller-supplied directory
-/// (normally QStandardPaths::AppDataLocation — passed in rather than
-/// hardcoded so tests can point it at a temp directory). Losing this
-/// file means losing access to anything encrypted to this identity: no
-/// backup/recovery/multi-device support in this phase (see issue #136).
+/// Одна пара ключей на логин, хранится в каталоге, переданном
+/// вызывающим кодом (обычно QStandardPaths::AppDataLocation — передаётся
+/// снаружи, а не захардкожен, чтобы тесты могли указать на временный
+/// каталог). Потеря этого файла означает потерю доступа ко всему,
+/// зашифрованному для этой идентичности: на этом этапе нет поддержки
+/// резервного копирования/восстановления/нескольких устройств (см.
+/// issue #136).
 class IdentityKeyStore {
 public:
-    /// Loads the keypair for @p login from @p storageDir, generating and
-    /// persisting a new one on first use.
+    /// Загружает пару ключей для @p login из @p storageDir, при первом
+    /// использовании генерируя и сохраняя новую.
     IdentityKeyStore(QString storageDir, QString login);
 
-    /// Base64-encoded X25519 public key — safe to publish.
+    /// Публичный ключ X25519 в base64 — безопасно публиковать.
     [[nodiscard]] QString publicKeyBase64() const;
 
-    /// Raw 32-byte X25519 secret key — for future local decrypt/unwrap
-    /// operations (E2E Phase 2+); never sent over the network.
+    /// Сырой 32-байтовый секретный ключ X25519 — для будущих локальных
+    /// операций расшифровки/распечатывания (E2E Phase 2+); никогда не
+    /// отправляется по сети.
     [[nodiscard]] QByteArray secretKeyBytes() const;
 
 private:
@@ -37,7 +41,7 @@ private:
     unsigned char secretKey_[crypto_box_SECRETKEYBYTES] = {};
 
     [[nodiscard]] QString keyFilePath() const;
-    /// @return True if an existing key file was found and loaded.
+    /// @return True, если существующий файл ключа был найден и загружен.
     bool loadIfExists();
     void generateAndPersist();
 };

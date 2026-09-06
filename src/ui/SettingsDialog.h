@@ -11,12 +11,13 @@ class QVideoWidget;
 namespace devicehub {
 
 /**
- * @brief Device settings: audio output, microphone, camera, screen
- *        capture — one tab each, opened from FooterBar's gear button.
+ * @brief Настройки устройств: вывод аудио, микрофон, камера, захват
+ *        экрана — по одной вкладке на каждое, открывается кнопкой-
+ *        шестерёнкой у FooterBar.
  *
- * Pure presentation (identical controls to the old top-level tabs, just
- * relocated into a dialog) — MainWindow still owns the device objects
- * and all the wiring.
+ * Чистое представление (те же элементы управления, что были на старых
+ * вкладках верхнего уровня, просто перенесённые в диалог) — MainWindow
+ * по-прежнему владеет объектами устройств и всей связующей логикой.
  */
 class SettingsDialog : public QDialog {
     Q_OBJECT

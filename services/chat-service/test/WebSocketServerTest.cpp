@@ -21,10 +21,11 @@
 #include <string>
 #include <vector>
 
-// Requires a live Postgres (see docker-compose.yml, chat-service-postgres)
-// AND a live auth-service (to mint real tokens for the hello handshake).
-// Skips itself rather than failing when either isn't reachable — see
-// ChatServiceIntegrationTest.cpp for the same pattern.
+// Требует работающий Postgres (см. docker-compose.yml,
+// chat-service-postgres) И работающий auth-service (для выпуска
+// настоящих токенов для hello-рукопожатия). Пропускает себя, а не
+// падает, если что-то из этого недоступно — см. ChatServiceIntegrationTest.cpp
+// за тем же паттерном.
 
 namespace chat_service {
 namespace {
@@ -40,8 +41,8 @@ std::string uniqueSuffix() {
             .count());
 }
 
-/// Registers a brand-new user against a live auth-service and returns
-/// its token, or std::nullopt if auth-service isn't reachable.
+/// Регистрирует нового пользователя в работающем auth-service и
+/// возвращает его токен, либо std::nullopt, если auth-service недоступен.
 std::optional<std::string> registerAndGetToken(const std::string& host, int port, const std::string& login) {
     httplib::Client client(host, port);
     const nlohmann::json body{{"login", login}, {"password", "ws-test-password"}};
@@ -56,9 +57,10 @@ std::optional<std::string> registerAndGetToken(const std::string& host, int port
     return response["token"].get<std::string>();
 }
 
-/// Minimal synchronous test client over ix::WebSocket — queues every
-/// received JSON frame so a test can wait for the one it expects
-/// without racing ixwebsocket's own callback thread.
+/// Минимальный синхронный тестовый клиент поверх ix::WebSocket —
+/// ставит в очередь каждый полученный JSON-кадр, чтобы тест мог ждать
+/// именно тот, который ожидает, не гоняясь наперегонки с собственным
+/// потоком колбэков ixwebsocket.
 class WsTestClient {
 public:
     explicit WsTestClient(const std::string& url) {
@@ -86,7 +88,7 @@ public:
 
     ~WsTestClient() { socket_.stop(); }
 
-    /// Blocks until the connection's Open event fires (or times out).
+    /// Блокируется до срабатывания события Open соединения (или до тайм-аута).
     [[nodiscard]] bool waitConnected(int timeoutMs = 3000) {
         std::unique_lock<std::mutex> lock(mutex_);
         return cv_.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return connected_; });
@@ -94,14 +96,16 @@ public:
 
     void send(const nlohmann::json& frame) { socket_.sendText(frame.dump()); }
 
-    /// Sends a raw text frame without going through nlohmann::json::dump()
-    /// — a real attacker's client isn't necessarily built on nlohmann, so
-    /// this is what actually simulates hostile-but-valid-JSON-syntax bytes
-    /// arriving at the server's own nlohmann::json::parse() unmodified.
+    /// Отправляет сырой текстовый кадр, минуя nlohmann::json::dump() —
+    /// клиент реального атакующего не обязательно построен на nlohmann,
+    /// так что это то, что действительно имитирует враждебные, но
+    /// синтаксически валидные JSON-байты, доходящие до собственного
+    /// nlohmann::json::parse() сервера без изменений.
     void sendRaw(const std::string& text) { socket_.sendText(text); }
 
-    /// Waits up to @p timeoutMs for a queued message matching @p predicate,
-    /// consuming and returning it; std::nullopt on timeout.
+    /// Ждёт до @p timeoutMs поставленное в очередь сообщение,
+    /// соответствующее @p predicate, забирая и возвращая его;
+    /// std::nullopt по истечении тайм-аута.
     std::optional<nlohmann::json> waitFor(const std::function<bool(const nlohmann::json&)>& predicate,
                                            int timeoutMs = 3000) {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -178,14 +182,14 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
     clientB.send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channelId}});
     ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
 
-    // A joins the call first — sees an empty roster (no one else there yet).
+    // A присоединяется к звонку первым — видит пустой список участников (больше пока никого нет).
     clientA.send(nlohmann::json{{"call_join", true}});
     const std::optional<nlohmann::json> rosterA =
         clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); });
     ASSERT_TRUE(rosterA.has_value());
     EXPECT_TRUE((*rosterA)["call_roster"].empty());
 
-    // B joins second — sees A in its roster, and A gets notified of B.
+    // B присоединяется вторым — видит A в своём списке участников, а A получает уведомление о B.
     clientB.send(nlohmann::json{{"call_join", true}});
     const std::optional<nlohmann::json> rosterB =
         clientB.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); });
@@ -198,7 +202,7 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
     ASSERT_TRUE(peerJoined.has_value());
     EXPECT_EQ((*peerJoined)["call_peer_joined"].get<std::string>(), loginB);
 
-    // Mesh rule: the newer joiner (B) offers to the peer already present (A).
+    // Правило mesh-топологии: тот, кто присоединился позже (B), делает offer уже присутствующему участнику (A).
     clientB.send(nlohmann::json{
         {"call_signal", {{"to", loginA}, {"payload", {{"kind", "offer"}, {"sdp", "fake-sdp"}}}}}});
     const std::optional<nlohmann::json> signalOnA =
@@ -207,12 +211,12 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
     EXPECT_EQ((*signalOnA)["call_signal"]["from"].get<std::string>(), loginB);
     EXPECT_EQ((*signalOnA)["call_signal"]["payload"]["sdp"].get<std::string>(), "fake-sdp");
 
-    // Signaling to someone not in the call is rejected, not silently dropped.
+    // Сигналинг тому, кто не в звонке, отклоняется, а не молча отбрасывается.
     clientA.send(
         nlohmann::json{{"call_signal", {{"to", "nobody-" + suffix}, {"payload", nlohmann::json::object()}}}});
     EXPECT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("error"); }).has_value());
 
-    // B leaves — A is notified.
+    // B покидает звонок — A получает уведомление.
     clientB.send(nlohmann::json{{"call_leave", true}});
     const std::optional<nlohmann::json> peerLeft =
         clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_left"); });
@@ -235,7 +239,7 @@ TEST(WebSocketServerTest, HelloWithMissingFieldsIsRejectedWithError) {
     ChatService service(repository);
     const std::string suffix = uniqueSuffix();
 
-    // Reachability probe, same pattern as CallJoinRosterSignalAndLeave.
+    // Проверка доступности, тот же паттерн, что и в CallJoinRosterSignalAndLeave.
     try {
         static_cast<void>(service.createCommunity("ws-hello-test-probe-" + suffix, "ws-hello-test-owner-" + suffix));
     } catch (const std::exception& error) {
@@ -249,7 +253,7 @@ TEST(WebSocketServerTest, HelloWithMissingFieldsIsRejectedWithError) {
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
     ASSERT_TRUE(client.waitConnected());
 
-    // Missing "channel_id".
+    // Отсутствует "channel_id".
     client.send(nlohmann::json{{"token", "irrelevant"}});
     const std::optional<nlohmann::json> error =
         client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
@@ -296,18 +300,18 @@ TEST(WebSocketServerTest, HelloWithInvalidTokenIsRejectedWithError) {
     server.stop();
 }
 
-// Interim stand-in for real coverage-guided fuzzing (issue #121 — libFuzzer
-// needs clang-cl, unavailable in this environment's MSVC toolchain): a
-// battery of adversarial-but-syntactically-parseable frames — wrong field
-// types, an int64_t overflow, nested/non-object payloads, empty strings —
-// aimed at the client-controlled dispatch in handleSubscribedMessage()
-// (issue #46 and later). The property under test is that the *process*
-// stays alive and responsive: an uncaught nlohmann::json exception
-// escaping the ix::WebSocket message callback would std::terminate the
-// whole chat-service, taking down every other connected client with it,
-// so surviving all of them and still answering the final well-formed
-// frame is what "pass" means here — each individual frame isn't expected
-// to succeed.
+// Временная замена настоящему fuzzing'у, управляемому покрытием (issue
+// #121 — libFuzzer требует clang-cl, недоступный в тулчейне MSVC этого
+// окружения): батарея враждебных, но синтаксически разбираемых кадров —
+// неверные типы полей, переполнение int64_t, вложенные/не-объектные
+// payload'ы, пустые строки — нацеленных на управляемую клиентом
+// диспетчеризацию в handleSubscribedMessage() (issue #46 и последующие).
+// Проверяемое свойство — что *процесс* остаётся живым и отвечающим:
+// неперехваченное исключение nlohmann::json, вырвавшееся из колбэка
+// сообщений ix::WebSocket, вызвало бы std::terminate всего chat-service,
+// утянув за собой всех остальных подключённых клиентов, так что пережить
+// их все и всё ещё ответить на финальный корректно сформированный кадр —
+// вот что здесь значит "пройден"; от каждого отдельного кадра успех не ожидается.
 TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
     ix::initNetSystem();
 
@@ -357,8 +361,8 @@ TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
         nlohmann::json{{"call_signal", {{"to", ""}, {"payload", nullptr}}}},
         nlohmann::json{{"edit_message", "not an object"}},
         nlohmann::json{{"edit_message", {{"id", "not-a-number"}, {"body", "x"}}}},
-        // int64_t::max() + 1 — is_number_integer() is true (parsed as
-        // number_unsigned), but get<int64_t>() can throw on overflow.
+        // int64_t::max() + 1 — is_number_integer() истинно (разбирается
+        // как number_unsigned), но get<int64_t>() может бросить исключение при переполнении.
         nlohmann::json{{"edit_message", {{"id", 9223372036854775808ULL}, {"body", "x"}}}},
         nlohmann::json{{"delete_message", nlohmann::json::array()}},
         nlohmann::json{{"delete_message", {{"id", -9223372036854775807LL - 1}}}},
@@ -374,18 +378,20 @@ TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
         client.send(frame);
     }
 
-    // Deeply nested raw payload — guards against nlohmann::json::parse()'s
-    // recursive descent blowing the stack on attacker-controlled nesting
-    // depth. Built as a raw string (not via nlohmann::json::dump(), which
-    // recurses just as deeply on the *sending* side) since a real attacker
-    // isn't necessarily sending bytes produced by nlohmann at all.
+    // Сильно вложенный сырой payload — проверяет защиту от переполнения
+    // стека рекурсивным спуском nlohmann::json::parse() на глубине
+    // вложенности, контролируемой атакующим. Построен как сырая строка
+    // (не через nlohmann::json::dump(), который рекурсирует так же
+    // глубоко на *отправляющей* стороне), поскольку реальный атакующий
+    // не обязательно вообще отправляет байты, произведённые nlohmann.
     std::string deeplyNestedFrame(500, '[');
     deeplyNestedFrame.append(500, ']');
     client.sendRaw(deeplyNestedFrame);
 
-    // Positive liveness check: if the process survived all of the above,
-    // a well-formed chat message sent afterward still gets broadcast back
-    // (same round trip as ChatMessageIsBroadcastToAllSubscribersIncludingSender).
+    // Позитивная проверка живости: если процесс пережил всё вышеперечисленное,
+    // корректно сформированное сообщение чата, отправленное после этого,
+    // всё ещё рассылается обратно (тот же round trip, что и в
+    // ChatMessageIsBroadcastToAllSubscribersIncludingSender).
     client.send(nlohmann::json{{"body", "still alive after the adversarial batch"}});
     const std::optional<nlohmann::json> echo = client.waitFor([](const nlohmann::json& m) {
         return m.contains("body") && m["body"] == "still alive after the adversarial batch";
@@ -552,13 +558,13 @@ TEST(WebSocketServerTest, ModeratorCanDeleteAnotherSubscribersMessageButNotEditI
     ASSERT_TRUE(posted.has_value());
     const auto messageId = (*posted)["id"].get<std::int64_t>();
 
-    // The moderator may not edit it — same authorship-only rule as
-    // before issue #114.
+    // Модератор не может её редактировать — то же правило "только автор",
+    // что и до issue #114.
     moderator.send(nlohmann::json{{"edit_message", {{"id", messageId}, {"body", "hijacked"}}}});
     ASSERT_TRUE(moderator.waitFor([](const nlohmann::json& m) { return m.contains("error"); }).has_value());
 
-    // But the moderator CAN delete it — broadcast to every subscriber,
-    // including the original author.
+    // Но модератор МОЖЕТ его удалить — рассылка каждому подписчику,
+    // включая исходного автора.
     moderator.send(nlohmann::json{{"delete_message", {{"id", messageId}}}});
     const std::optional<nlohmann::json> deletedOnAuthor =
         author.waitFor([](const nlohmann::json& m) { return m.contains("message_deleted"); });
@@ -674,8 +680,8 @@ TEST(WebSocketServerTest, DisconnectWithoutLeaveNotifiesRemainingCallParticipant
     ASSERT_TRUE(clientB->waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
     ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_joined"); }).has_value());
 
-    // B disconnects without ever sending call_leave — A should still be
-    // notified via the Close/Error cleanup path in handleMessage().
+    // B отключается, ни разу не отправив call_leave — A всё равно должен
+    // получить уведомление через путь очистки Close/Error в handleMessage().
     clientB.reset();
     const std::optional<nlohmann::json> peerLeft =
         clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_left"); });

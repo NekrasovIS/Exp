@@ -49,8 +49,8 @@ TEST(ChatViewMessageHistoryTest, PrependMessagesInsertsAboveExistingContent) {
 
     QLayout* layout = view.messagesContainer()->layout();
     ASSERT_NE(layout, nullptr);
-    // Two message rows, oldest first — prependMessages() inserted
-    // before the message that was appended earlier, not after it.
+    // Две строки сообщений, сначала самое старое — prependMessages() вставил
+    // сообщение перед тем, что было добавлено ранее через appendMessage(), а не после.
     ASSERT_GE(layout->count(), 2);
     EXPECT_NE(layout->itemAt(0)->widget(), nullptr);
     EXPECT_NE(layout->itemAt(1)->widget(), nullptr);

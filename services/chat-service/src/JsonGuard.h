@@ -4,18 +4,20 @@
 
 namespace chat_service::json_guard {
 
-/// Nesting depth generous enough for every message this protocol actually
-/// sends (a few levels deep at most, e.g. call_signal's nested payload)
-/// while staying far short of what it takes to stack-overflow
-/// nlohmann::json's recursive-descent parser.
+/// Глубина вложенности с запасом, достаточным для любого сообщения,
+/// реально отправляемого этим протоколом (максимум несколько уровней,
+/// например вложенный payload call_signal), но при этом далеко от того,
+/// что нужно для переполнения стека рекурсивно-нисходящего парсера
+/// nlohmann::json.
 inline constexpr int kMaxNestingDepth = 32;
 
-/// Returns true if @p payload's bracket/brace nesting (outside string
-/// literals) exceeds @p maxDepth. Meant to be checked before handing
-/// attacker-controlled bytes to nlohmann::json::parse(): its recursive-
-/// descent parser stack-overflows the whole process on deeply nested
-/// input (e.g. `[[[[...]]]]`) well before any size limit would catch it,
-/// since a few hundred bytes are enough to reach thousands of levels.
+/// Возвращает true, если вложенность скобок/фигурных скобок @p payload
+/// (вне строковых литералов) превышает @p maxDepth. Предназначено для
+/// проверки перед передачей контролируемых атакующим байтов в
+/// nlohmann::json::parse(): её рекурсивно-нисходящий парсер переполняет
+/// стек всего процесса на сильно вложенном вводе (например, `[[[[...]]]]`)
+/// задолго до того, как это поймало бы любое ограничение по размеру, —
+/// нескольких сотен байт достаточно, чтобы достичь тысяч уровней вложенности.
 [[nodiscard]] bool exceedsMaxNestingDepth(std::string_view payload, int maxDepth);
 
 }  // namespace chat_service::json_guard

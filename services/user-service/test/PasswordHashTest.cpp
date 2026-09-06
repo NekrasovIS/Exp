@@ -34,9 +34,9 @@ TEST(PasswordHashTest, EmptyPasswordHashesAndVerifies) {
 }
 
 TEST(PasswordHashTest, HashAtOrOverStrbytesBoundaryIsRejectedNotCrashed) {
-    // verify() explicitly guards against hash.size() >= crypto_pwhash_STRBYTES
-    // before ever calling into libsodium — this exercises that boundary
-    // directly rather than relying on a real hash happening to be shorter.
+    // verify() явно защищается от hash.size() >= crypto_pwhash_STRBYTES
+    // ещё до вызова libsodium — этот тест напрямую проверяет данную границу,
+    // а не полагается на то, что реальный хеш случайно окажется короче.
     const std::string tooLong(static_cast<size_t>(crypto_pwhash_STRBYTES), 'x');
     EXPECT_FALSE(password_hash::verify(tooLong, "anything"));
 }

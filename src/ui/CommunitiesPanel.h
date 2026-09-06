@@ -10,18 +10,31 @@ class QPushButton;
 
 namespace devicehub {
 
+class CommunityConnectDialog;
+
 /**
- * @brief Narrow icon rail on the far left of the sidebar: one avatar
- *        badge per community (first letter, green gradient), a
- *        refresh button on top and a "+" button pinned to the bottom
- *        to create one; right-click for join/rename/delete.
+ * @brief Узкая иконочная полоса в самом левом краю боковой панели:
+ *        кнопка "Friends" (issue #187) сверху, по одному значку-аватару
+ *        на сообщество (первая буква, зелёный градиент), кнопка
+ *        обновления и кнопка "+" внизу, открывающая CommunityConnectDialog
+ *        (присоединение по коду приглашения или создание нового, issue
+ *        #186); правый клик — для переименования/удаления/копирования
+ *        кода приглашения.
  *
- * Pure presentation — owns no network state. MainWindow feeds it the
- * current community list and the signed-in user's login (so it can
- * decide whether to offer rename/delete for a given item — those are
- * owner-only server-side too, this just avoids showing actions that
- * would only come back as a 403) and reacts to the request signals by
- * calling ChatRestClient itself.
+ * Список (issue #186) — только сообщества, в которых уже состоит
+ * вошедший пользователь, а не все существующие: подключиться к новому
+ * теперь можно только по коду приглашения, не выбором из общего
+ * списка — отсюда и переход от "Join" в контекстном меню (нужен был
+ * общий список, чтобы вообще увидеть, что присоединять) к
+ * CommunityConnectDialog.
+ *
+ * Чистое представление — не владеет никаким сетевым состоянием.
+ * MainWindow передаёт ей текущий список сообществ и логин вошедшего
+ * пользователя (чтобы решить, предлагать ли переименование/удаление
+ * для конкретного элемента — на сервере это тоже разрешено только
+ * владельцу, здесь это просто избавляет от показа действий, которые
+ * всё равно вернут только 403) и реагирует на сигналы запросов, сама
+ * вызывая ChatRestClient.
  */
 class CommunitiesPanel : public QWidget {
     Q_OBJECT
@@ -29,31 +42,45 @@ class CommunitiesPanel : public QWidget {
 public:
     explicit CommunitiesPanel(QWidget* parent = nullptr);
 
-    /// Replaces the list contents.
+    /// Заменяет содержимое списка.
     void setCommunities(const QList<ChatItem>& communities);
 
-    /// Selects the item with @p id, if present, without emitting
-    /// communitySelected() — used to reflect a selection MainWindow
-    /// already decided on (e.g. auto-selecting a freshly created
-    /// community) without re-triggering the same request.
+    /// Выбирает элемент с @p id, если он есть, не порождая при этом
+    /// communitySelected() — используется, чтобы отразить выбор,
+    /// который MainWindow уже сделал сам (например, автовыбор только
+    /// что созданного сообщества), не вызывая повторно тот же запрос.
     void selectCommunityId(qint64 id);
 
-    /// Needed to decide whether to offer rename/delete for an item.
+    /// Нужно, чтобы решить, предлагать ли переименование/удаление
+    /// для элемента.
     void setCurrentUserLogin(const QString& login);
 
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
     [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
+    [[nodiscard]] QPushButton* friendsButton() const { return friendsButton_; }
+    [[nodiscard]] CommunityConnectDialog* connectDialog() const { return connectDialog_; }
 
 signals:
     void createRequested(const QString& name);
     void renameRequested(qint64 id, const QString& newName);
     void deleteRequested(qint64 id);
-    void joinRequested(qint64 id);
-    /// "Manage Moderators…" clicked (owner-only, issue #114) — @p name
-    /// lets MainWindow title the dialog without a separate lookup.
+    /// Клик по "Join" в CommunityConnectDialog (issue #186) — заменяет
+    /// прежний joinRequested(qint64 id): до ответа сервера вызывающая
+    /// сторона знает только код, не id сообщества.
+    void joinByCodeRequested(const QString& code);
+    /// Клик по "Regenerate Invite Code" в контекстном меню (issue #186,
+    /// только для владельца — прежний код @p id сразу перестаёт
+    /// работать).
+    void regenerateInviteCodeRequested(qint64 id);
+    /// Клик по "Manage Moderators…" (только для владельца, issue #114)
+    /// — @p name позволяет MainWindow озаглавить диалог без отдельного
+    /// поиска.
     void manageModeratorsRequested(qint64 id, const QString& name);
     void communitySelected(qint64 id);
+    /// Клик по кнопке "Friends" (issue #187) — переключает MainWindow в
+    /// режим друзей/личных сообщений вместо сообществ/каналов.
+    void friendsRequested();
 
 private:
     void showAddDialog();
@@ -62,6 +89,8 @@ private:
     QListWidget* listWidget_ = nullptr;
     QPushButton* addButton_ = nullptr;
     QPushButton* refreshButton_ = nullptr;
+    QPushButton* friendsButton_ = nullptr;
+    CommunityConnectDialog* connectDialog_ = nullptr;
     QString currentUserLogin_;
 };
 

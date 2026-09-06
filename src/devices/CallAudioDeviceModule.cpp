@@ -40,10 +40,11 @@ void CallAudioDeviceModule::pushCapturedAudio(const int16_t* samples, size_t fra
         return;
     }
     uint32_t newMicLevel = 0;
-    // nBytesPerSample here means bytes per interleaved frame across all
-    // channels, not per individual scalar sample — WebRTC's own
-    // AudioTransportImpl asserts sizeof(int16_t) * nChannels ==
-    // nBytesPerSample and aborts (fatal CHECK) if it doesn't hold.
+    // nBytesPerSample здесь означает байты на чередующийся кадр по всем
+    // каналам, а не на отдельный скалярный сэмпл — собственный
+    // AudioTransportImpl у WebRTC проверяет условие sizeof(int16_t) *
+    // nChannels == nBytesPerSample и аварийно завершается (фатальный
+    // CHECK), если оно не выполняется.
     callback->RecordedDataIsAvailable(samples, frameCount, sizeof(int16_t) * channels, channels,
                                        static_cast<uint32_t>(sampleRateHz),
                                        static_cast<uint32_t>(totalDelayMs_.load()), /*clockDrift=*/0,
@@ -74,20 +75,21 @@ bool CallAudioDeviceModule::PlayoutIsInitialized() const {
     return playoutInitialized_.load();
 }
 
-// WebRTC calls Start/StopPlayout serially from its own worker thread, never
-// concurrently with each other — no extra locking around playoutThread_
-// itself beyond the atomics governing its loop.
+// WebRTC вызывает Start/StopPlayout последовательно на своём собственном
+// worker-потоке, никогда не параллельно друг с другом — дополнительная
+// блокировка вокруг самого playoutThread_ не нужна сверх атомиков,
+// управляющих его циклом.
 int32_t CallAudioDeviceModule::StartPlayout() {
     if (!playoutInitialized_.load() || playing_.load()) {
         return 0;
     }
     playing_.store(true);
-    // Not std::jthread(&CallAudioDeviceModule::playoutLoop, this): jthread
-    // inserts the stop_token as the argument right after the callable, which
-    // for a pointer-to-member-function lands in the *object* slot, not
-    // after it — silently falls back to calling playoutLoop() with no
-    // stop_token at all (ill-formed here, since it now takes one). A
-    // lambda sidesteps the ambiguity entirely.
+    // Не std::jthread(&CallAudioDeviceModule::playoutLoop, this):
+    // jthread вставляет stop_token как аргумент сразу после callable,
+    // что для указателя на метод класса попадает в слот *объекта*, а не
+    // после него — молча откатывается к вызову playoutLoop() вовсе без
+    // stop_token (что здесь некорректно, поскольку теперь метод его
+    // принимает). Лямбда полностью обходит эту неоднозначность.
     playoutThread_ = std::jthread([this](std::stop_token stopToken) { playoutLoop(std::move(stopToken)); });
     return 0;
 }
@@ -134,21 +136,24 @@ bool CallAudioDeviceModule::Recording() const {
 }
 
 void CallAudioDeviceModule::playoutLoop(std::stop_token stopToken) {
-    // Fixed for the lifetime of one playout session, per setPlayoutFormat()'s
-    // documented precondition (set before StartPlayout(), not touched again
-    // until it stops).
+    // Фиксировано на всё время жизни одной сессии воспроизведения,
+    // согласно задокументированному предусловию setPlayoutFormat()
+    // (устанавливается до StartPlayout(), больше не трогается до
+    // остановки).
     const int sampleRateHz = playoutSampleRateHz_;
     const size_t channels = playoutChannels_;
     const size_t framesPerBuffer = static_cast<size_t>(sampleRateHz) * kPlayoutIntervalMs / 1000;
 
     std::vector<int16_t> buffer(framesPerBuffer * channels);
-    // sleep_until against a fixed-cadence anchor rather than
-    // sleep_for(10ms) after each iteration — sleep_for lets whatever
-    // this iteration's work (plus the OS's own wake-up latency) cost
-    // get added on top of the next 10ms wait every single time, which
-    // drifts the loop below real-time under any sustained system load
-    // and starves the playout sink over time (audible as crackling),
-    // not just the occasional jitter a bigger sink buffer can absorb.
+    // sleep_until относительно якоря с фиксированным шагом вместо
+    // sleep_for(10ms) после каждой итерации — sleep_for позволяет
+    // стоимости работы текущей итерации (плюс собственной задержке
+    // пробуждения ОС) каждый раз добавляться поверх следующего
+    // 10-миллисекундного ожидания, из-за чего цикл постепенно отстаёт
+    // от реального времени при любой устойчивой нагрузке на систему и
+    // со временем морит playout sink голодом (слышно как
+    // потрескивание), а не просто изредка дрожит, что мог бы поглотить
+    // больший буфер sink'а.
     auto nextTick = std::chrono::steady_clock::now();
     while (!stopToken.stop_requested()) {
         nextTick += std::chrono::milliseconds(kPlayoutIntervalMs);
@@ -157,8 +162,8 @@ void CallAudioDeviceModule::playoutLoop(std::stop_token stopToken) {
             size_t samplesOut = 0;
             int64_t elapsedTimeMs = 0;
             int64_t ntpTimeMs = 0;
-            // Same nBytesPerSample-means-bytes-per-frame convention as
-            // RecordedDataIsAvailable() above.
+            // Та же конвенция «nBytesPerSample означает байты на кадр»,
+            // что и у RecordedDataIsAvailable() выше.
             const int32_t result = callback->NeedMorePlayData(framesPerBuffer, sizeof(int16_t) * channels, channels,
                                                                 static_cast<uint32_t>(sampleRateHz), buffer.data(),
                                                                 samplesOut, &elapsedTimeMs, &ntpTimeMs);

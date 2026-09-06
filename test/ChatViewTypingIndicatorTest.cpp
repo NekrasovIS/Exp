@@ -10,8 +10,9 @@
 namespace devicehub {
 namespace {
 
-/// Spins the event loop for @p ms so queued timer events (like the
-/// typing indicator's auto-hide/throttle timers) actually fire.
+/// Крутит цикл событий в течение @p ms, чтобы поставленные в очередь события
+/// таймеров (например, таймеры авто-скрытия/троттлинга индикатора набора
+/// текста) успели сработать.
 void waitMs(int ms) {
     QEventLoop loop;
     QTimer::singleShot(ms, &loop, &QEventLoop::quit);

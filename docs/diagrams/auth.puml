@@ -10,14 +10,17 @@ class AuthClient {
   +verifyToken(token: QString)
   +registerUser(login: QString, password: QString)
   +refreshAccessToken(refreshToken: QString)
+  +requestOtp(identifier: QString)
+  +verifyOtp(identifier: QString, code: QString)
   .. signals ..
   +tokenReceived(token: QString, refreshToken: QString, expiresAt: qint64)
   +tokenVerified(valid: bool, subject: QString)
   +registrationCompleted(registered: bool)
   +errorOccurred(message: QString)
+  +otpRequested(identifier: QString)
 }
 AuthClient *-- QNetworkAccessManager : owns
-AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register,\nPOST /auth/refresh
+AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register,\nPOST /auth/refresh,\nPOST /auth/otp/request,\nPOST /auth/otp/verify
 
 note left of AuthClient
   registerUser() success also emits
@@ -45,6 +48,17 @@ note right of AuthClient
   immediately, result comes back
   via signals. Never blocks the
   GUI thread on a network round trip.
+end note
+
+note bottom of AuthClient
+  issue #156: requestOtp()/verifyOtp() —
+  вход по одноразовому коду через email.
+  verifyOtp() success тоже эмитит
+  tokenReceived(), тот же путь, что и
+  requestToken()/registerUser(). Требует,
+  чтобы у аккаунта уже был задан email
+  (профиль на user-service) — своего
+  passwordless-регистрационного flow нет.
 end note
 
 @enduml

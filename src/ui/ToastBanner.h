@@ -8,14 +8,15 @@ class QTimer;
 namespace devicehub {
 
 /**
- * @brief Transient, non-modal feedback banner floating over its parent
- *        (top-inset, full width) — used for CRUD success/error/info
- *        messages that a QMainWindow::statusBar() line is too easy to
- *        miss.
+ * @brief Временный немодальный баннер обратной связи, плавающий над
+ *        своим родителем (отступ сверху, на всю ширину) — используется
+ *        для сообщений об успехе/ошибке/информации CRUD-операций,
+ *        которые легко пропустить в строке QMainWindow::statusBar().
  *
- * Positions itself via an event filter on the parent (repositions on
- * resize) rather than participating in the parent's layout, since it
- * needs to float above whatever content is already there.
+ * Позиционирует себя через фильтр событий на родителе (перепозициони-
+ * руется при изменении размера), а не участвует в layout'е родителя,
+ * поскольку ему нужно плавать поверх всего содержимого, которое там уже
+ * есть.
  */
 class ToastBanner : public QWidget {
     Q_OBJECT
@@ -23,13 +24,13 @@ class ToastBanner : public QWidget {
 public:
     enum class Variant { kSuccess, kError, kInfo };
 
-    /// @p parent is the widget the banner floats over (e.g. ChatView) —
-    /// must not be null.
+    /// @p parent — виджет, над которым плавает баннер (например,
+    /// ChatView) — не должен быть null.
     explicit ToastBanner(QWidget* parent);
 
-    /// Shows @p text for @p timeoutMs milliseconds, styled per @p variant.
-    /// Calling again while already visible restarts the timeout with the
-    /// new text/variant.
+    /// Показывает @p text в течение @p timeoutMs миллисекунд,
+    /// оформленный согласно @p variant. Повторный вызов, пока баннер уже
+    /// виден, перезапускает таймаут с новым текстом/вариантом.
     void showMessage(const QString& text, Variant variant, int timeoutMs);
 
 protected:

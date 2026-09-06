@@ -10,20 +10,62 @@ struct UserProfile {
   +displayName: QString
   +avatarUrl: QString
   +publicKey: QString
+  +email: QString
+  +telegramChatId: QString
+}
+
+struct ProfileEdits {
+  +displayName: QString
+  +avatarUrl: QString
+  +email: QString
+  +telegramChatId: QString
+}
+
+struct FriendRequestInfo {
+  +id: qint64
+  +requesterLogin: QString
+  +createdAt: QString
 }
 
 class UserProfileClient {
   +fetchProfile(token: QString, login: QString)
-  +updateOwnProfile(token: QString, displayName: QString, avatarUrl: QString)
+  +updateOwnProfile(token: QString, edits: ProfileEdits)
   +publishPublicKey(token: QString, publicKey: QString)
+  +sendFriendRequest(token: QString, recipientLogin: QString)
+  +listIncomingFriendRequests(token: QString)
+  +acceptFriendRequest(token: QString, requestId: qint64)
+  +declineFriendRequest(token: QString, requestId: qint64)
+  +listFriends(token: QString)
+  +removeFriend(token: QString, login: QString)
   .. signals ..
   +profileReceived(profile: UserProfile)
   +profileUpdated(profile: UserProfile)
+  +friendRequestSent(recipientLogin: QString, status: QString)
+  +incomingFriendRequestsListed(requests: QList<FriendRequestInfo>)
+  +friendRequestAccepted(requestId: qint64)
+  +friendRequestDeclined(requestId: qint64)
+  +friendsListed(logins: QStringList)
+  +friendRemoved(login: QString)
   +errorOccurred(message: QString)
 }
 UserProfileClient *-- QNetworkAccessManager : owns
 UserProfileClient ..> UserProfile : emits
+UserProfileClient ..> ProfileEdits : updateOwnProfile() >
+UserProfileClient ..> FriendRequestInfo : emits (issue #187, Фаза 3)
 UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
+UserProfileClient ..> "user-service" : POST /friends/requests,\nGET /friends/requests,\nPOST /friends/requests/{id}/accept|decline,\nGET /friends, DELETE /friends/{login}\n(issue #187)
+note bottom of ProfileEdits
+  issue #156/#174: email/telegramChatId —
+  заданы, значит, вход по одноразовому
+  коду доступен через этот канал для
+  этого аккаунта (Telegram в приоритете
+  на сервере, если задан и настроен);
+  сгруппированы с displayName/avatarUrl
+  в структуру (правило проекта про
+  количество аргументов — четыре
+  однотипных QString подряд легко
+  перепутать местами).
+end note
 
 package "libsodium" {
   class "crypto_box_keypair()" as CryptoBoxKeypair

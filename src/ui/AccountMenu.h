@@ -10,11 +10,13 @@ class QPushButton;
 namespace devicehub {
 
 /**
- * @brief Top-right account control: a button that toggles a popup with
- *        login/password fields, a "get token" action, and auth status.
+ * @brief Элемент управления аккаунтом в правом верхнем углу: кнопка,
+ *        открывающая всплывающее окно с полями логина/пароля, действием
+ *        "получить токен" и статусом авторизации.
  *
- * Pure presentation (the same controls the old Authorization tab exposed,
- * just relocated) — MainWindow still owns AuthClient and all the wiring.
+ * Чистое представление (те же элементы управления, что были на старой
+ * вкладке Authorization, просто перенесённые) — MainWindow по-прежнему
+ * владеет AuthClient и всей связующей логикой.
  */
 class AccountMenu : public QWidget {
     Q_OBJECT
@@ -30,9 +32,9 @@ public:
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
     [[nodiscard]] QPushButton* toggleButton() const { return toggleButton_; }
 
-    /// Only meaningful while signed in — MainWindow enables it once
-    /// AuthClient::tokenVerified() reports a valid token, disables it
-    /// otherwise (issue #110).
+    /// Имеет смысл только при выполненном входе — MainWindow включает её,
+    /// как только AuthClient::tokenVerified() сообщает о валидном токене,
+    /// и отключает в противном случае (issue #110).
     void setEditProfileEnabled(bool enabled);
 
 private:

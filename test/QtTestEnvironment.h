@@ -8,12 +8,12 @@
 namespace devicehub_test {
 
 /**
- * @brief Shared GTest environment providing a live QApplication.
+ * @brief Общее для всех тестов GTest-окружение, предоставляющее живой QApplication.
  *
- * Qt Widgets (MainWindow), Qt Multimedia device enumeration, and
- * QGuiApplication::screens() all need a live application instance to
- * initialize their backends — GTest's own main() alone isn't enough.
- * Shared across test files rather than duplicated per file.
+ * Qt Widgets (MainWindow), перечисление устройств Qt Multimedia и
+ * QGuiApplication::screens() — всем им нужен живой экземпляр приложения для
+ * инициализации своих бэкендов — одного main() из GTest недостаточно.
+ * Используется совместно всеми тестовыми файлами, а не дублируется в каждом.
  */
 class QtTestEnvironment : public ::testing::Environment {
 public:

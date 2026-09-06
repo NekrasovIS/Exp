@@ -8,29 +8,33 @@
 namespace auth_service {
 
 /**
- * @brief Fixed-window request rate limiter, keyed by an arbitrary
- *        string (in practice, the client's remote address) — issue
- *        #102, applied to auth-service's credential-checking routes
- *        (/auth/token, /auth/register) to slow down brute-force
- *        guessing and account-creation spam.
+ * @brief Ограничитель частоты запросов с фиксированным окном, ключом
+ *        служит произвольная строка (на практике — адрес клиента) —
+ *        issue #102, применяется к маршрутам auth-service, проверяющим
+ *        учётные данные (/auth/token, /auth/register), чтобы замедлить
+ *        подбор паролей методом brute-force и спам созданием аккаунтов.
  *
- * Thread-safe: HttpServer may dispatch onto multiple threads (same as
- * TokenService/UserServiceClient). First-pass tradeoff, not solved
- * here: windows_ grows by one entry per distinct key ever seen and is
- * never evicted, so a long-running process accumulates memory
- * proportional to the number of distinct client addresses it's ever
- * seen — acceptable for now, revisit if this ever actually matters.
+ * Потокобезопасен: HttpServer может диспетчеризовать запросы на
+ * несколько потоков (как и TokenService/UserServiceClient). Компромисс
+ * первого прохода, не решённый здесь: windows_ растёт на одну запись
+ * на каждый когда-либо встреченный уникальный ключ и никогда не
+ * очищается, поэтому долго работающий процесс накапливает память
+ * пропорционально числу когда-либо виденных уникальных клиентских
+ * адресов — приемлемо на данный момент, вернуться к этому, если это
+ * действительно станет проблемой.
  */
 class RateLimiter {
 public:
-    /// @p window as milliseconds (not seconds) so tests can use a
-    /// sub-second window and stay fast/deterministic rather than
-    /// sleeping a real second to observe a window reset.
+    /// @p window задаётся в миллисекундах (а не в секундах), чтобы тесты
+    /// могли использовать окно короче секунды и оставаться быстрыми и
+    /// детерминированными, а не ждать реальную секунду, чтобы увидеть
+    /// сброс окна.
     RateLimiter(int maxRequestsPerWindow, std::chrono::milliseconds window);
 
-    /// True if @p key is still under its limit for the current window
-    /// (and counts this call towards it); false if it's already at the
-    /// limit — the caller should reject the request (e.g. HTTP 429).
+    /// True, если @p key всё ещё не превысил лимит для текущего окна
+    /// (и этот вызов засчитывается в счётчик); false, если лимит уже
+    /// исчерпан — вызывающий код должен отклонить запрос (например,
+    /// вернуть HTTP 429).
     [[nodiscard]] bool allow(const std::string& key);
 
 private:
