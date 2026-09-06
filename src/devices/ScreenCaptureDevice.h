@@ -1,31 +1,36 @@
 #pragma once
 
-#include <QMediaCaptureSession>
 #include <QObject>
 #include <QVideoFrame>
-#include <QVideoSink>
 #include <memory>
 
 class QScreen;
-class QScreenCapture;
 
 namespace devicehub {
 
+class IScreenCaptureBackend;
+
 /**
- * @brief Владеет QScreenCapture и его сессией захвата для выбранного
- *        экрана.
+ * @brief Кросс-платформенный фасад захвата экрана.
  *
- * Отражает CameraDevice: QMediaCaptureSession поддерживает только один
- * video sink одновременно, поэтому этот класс сам владеет этим
- * единственным sink'ом и переиспускает каждый кадр через
- * frameAvailable(), а не открывает сессию наружу для прямого
- * подключения виджета — потребитель, желающий его отобразить (превью в
- * настройках, демонстрация экрана в звонках — issue #112), вместо этого
- * проталкивает кадры в свой собственный QVideoSink/цель. Это позволяет
- * и локальному виджету превью, и исходящему видео звонка делить один
- * захват экрана — тот же паттерн «один владелец одновременно», что уже
- * используется для CameraDevice/AudioInputDevice/AudioOutputDevice (см.
- * их doc-комментарии).
+ * Сам не обращается к API конкретной ОС — делегирует
+ * IScreenCaptureBackend (WindowsScreenCaptureBackend на Windows; на
+ * прочих платформах пока не реализовано, см. конструктор), выбранному
+ * ровно в одной точке (конструкторе), а не разбросанными по бизнес-
+ * логике #ifdef (см. «Кроссплатформенность» в CLAUDE.md).
+ *
+ * До issue #154 здесь использовался Qt6 QScreenCapture — заменён,
+ * потому что в этой сборке Qt6 Multimedia (vcpkg) backend захвата
+ * экрана для Windows не собран (QScreenCapture::start() возвращал
+ * NotSupportedError на любом экране; см. диагностику в issue).
+ *
+ * Отражает CameraDevice: только один потребитель кадров одновременно
+ * технически не требуется здесь (в отличие от QMediaCaptureSession),
+ * но сохранён тот же паттерн одного владельца, переизлучающего кадры
+ * через frameAvailable() всем интересующимся (превью в настройках,
+ * демонстрация экрана в звонках — issue #112) — тот же принцип, что и
+ * у CameraDevice/AudioInputDevice/AudioOutputDevice (см. их doc-
+ * комментарии).
  */
 class ScreenCaptureDevice : public QObject {
     Q_OBJECT
@@ -46,12 +51,6 @@ public:
     /// @return True, пока экран активно захватывается.
     [[nodiscard]] bool isActive() const;
 
-    /// @return Сессия захвата — для чего угодно, кроме подключения
-    /// video sink/вывода (этот класс уже владеет тем единственным
-    /// слотом, что допускает QMediaCaptureSession); например, оставлено
-    /// для будущей настройки на уровне сессии захвата.
-    [[nodiscard]] QMediaCaptureSession& captureSession();
-
 signals:
     /// Испускается для каждого захваченного кадра, независимо от того,
     /// чем занят захват экрана.
@@ -61,9 +60,7 @@ signals:
     void errorOccurred(const QString& message);
 
 private:
-    std::unique_ptr<QScreenCapture> screenCapture_;
-    QMediaCaptureSession captureSession_;
-    QVideoSink videoSink_;
+    std::unique_ptr<IScreenCaptureBackend> backend_;
 };
 
 }  // namespace devicehub

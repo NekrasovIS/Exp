@@ -20,6 +20,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -34,7 +35,9 @@
 #include "ui/ChatView.h"
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
+#include "ui/DirectMessageView.h"
 #include "ui/FooterBar.h"
+#include "ui/FriendsPanel.h"
 #include "ui/LoginWindow.h"
 #include "ui/ModeratorsDialog.h"
 #include "ui/ProfileDialog.h"
@@ -50,6 +53,10 @@ constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
 constexpr const char* kDefaultUserServiceUrl = "http://127.0.0.1:8081";
 constexpr int kToastTimeoutMs = 4000;
+/// Интервал поллинга нового сообщения в открытом диалоге личных
+/// сообщений (issue #187, Фаза 3) — backend этой фазы (Фаза 2) не
+/// доставляет их через WebSocket, только REST-история.
+constexpr int kDmPollIntervalMs = 4000;
 /// За сколько до фактического истечения срока действия access-токена
 /// обменивать refresh-токен (issue #105) — небольшой запас, чтобы
 /// обмен, выполняемый в фоне, успел завершиться прежде, чем что-либо,
@@ -79,6 +86,12 @@ MainWindow::MainWindow(QWidget* parent)
             authClient_.refreshAccessToken(refreshToken_);
         }
     });
+
+    // Issue #187, Фаза 2b (живая доставка через WebSocket) ещё не
+    // сделана на backend'е — поллинг каждые несколько секунд вместо
+    // неё, пока открыт какой-либо диалог (см. pollOpenDmThread()).
+    dmPollTimer_ = new QTimer(this);
+    connect(dmPollTimer_, &QTimer::timeout, this, &MainWindow::pollOpenDmThread);
 
     connect(settingsDialog_->playToneButton(), &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
     connect(settingsDialog_->toggleMicButton(), &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
@@ -120,6 +133,12 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&userProfileClient_, &UserProfileClient::errorOccurred, this, [this](const QString& message) {
         profileDialog_->statusLabel()->setText(tr("Error: %1").arg(message));
+        // Общий для профиля и заявок в друзья (issue #187) — в отличие
+        // от статус-лейбла ProfileDialog, тост виден независимо от
+        // того, открыт ли этот диалог, что важно именно для ошибок
+        // заявок в друзья (например, "already friends"), которые
+        // случаются в режиме Friends, а не в ProfileDialog.
+        showToast(tr("Error: %1").arg(message), ToastBanner::Variant::kError);
     });
     connect(&audioInput_, &AudioInputDevice::levelChanged, settingsDialog_->micLevelBar(), [this](float level) {
         settingsDialog_->micLevelBar()->setValue(static_cast<int>(level * 100.0f));
@@ -319,13 +338,22 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QString& newName) { chatRestClient_.renameCommunity(lastToken_, id, newName); });
     connect(communitiesPanel_, &CommunitiesPanel::deleteRequested, this,
             [this](qint64 id) { chatRestClient_.deleteCommunity(lastToken_, id); });
-    connect(communitiesPanel_, &CommunitiesPanel::joinRequested, this,
-            [this](qint64 id) { chatRestClient_.joinCommunity(lastToken_, id); });
+    connect(communitiesPanel_, &CommunitiesPanel::joinByCodeRequested, this, [this](const QString& code) {
+        if (lastToken_.isEmpty()) {
+            showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+            return;
+        }
+        chatRestClient_.joinCommunityByCode(lastToken_, code);
+    });
+    connect(communitiesPanel_, &CommunitiesPanel::regenerateInviteCodeRequested, this,
+            [this](qint64 id) { chatRestClient_.regenerateInviteCode(lastToken_, id); });
     connect(communitiesPanel_, &CommunitiesPanel::communitySelected, this, [this](qint64 id) {
+        showCommunitiesMode();
         selectedCommunityId_ = id;
         closeChatView();
         refreshChannelsForSelectedCommunity();
     });
+    connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::showFriendsMode);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
                 moderatorsDialog_->setCommunity(id, name);
@@ -338,6 +366,95 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QString& login) { chatRestClient_.promoteModerator(lastToken_, id, login); });
     connect(moderatorsDialog_, &ModeratorsDialog::demoteRequested, this,
             [this](qint64 id, const QString& login) { chatRestClient_.demoteModerator(lastToken_, id, login); });
+
+    connect(friendsPanel_, &FriendsPanel::friendSelected, this, &MainWindow::openDmThreadWith);
+    connect(friendsPanel_, &FriendsPanel::addFriendRequested, this, [this](const QString& login) {
+        if (lastToken_.isEmpty()) {
+            showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+            return;
+        }
+        userProfileClient_.sendFriendRequest(lastToken_, login);
+    });
+    connect(friendsPanel_, &FriendsPanel::acceptRequestRequested, this,
+            [this](qint64 requestId) { userProfileClient_.acceptFriendRequest(lastToken_, requestId); });
+    connect(friendsPanel_, &FriendsPanel::declineRequestRequested, this,
+            [this](qint64 requestId) { userProfileClient_.declineFriendRequest(lastToken_, requestId); });
+    connect(friendsPanel_, &FriendsPanel::removeFriendRequested, this,
+            [this](const QString& login) { userProfileClient_.removeFriend(lastToken_, login); });
+
+    connect(&userProfileClient_, &UserProfileClient::friendRequestSent, this,
+            [this](const QString& recipientLogin, const QString& status) {
+                showToast(status == QStringLiteral("accepted")
+                              ? tr("You and '%1' are now friends").arg(recipientLogin)
+                              : tr("Friend request sent to '%1'").arg(recipientLogin),
+                          ToastBanner::Variant::kSuccess);
+                userProfileClient_.listFriends(lastToken_);
+                userProfileClient_.listIncomingFriendRequests(lastToken_);
+            });
+    connect(&userProfileClient_, &UserProfileClient::incomingFriendRequestsListed, this,
+            [this](const QList<FriendRequestInfo>& requests) { friendsPanel_->setIncomingRequests(requests); });
+    connect(&userProfileClient_, &UserProfileClient::friendRequestAccepted, this, [this](qint64) {
+        showToast(tr("Friend request accepted"), ToastBanner::Variant::kSuccess);
+        userProfileClient_.listFriends(lastToken_);
+        userProfileClient_.listIncomingFriendRequests(lastToken_);
+    });
+    connect(&userProfileClient_, &UserProfileClient::friendRequestDeclined, this, [this](qint64) {
+        userProfileClient_.listIncomingFriendRequests(lastToken_);
+    });
+    connect(&userProfileClient_, &UserProfileClient::friendsListed, this,
+            [this](const QStringList& logins) { friendsPanel_->setFriends(logins); });
+    connect(&userProfileClient_, &UserProfileClient::friendRemoved, this, [this](const QString&) {
+        userProfileClient_.listFriends(lastToken_);
+    });
+
+    connect(&chatRestClient_, &ChatRestClient::dmThreadOpened, this, [this](qint64 id, const QString& otherLogin) {
+        openDmThreadId_ = id;
+        openDmOtherLogin_ = otherLogin;
+        dmHistoryLoaded_ = false;
+        // Не переносить lastSeenDmMessageId_ от предыдущего диалога:
+        // корректность appendMessage()-only-для-новых в
+        // directMessagesListed() ниже иначе тихо зависела бы от того,
+        // что id сообщений — общая для всех диалогов последовательность
+        // (см. direct_messages.id в chat-service), а не от чего-то, что
+        // видно прямо здесь.
+        lastSeenDmMessageId_ = -1;
+        directMessageView_->showThread(otherLogin);
+        chatRestClient_.listDirectMessages(lastToken_, id, /*limit=*/50);
+        dmPollTimer_->start(kDmPollIntervalMs);
+    });
+    connect(&chatRestClient_, &ChatRestClient::directMessagesListed, this,
+            [this](qint64 threadId, const QList<DirectMessageInfo>& messages) {
+                if (threadId != openDmThreadId_) {
+                    return;
+                }
+                if (!dmHistoryLoaded_) {
+                    directMessageView_->setMessages(messages);
+                    dmHistoryLoaded_ = true;
+                    for (const DirectMessageInfo& message : messages) {
+                        lastSeenDmMessageId_ = std::max(lastSeenDmMessageId_, message.id);
+                    }
+                    return;
+                }
+                for (const DirectMessageInfo& message : messages) {
+                    if (message.id > lastSeenDmMessageId_) {
+                        directMessageView_->appendMessage(message);
+                        lastSeenDmMessageId_ = message.id;
+                    }
+                }
+            });
+    connect(&chatRestClient_, &ChatRestClient::directMessageSent, this,
+            [this](qint64 threadId, const DirectMessageInfo& message) {
+                if (threadId != openDmThreadId_) {
+                    return;
+                }
+                directMessageView_->appendMessage(message);
+                lastSeenDmMessageId_ = std::max(lastSeenDmMessageId_, message.id);
+            });
+    connect(directMessageView_, &DirectMessageView::sendMessageRequested, this, [this](const QString& body) {
+        if (openDmThreadId_ >= 0) {
+            chatRestClient_.sendDirectMessage(lastToken_, openDmThreadId_, body);
+        }
+    });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {
@@ -355,11 +472,28 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(chatView_, &ChatView::createChannelRequested, channelsPanel_->addButton(), &QPushButton::click);
 
-    connect(&chatRestClient_, &ChatRestClient::communityCreated, this, [this](qint64 id, const QString& name) {
-        showToast(tr("Community '%1' created").arg(name), ToastBanner::Variant::kSuccess);
-        pendingCommunitySelection_ = id;
-        refreshCommunities();
-    });
+    connect(&chatRestClient_, &ChatRestClient::communityCreated, this,
+            [this](qint64 id, const QString& name, const QString& inviteCode) {
+                // Код приглашения показан сразу здесь (issue #186) —
+                // тем не менее доступен и позже через "Copy Invite Code"
+                // в контекстном меню сообщества, тост не единственный
+                // способ его увидеть.
+                showToast(tr("Community '%1' created — invite code: %2").arg(name, inviteCode),
+                           ToastBanner::Variant::kSuccess);
+                pendingCommunitySelection_ = id;
+                refreshCommunities();
+            });
+    connect(&chatRestClient_, &ChatRestClient::joinedCommunityByCode, this,
+            [this](qint64 id, const QString& name) {
+                showToast(tr("Joined community '%1'").arg(name), ToastBanner::Variant::kSuccess);
+                pendingCommunitySelection_ = id;
+                refreshCommunities();
+            });
+    connect(&chatRestClient_, &ChatRestClient::inviteCodeRegenerated, this,
+            [this](qint64, const QString& inviteCode) {
+                showToast(tr("New invite code: %1").arg(inviteCode), ToastBanner::Variant::kSuccess);
+                refreshCommunities();
+            });
     connect(&chatRestClient_, &ChatRestClient::communitiesListed, this, [this](const QList<ChatItem>& communities) {
         communities_ = communities;
         communitiesPanel_->setCommunities(communities_);
@@ -598,17 +732,30 @@ void MainWindow::buildUi() {
     sidebarLayout->setSpacing(0);
     communitiesPanel_ = new CommunitiesPanel(sidebar);
     channelsPanel_ = new ChannelsPanel(sidebar);
+    friendsPanel_ = new FriendsPanel(sidebar);
+    sidebarListStack_ = new QStackedWidget(sidebar);
+    sidebarListStack_->addWidget(channelsPanel_);
+    sidebarListStack_->addWidget(friendsPanel_);
     sidebarLayout->addWidget(communitiesPanel_);
-    sidebarLayout->addWidget(channelsPanel_, /*stretch=*/1);
+    sidebarLayout->addWidget(sidebarListStack_, /*stretch=*/1);
 
     chatView_ = new ChatView(central);
-    toastBanner_ = new ToastBanner(chatView_);
+    directMessageView_ = new DirectMessageView(central);
+    contentStack_ = new QStackedWidget(central);
+    contentStack_->addWidget(chatView_);
+    contentStack_->addWidget(directMessageView_);
+    // Родитель — contentStack_, а не chatView_ (issue #187, Фаза 3):
+    // тост должен быть виден и в режиме Friends, когда показан
+    // directMessageView_, а не chatView_ — ToastBanner сам следит за
+    // resize() своего parentWidget() (см. её конструктор), так что
+    // достаточно просто выбрать родителя, который виден в обоих режимах.
+    toastBanner_ = new ToastBanner(contentStack_);
     desktopNotifier_ = new DesktopNotifier(this, this);
 
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
     middleLayout->addWidget(sidebar);
-    middleLayout->addWidget(chatView_, /*stretch=*/1);
+    middleLayout->addWidget(contentStack_, /*stretch=*/1);
 
     footerBar_ = new FooterBar(central);
 
@@ -853,7 +1000,10 @@ void MainWindow::signOut() {
     refreshToken_.clear();
     currentUserLogin_.clear();
     identityKeyStore_.reset();
+    showCommunitiesMode();
     closeChatView();
+    friendsPanel_->setFriends({});
+    friendsPanel_->setIncomingRequests({});
     selectedCommunityId_ = -1;
     pendingCommunitySelection_ = -1;
     pendingChannelSelection_ = -1;
@@ -988,6 +1138,46 @@ QString MainWindow::decryptForDisplay(const QString& ciphertext) const {
 
 void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {
     toastBanner_->showMessage(text, variant, kToastTimeoutMs);
+}
+
+void MainWindow::showFriendsMode() {
+    sidebarListStack_->setCurrentWidget(friendsPanel_);
+    contentStack_->setCurrentWidget(directMessageView_);
+    directMessageView_->showPlaceholder();
+    openDmThreadId_ = -1;
+    openDmOtherLogin_.clear();
+    dmHistoryLoaded_ = false;
+    lastSeenDmMessageId_ = -1;
+    dmPollTimer_->stop();
+    if (!lastToken_.isEmpty()) {
+        userProfileClient_.listFriends(lastToken_);
+        userProfileClient_.listIncomingFriendRequests(lastToken_);
+    }
+}
+
+void MainWindow::showCommunitiesMode() {
+    sidebarListStack_->setCurrentWidget(channelsPanel_);
+    contentStack_->setCurrentWidget(chatView_);
+    openDmThreadId_ = -1;
+    openDmOtherLogin_.clear();
+    dmHistoryLoaded_ = false;
+    lastSeenDmMessageId_ = -1;
+    dmPollTimer_->stop();
+}
+
+void MainWindow::openDmThreadWith(const QString& login) {
+    if (lastToken_.isEmpty()) {
+        showToast(tr("Sign in first (Account menu, top right)"), ToastBanner::Variant::kInfo);
+        return;
+    }
+    chatRestClient_.openDmThread(lastToken_, login);
+}
+
+void MainWindow::pollOpenDmThread() {
+    if (openDmThreadId_ < 0) {
+        return;
+    }
+    chatRestClient_.listDirectMessages(lastToken_, openDmThreadId_, /*limit=*/50);
 }
 
 }  // namespace devicehub

@@ -194,6 +194,10 @@ class ChatRestClient {
   +uploadAttachment(token: QString, channelId: qint64, filename: QString,\n    contentType: QString, data: QByteArray)
   +downloadAttachment(token: QString, attachmentId: qint64)
   +searchMessages(token: QString, channelId: qint64, query: QString, limit: int = 20)
+  +openDmThread(token: QString, recipientLogin: QString)
+  +listDmThreads(token: QString)
+  +sendDirectMessage(token: QString, threadId: qint64, body: QString)
+  +listDirectMessages(token: QString, threadId: qint64, limit: int, beforeId: qint64 = -1)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
@@ -211,6 +215,10 @@ class ChatRestClient {
   +attachmentUploaded(id: qint64, filename: QString)
   +attachmentDownloaded(attachmentId: qint64, data: QByteArray)
   +messagesFound(channelId: qint64, query: QString, matches: QList<ChatMessageInfo>)
+  +dmThreadOpened(id: qint64, otherLogin: QString)
+  +dmThreadsListed(threads: QList<DirectMessageThreadInfo>)
+  +directMessageSent(threadId: qint64, message: DirectMessageInfo)
+  +directMessagesListed(threadId: qint64, messages: QList<DirectMessageInfo>)
   +errorOccurred(message: QString)
 }
 
