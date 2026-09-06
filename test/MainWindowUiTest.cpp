@@ -14,6 +14,7 @@
 #include <QTabWidget>
 
 #include "devices/DeviceEnumerator.h"
+#include "ui/MemberListPanel.h"
 
 // Эти тесты намеренно никогда не нажимают кнопку, которая запускала бы
 // реальный захват (микрофон/камера/экран): у обычного CLI-бинарника
@@ -213,6 +214,26 @@ TEST(MainWindowUiTest, CallControlsExistAndMuteStartsDisabled) {
     EXPECT_EQ(callToggleButton->text(), QStringLiteral("Call"));
     EXPECT_EQ(muteToggleButton->text(), QStringLiteral("Mute"));
     EXPECT_FALSE(muteToggleButton->isEnabled());
+}
+
+TEST(MainWindowUiTest, MemberListToggleButtonShowsAndHidesMemberListPanel) {
+    // #184: панель участников видна по умолчанию, но её можно
+    // свернуть/развернуть иконкой в шапке ChatView — сама MainWindow
+    // просто переключает видимость memberListPanel_ на каждый клик.
+    MainWindow window;
+
+    auto* toggleButton = window.findChild<QPushButton*>("memberListToggleButton");
+    auto* memberListPanel = window.findChild<MemberListPanel*>();
+
+    ASSERT_NE(toggleButton, nullptr);
+    ASSERT_NE(memberListPanel, nullptr);
+    EXPECT_FALSE(memberListPanel->isHidden());
+
+    toggleButton->click();
+    EXPECT_TRUE(memberListPanel->isHidden());
+
+    toggleButton->click();
+    EXPECT_FALSE(memberListPanel->isHidden());
 }
 
 TEST(MainWindowUiTest, VideoToggleButtonExistsAndStartsDisabled) {

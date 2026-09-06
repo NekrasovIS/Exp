@@ -27,5 +27,12 @@ TEST(IconFactoryTest, CommunityAvatarIconIsNotNull) {
     EXPECT_FALSE(icon.availableSizes().isEmpty());
 }
 
+TEST(IconFactoryTest, MembersIconIsNotNull) {
+    const QIcon icon = ui_icons::membersIcon(QColor("#ffffff"));
+
+    EXPECT_FALSE(icon.isNull());
+    EXPECT_FALSE(icon.availableSizes().isEmpty());
+}
+
 }  // namespace
 }  // namespace devicehub
