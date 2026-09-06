@@ -1,29 +1,33 @@
 cmake_minimum_required(VERSION 3.21)
 
-# Independently buildable microservice — its own vcpkg.json (this
-# directory), sharing the vcpkg tool/cache vendored at the repo root.
+# Независимо собираемый микросервис — свой vcpkg.json (в этом
+# каталоге), использует общий инструмент/кэш vcpkg, вендоренный в корне
+# репозитория.
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../vcpkg/scripts/buildsystems/vcpkg.cmake"
         CACHE STRING "Vcpkg toolchain file")
 endif()
 
-# libpqxx's zview type publicly derives from std::string_view; MSVC's
-# dllexport propagates to inherited base-class members even when
-# they're plain STL inline functions, so building against the default
-# dynamic (DLL) triplet on Windows makes basic_string_view::size()/
-# data() get exported from pqxx.dll *and* locally instantiated by any
-# translation unit that also happens to use std::string_view directly
-# (issue #98's chat-service diagnosis — HttpServer.cpp's own
-# std::string_view Bearer-prefix check is enough to trigger it here
-# too, issue #110) — a link-time "already defined" for both. Scoped to
-# Windows only; this class of MSVC DLL-boundary issue doesn't exist on
-# the dynamic triplets vcpkg picks for macOS/Linux.
+# Тип zview у libpqxx публично наследуется от std::string_view; у MSVC
+# dllexport распространяется на унаследованные члены базового класса
+# даже когда это обычные inline-функции STL, поэтому сборка против
+# стандартного динамического (DLL) триплета на Windows заставляет
+# basic_string_view::size()/data() одновременно экспортироваться из
+# pqxx.dll *и* локально инстанцироваться в любой единице трансляции,
+# которая тоже использует std::string_view напрямую (диагностика из
+# chat-service, issue #98 — собственная проверка префикса Bearer через
+# std::string_view в HttpServer.cpp достаточна, чтобы вызвать это и
+# здесь, issue #110) — "already defined" на этапе линковки для обоих.
+# Ограничено только Windows; этот класс проблем с границей DLL у MSVC не
+# существует на динамических триплетах, которые vcpkg выбирает для
+# macOS/Linux.
 if(WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
     set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "Vcpkg triplet")
-    # x64-windows-static's packages are built against the static CRT
-    # (/MT, /MTd) — CMake defaults to the dynamic CRT (/MD, /MDd)
-    # otherwise, which links fine but then every object file disagrees
-    # with every vcpkg .lib on which CRT it wants (LNK2038).
+    # Пакеты x64-windows-static собраны против статического CRT
+    # (/MT, /MTd) — иначе CMake по умолчанию берёт динамический CRT
+    # (/MD, /MDd), который линкуется без ошибок, но затем каждый
+    # объектный файл расходится с каждой vcpkg .lib в том, какой CRT ему
+    # нужен (LNK2038).
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library")
 endif()
 
@@ -36,7 +40,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# Maximum warnings + pedantic mode — same project-wide rule as DeviceHub.
+# Максимальный набор предупреждений + pedantic-режим — то же правило,
+# что и во всём проекте (DeviceHub).
 if(MSVC)
     add_compile_options(/W4 /permissive-)
 else()
@@ -58,8 +63,8 @@ else()
     )
 endif()
 
-# Sanitizer builds (issue #145) — see chat-service/CMakeLists.txt's copy
-# of this same block for the full rationale.
+# Сборки с санитайзерами (issue #145) — полное обоснование см. в копии
+# этого же блока в chat-service/CMakeLists.txt.
 option(DEVICEHUB_ENABLE_ASAN_UBSAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
 option(DEVICEHUB_ENABLE_TSAN "Build with ThreadSanitizer (GCC/Clang only; incompatible with DEVICEHUB_ENABLE_ASAN_UBSAN)" OFF)
 if(DEVICEHUB_ENABLE_ASAN_UBSAN AND DEVICEHUB_ENABLE_TSAN)
@@ -77,10 +82,14 @@ endif()
 if(DEVICEHUB_ENABLE_TSAN)
     add_compile_options(-fsanitize=thread)
     add_link_options(-fsanitize=thread)
+    # issue #170 — полное обоснование см. в копии этого же блока в
+    # chat-service/CMakeLists.txt (асинхронный getaddrinfo у cpp-httplib
+    # против отслеживания потоков в TSan).
+    add_compile_options(-UCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO)
 endif()
 
-# Source-based code coverage (issue #146) — see chat-service/CMakeLists.txt's
-# copy of this same block for the full rationale.
+# Покрытие тестами на основе исходников (issue #146) — полное
+# обоснование см. в копии этого же блока в chat-service/CMakeLists.txt.
 option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
 if(DEVICEHUB_ENABLE_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

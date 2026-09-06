@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-# Independently buildable microservice — its own vcpkg.json (this
-# directory), sharing the vcpkg tool/cache vendored at the repo root.
+# Независимо собираемый микросервис — свой vcpkg.json (в этом
+# каталоге), использует общий инструмент/кэш vcpkg, вендоренный в корне
+# репозитория.
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../vcpkg/scripts/buildsystems/vcpkg.cmake"
         CACHE STRING "Vcpkg toolchain file")
@@ -16,7 +17,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# Maximum warnings + pedantic mode — same project-wide rule as DeviceHub.
+# Максимальный набор предупреждений + pedantic-режим — то же правило,
+# что и во всём проекте (DeviceHub).
 if(MSVC)
     add_compile_options(/W4 /permissive-)
 else()
@@ -38,8 +40,8 @@ else()
     )
 endif()
 
-# Sanitizer builds (issue #145) — see chat-service/CMakeLists.txt's copy
-# of this same block for the full rationale.
+# Сборки с санитайзерами (issue #145) — полное обоснование см. в копии
+# этого же блока в chat-service/CMakeLists.txt.
 option(DEVICEHUB_ENABLE_ASAN_UBSAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
 option(DEVICEHUB_ENABLE_TSAN "Build with ThreadSanitizer (GCC/Clang only; incompatible with DEVICEHUB_ENABLE_ASAN_UBSAN)" OFF)
 if(DEVICEHUB_ENABLE_ASAN_UBSAN AND DEVICEHUB_ENABLE_TSAN)
@@ -57,10 +59,14 @@ endif()
 if(DEVICEHUB_ENABLE_TSAN)
     add_compile_options(-fsanitize=thread)
     add_link_options(-fsanitize=thread)
+    # issue #170 — полное обоснование см. в копии этого же блока в
+    # chat-service/CMakeLists.txt (асинхронный getaddrinfo у cpp-httplib
+    # против отслеживания потоков в TSan).
+    add_compile_options(-UCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO)
 endif()
 
-# Source-based code coverage (issue #146) — see chat-service/CMakeLists.txt's
-# copy of this same block for the full rationale.
+# Покрытие тестами на основе исходников (issue #146) — полное
+# обоснование см. в копии этого же блока в chat-service/CMakeLists.txt.
 option(DEVICEHUB_ENABLE_COVERAGE "Build with source-based code coverage instrumentation (needs Clang)" OFF)
 if(DEVICEHUB_ENABLE_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -132,9 +138,10 @@ target_link_libraries(auth_service_tests PRIVATE
 include(GoogleTest)
 gtest_discover_tests(auth_service_tests)
 
-# Real coverage-guided fuzzing (issue #121/#132/#133) — off by default,
-# Clang-only; see chat-service/CMakeLists.txt's copy of this same block
-# for the full rationale (MSVC's cl.exe doesn't support -fsanitize=fuzzer).
+# Настоящий coverage-guided fuzzing (issue #121/#132/#133) — выключен по
+# умолчанию, только Clang; полное обоснование см. в копии этого же блока
+# в chat-service/CMakeLists.txt (cl.exe у MSVC не поддерживает
+# -fsanitize=fuzzer).
 option(DEVICEHUB_ENABLE_FUZZING "Build libFuzzer targets (needs Clang)" OFF)
 if(DEVICEHUB_ENABLE_FUZZING)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
