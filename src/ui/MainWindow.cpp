@@ -53,10 +53,6 @@ constexpr const char* kDefaultChatServiceWsUrl = "ws://127.0.0.1:8083";
 constexpr const char* kDefaultChatServiceUrl = "http://127.0.0.1:8082";
 constexpr const char* kDefaultUserServiceUrl = "http://127.0.0.1:8081";
 constexpr int kToastTimeoutMs = 4000;
-/// Интервал поллинга нового сообщения в открытом диалоге личных
-/// сообщений (issue #187, Фаза 3) — backend этой фазы (Фаза 2) не
-/// доставляет их через WebSocket, только REST-история.
-constexpr int kDmPollIntervalMs = 4000;
 /// За сколько до фактического истечения срока действия access-токена
 /// обменивать refresh-токен (issue #105) — небольшой запас, чтобы
 /// обмен, выполняемый в фоне, успел завершиться прежде, чем что-либо,
@@ -74,6 +70,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       authClient_(QUrl(qEnvironmentVariable("AUTH_SERVICE_URL", kDefaultAuthServiceUrl))),
       chatClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_WS_URL", kDefaultChatServiceWsUrl))),
+      dmChatClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_WS_URL", kDefaultChatServiceWsUrl))),
       chatRestClient_(QUrl(qEnvironmentVariable("CHAT_SERVICE_URL", kDefaultChatServiceUrl))),
       userProfileClient_(QUrl(qEnvironmentVariable("USER_SERVICE_URL", kDefaultUserServiceUrl))) {
     buildUi();
@@ -86,12 +83,6 @@ MainWindow::MainWindow(QWidget* parent)
             authClient_.refreshAccessToken(refreshToken_);
         }
     });
-
-    // Issue #187, Фаза 2b (живая доставка через WebSocket) ещё не
-    // сделана на backend'е — поллинг каждые несколько секунд вместо
-    // неё, пока открыт какой-либо диалог (см. pollOpenDmThread()).
-    dmPollTimer_ = new QTimer(this);
-    connect(dmPollTimer_, &QTimer::timeout, this, &MainWindow::pollOpenDmThread);
 
     connect(settingsDialog_->playToneButton(), &QPushButton::clicked, this, &MainWindow::onPlayToneClicked);
     connect(settingsDialog_->toggleMicButton(), &QPushButton::clicked, this, &MainWindow::onToggleMicClicked);
@@ -398,49 +389,33 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::dmThreadOpened, this, [this](qint64 id, const QString& otherLogin) {
         openDmThreadId_ = id;
         openDmOtherLogin_ = otherLogin;
-        dmHistoryLoaded_ = false;
-        // Не переносить lastSeenDmMessageId_ от предыдущего диалога:
-        // корректность appendMessage()-only-для-новых в
-        // directMessagesListed() ниже иначе тихо зависела бы от того,
-        // что id сообщений — общая для всех диалогов последовательность
-        // (см. direct_messages.id в chat-service), а не от чего-то, что
-        // видно прямо здесь.
-        lastSeenDmMessageId_ = -1;
         directMessageView_->showThread(otherLogin);
+        // REST — разовая загрузка истории; дальнейшая доставка новых
+        // сообщений идёт через dmChatClient_ (issue #187, Фаза 2b) —
+        // те же роли, что у chatRestClient_.listMessages()/chatClient_
+        // для канала.
         chatRestClient_.listDirectMessages(lastToken_, id, /*limit=*/50);
-        dmPollTimer_->start(kDmPollIntervalMs);
+        dmChatClient_.disconnectFromChannel();
+        dmChatClient_.connectToDirectMessageThread(lastToken_, id);
     });
     connect(&chatRestClient_, &ChatRestClient::directMessagesListed, this,
             [this](qint64 threadId, const QList<DirectMessageInfo>& messages) {
                 if (threadId != openDmThreadId_) {
                     return;
                 }
-                if (!dmHistoryLoaded_) {
-                    directMessageView_->setMessages(messages);
-                    dmHistoryLoaded_ = true;
-                    for (const DirectMessageInfo& message : messages) {
-                        lastSeenDmMessageId_ = std::max(lastSeenDmMessageId_, message.id);
-                    }
-                    return;
-                }
-                for (const DirectMessageInfo& message : messages) {
-                    if (message.id > lastSeenDmMessageId_) {
-                        directMessageView_->appendMessage(message);
-                        lastSeenDmMessageId_ = message.id;
-                    }
-                }
+                directMessageView_->setMessages(messages);
             });
-    connect(&chatRestClient_, &ChatRestClient::directMessageSent, this,
-            [this](qint64 threadId, const DirectMessageInfo& message) {
-                if (threadId != openDmThreadId_) {
-                    return;
-                }
-                directMessageView_->appendMessage(message);
-                lastSeenDmMessageId_ = std::max(lastSeenDmMessageId_, message.id);
+    connect(&dmChatClient_, &ChatClient::messageReceived, this,
+            [this](qint64 id, const QString& author, const QString& body, const QString& sentAt, qint64 /*attachmentId*/,
+                   const QString& /*attachmentFilename*/) {
+                directMessageView_->appendMessage(
+                    DirectMessageInfo{.id = id, .author = author, .body = body, .sentAt = sentAt});
             });
+    connect(&dmChatClient_, &ChatClient::errorOccurred, this,
+            [this](const QString& message) { showToast(message, ToastBanner::Variant::kError); });
     connect(directMessageView_, &DirectMessageView::sendMessageRequested, this, [this](const QString& body) {
         if (openDmThreadId_ >= 0) {
-            chatRestClient_.sendDirectMessage(lastToken_, openDmThreadId_, body);
+            dmChatClient_.sendMessage(body);
         }
     });
 
@@ -1137,9 +1112,7 @@ void MainWindow::showFriendsMode() {
     directMessageView_->showPlaceholder();
     openDmThreadId_ = -1;
     openDmOtherLogin_.clear();
-    dmHistoryLoaded_ = false;
-    lastSeenDmMessageId_ = -1;
-    dmPollTimer_->stop();
+    dmChatClient_.disconnectFromChannel();
     if (!lastToken_.isEmpty()) {
         userProfileClient_.listFriends(lastToken_);
         userProfileClient_.listIncomingFriendRequests(lastToken_);
@@ -1151,9 +1124,7 @@ void MainWindow::showCommunitiesMode() {
     contentStack_->setCurrentWidget(chatView_);
     openDmThreadId_ = -1;
     openDmOtherLogin_.clear();
-    dmHistoryLoaded_ = false;
-    lastSeenDmMessageId_ = -1;
-    dmPollTimer_->stop();
+    dmChatClient_.disconnectFromChannel();
 }
 
 void MainWindow::openDmThreadWith(const QString& login) {
@@ -1162,13 +1133,6 @@ void MainWindow::openDmThreadWith(const QString& login) {
         return;
     }
     chatRestClient_.openDmThread(lastToken_, login);
-}
-
-void MainWindow::pollOpenDmThread() {
-    if (openDmThreadId_ < 0) {
-        return;
-    }
-    chatRestClient_.listDirectMessages(lastToken_, openDmThreadId_, /*limit=*/50);
 }
 
 }  // namespace devicehub

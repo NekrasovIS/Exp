@@ -24,7 +24,6 @@ class MainWindow {
   -showFriendsMode()
   -showCommunitiesMode()
   -openDmThreadWith(login: QString)
-  -pollOpenDmThread()
 }
 note right of MainWindow
   Issue #187, Фаза 3: sidebarListStack_
@@ -32,13 +31,15 @@ note right of MainWindow
   contentStack_ (chatView_/
   directMessageView_) переключаются вместе
   — showFriendsMode()/showCommunitiesMode().
-  dmPollTimer_ (4с) перезапрашивает
-  последние сообщения открытого диалога,
-  пока backend не доставляет их через
-  WebSocket (Фаза 2b); directMessagesListed()
-  сам решает, initial load это (setMessages)
-  или новые сообщения (appendMessage только
-  для id > lastSeenDmMessageId_).
+  Фаза 2b: dmChatClient_ — отдельный
+  ChatClient для живой доставки открытого
+  диалога (connectToDirectMessageThread()),
+  не тот же экземпляр, что подписан на канал
+  сообщества (chatClient_, нужен
+  CallManager для сигналинга звонка).
+  REST (listDirectMessages) грузит историю
+  один раз при открытии диалога, дальше —
+  только WS messageReceived().
 end note
 
 class CommunitiesPanel {
@@ -449,13 +450,15 @@ MainWindow *-- AudioInputDevice : owns
 MainWindow *-- CameraDevice : owns
 MainWindow *-- ScreenCaptureDevice : owns
 MainWindow *-- AuthClient : owns
-MainWindow *-- ChatClient : owns
+MainWindow *-- ChatClient : owns (subscribed to a\ncommunity channel)
+MainWindow *-- ChatClient : owns (dmChatClient_ — issue #187\nPhase 2b, DM thread live delivery)
 MainWindow *-- CallManager : owns (uses ChatClient& — issue #46 Phase 3)
 MainWindow *-- ChatRestClient : owns
 
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
 MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
+MainWindow ..> ChatClient : dmChatClient_ subscribed()\nmessageReceived() -> DirectMessageView::appendMessage()\n(issue #187, Phase 2b) >
 MainWindow ..> DesktopNotifier : notifyMessage() (from\nmessageReceived() handler) >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >

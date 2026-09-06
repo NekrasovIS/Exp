@@ -28,6 +28,7 @@ class ChatItem {
 
 class ChatClient {
   +connectToChannel(token: QString, channelId: qint64)
+  +connectToDirectMessageThread(token: QString, threadId: qint64)
   +sendMessage(body: QString, attachmentId: qint64 = -1)
   +disconnectFromChannel()
   +joinCall()
@@ -54,6 +55,7 @@ ChatClient ..> "chat-service" : call_join/call_leave/call_signal\n(issue #46 sig
 ChatClient ..> "chat-service" : {"typing": true} ->\n{"user_typing": login} (issue #96)
 ChatClient ..> "chat-service" : edit_message/delete_message\n(issue #107, author-only)
 ChatClient ..> "chat-service" : {"body", "attachment_id"?} (issue #116,\nattachment_id references an upload\nalready done via ChatRestClient)
+ChatClient ..> "chat-service" : {"token", "dm_thread_id"} then\n{"body"} (issue #187, Phase 2b —\nno call/typing/edit/delete for DM threads)
 
 class CallManager {
   +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)

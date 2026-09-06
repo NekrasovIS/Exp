@@ -70,6 +70,19 @@ namespace chat_service {
  * класс только проталкивает то, что отправлено, пока клиент подключён,
  * и только ретранслирует сигналинг звонков — он никогда не декодирует
  * содержимое SDP/ICE.
+ *
+ * Личные диалоги (issue #187, Фаза 2b) используют тот же протокол
+ * подписки, но `{"token": "...", "dm_thread_id": N}` вместо
+ * `channel_id` — вызывающая сторона должна уже быть участником диалога
+ * (проверяется через ChatService::isThreadParticipant(), 404 "no such
+ * thread" при отказе — та же приватность, что и у REST-эндпоинтов
+ * HttpServer::handlePostDirectMessage()/handleListDirectMessages(), не
+ * подтверждающих чужому существование диалога через разные коды ошибок
+ * для "не найден" и "не участник"). После подписки на диалог доступно
+ * только `{"body": "..."}` — звонки/typing/edit/delete не поддерживаются
+ * для личных диалогов на этом этапе (backend Фазы 2 их не реализует),
+ * поэтому подписка на диалог не проходит через общую диспетчеризацию
+ * handleSubscribedMessage(), а сразу и только через handleDirectMessage().
  */
 class WebSocketServer {
 public:
@@ -86,6 +99,13 @@ private:
     struct Subscription {
         std::string login;
         std::int64_t channelId = 0;
+        /// True, когда эта подписка — на личный диалог (dmThreadId), а
+        /// не на канал сообщества (channelId) — оба поля взаимно
+        /// исключающие, различаются этим флагом, а не значением 0
+        /// (валидные id из Postgres serial начинаются с 1, но флаг явнее
+        /// сравнения с сентинелом).
+        bool isDirectMessage = false;
+        std::int64_t dmThreadId = 0;
     };
 
     void handleMessage(const std::shared_ptr<ix::ConnectionState>& connectionState, ix::WebSocket& webSocket,
@@ -93,6 +113,10 @@ private:
     void handleHello(ix::WebSocket& webSocket, const std::string& payload);
     void handleSubscribedMessage(ix::WebSocket& webSocket, const std::string& payload);
     void handleChatMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// Личное сообщение в подписанном диалоге (issue #187, Фаза 2b) —
+    /// узкий аналог handleChatMessage() для dmThreadId вместо channelId,
+    /// без attachment_id (личные диалоги их не поддерживают).
+    void handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
@@ -106,6 +130,11 @@ private:
     /// уведомления о наборе текста передают сюда отправителя, чтобы он
     /// не видел эхо собственного "typing").
     void broadcastToChannel(std::int64_t channelId, const std::string& json, const ix::WebSocket* excludeSocket = nullptr);
+    /// Аналог broadcastToChannel() для подписчиков личного диалога
+    /// dmThreadId — их всегда ровно два (участники), включая
+    /// отправителя (тот же принцип "рассылка всем, без локального
+    /// оптимистичного эха", что и у broadcastToChannel()).
+    void broadcastToDmThread(std::int64_t dmThreadId, const std::string& json);
     /// В отличие от broadcastToChannel (все подписчики *чата* канала),
     /// это достигает только сокетов, реально находящихся в
     /// callParticipants_[channelId] — тот, кто подписан на текстовый чат
