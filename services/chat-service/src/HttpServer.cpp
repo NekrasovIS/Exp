@@ -719,6 +719,17 @@ void HttpServer::handlePostDirectMessage(const httplib::Request& request, httpli
     }
 
     const std::optional<DirectMessage> message = chatService_.postDirectMessage(threadId, *login, *body);
+    if (!message.has_value()) {
+        // Не должно происходить — isThreadParticipant() выше уже
+        // подтвердил, что threadId существует, а удалить диалог через
+        // этот API нельзя (ни один эндпоинт этого не делает) — но
+        // optional сигнализирует о возможности сбоя, и разыменовывать
+        // его без проверки было бы неопределённым поведением, если это
+        // когда-нибудь перестанет быть верным.
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such thread"}}.dump(), kJsonContentType);
+        return;
+    }
     response.status = 201;
     response.set_content(toJson(*message).dump(), kJsonContentType);
 }
