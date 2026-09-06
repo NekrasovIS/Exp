@@ -29,7 +29,8 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
         items.push_back(ChatItem{.id = object.value("id").toVariant().toLongLong(),
                                   .name = object.value("name").toString(),
                                   .ownerLogin = object.value("owner").toString(),
-                                  .isEncrypted = object.value("is_encrypted").toBool()});
+                                  .isEncrypted = object.value("is_encrypted").toBool(),
+                                  .inviteCode = object.value("invite_code").toString()});
     }
     return items;
 }
@@ -58,12 +59,14 @@ void ChatRestClient::createCommunity(const QString& token, const QString& name) 
             return;
         }
         const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
-        emit communityCreated(object.value("id").toVariant().toLongLong(), object.value("name").toString());
+        emit communityCreated(object.value("id").toVariant().toLongLong(), object.value("name").toString(),
+                               object.value("invite_code").toString());
     });
 }
 
 void ChatRestClient::listCommunities(const QString& token) {
-    QNetworkReply* reply = networkManager_.get(buildRequest(baseUrl_.resolved(QUrl(QStringLiteral("/communities"))), token));
+    QNetworkReply* reply =
+        networkManager_.get(buildRequest(baseUrl_.resolved(QUrl(QStringLiteral("/communities/mine"))), token));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
@@ -111,6 +114,35 @@ void ChatRestClient::joinCommunity(const QString& token, qint64 communityId) {
             return;
         }
         emit communityJoined(communityId);
+    });
+}
+
+void ChatRestClient::joinCommunityByCode(const QString& token, const QString& code) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/join-by-code")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token), QJsonDocument(QJsonObject{{"code", code}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit joinedCommunityByCode(object.value("id").toVariant().toLongLong(), object.value("name").toString());
+    });
+}
+
+void ChatRestClient::regenerateInviteCode(const QString& token, qint64 communityId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/communities/%1/invite/regenerate").arg(communityId)));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, communityId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit inviteCodeRegenerated(communityId, object.value("invite_code").toString());
     });
 }
 

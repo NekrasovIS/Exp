@@ -16,8 +16,9 @@ namespace chat_service {
  *        управление модераторами (issue #114), история сообщений,
  *        загрузка/скачивание вложений (issue #116), поиск сообщений
  *        (issue #118), обмен пер-участник ключами канала для E2E-
- *        шифрования (issue #138) и личные диалоги (issue #187, Фаза 2).
- *        Каждый маршрут требует действительный заголовок
+ *        шифрования (issue #138), приглашения в сообщество по коду
+ *        (issue #186) и личные диалоги (issue #187, Фаза 2). Каждый
+ *        маршрут требует действительный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через auth-service
  *        посредством AuthServiceClient.
  *
@@ -52,6 +53,16 @@ private:
 
     void handleCreateCommunity(const httplib::Request& request, httplib::Response& response);
     void handleListCommunities(const httplib::Request& request, httplib::Response& response);
+    /// GET /communities/mine (issue #186) — только сообщества, в которых
+    /// состоит вызывающая сторона, с их invite_code (см. toJson()).
+    void handleListMyCommunities(const httplib::Request& request, httplib::Response& response);
+    /// POST /communities/join-by-code (issue #186) — альтернатива
+    /// handleJoinCommunity() ниже, не требующая заранее знать id
+    /// сообщества.
+    void handleJoinCommunityByCode(const httplib::Request& request, httplib::Response& response);
+    /// POST /communities/{id}/invite/regenerate (issue #186) — только
+    /// для владельца.
+    void handleRegenerateInviteCode(const httplib::Request& request, httplib::Response& response);
     void handleRenameCommunity(const httplib::Request& request, httplib::Response& response);
     void handleDeleteCommunity(const httplib::Request& request, httplib::Response& response);
     void handleJoinCommunity(const httplib::Request& request, httplib::Response& response);
