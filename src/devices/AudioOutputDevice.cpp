@@ -30,6 +30,10 @@ QByteArray AudioOutputDevice::generateSineWave(const QAudioFormat& format, doubl
         for (int channel = 0; channel < format.channelCount(); ++channel) {
             const int32_t pcm = static_cast<int32_t>(sample * 0.5 * std::numeric_limits<int16_t>::max());
             const int16_t pcm16 = static_cast<int16_t>(pcm);
+            // Обратная граница той же пары типов, что и в
+            // AudioInputDevice::computeLevel() — QByteArray::append()
+            // хочет char*, сэмпл лежит как int16_t; sizeof(pcm16) рядом
+            // не даёт выйти за границы одного сэмпла.
             data.append(reinterpret_cast<const char*>(&pcm16), sizeof(pcm16));
         }
     }

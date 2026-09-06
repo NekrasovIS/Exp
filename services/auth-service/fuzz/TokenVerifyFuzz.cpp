@@ -15,6 +15,10 @@
 /// finding the secret itself.
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     static const auth_service::TokenService service("fuzz-harness-only-secret");
+    // libFuzzer передаёт вход как uint8_t*, std::string хочет char* —
+    // reinterpret_cast стандартно переходит между этими несвязанными
+    // типами указателей; size передан рядом, поэтому построение строки
+    // не выйдет за границы буфера, который выделил сам фаззер.
     const std::string token(reinterpret_cast<const char*>(data), size);
     static_cast<void>(service.verifyToken(token));
     return 0;

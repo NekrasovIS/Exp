@@ -12,6 +12,10 @@
 /// незавершённые строковые литералы), а не ожидание найти что-то новое,
 /// как это сделала цель fuzzing'а WebSocket-кадров (находка issue #129).
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
+    // libFuzzer передаёт вход как uint8_t*, string_view хочет char* —
+    // reinterpret_cast стандартно переходит между этими несвязанными
+    // типами указателей; size передан рядом, поэтому view не выйдет за
+    // границы буфера, который выделил сам фаззер.
     const std::string_view input(reinterpret_cast<const char*>(data), size);
     static_cast<void>(chat_service::json_guard::exceedsMaxNestingDepth(input, chat_service::json_guard::kMaxNestingDepth));
     return 0;
