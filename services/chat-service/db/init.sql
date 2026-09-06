@@ -2,7 +2,13 @@ CREATE TABLE IF NOT EXISTS communities (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     owner_login TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Приглашения (issue #186) — генерируется на стороне приложения
+    -- (ChatRepository::generateInviteCode(), RAND_bytes) при создании
+    -- сообщества, а не здесь в SQL; NULL допускается только для строк,
+    -- существовавших до этой миграции (ALTER TABLE ниже) — новый код
+    -- для них выдаёт POST /communities/{id}/invite/regenerate.
+    invite_code TEXT
 );
 
 CREATE TABLE IF NOT EXISTS channels (
@@ -88,5 +94,11 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_id BIGINT REFERENCES attachments(id) ON DELETE SET NULL;
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS is_moderator BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE communities ADD COLUMN IF NOT EXISTS invite_code TEXT;
 
 CREATE INDEX IF NOT EXISTS messages_channel_id_sent_at_idx ON messages (channel_id, sent_at);
+-- Частичный индекс (не обычный UNIQUE) — допускает сколько угодно строк
+-- с invite_code IS NULL (сообщества, созданные до миграции и ещё не
+-- получившие код через regenerate), но не позволяет двум ненулевым
+-- кодам совпасть.
+CREATE UNIQUE INDEX IF NOT EXISTS communities_invite_code_idx ON communities (invite_code) WHERE invite_code IS NOT NULL;

@@ -11,6 +11,11 @@ struct Community {
     std::int64_t id = 0;
     std::string name;
     std::string ownerLogin;
+    /// Не установлен только для сообществ, созданных до issue #186
+    /// (миграция ALTER TABLE ... ADD COLUMN не может задним числом
+    /// сгенерировать код каждой существующей строке) — владелец получает
+    /// новый через regenerateInviteCode().
+    std::optional<std::string> inviteCode;
 };
 
 struct Channel {
@@ -95,6 +100,14 @@ struct EditMessageResult {
     std::string editedAt;  // имеет смысл только при result == kSuccess
 };
 
+/// Результат regenerateInviteCode() (issue #186) — тот же приём, что и
+/// у EditMessageResult: одного MutationResult недостаточно, чтобы
+/// передать вызывающей стороне новый код.
+struct RegenerateInviteCodeResult {
+    MutationResult result = MutationResult::kNotFound;
+    std::string inviteCode;  // имеет смысл только при result == kSuccess
+};
+
 /**
  * @brief Хранилище на базе Postgres для сообществ/каналов/членств/
  *        сообщений/вложений.
@@ -129,8 +142,32 @@ class ChatRepository {
 public:
     explicit ChatRepository(std::string connectionString);
 
+    /// Генерирует и сохраняет invite_code (issue #186, RAND_bytes — см.
+    /// doc-комментарий у find_package(OpenSSL) в CMakeLists.txt).
     [[nodiscard]] Community createCommunity(const std::string& name, const std::string& ownerLogin);
     [[nodiscard]] std::vector<Community> listCommunities();
+
+    /// Только сообщества, в которых состоит @p login (issue #186) — то,
+    /// что клиент теперь показывает вместо полного listCommunities():
+    /// подключение к сообществу идёт по приглашению (findCommunityByInviteCode()),
+    /// а не выбором из общего списка всех существующих.
+    [[nodiscard]] std::vector<Community> listCommunitiesForMember(const std::string& login);
+
+    /// @return Сообщество с таким invite_code, либо std::nullopt, если
+    ///         код не найден — не различает "неверный код" и "код
+    ///         существовал, но был перевыпущен" (regenerateInviteCode()
+    ///         делает старый код недействительным безвозвратно), вызывающей
+    ///         стороне обе ситуации всё равно нужно обработать одинаково.
+    [[nodiscard]] std::optional<Community> findCommunityByInviteCode(const std::string& code);
+
+    /// Только для владельца (issue #186) — прежний код (если был) сразу
+    /// перестаёт работать, действителен только новый. Тот же паттерн
+    /// "заново сгенерировать секрет", что и у токенов авторизации: если
+    /// код случайно утёк, владелец должен быть в состоянии его отозвать
+    /// без удаления и пересоздания всего сообщества.
+    [[nodiscard]] RegenerateInviteCodeResult regenerateInviteCode(std::int64_t communityId,
+                                                                    const std::string& requesterLogin);
+
     [[nodiscard]] MutationResult renameCommunity(std::int64_t id, const std::string& newName,
                                                   const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);

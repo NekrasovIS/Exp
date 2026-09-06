@@ -14,6 +14,7 @@ class Community {
   +id : int64
   +name : string
   +ownerLogin : string
+  +inviteCode : optional<string>
 }
 class Channel {
   +id : int64
@@ -35,6 +36,10 @@ enum MutationResult {
   kNotFound
   kForbidden
   kConflict
+}
+class RegenerateInviteCodeResult {
+  +result : MutationResult
+  +inviteCode : string
 }
 class AttachmentMetadata {
   +id : int64
@@ -64,6 +69,9 @@ package "chat_service::base64" <<Rectangle>> {
 class ChatRepository {
   +createCommunity(name: string, ownerLogin: string) : Community
   +listCommunities() : vector<Community>
+  +listCommunitiesForMember(login: string) : vector<Community>
+  +findCommunityByInviteCode(code: string) : optional<Community>
+  +regenerateInviteCode(communityId: int64, requesterLogin: string) : RegenerateInviteCodeResult
   +renameCommunity(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteCommunity(id: int64, requesterLogin: string) : MutationResult
   +createChannel(communityId: int64, name: string, ownerLogin: string,\n    isEncrypted: bool = false) : optional<int64>
@@ -87,6 +95,7 @@ class ChatRepository {
   +findChannelKey(channelId: int64, login: string) : optional<string>
 }
 ChatRepository ..> Community : creates
+ChatRepository ..> RegenerateInviteCodeResult : returns
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
 ChatRepository ..> AttachmentMetadata : creates
@@ -98,6 +107,9 @@ ChatRepository ..> PqxxConnection : opens per call
 class ChatService {
   +createCommunity(name: string, ownerLogin: string) : Community
   +listCommunities() : vector<Community>
+  +listCommunitiesForMember(login: string) : vector<Community>
+  +findCommunityByInviteCode(code: string) : optional<Community>
+  +regenerateInviteCode(communityId: int64, requesterLogin: string) : RegenerateInviteCodeResult
   +renameCommunity(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteCommunity(id: int64, requesterLogin: string) : MutationResult
   +createChannel(communityId: int64, name: string, ownerLogin: string,\n    isEncrypted: bool = false) : optional<int64>
@@ -133,6 +145,9 @@ class HttpServer {
   -authenticate(request) : optional<string>
   -handleCreateCommunity(request, response)
   -handleListCommunities(request, response)
+  -handleListMyCommunities(request, response)
+  -handleJoinCommunityByCode(request, response)
+  -handleRegenerateInviteCode(request, response)
   -handleRenameCommunity(request, response)
   -handleDeleteCommunity(request, response)
   -handleJoinCommunity(request, response)

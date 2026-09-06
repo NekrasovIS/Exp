@@ -17,6 +17,10 @@ public:
 
     [[nodiscard]] Community createCommunity(const std::string& name, const std::string& ownerLogin);
     [[nodiscard]] std::vector<Community> listCommunities();
+    [[nodiscard]] std::vector<Community> listCommunitiesForMember(const std::string& login);
+    [[nodiscard]] std::optional<Community> findCommunityByInviteCode(const std::string& code);
+    [[nodiscard]] RegenerateInviteCodeResult regenerateInviteCode(std::int64_t communityId,
+                                                                    const std::string& requesterLogin);
     [[nodiscard]] MutationResult renameCommunity(std::int64_t id, const std::string& newName,
                                                   const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);

@@ -35,8 +35,18 @@ std::string sanitizeForHeaderValue(const std::string& value) {
     return sanitized;
 }
 
-nlohmann::json toJson(const Community& community) {
-    return nlohmann::json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
+/// @p includeInviteCode — только для ответов, где вызывающая сторона уже
+/// имеет право знать код (создатель сразу после создания, участник в
+/// GET /communities/mine, issue #186) — не для устаревшего
+/// GET /communities (см. handleListCommunities()), который отдаёт все
+/// сообщества без проверки членства.
+nlohmann::json toJson(const Community& community, bool includeInviteCode) {
+    nlohmann::json json{{"id", community.id}, {"name", community.name}, {"owner", community.ownerLogin}};
+    if (includeInviteCode) {
+        json["invite_code"] =
+            community.inviteCode.has_value() ? nlohmann::json(*community.inviteCode) : nlohmann::json(nullptr);
+    }
+    return json;
 }
 
 nlohmann::json toJson(const Channel& channel) {
@@ -81,6 +91,18 @@ void HttpServer::registerRoutes() {
     server_.Get("/communities", [this](const httplib::Request& request, httplib::Response& response) {
         handleListCommunities(request, response);
     });
+    // Issue #186 — регистрируется раньше /communities/(\d+)/... ниже,
+    // иначе "mine" никогда бы не совпало с ними первым, но здесь это не
+    // играет роли: "mine" — не число, ни один из \d+-маршрутов на него
+    // и не претендует. Порядок сохранён для читаемости (рядом с
+    // остальными /communities-маршрутами), а не по необходимости.
+    server_.Get("/communities/mine", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListMyCommunities(request, response);
+    });
+    server_.Post("/communities/join-by-code",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleJoinCommunityByCode(request, response);
+                  });
     server_.Patch(R"(/communities/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
         handleRenameCommunity(request, response);
     });
@@ -90,6 +112,10 @@ void HttpServer::registerRoutes() {
     server_.Post(R"(/communities/(\d+)/join)",
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleJoinCommunity(request, response);
+                  });
+    server_.Post(R"(/communities/(\d+)/invite/regenerate)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleRegenerateInviteCode(request, response);
                   });
     server_.Post(R"(/communities/(\d+)/channels)",
                   [this](const httplib::Request& request, httplib::Response& response) {
@@ -167,7 +193,9 @@ void HttpServer::handleCreateCommunity(const httplib::Request& request, httplib:
 
     const Community community = chatService_.createCommunity(body["name"].get<std::string>(), *login);
     response.status = 201;
-    response.set_content(toJson(community).dump(), kJsonContentType);
+    // Создатель сразу видит код приглашения — ему и предстоит его
+    // раздавать (issue #186).
+    response.set_content(toJson(community, /*includeInviteCode=*/true).dump(), kJsonContentType);
 }
 
 void HttpServer::handleListCommunities(const httplib::Request& request, httplib::Response& response) {
@@ -178,9 +206,77 @@ void HttpServer::handleListCommunities(const httplib::Request& request, httplib:
 
     nlohmann::json communities = nlohmann::json::array();
     for (const Community& community : chatService_.listCommunities()) {
-        communities.push_back(toJson(community));
+        communities.push_back(toJson(community, /*includeInviteCode=*/false));
     }
     response.set_content(communities.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListMyCommunities(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json communities = nlohmann::json::array();
+    for (const Community& community : chatService_.listCommunitiesForMember(*login)) {
+        communities.push_back(toJson(community, /*includeInviteCode=*/true));
+    }
+    response.set_content(communities.dump(), kJsonContentType);
+}
+
+void HttpServer::handleJoinCommunityByCode(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("code") || !body["code"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'code' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<Community> community = chatService_.findCommunityByInviteCode(body["code"].get<std::string>());
+    if (!community.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "invalid invite code"}}.dump(), kJsonContentType);
+        return;
+    }
+    // findCommunityByInviteCode() уже подтвердил, что сообщество
+    // существует, так что false здесь означало бы только состояние
+    // гонки — сообщество удалили в промежутке между этими двумя
+    // вызовами — тот же 404, что и на невалидный код изначально, а не
+    // отдельный класс ошибки, который стоило бы различать для клиента.
+    if (!chatService_.joinCommunity(community->id, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "invalid invite code"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(toJson(*community, /*includeInviteCode=*/false).dump(), kJsonContentType);
+}
+
+void HttpServer::handleRegenerateInviteCode(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    const RegenerateInviteCodeResult result = chatService_.regenerateInviteCode(communityId, *login);
+    if (result.result != MutationResult::kSuccess) {
+        writeMutationResult(result.result, response);
+        return;
+    }
+    response.set_content(nlohmann::json{{"invite_code", result.inviteCode}}.dump(), kJsonContentType);
 }
 
 void HttpServer::writeMutationResult(MutationResult result, httplib::Response& response) {

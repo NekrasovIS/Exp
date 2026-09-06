@@ -437,6 +437,129 @@ TEST(HttpServerTest, JoinCommunityRejectsNonexistentIdWith404) {
     EXPECT_EQ(result->status, 404);
 }
 
+TEST(HttpServerTest, JoinCommunityByCodeSucceedsWith200AndReturnsTheCommunity) {
+    auto fixtureOpt = TestFixture::create("http-server-join-by-code-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-join-by-code-200-" + uniqueSuffix(), fixture.ownerLogin);
+    ASSERT_TRUE(community.inviteCode.has_value());
+    const std::optional<std::string> joinerToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-joiner-by-code-" + uniqueSuffix());
+    ASSERT_TRUE(joinerToken.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*joinerToken)}};
+    const httplib::Result result = client.Post("/communities/join-by-code", headers,
+                                                 nlohmann::json{{"code", *community.inviteCode}}.dump(),
+                                                 "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    ASSERT_FALSE(body.is_discarded());
+    EXPECT_EQ(body["id"].get<std::int64_t>(), community.id);
+}
+
+TEST(HttpServerTest, JoinCommunityByCodeRejectsUnknownCodeWith404) {
+    auto fixtureOpt = TestFixture::create("http-server-join-by-code-404");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const ScopedServer server(chatService, fixture.authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post("/communities/join-by-code", headers,
+                                                 nlohmann::json{{"code", "not-a-real-code"}}.dump(),
+                                                 "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
+TEST(HttpServerTest, RegenerateInviteCodeSucceedsForOwnerAndRotatesTheCode) {
+    auto fixtureOpt = TestFixture::create("http-server-regen-invite-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-regen-invite-200-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/invite/regenerate", headers, "",
+                     "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    ASSERT_FALSE(body.is_discarded());
+    EXPECT_NE(body["invite_code"].get<std::string>(), *community.inviteCode);
+}
+
+TEST(HttpServerTest, RegenerateInviteCodeRejectsNonOwnerWith403) {
+    auto fixtureOpt = TestFixture::create("http-server-regen-invite-403");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-regen-invite-403-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::string> otherToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-regen-other-" + uniqueSuffix());
+    ASSERT_TRUE(otherToken.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*otherToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/invite/regenerate", headers, "",
+                     "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 403);
+}
+
+TEST(HttpServerTest, ListMyCommunitiesOnlyIncludesCommunitiesTheCallerJoined) {
+    auto fixtureOpt = TestFixture::create("http-server-list-mine-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community joined = chatService.createCommunity("http-test-list-mine-joined-" + uniqueSuffix(), fixture.ownerLogin);
+    static_cast<void>(chatService.createCommunity("http-test-list-mine-other-" + uniqueSuffix(),
+                                                    "http-list-mine-someone-else-" + uniqueSuffix()));
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/communities/mine", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    ASSERT_FALSE(body.is_discarded());
+    ASSERT_TRUE(body.is_array());
+    EXPECT_TRUE(std::any_of(body.begin(), body.end(),
+                             [&](const nlohmann::json& item) { return item["id"].get<std::int64_t>() == joined.id; }));
+    EXPECT_TRUE(std::none_of(body.begin(), body.end(), [](const nlohmann::json& item) {
+        return item.value("invite_code", std::string()).empty();
+    }));
+}
+
 TEST(HttpServerTest, CreateChannelRejectsMissingNameWith400) {
     auto fixtureOpt = TestFixture::create("http-server-create-channel-400");
     if (!fixtureOpt.has_value()) {

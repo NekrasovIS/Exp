@@ -10,12 +10,16 @@ namespace devicehub {
 
 /// Сообщество или канал, как их возвращает REST API chat-service.
 /// isEncrypted не имеет смысла (всегда false) для сообщества — только
-/// каналы могут быть зашифрованы (issue #138).
+/// каналы могут быть зашифрованы (issue #138). inviteCode (issue #186)
+/// заполнен только для собственных сообществ (listCommunities(), см. её
+/// doc-комментарий) — сервер не отдаёт его в местах, где вызывающая
+/// сторона ещё не подтвердила членство, и никогда для каналов.
 struct ChatItem {
     qint64 id = 0;
     QString name;
     QString ownerLogin;
     bool isEncrypted = false;
+    QString inviteCode;
 };
 
 /// Сообщение чата, как его возвращает REST-эндпоинт истории
@@ -49,10 +53,25 @@ public:
     explicit ChatRestClient(QUrl baseUrl, QObject* parent = nullptr);
 
     void createCommunity(const QString& token, const QString& name);
+    /// Issue #186: только сообщества, в которых вызывающая сторона уже
+    /// состоит (GET /communities/mine на стороне chat-service, не
+    /// GET /communities) — подключение к новому сообществу теперь идёт
+    /// по коду приглашения (joinCommunityByCode()), а не выбором из
+    /// общего списка всех существующих.
     void listCommunities(const QString& token);
     void renameCommunity(const QString& token, qint64 communityId, const QString& newName);
     void deleteCommunity(const QString& token, qint64 communityId);
     void joinCommunity(const QString& token, qint64 communityId);
+    /// Присоединяет к сообществу по его коду приглашения (issue #186), а
+    /// не по известному id — вызывает joinedCommunityByCode() при успехе
+    /// (сообщает и id, и name сразу, поскольку до этого момента
+    /// вызывающая сторона не знала ни того, ни другого) или
+    /// errorOccurred() с "invalid invite code", если такого кода нет.
+    void joinCommunityByCode(const QString& token, const QString& code);
+    /// Только для владельца @p communityId (issue #186) — прежний код
+    /// сразу перестаёт работать. Вызывает inviteCodeRegenerated() при
+    /// успехе.
+    void regenerateInviteCode(const QString& token, qint64 communityId);
     /// @p isEncrypted (issue #138) фиксируется при создании — почему
     /// изменить его впоследствии невозможно, см. doc-комментарий
     /// Channel::isEncrypted на стороне chat-service.
@@ -111,11 +130,19 @@ public:
     void searchMessages(const QString& token, qint64 channelId, const QString& query, int limit = 20);
 
 signals:
-    void communityCreated(qint64 id, const QString& name);
+    /// @p inviteCode (issue #186) — создатель сразу видит код, который
+    /// предстоит раздавать, без отдельного запроса.
+    void communityCreated(qint64 id, const QString& name, const QString& inviteCode);
     void communitiesListed(const QList<ChatItem>& communities);
     void communityRenamed(qint64 id, const QString& newName);
     void communityDeleted(qint64 id);
     void communityJoined(qint64 communityId);
+    /// Ответ на joinCommunityByCode() (issue #186) — @p id/@p name, а не
+    /// только id, как у communityJoined(): до этого вызова вызывающая
+    /// сторона не знала ни того, ни другого.
+    void joinedCommunityByCode(qint64 id, const QString& name);
+    /// Ответ на regenerateInviteCode() (issue #186).
+    void inviteCodeRegenerated(qint64 communityId, const QString& inviteCode);
     void channelCreated(qint64 id, const QString& name, bool isEncrypted);
     void channelsListed(const QList<ChatItem>& channels);
     void channelRenamed(qint64 id, const QString& newName);
