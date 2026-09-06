@@ -45,6 +45,14 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
                                 ui_theme::kSpacingSm);
     layout->setSpacing(ui_theme::kSpacingSm);
 
+    friendsButton_ = new QPushButton(this);
+    friendsButton_->setObjectName(QStringLiteral("friendsButton"));
+    friendsButton_->setToolTip(tr("Friends"));
+    friendsButton_->setIcon(ui_icons::friendsIcon(QColor(QStringLiteral("#e3e6e8"))));
+    friendsButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
+    friendsButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
+    friendsButton_->setProperty("iconOnly", true);
+
     refreshButton_ = new QPushButton(this);
     refreshButton_->setObjectName(QStringLiteral("refreshCommunitiesButton"));
     refreshButton_->setToolTip(tr("Refresh communities"));
@@ -76,9 +84,12 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     addButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addButton_->setProperty("iconOnly", true);
 
+    layout->addWidget(friendsButton_, /*stretch=*/0, Qt::AlignHCenter);
     layout->addWidget(refreshButton_, /*stretch=*/0, Qt::AlignHCenter);
     layout->addWidget(listWidget_, /*stretch=*/1);
     layout->addWidget(addButton_, /*stretch=*/0, Qt::AlignHCenter);
+
+    connect(friendsButton_, &QPushButton::clicked, this, &CommunitiesPanel::friendsRequested);
 
     connectDialog_ = new CommunityConnectDialog(this);
     connect(connectDialog_, &CommunityConnectDialog::joinRequested, this, &CommunitiesPanel::joinByCodeRequested);
