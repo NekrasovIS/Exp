@@ -43,6 +43,8 @@ public:
     [[nodiscard]] std::vector<std::string> listFriends(const std::string& login);
     /// См. UserRepository::removeFriend().
     [[nodiscard]] bool removeFriend(const std::string& loginA, const std::string& loginB);
+    /// См. UserRepository::areFriends() (issue #187, Фаза 2).
+    [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
 
 private:
     UserRepository& repository_;

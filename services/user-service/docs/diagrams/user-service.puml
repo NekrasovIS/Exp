@@ -96,6 +96,7 @@ class UserRepository {
   +listIncomingFriendRequests(login: string) : vector<FriendRequestInfo>
   +listFriends(login: string) : vector<string>
   +removeFriend(loginA: string, loginB: string) : bool
+  +areFriends(loginA: string, loginB: string) : bool
 }
 UserRepository ..> PqxxConnection : opens per call
 UserRepository ..> Profile : creates
@@ -117,7 +118,15 @@ class UserService {
   +listIncomingFriendRequests(login: string) : vector<FriendRequestInfo>
   +listFriends(login: string) : vector<string>
   +removeFriend(loginA: string, loginB: string) : bool
+  +areFriends(loginA: string, loginB: string) : bool
 }
+note bottom of UserService
+  issue #187, Фаза 2: areFriends()
+  используется только через
+  GET /internal/friendship — chat-service
+  проверяет дружбу перед тем, как открыть
+  новый диалог личных сообщений.
+end note
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
 password_hash.password_hash ..> Argon2 : implemented with
@@ -148,6 +157,7 @@ class HttpServer {
   -handleDeclineFriendRequest(request, response)
   -handleListFriends(request, response)
   -handleRemoveFriend(request, response)
+  -handleCheckFriendship(request, response)
 }
 HttpServer --> UserService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
@@ -194,6 +204,12 @@ note right of HttpServer
                                         адресат конкретной заявки)
   GET   /friends                    -> handleListFriends
   DELETE /friends/{login}           -> handleRemoveFriend
+  GET   /internal/friendship?user_a=&user_b=
+                                     -> handleCheckFriendship (issue #187,
+                                        Фаза 2, unauthenticated — только
+                                        для chat-service, см.
+                                        UserServiceClient в chat-service;
+                                        отвечает {friends: bool})
 end note
 
 note right of json_guard.json_guard

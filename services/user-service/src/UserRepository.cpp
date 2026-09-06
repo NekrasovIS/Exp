@@ -231,4 +231,14 @@ bool UserRepository::removeFriend(const std::string& loginA, const std::string& 
     return !rows.empty();
 }
 
+bool UserRepository::areFriends(const std::string& loginA, const std::string& loginB) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const auto [canonicalA, canonicalB] = canonicalPair(loginA, loginB);
+    const pqxx::result rows = transaction.exec(
+        "SELECT 1 FROM friendships WHERE user_a_login = $1 AND user_b_login = $2", pqxx::params{canonicalA, canonicalB});
+    return !rows.empty();
+}
+
 }  // namespace user_service
