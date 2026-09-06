@@ -11,6 +11,7 @@
 
 #include "AuthServiceClient.h"
 #include "ChatService.h"
+#include "JanusClient.h"
 
 namespace chat_service {
 
@@ -32,10 +33,14 @@ namespace chat_service {
  *     из одного и того же потока реального времени, а не делали
  *     оптимистичное локальное эхо).
  *   - `{"call_join": true}` — присоединиться к голосовому звонку для
- *     подписанного канала; отвечает `{"call_roster": [...]}`
- *     (существующие участники звонка, не сохраняются, эфемерны в
- *     пределах этого процесса) и рассылает им
- *     `{"call_peer_joined": "<login>"}`.
+ *     подписанного канала; требует членства в сообществе канала (issue
+ *     #231 — раньше не проверялось вообще), иначе `{"error": "not a
+ *     member of this channel"}`. Отвечает `{"call_roster": [...],
+ *     "sfu_room": "channel-<id>"}` (существующий mesh-ростер участников,
+ *     не сохраняется, эфемерен в пределах этого процесса; "sfu_room" —
+ *     id videoroom-комнаты Janus для этого канала, идемпотентно создаётся
+ *     через JanusClient при первом обращении, null, если Janus сейчас
+ *     недоступен) и рассылает остальным `{"call_peer_joined": "<login>"}`.
  *   - `{"call_leave": true}` — покинуть звонок; рассылает
  *     `{"call_peer_left": "<login>"}` оставшимся участникам.
  *     Отключение (Close/Error) без явного выхода даёт тот же эффект.
@@ -86,8 +91,8 @@ namespace chat_service {
  */
 class WebSocketServer {
 public:
-    WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient, int port,
-                     const std::string& host = "127.0.0.1");
+    WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                     const JanusClient& janusClient, int port, const std::string& host = "127.0.0.1");
 
     /// Начинает принимать соединения; возвращает управление после начала прослушивания (дальше асинхронно).
     bool start();
@@ -146,6 +151,7 @@ private:
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;
+    const JanusClient& janusClient_;
     ix::WebSocketServer server_;
 
     std::mutex subscriptionsMutex_;

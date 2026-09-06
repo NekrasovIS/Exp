@@ -131,6 +131,14 @@ bool ChatService::isThreadParticipant(std::int64_t threadId, const std::string& 
     return repository_.isThreadParticipant(threadId, login);
 }
 
+bool ChatService::isChannelMember(std::int64_t channelId, const std::string& login) {
+    return repository_.isChannelMember(channelId, login);
+}
+
+void ChatService::recordCallRoom(std::int64_t channelId, const std::string& janusRoomId) {
+    repository_.recordJanusRoom(channelId, janusRoomId);
+}
+
 std::optional<DirectMessage> ChatService::postDirectMessage(std::int64_t threadId, const std::string& authorLogin,
                                                               const std::string& body) {
     return repository_.insertDirectMessage(threadId, authorLogin, body);

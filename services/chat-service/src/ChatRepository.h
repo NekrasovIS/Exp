@@ -350,6 +350,19 @@ public:
     [[nodiscard]] std::vector<DirectMessage> listDirectMessages(std::int64_t threadId, int limit,
                                                                  std::optional<std::int64_t> beforeId = std::nullopt);
 
+    /// @return True, если @p login состоит в сообществе, которому
+    /// принадлежит @p channelId (включая случай несуществующего канала —
+    /// тогда тоже false). Переиспользуется и для чата, и для SFU-звонков
+    /// (issue #231) — не заводит отдельную систему прав только для
+    /// звонков, см. doc-комментарий ChatService::ensureCallRoom().
+    [[nodiscard]] bool isChannelMember(std::int64_t channelId, const std::string& login);
+
+    /// Идемпотентно фиксирует, что @p channelId использует videoroom
+    /// @p janusRoomId в Janus (issue #230/#231) — см. doc-комментарий
+    /// таблицы channel_janus_rooms в db/init.sql о том, почему это учёт,
+    /// а не источник истины для самого id.
+    void recordJanusRoom(std::int64_t channelId, const std::string& janusRoomId);
+
 private:
     std::string connectionString_;
 };

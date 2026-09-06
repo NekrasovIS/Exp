@@ -723,4 +723,31 @@ std::vector<DirectMessage> ChatRepository::listDirectMessages(std::int64_t threa
     return messages;
 }
 
+bool ChatRepository::isChannelMember(std::int64_t channelId, const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT 1 FROM channels c JOIN memberships m ON m.community_id = c.community_id "
+        "WHERE c.id = $1 AND m.member_login = $2",
+        pqxx::params{channelId, login});
+    return !rows.empty();
+}
+
+void ChatRepository::recordJanusRoom(std::int64_t channelId, const std::string& janusRoomId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // ON CONFLICT DO NOTHING: janus_room_id вычисляется детерминированно
+    // от channelId вызывающей стороной (см. ChatService::ensureCallRoom()),
+    // поэтому повторная запись всегда несёт то же значение — эта таблица
+    // только учёт "когда впервые понадобилась комната", а не источник
+    // истины для самого id.
+    transaction.exec(
+        "INSERT INTO channel_janus_rooms (channel_id, janus_room_id) VALUES ($1, $2) "
+        "ON CONFLICT (channel_id) DO NOTHING",
+        pqxx::params{channelId, janusRoomId});
+    transaction.commit();
+}
+
 }  // namespace chat_service

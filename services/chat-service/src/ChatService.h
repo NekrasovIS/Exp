@@ -73,6 +73,18 @@ public:
     [[nodiscard]] std::vector<DirectMessage> listDirectMessages(std::int64_t threadId, int limit,
                                                                  std::optional<std::int64_t> beforeId = std::nullopt);
 
+    /// @return True, если @p login состоит в сообществе канала @p channelId
+    /// — переиспользуется существующая проверка членства (issue #231),
+    /// а не заводится отдельная система прав для звонков; см.
+    /// ChatRepository::isChannelMember().
+    [[nodiscard]] bool isChannelMember(std::int64_t channelId, const std::string& login);
+
+    /// Идемпотентно фиксирует, что @p channelId использует videoroom
+    /// @p janusRoomId — вызывается после того, как WebSocketServer
+    /// (владеющий JanusClient) убедился, что комната реально существует в
+    /// Janus; см. doc-комментарий ChatRepository::recordJanusRoom().
+    void recordCallRoom(std::int64_t channelId, const std::string& janusRoomId);
+
 private:
     ChatRepository& repository_;
 };

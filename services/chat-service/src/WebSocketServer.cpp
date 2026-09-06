@@ -29,9 +29,9 @@ nlohmann::json toJson(const DirectMessage& message) {
 }
 }  // namespace
 
-WebSocketServer::WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient, int port,
-                                  const std::string& host)
-    : chatService_(chatService), authServiceClient_(authServiceClient), server_(port, host) {
+WebSocketServer::WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                                  const JanusClient& janusClient, int port, const std::string& host)
+    : chatService_(chatService), authServiceClient_(authServiceClient), janusClient_(janusClient), server_(port, host) {
     server_.setOnClientMessageCallback(
         [this](const std::shared_ptr<ix::ConnectionState>& connectionState, ix::WebSocket& webSocket,
                const ix::WebSocketMessagePtr& message) { handleMessage(connectionState, webSocket, message); });
@@ -291,6 +291,31 @@ void WebSocketServer::handleDeleteMessage(ix::WebSocket& webSocket, const Subscr
 }
 
 void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription) {
+    // Issue #231: раньше call_join не проверял членство в канале вообще —
+    // любой обладатель валидного токена мог присоединиться к звонку любого
+    // канала. Переиспользуем ту же проверку, что и у остального доступа к
+    // каналу, вместо отдельной системы прав только для звонков.
+    if (!chatService_.isChannelMember(subscription.channelId, subscription.login)) {
+        webSocket.send(nlohmann::json{{"error", "not a member of this channel"}}.dump());
+        return;
+    }
+
+    // SFU-комната (issue #123/#230/#231): id детерминированно вычисляется
+    // из channelId, поэтому повторный call_join на тот же канал не плодит
+    // новые videoroom — ensureRoomExists() сама идемпотентна на стороне
+    // Janus (проверяет "exists" перед "create"). Недоступность Janus не
+    // должна ронять mesh-присутствие ниже (оно от SFU не зависит, пока
+    // существуют оба пути — issue #232/#233 всё это переключат/уберут) —
+    // отсутствие "sfu_room" в ответе означает "SFU для этого звонка сейчас
+    // недоступен", клиент, ещё не умеющий его использовать (issue #232),
+    // это поле просто игнорирует.
+    const std::string janusRoomId = "channel-" + std::to_string(subscription.channelId);
+    std::optional<std::string> sfuRoom;
+    if (janusClient_.ensureRoomExists(janusRoomId)) {
+        chatService_.recordCallRoom(subscription.channelId, janusRoomId);
+        sfuRoom = janusRoomId;
+    }
+
     nlohmann::json roster = nlohmann::json::array();
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
@@ -301,7 +326,9 @@ void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscriptio
         participants[subscription.login] = &webSocket;
     }
 
-    webSocket.send(nlohmann::json{{"call_roster", roster}}.dump());
+    webSocket.send(nlohmann::json{{"call_roster", roster},
+                                   {"sfu_room", sfuRoom.has_value() ? nlohmann::json(*sfuRoom) : nlohmann::json(nullptr)}}
+                       .dump());
     broadcastToCallParticipants(subscription.channelId, nlohmann::json{{"call_peer_joined", subscription.login}}.dump(),
                                  &webSocket);
 }
