@@ -2,17 +2,326 @@
   "title": "CI overview — tests, coverage, sanitizers",
   "uid": "ci-overview",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "timezone": "browser",
   "time": { "from": "now-30d", "to": "now" },
   "refresh": "",
   "tags": ["ci", "devicehub"],
+  "templating": {
+    "list": [
+      {
+        "name": "branch",
+        "type": "query",
+        "label": "Branch",
+        "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+        "query": "SELECT DISTINCT branch FROM ci_runs ORDER BY 1",
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": ["$__all"] },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
-      "title": "Failed tests per job",
+      "title": "Последний прогон",
+      "description": "Кликабельно — ведёт на сам прогон в GitHub Actions.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "success": { "text": "✅ Passing" }, "failure": { "text": "❌ Failing" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "custom": { "cellOptions": { "type": "auto" } },
+          "links": [
+            { "title": "Открыть в GitHub Actions", "url": "${__data.fields.html_url}" }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "conclusion" },
+            "properties": [
+              { "id": "custom.mapValueMapping", "value": true },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "success": { "text": "✅ Passing", "color": "green", "index": 0 }, "failure": { "text": "❌ Failing", "color": "red", "index": 1 } } }
+                ]
+              },
+              { "id": "color", "value": { "mode": "thresholds" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/conclusion/" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "SELECT r.conclusion, r.branch, r.html_url FROM ci_runs r WHERE r.branch IN ($branch) ORDER BY r.created_at DESC LIMIT 1",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Здоровье ядра (services+coverage+fuzz)",
+      "description": "Реальная бизнес-логика: тесты сервисов, покрытие, fuzz-таргеты. Не включает build-and-test/sanitizers — см. соседний панель, почему это разные вещи.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "SELECT round(100.0 * sum(CASE WHEN j.conclusion = 'success' THEN 1 ELSE 0 END) / count(*), 1) AS value FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.kind IN ('services', 'coverage', 'fuzz') AND r.branch IN ($branch) AND $__timeFilter(r.created_at)",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Итоговый статус прогонов (включая build-and-test)",
+      "description": "Общий conclusion прогона учитывает и macOS build-and-test — известно падающий (issue #171), поэтому этот процент почти всегда намного ниже панели «Здоровье ядра» слева. Разрыв между ними — это цена сломанной инфраструктуры CI, а не реальных багов.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "SELECT round(100.0 * sum(CASE WHEN r.conclusion = 'success' THEN 1 ELSE 0 END) / count(*), 1) AS value FROM ci_runs r WHERE r.branch IN ($branch) AND $__timeFilter(r.created_at)",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Сейчас красных job'ов",
+      "description": "Число уникальных job'ов (по всем веткам), чей самый последний прогон завершился failure — не зависит от фильтра Branch/времени вверху, это снимок «прямо сейчас».",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "WITH latest AS (SELECT DISTINCT ON (j.job_name) j.job_name, j.conclusion FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id ORDER BY j.job_name, r.created_at DESC) SELECT count(*) AS value FROM latest WHERE conclusion = 'failure'",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Надёжность по job'ам (за выбранный период)",
+      "description": "Отсортировано от самых нестабильных — сразу видно, что чинить в первую очередь.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Pass rate %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "yellow", "value": 50 },
+                    { "color": "green", "value": 90 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Latest" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "success": { "text": "✅ pass", "color": "green" }, "failure": { "text": "❌ fail", "color": "red" } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Avg duration (s)" },
+            "properties": [{ "id": "unit", "value": "s" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "SELECT j.job_name AS \"Job\", count(*) AS \"Runs\", round(100.0 * sum(CASE WHEN j.conclusion = 'success' THEN 1 ELSE 0 END) / count(*), 0) AS \"Pass rate %\", round(avg(j.duration_seconds)) AS \"Avg duration (s)\", (SELECT j2.conclusion FROM ci_job_results j2 JOIN ci_runs r2 ON r2.run_id = j2.run_id WHERE j2.job_name = j.job_name AND r2.branch IN ($branch) ORDER BY r2.created_at DESC LIMIT 1) AS \"Latest\" FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE r.branch IN ($branch) AND $__timeFilter(r.created_at) GROUP BY j.job_name ORDER BY \"Pass rate %\" ASC, j.job_name",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "build-and-test (macOS): время выполнения",
+      "description": "issue #171 — этот job структурно не переживает раннер (обрывается ~1ч20-25м, см. README). Отдельная шкала от остальных job'ов ниже — иначе их 1.5-2-минутные времена были бы не видны рядом с этими часами.",
       "type": "timeseries",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "m",
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "yellow", "value": null },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "custom": { "drawStyle": "line", "spanNulls": true, "fillOpacity": 15, "thresholdsStyle": { "mode": "area" } }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT r.created_at AS \"time\", j.duration_seconds / 60.0 AS value FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.job_name = 'build-and-test' AND r.branch IN ($branch) AND $__timeFilter(r.created_at) ORDER BY 1",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Остальные job'ы: время выполнения",
+      "description": "services/coverage/fuzz/sanitizers — все в пределах пары минут, общая шкала им подходит.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "spanNulls": true, "fillOpacity": 10 }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT r.created_at AS \"time\", j.duration_seconds AS value, j.job_name AS metric FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.job_name <> 'build-and-test' AND r.branch IN ($branch) AND $__timeFilter(r.created_at) ORDER BY 1",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Провалившиеся тесты по job'ам",
+      "description": "build-and-test здесь никогда не появляется — он падает на этапе сборки/конфигурации, раньше, чем ctest успевает напечатать сводку с числом тестов (см. панель времени выполнения выше вместо этого).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
       "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "drawStyle": "line", "spanNulls": true, "fillOpacity": 10 } },
@@ -22,24 +331,38 @@
         {
           "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
           "format": "time_series",
-          "rawSql": "SELECT r.created_at AS \"time\", j.tests_failed AS value, j.job_name AS metric FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.tests_failed IS NOT NULL AND $__timeFilter(r.created_at) ORDER BY 1",
+          "rawSql": "SELECT r.created_at AS \"time\", j.tests_failed AS value, j.job_name AS metric FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.tests_failed IS NOT NULL AND r.branch IN ($branch) AND $__timeFilter(r.created_at) ORDER BY 1",
           "rawQuery": true,
           "refId": "A"
         }
       ]
     },
     {
-      "id": 2,
-      "title": "Code coverage % (lines) by service",
+      "id": 9,
+      "title": "Покрытие кода % (строки) по сервисам",
       "type": "timeseries",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
       "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
           "min": 0,
           "max": 100,
-          "custom": { "drawStyle": "line", "spanNulls": true, "fillOpacity": 15 }
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 75 }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "fillOpacity": 15,
+            "thresholdsStyle": { "mode": "dashed" }
+          }
         },
         "overrides": []
       },
@@ -47,17 +370,131 @@
         {
           "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
           "format": "time_series",
-          "rawSql": "SELECT r.created_at AS \"time\", c.line_coverage_percent AS value, c.service AS metric FROM ci_coverage c JOIN ci_runs r ON r.run_id = c.run_id WHERE $__timeFilter(r.created_at) ORDER BY 1",
+          "rawSql": "SELECT r.created_at AS \"time\", c.line_coverage_percent AS value, c.service AS metric FROM ci_coverage c JOIN ci_runs r ON r.run_id = c.run_id WHERE r.branch IN ($branch) AND $__timeFilter(r.created_at) ORDER BY 1",
           "rawQuery": true,
           "refId": "A"
         }
       ]
     },
     {
-      "id": 3,
-      "title": "Sanitizer pass/fail by service",
+      "id": 13,
+      "title": "Файлы с наименьшим покрытием (последний прогон каждого сервиса)",
+      "description": "Клик по имени файла ведёт на него в GitHub на том самом коммите, где собирались эти цифры.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 37 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "File" },
+            "properties": [
+              { "id": "links", "value": [ { "title": "Открыть на GitHub", "url": "https://github.com/NekrasovIS/Exp/blob/${__data.fields.commit_sha}/${__value.text}" } ] }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "commit_sha" },
+            "properties": [ { "id": "custom.hidden", "value": true } ]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": ".* %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "yellow", "value": 50 },
+                    { "color": "green", "value": 75 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "WITH latest_per_service AS (SELECT DISTINCT ON (cf.service) cf.service, cf.run_id, r.commit_sha FROM ci_coverage_files cf JOIN ci_runs r ON r.run_id = cf.run_id WHERE r.branch IN ($branch) ORDER BY cf.service, r.created_at DESC) SELECT cf.service AS \"Service\", cf.file_path AS \"File\", cf.line_coverage_percent AS \"Line %\", cf.function_coverage_percent AS \"Function %\", cf.region_coverage_percent AS \"Region %\", lps.commit_sha AS commit_sha FROM ci_coverage_files cf JOIN latest_per_service lps ON lps.service = cf.service AND lps.run_id = cf.run_id ORDER BY \"Line %\" ASC LIMIT 25",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Наименее покрытые функции (последний прогон каждого сервиса)",
+      "description": "Клик по имени файла ведёт на него в GitHub — конкретной функцию внутри придётся найти самому (llvm-cov report не даёт номер строки в этом формате вывода).",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 46 },
+      "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "File" },
+            "properties": [
+              { "id": "links", "value": [ { "title": "Открыть на GitHub", "url": "https://github.com/NekrasovIS/Exp/blob/${__data.fields.commit_sha}/${__value.text}" } ] }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "commit_sha" },
+            "properties": [ { "id": "custom.hidden", "value": true } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Line %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "yellow", "value": 50 },
+                    { "color": "green", "value": 75 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
+          "format": "table",
+          "rawSql": "WITH latest_per_service AS (SELECT DISTINCT ON (cfn.service) cfn.service, cfn.run_id, r.commit_sha FROM ci_coverage_functions cfn JOIN ci_runs r ON r.run_id = cfn.run_id WHERE r.branch IN ($branch) ORDER BY cfn.service, r.created_at DESC) SELECT cfn.service AS \"Service\", cfn.file_path AS \"File\", cfn.function_name AS \"Function\", cfn.line_coverage_percent AS \"Line %\", lps.commit_sha AS commit_sha FROM ci_coverage_functions cfn JOIN latest_per_service lps ON lps.service = cfn.service AND lps.run_id = cfn.run_id ORDER BY \"Line %\" ASC LIMIT 25",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 55 },
+      "options": {
+        "mode": "markdown",
+        "content": "**TSan почти всегда красный — это известная причина, не регрессия кода (issue #170).** GCC-версия ThreadSanitizer на этих раннерах падает с `FATAL: ThreadSanitizer: unexpected memory mapping` ещё до начала теста (несовместимость libtsan из GCC с раскладкой памяти современного ядра). Под Clang та же сборка проходит чисто — TSan-ветка CI переведена на Clang, здесь просто накапливается история старых, ещё не пересобранных прогонов."
+      }
+    },
+    {
+      "id": 11,
+      "title": "Санитайзеры: pass/fail по сервисам",
       "type": "state-timeline",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 58 },
       "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
       "fieldConfig": {
         "defaults": {
@@ -80,17 +517,17 @@
         {
           "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
           "format": "time_series",
-          "rawSql": "SELECT r.created_at AS \"time\", (j.service || ' / ' || j.sanitizer) AS metric, CASE j.conclusion WHEN 'success' THEN 1 ELSE 0 END AS value FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.kind = 'sanitizers' AND $__timeFilter(r.created_at) ORDER BY 1",
+          "rawSql": "SELECT r.created_at AS \"time\", (j.service || ' / ' || j.sanitizer) AS metric, CASE j.conclusion WHEN 'success' THEN 1 ELSE 0 END AS value FROM ci_job_results j JOIN ci_runs r ON r.run_id = j.run_id WHERE j.kind = 'sanitizers' AND r.branch IN ($branch) AND $__timeFilter(r.created_at) ORDER BY 1",
           "rawQuery": true,
           "refId": "A"
         }
       ]
     },
     {
-      "id": 4,
-      "title": "Most recent CI run — job status",
+      "id": 12,
+      "title": "Самый свежий прогон — статус по job'ам",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 27 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 66 },
       "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
       "fieldConfig": {
         "defaults": {},
@@ -106,6 +543,10 @@
               },
               { "id": "custom.cellOptions", "value": { "type": "color-text" } }
             ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duration_seconds" },
+            "properties": [{ "id": "unit", "value": "s" }]
           }
         ]
       },
@@ -113,7 +554,7 @@
         {
           "datasource": { "type": "postgres", "uid": "ci-metrics-postgres" },
           "format": "table",
-          "rawSql": "SELECT j.job_name, j.kind, j.service, j.sanitizer, j.conclusion, j.tests_total, j.tests_failed, j.duration_seconds FROM ci_job_results j WHERE j.run_id = (SELECT run_id FROM ci_runs ORDER BY created_at DESC LIMIT 1) ORDER BY j.kind, j.service NULLS FIRST, j.sanitizer",
+          "rawSql": "SELECT j.job_name, j.kind, j.service, j.sanitizer, j.conclusion, j.tests_total, j.tests_failed, j.duration_seconds FROM ci_job_results j WHERE j.run_id = (SELECT run_id FROM ci_runs WHERE branch IN ($branch) ORDER BY created_at DESC LIMIT 1) ORDER BY j.kind, j.service NULLS FIRST, j.sanitizer",
           "rawQuery": true,
           "refId": "A"
         }
