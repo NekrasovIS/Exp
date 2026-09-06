@@ -26,6 +26,16 @@
 
 namespace devicehub {
 
+namespace {
+/// Идентификаторы локальных видеотреков (issue #185) — заданы при
+/// CreateVideoTrack() на отправляющей стороне и доходят до приёмника
+/// через msid в SDP, поэтому handleRemoteTrack() может по ним же
+/// различить, какой из двух независимых треков пира (камера или
+/// демонстрация экрана) только что появился.
+constexpr char kCameraTrackId[] = "call-camera-video0";
+constexpr char kScreenShareTrackId[] = "call-screenshare-video0";
+}  // namespace
+
 /// Адаптер webrtc::PeerConnectionObserver — каждый колбэк срабатывает на
 /// signaling-потоке WebRTC и немедленно перепрыгивает обратно на
 /// собственный (GUI) поток CallManager через QMetaObject::invokeMethod
@@ -91,7 +101,8 @@ private:
 /// трогать CallManager.
 class CallManager::RemoteVideoSink : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
-    RemoteVideoSink(CallManager& manager, QString peerLogin) : manager_(manager), peerLogin_(std::move(peerLogin)) {}
+    RemoteVideoSink(CallManager& manager, QString peerLogin, bool isScreenShare)
+        : manager_(manager), peerLogin_(std::move(peerLogin)), isScreenShare_(isScreenShare) {}
 
     void OnFrame(const webrtc::VideoFrame& frame) override {
         const webrtc::scoped_refptr<webrtc::I420BufferInterface> i420 = frame.video_frame_buffer()->ToI420();
@@ -101,14 +112,19 @@ public:
                             i420->height());
         CallManager* manager = &manager_;
         const QString peerLogin = peerLogin_;
+        const bool isScreenShare = isScreenShare_;
         QMetaObject::invokeMethod(
-            manager, [manager, peerLogin, image] { manager->handleRemoteVideoFrame(peerLogin, image); },
+            manager,
+            [manager, peerLogin, image, isScreenShare] {
+                manager->handleRemoteVideoFrame(peerLogin, image, isScreenShare);
+            },
             Qt::QueuedConnection);
     }
 
 private:
     CallManager& manager_;
     QString peerLogin_;
+    bool isScreenShare_;
 };
 
 class CallManager::LocalDescriptionSetObserver : public webrtc::SetLocalDescriptionObserverInterface {
@@ -230,23 +246,22 @@ void CallManager::setMuted(bool muted) {
     }
 }
 
-void CallManager::ensureLocalVideoTrack() {
+void CallManager::ensureLocalCameraTrack() {
     ensureFactory();
-    if (localVideoTrack_) {
+    if (localCameraTrack_) {
         return;
     }
-    videoTrackSource_ = webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
-    localVideoTrack_ = peerConnectionFactory_->CreateVideoTrack(videoTrackSource_, "call-video0");
-    // Самый первый вызов enableVideo()/enableScreenShare(): подключаем
-    // (новый) трек ко всем уже существующим соединениям с пирами и
-    // явно согласовываем это изменение прямо здесь (тот же паттерн,
-    // что уже используют ensurePeerConnection()/onCallRosterReceived()
-    // для изначального аудиотрека — почему это остаётся явным, а не
-    // реакцией на собственное уведомление WebRTC
-    // OnRenegotiationNeeded(), см. doc-комментарий класса). Любое
-    // соединение, созданное после этого момента, вместо этого
-    // подхватывает трек как часть своего собственного изначального
-    // offer/answer (см. ensurePeerConnection()).
+    cameraTrackSource_ = webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/false);
+    localCameraTrack_ = peerConnectionFactory_->CreateVideoTrack(cameraTrackSource_, kCameraTrackId);
+    // Самый первый вызов enableVideo(): подключаем (новый) трек ко всем
+    // уже существующим соединениям с пирами и явно согласовываем это
+    // изменение прямо здесь (тот же паттерн, что уже используют
+    // ensurePeerConnection()/onCallRosterReceived() для изначального
+    // аудиотрека — почему это остаётся явным, а не реакцией на
+    // собственное уведомление WebRTC OnRenegotiationNeeded(), см.
+    // doc-комментарий класса). Любое соединение, созданное после этого
+    // момента, вместо этого подхватывает трек как часть своего
+    // собственного изначального offer/answer (см. ensurePeerConnection()).
     //
     // Последующие переключения просто дёргают set_enabled() ниже,
     // намеренно никогда больше не удаляя трек — RemoveTrackOrError()
@@ -258,18 +273,30 @@ void CallManager::ensureLocalVideoTrack() {
     // который setMuted() уже использует для аудио, вообще не трогая
     // треки (и, соответственно, не требуя renegotiation).
     for (auto& [login, entry] : peers_) {
-        attachVideoTrack(entry);
+        attachCameraTrack(entry);
+        negotiateLocal(QString::fromStdString(login));
+    }
+}
+
+void CallManager::ensureLocalScreenShareTrack() {
+    ensureFactory();
+    if (localScreenShareTrack_) {
+        return;
+    }
+    screenShareTrackSource_ = webrtc::make_ref_counted<CallVideoTrackSource>(/*isScreencast=*/true);
+    localScreenShareTrack_ = peerConnectionFactory_->CreateVideoTrack(screenShareTrackSource_, kScreenShareTrackId);
+    // Тот же паттерн «создать один раз, подключить ко всем текущим
+    // пирам, явно согласовать», что и ensureLocalCameraTrack() — оба
+    // трека полностью независимы друг от друга (issue #185).
+    for (auto& [login, entry] : peers_) {
+        attachScreenShareTrack(entry);
         negotiateLocal(QString::fromStdString(login));
     }
 }
 
 void CallManager::enableVideo(const QCameraDevice& device) {
-    if (screenShareEnabled_) {
-        disableScreenShare();
-    }
-    ensureLocalVideoTrack();
-    videoTrackSource_->setIsScreencast(false);
-    localVideoTrack_->set_enabled(true);
+    ensureLocalCameraTrack();
+    localCameraTrack_->set_enabled(true);
     videoEnabled_ = true;
     camera_.setDevice(device);
     camera_.start();
@@ -281,18 +308,14 @@ void CallManager::disableVideo() {
     }
     videoEnabled_ = false;
     camera_.stop();
-    if (localVideoTrack_) {
-        localVideoTrack_->set_enabled(false);
+    if (localCameraTrack_) {
+        localCameraTrack_->set_enabled(false);
     }
 }
 
 void CallManager::enableScreenShare(QScreen* screen) {
-    if (videoEnabled_) {
-        disableVideo();
-    }
-    ensureLocalVideoTrack();
-    videoTrackSource_->setIsScreencast(true);
-    localVideoTrack_->set_enabled(true);
+    ensureLocalScreenShareTrack();
+    localScreenShareTrack_->set_enabled(true);
     screenShareEnabled_ = true;
     screenCapture_.setScreen(screen);
     screenCapture_.start();
@@ -304,8 +327,8 @@ void CallManager::disableScreenShare() {
     }
     screenShareEnabled_ = false;
     screenCapture_.stop();
-    if (localVideoTrack_) {
-        localVideoTrack_->set_enabled(false);
+    if (localScreenShareTrack_) {
+        localScreenShareTrack_->set_enabled(false);
     }
 }
 
@@ -391,10 +414,12 @@ CallManager::PeerConnectionEntry* CallManager::ensurePeerConnection(const QStrin
 
     PeerConnectionEntry& insertedEntry = peers_.emplace(key, std::move(entry)).first->second;
     // Часть изначального offer/answer этого соединения, а не отдельная
-    // renegotiation — если видеотрек уже существует (даже сейчас
-    // выключенный), соединение нового пира включает его с самого
-    // начала.
-    attachVideoTrack(insertedEntry);
+    // renegotiation — если один или оба видеотрека уже существуют (даже
+    // сейчас выключенные), соединение нового пира включает их с самого
+    // начала. Каждый attach*Track() — no-op, если соответствующий трек
+    // ещё не создан (см. их doc-комментарии).
+    attachCameraTrack(insertedEntry);
+    attachScreenShareTrack(insertedEntry);
     return &insertedEntry;
 }
 
@@ -484,20 +509,28 @@ void CallManager::handleLocalIceCandidate(const QString& peerLogin, const QJsonO
 void CallManager::handleRemoteTrack(const QString& peerLogin,
                                      webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
     const auto it = peers_.find(peerLogin.toStdString());
-    if (it == peers_.end() || !transceiver || !transceiver->receiver() || it->second.remoteVideoSink) {
+    if (it == peers_.end() || !transceiver || !transceiver->receiver()) {
         return;
     }
     const webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track = transceiver->receiver()->track();
     if (!track || track->kind() != webrtc::MediaStreamTrackInterface::kVideoKind) {
         return;
     }
-    it->second.remoteVideoSink = std::make_unique<RemoteVideoSink>(*this, peerLogin);
-    static_cast<webrtc::VideoTrackInterface*>(track.get())
-        ->AddOrUpdateSink(it->second.remoteVideoSink.get(), webrtc::VideoSinkWants());
+    // Различаем камеру и демонстрацию экрана этого пира по id трека
+    // (issue #185) — оба независимы, у каждого свой слот-защита от
+    // повторного подключения sink'а.
+    const bool isScreenShare = track->id() == kScreenShareTrackId;
+    std::unique_ptr<RemoteVideoSink>& sinkSlot =
+        isScreenShare ? it->second.remoteScreenShareVideoSink : it->second.remoteCameraVideoSink;
+    if (sinkSlot) {
+        return;
+    }
+    sinkSlot = std::make_unique<RemoteVideoSink>(*this, peerLogin, isScreenShare);
+    static_cast<webrtc::VideoTrackInterface*>(track.get())->AddOrUpdateSink(sinkSlot.get(), webrtc::VideoSinkWants());
 }
 
-void CallManager::handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame) {
-    emit remoteVideoFrameReceived(peerLogin, frame);
+void CallManager::handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame, bool isScreenShare) {
+    emit remoteVideoFrameReceived(peerLogin, frame, isScreenShare);
 }
 
 void CallManager::onCapturedPcm(const QByteArray& data, const QAudioFormat& format) {
@@ -514,31 +547,40 @@ void CallManager::onCapturedPcm(const QByteArray& data, const QAudioFormat& form
 }
 
 void CallManager::onCameraFrame(const QVideoFrame& frame) {
-    if (!videoEnabled_ || !videoTrackSource_) {
+    if (!videoEnabled_ || !cameraTrackSource_) {
         return;
     }
-    videoTrackSource_->pushFrame(frame);
+    cameraTrackSource_->pushFrame(frame);
 }
 
 void CallManager::onScreenShareFrame(const QVideoFrame& frame) {
-    if (!screenShareEnabled_ || !videoTrackSource_) {
+    if (!screenShareEnabled_ || !screenShareTrackSource_) {
         return;
     }
-    videoTrackSource_->pushFrame(frame);
+    screenShareTrackSource_->pushFrame(frame);
 }
 
-void CallManager::attachVideoTrack(PeerConnectionEntry& entry) {
-    if (!localVideoTrack_ || entry.videoSender || !entry.connection) {
+void CallManager::attachCameraTrack(PeerConnectionEntry& entry) {
+    attachTrack(entry, localCameraTrack_, entry.cameraSender);
+}
+
+void CallManager::attachScreenShareTrack(PeerConnectionEntry& entry) {
+    attachTrack(entry, localScreenShareTrack_, entry.screenShareSender);
+}
+
+void CallManager::attachTrack(PeerConnectionEntry& entry, const webrtc::scoped_refptr<webrtc::VideoTrackInterface>& track,
+                               webrtc::scoped_refptr<webrtc::RtpSenderInterface>& sender) {
+    if (!track || sender || !entry.connection) {
         return;
     }
     const webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpSenderInterface>> addTrackResult =
-        entry.connection->AddTrack(localVideoTrack_, std::vector<std::string>{"call-stream"});
+        entry.connection->AddTrack(track, std::vector<std::string>{"call-stream"});
     if (!addTrackResult.ok()) {
         emit callError(
             QStringLiteral("Failed to attach video: %1").arg(QString::fromUtf8(addTrackResult.error().message())));
         return;
     }
-    entry.videoSender = addTrackResult.value();
+    sender = addTrackResult.value();
 }
 
 void CallManager::onCallRosterReceived(const QStringList& participants) {
@@ -561,7 +603,11 @@ void CallManager::onCallPeerJoined(const QString& login) {
 void CallManager::onCallPeerLeft(const QString& login) {
     closePeerConnection(login);
     emit participantLeft(login);
-    emit remoteVideoTrackRemoved(login);
+    // Оба рода сразу (issue #185) — UI-сторона просто не найдёт плитку
+    // того рода, который этот участник в реальности не отправлял, и
+    // ничего не сделает для неё.
+    emit remoteVideoTrackRemoved(login, /*isScreenShare=*/false);
+    emit remoteVideoTrackRemoved(login, /*isScreenShare=*/true);
 }
 
 void CallManager::onCallSignalReceived(const QString& from, const QJsonObject& payload) {

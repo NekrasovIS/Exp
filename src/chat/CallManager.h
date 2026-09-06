@@ -96,30 +96,37 @@ namespace devicehub {
  * пути, вместо того чтобы полагаться на исправление внутреннего бага
  * WebRTC.
  *
- * Демонстрация экрана (issue #112) переиспользует ровно тот же
- * механизм трека/источника трека/подключения, что и видео с камеры —
- * ensureLocalVideoTrack() выносит блок «создать один раз, подключить ко
- * всем пирам», который раньше enableVideo() делал прямо внутри себя —
- * вместо создания второго видеотрека: enableVideo() и
- * enableScreenShare() взаимно исключают друг друга (включение одного
- * сначала выключает другое) и просто направляют один общий
- * CallVideoTrackSource на другой источник кадров (camera_ против
- * screenCapture_), переключая его подсказку is_screencast() через
- * setIsScreencast() соответственно. Проще, чем второй трек (не нужен
- * дополнительный учёт renegotiation/подключения на каждого пира), ценой
- * невозможности отправлять оба одновременно — принятое на первом этапе
- * ограничение по объёму, а не ограничение WebRTC.
+ * Демонстрация экрана (issue #112) поначалу переиспользовала один общий
+ * видеотрек с камерой (взаимно исключая их), но issue #185 разделил это
+ * на два полностью независимых трека/источника — cameraTrackSource_/
+ * localCameraTrack_ и screenShareTrackSource_/localScreenShareTrack_,
+ * каждый ensure*() (ensureLocalCameraTrack()/ensureLocalScreenShareTrack())
+ * создаётся один раз и подключается ко всем текущим пирам тем же
+ * паттерном «создать → attachXxxTrack() → явный negotiateLocal() для
+ * каждого», что раньше был общим для обоих; attachTrack() — маленький
+ * общий хелпер под обоими attachCameraTrack()/attachScreenShareTrack(),
+ * чтобы не дублировать AddTrack()+обработку ошибки. enableVideo() и
+ * enableScreenShare() теперь можно включать одновременно — реального
+ * ограничения от WebRTC тут никогда не было, только цена второго трека
+ * (лишний renegotiation/подключение на пира при первом использовании
+ * каждого), которую issue #185 решил заплатить.
  *
  * Приём удалённого видео (issue #91) — зеркальное отражение его
- * отправки: PeerObserver::OnTrack() срабатывает, как только появляется
- * видео-transceiver пира, handleRemoteTrack() подключает RemoteVideoSink
- * к этому треку (защищено полем PeerConnectionEntry::remoteVideoSink,
- * чтобы это происходило только один раз на пира), а RemoteVideoSink
- * конвертирует каждый входящий I420-кадр обратно в QImage (обратная
- * операция ARGBToI420 из CallVideoTrackSource) и испускает
- * remoteVideoFrameReceived() — сначала перепрыгивая на GUI-поток,
- * поскольку OnFrame() срабатывает на потоке декодирования WebRTC, как и
- * любой другой колбэк с WebRTC-потока в этом классе.
+ * отправки, тоже раздвоенное на камеру/экран (issue #185):
+ * PeerObserver::OnTrack() срабатывает, как только появляется
+ * видео-transceiver пира, handleRemoteTrack() различает, какой из двух
+ * это треков, по его id (kCameraTrackId/kScreenShareTrackId — те же
+ * строки, что заданы при CreateVideoTrack() на отправляющей стороне и
+ * доходят до приёмника через msid в SDP), и подключает RemoteVideoSink
+ * к соответствующему полю PeerConnectionEntry::remoteCameraVideoSink/
+ * remoteScreenShareVideoSink (по отдельности защищает каждое от
+ * повторного подключения). RemoteVideoSink знает, какого он рода, и
+ * передаёт это дальше вместе с кадром — remoteVideoFrameReceived()
+ * получила параметр isScreenShare, чтобы UI мог показать камеру и
+ * демонстрацию экрана одного и того же участника как две разные
+ * плитки, а не путать их в одну. Конвертация кадра (I420 -> QImage,
+ * обратная ARGBToI420 из CallVideoTrackSource) и переход на GUI-поток
+ * (OnFrame() срабатывает на потоке декодирования WebRTC) не изменились.
  */
 class CallManager : public QObject {
     Q_OBJECT
@@ -152,25 +159,27 @@ public:
     /// Начинает захват с @p device и отправку его как видеотрека
     /// каждому текущему и будущему пиру — добавляется к существующим
     /// PeerConnection через renegotiation, к новым — как часть их
-    /// изначального offer/answer. Безопасно вызывать независимо от
-    /// того, активен ли звонок.
+    /// изначального offer/answer. Независимо от enableScreenShare()
+    /// (issue #185 — отдельный трек, а не общий) и от того, активен ли
+    /// звонок — оба безопасно вызывать в любом порядке и сочетании.
     void enableVideo(const QCameraDevice& device);
 
-    /// Останавливает камеру и удаляет видеотрек у всех пиров.
+    /// Останавливает камеру и отключает видеотрек камеры у всех пиров —
+    /// демонстрация экрана, если она тоже активна, не затрагивается.
     void disableVideo();
 
     [[nodiscard]] bool videoEnabled() const { return videoEnabled_; }
 
-    /// Начинает захват @p screen и отправку его как локального
-    /// видеотрека (issue #112) — использует ровно тот же трек/источник
-    /// трека, что и enableVideo(), а не второй, поэтому взаимно
-    /// исключает видео с камеры: включение одного выключает другое.
-    /// Безопасно вызывать независимо от того, активен ли звонок.
+    /// Начинает захват @p screen и отправку его как отдельного
+    /// локального видеотрека (issue #112, независимый трек с issue
+    /// #185) — не взаимоисключает видео с камеры, оба можно включить
+    /// одновременно. Безопасно вызывать независимо от того, активен ли
+    /// звонок.
     void enableScreenShare(QScreen* screen);
 
-    /// Останавливает захват экрана и выключает общий видеотрек (если
-    /// только на самом деле не активно видео с камеры — см.
-    /// enableVideo()).
+    /// Останавливает захват экрана и отключает видеотрек демонстрации
+    /// экрана у всех пиров — видео с камеры, если оно тоже активно, не
+    /// затрагивается.
     void disableScreenShare();
 
     [[nodiscard]] bool screenShareEnabled() const { return screenShareEnabled_; }
@@ -182,11 +191,17 @@ signals:
 
     /// Декодированный кадр из входящего видеотрека удалённого участника
     /// (issue #91) — никогда не испускается для пира, не отправлявшего
-    /// видео.
-    void remoteVideoFrameReceived(const QString& peerLogin, const QImage& frame);
-    /// Видеотрек данного пира пропал (он покинул звонок) — UI должен
-    /// убрать видео-плитку этого участника.
-    void remoteVideoTrackRemoved(const QString& peerLogin);
+    /// видео. @p isScreenShare различает камеру и демонстрацию экрана
+    /// одного и того же участника (issue #185, независимые треки) — UI
+    /// показывает их как отдельные плитки.
+    void remoteVideoFrameReceived(const QString& peerLogin, const QImage& frame, bool isScreenShare);
+    /// Видеотрек данного рода (камера/демонстрация экрана, см.
+    /// @p isScreenShare) у этого пира пропал — UI должен убрать
+    /// соответствующую видео-плитку. Испускается для обоих родов сразу
+    /// при уходе участника из звонка, даже если он в реальности слал
+    /// только один — UI-сторона просто ничего не найдёт для отсутствующего
+    /// и промолчит.
+    void remoteVideoTrackRemoved(const QString& peerLogin, bool isScreenShare);
 
 private:
     class PeerObserver;
@@ -201,16 +216,23 @@ private:
     struct PeerConnectionEntry {
         webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection;
         std::unique_ptr<PeerObserver> observer;
-        /// Не null, как только localVideoTrack_ подключён к этому
-        /// пиру — защищает attachVideoTrack() от повторного добавления.
-        /// Трек, будучи подключённым, больше никогда не удаляется (см.
-        /// doc-комментарий enableVideo()), поэтому обратно в null это
-        /// поле не возвращается.
-        webrtc::scoped_refptr<webrtc::RtpSenderInterface> videoSender;
-        /// Не null, как только для этого пира замечен удалённый
-        /// видеотрек (PeerObserver::OnTrack() -> handleRemoteTrack()) —
-        /// защищает от повторного подключения приёмного sink'а.
-        std::unique_ptr<RemoteVideoSink> remoteVideoSink;
+        /// Не null, как только localCameraTrack_/localScreenShareTrack_
+        /// подключён к этому пиру — защищает attachCameraTrack()/
+        /// attachScreenShareTrack() от повторного добавления. Трек,
+        /// будучи подключённым, больше никогда не удаляется (см.
+        /// doc-комментарий enableVideo()), поэтому обратно в null эти
+        /// поля не возвращаются.
+        webrtc::scoped_refptr<webrtc::RtpSenderInterface> cameraSender;
+        webrtc::scoped_refptr<webrtc::RtpSenderInterface> screenShareSender;
+        /// Не null, как только для этого пира замечен соответствующий
+        /// удалённый видеотрек (PeerObserver::OnTrack() ->
+        /// handleRemoteTrack(), различает камеру/экран по id трека) —
+        /// защищает каждый от повторного подключения приёмного sink'а
+        /// независимо от другого (issue #185 — камера и демонстрация
+        /// экрана участника могут идти одновременно, каждая своим
+        /// треком).
+        std::unique_ptr<RemoteVideoSink> remoteCameraVideoSink;
+        std::unique_ptr<RemoteVideoSink> remoteScreenShareVideoSink;
     };
 
     void onCallRosterReceived(const QStringList& participants);
@@ -234,36 +256,52 @@ private:
 
     /// На соединении пира `peerLogin` появился новый (или
     /// пересогласованный) transceiver — если он несёт видеотрек и у
-    /// этого пира ещё нет приёмного sink'а, подключает его, чтобы кадры
-    /// начали поступать в remoteVideoFrameReceived().
+    /// этого пира ещё нет приёмного sink'а нужного рода (камера/экран,
+    /// определяется по id трека — kCameraTrackId/kScreenShareTrackId),
+    /// подключает его, чтобы кадры начали поступать в
+    /// remoteVideoFrameReceived().
     void handleRemoteTrack(const QString& peerLogin, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
-    void handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame);
+    void handleRemoteVideoFrame(const QString& peerLogin, const QImage& frame, bool isScreenShare);
 
     /// Перенаправляет захваченный буфер из audioInput_ в ADM, пока
     /// звонок активен.
     void onCapturedPcm(const QByteArray& data, const QAudioFormat& format);
 
-    /// Перенаправляет захваченный кадр из camera_ в videoTrackSource_,
+    /// Перенаправляет захваченный кадр из camera_ в cameraTrackSource_,
     /// пока видео включено.
     void onCameraFrame(const QVideoFrame& frame);
 
     /// Перенаправляет захваченный кадр из screenCapture_ в
-    /// videoTrackSource_, пока активна демонстрация экрана.
+    /// screenShareTrackSource_, пока активна демонстрация экрана.
     void onScreenShareFrame(const QVideoFrame& frame);
 
-    /// Создаёт videoTrackSource_/localVideoTrack_ и подключает их ко
-    /// всем существующим пирам, если это первый вызов enableVideo() или
-    /// enableScreenShare() за всё время — иначе ничего не делает (см.
-    /// doc-комментарий enableVideo() о том, почему трек, будучи создан,
-    /// общий и больше никогда не удаляется).
-    void ensureLocalVideoTrack();
+    /// Создаёт cameraTrackSource_/localCameraTrack_ и подключает их ко
+    /// всем существующим пирам, если это первый вызов enableVideo() за
+    /// всё время — иначе ничего не делает (см. doc-комментарий
+    /// enableVideo() о том, почему трек, будучи создан, больше никогда
+    /// не удаляется).
+    void ensureLocalCameraTrack();
 
-    /// Добавляет localVideoTrack_ к соединению `entry`, если оно
+    /// То же самое, что ensureLocalCameraTrack(), для отдельного трека
+    /// демонстрации экрана (issue #185).
+    void ensureLocalScreenShareTrack();
+
+    /// Добавляет localCameraTrack_ к соединению `entry`, если оно
     /// существует и ещё не подключено — независимо от того, включено
     /// ли видео сейчас (см. doc-комментарий enableVideo() о том, почему
     /// трек, будучи создан, больше никогда не удаляется, а только
     /// переключается через set_enabled()).
-    void attachVideoTrack(PeerConnectionEntry& entry);
+    void attachCameraTrack(PeerConnectionEntry& entry);
+
+    /// То же самое, что attachCameraTrack(), для localScreenShareTrack_
+    /// (issue #185).
+    void attachScreenShareTrack(PeerConnectionEntry& entry);
+
+    /// Общая часть attachCameraTrack()/attachScreenShareTrack() —
+    /// AddTrack() @p track к `entry` в @p sender, если он ещё не был
+    /// добавлен, с одинаковой обработкой ошибки в обоих случаях.
+    void attachTrack(PeerConnectionEntry& entry, const webrtc::scoped_refptr<webrtc::VideoTrackInterface>& track,
+                      webrtc::scoped_refptr<webrtc::RtpSenderInterface>& sender);
 
     ChatClient& chatClient_;
     AudioInputDevice& audioInput_;
@@ -277,8 +315,10 @@ private:
     webrtc::scoped_refptr<CallAudioDeviceModule> audioDeviceModule_;
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peerConnectionFactory_;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> localAudioTrack_;
-    webrtc::scoped_refptr<CallVideoTrackSource> videoTrackSource_;
-    webrtc::scoped_refptr<webrtc::VideoTrackInterface> localVideoTrack_;
+    webrtc::scoped_refptr<CallVideoTrackSource> cameraTrackSource_;
+    webrtc::scoped_refptr<webrtc::VideoTrackInterface> localCameraTrack_;
+    webrtc::scoped_refptr<CallVideoTrackSource> screenShareTrackSource_;
+    webrtc::scoped_refptr<webrtc::VideoTrackInterface> localScreenShareTrack_;
 
     std::unordered_map<std::string, PeerConnectionEntry> peers_;
     bool inCall_ = false;

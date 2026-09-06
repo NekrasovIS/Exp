@@ -27,6 +27,7 @@ class QTimer;
 namespace devicehub {
 
 class ChannelsPanel;
+class CallWindow;
 class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
@@ -81,6 +82,12 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+
+    /// Выходит из текущего звонка, если он вообще идёт — общая часть
+    /// onCallToggleClicked()/openChannel()/closeChatView() (звонок
+    /// привязан к каналу, поэтому уходит вместе с ним при
+    /// переключении/закрытии), включая скрытие callWindow_.
+    void leaveCallIfActive();
     /// LoginWindow::requestCodeRequested() — issue #156.
     void onRequestOtpCodeClicked(const QString& identifier);
     /// LoginWindow::verifyCodeRequested() — issue #156.
@@ -253,6 +260,7 @@ private:
     FriendsPanel* friendsPanel_ = nullptr;
     QStackedWidget* sidebarListStack_ = nullptr;
     ChatView* chatView_ = nullptr;
+    CallWindow* callWindow_ = nullptr;
     MemberListPanel* memberListPanel_ = nullptr;
     DirectMessageView* directMessageView_ = nullptr;
     QStackedWidget* contentStack_ = nullptr;

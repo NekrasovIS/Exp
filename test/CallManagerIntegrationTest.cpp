@@ -14,12 +14,14 @@
 #include <QCameraDevice>
 #include <QDateTime>
 #include <QEventLoop>
+#include <QGuiApplication>
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QScreen>
 #include <QTimer>
 #include <QUrl>
 
@@ -229,12 +231,14 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         // реально декодирует видео от A — нужно по-настоящему прогнать
         // PeerObserver::OnTrack() / RemoteVideoSink::OnFrame(), поэтому здесь
         // ещё и ждём как минимум один декодированный кадр на стороне B.
-        QImage receivedFrame;
+        QImage receivedCameraFrame;
+        QImage receivedScreenShareFrame;
         QObject::connect(&callManagerB, &CallManager::remoteVideoFrameReceived,
-                          [&](const QString& login, const QImage& frame) {
-                              if (login == loginA) {
-                                  receivedFrame = frame;
+                          [&](const QString& login, const QImage& frame, bool isScreenShare) {
+                              if (login != loginA) {
+                                  return;
                               }
+                              (isScreenShare ? receivedScreenShareFrame : receivedCameraFrame) = frame;
                           });
 
         callManagerA.enableVideo(cameras.first());
@@ -246,10 +250,44 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
         EXPECT_TRUE(callManagerA.videoEnabled());
         EXPECT_TRUE(errorsA.isEmpty()) << errorsA.join(QStringLiteral("; ")).toStdString();
         EXPECT_TRUE(errorsB.isEmpty()) << errorsB.join(QStringLiteral("; ")).toStdString();
-        EXPECT_FALSE(receivedFrame.isNull()) << "B never decoded a video frame from A";
-        if (!receivedFrame.isNull()) {
-            EXPECT_GT(receivedFrame.width(), 0);
-            EXPECT_GT(receivedFrame.height(), 0);
+        EXPECT_FALSE(receivedCameraFrame.isNull()) << "B never decoded a camera frame from A";
+        if (!receivedCameraFrame.isNull()) {
+            EXPECT_GT(receivedCameraFrame.width(), 0);
+            EXPECT_GT(receivedCameraFrame.height(), 0);
+        }
+
+        // issue #185: enableScreenShare() must no longer disable the camera
+        // track (they used to be mutually exclusive) — start screen share
+        // ON TOP of the still-enabled camera and confirm B decodes BOTH as
+        // distinct streams (isScreenShare correctly tells them apart),
+        // rather than one clobbering the other.
+        if (QScreen* primaryScreen = QGuiApplication::primaryScreen(); primaryScreen != nullptr) {
+            callManagerA.enableScreenShare(primaryScreen);
+            {
+                QEventLoop loop;
+                QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+                loop.exec();
+            }
+            EXPECT_TRUE(callManagerA.videoEnabled()) << "camera should still be on alongside screen share";
+            EXPECT_TRUE(callManagerA.screenShareEnabled());
+            EXPECT_TRUE(errorsA.isEmpty()) << errorsA.join(QStringLiteral("; ")).toStdString();
+            EXPECT_TRUE(errorsB.isEmpty()) << errorsB.join(QStringLiteral("; ")).toStdString();
+            EXPECT_FALSE(receivedScreenShareFrame.isNull()) << "B never decoded a screen-share frame from A";
+            if (!receivedScreenShareFrame.isNull()) {
+                EXPECT_GT(receivedScreenShareFrame.width(), 0);
+                EXPECT_GT(receivedScreenShareFrame.height(), 0);
+            }
+
+            callManagerA.disableScreenShare();
+            {
+                QEventLoop loop;
+                QTimer::singleShot(1000, &loop, &QEventLoop::quit);
+                loop.exec();
+            }
+            EXPECT_FALSE(callManagerA.screenShareEnabled());
+            EXPECT_TRUE(callManagerA.videoEnabled()) << "disabling screen share must not touch the camera";
+        } else {
+            GTEST_LOG_(INFO) << "No primary screen available — skipping the simultaneous screen-share part.";
         }
 
         callManagerA.disableVideo();

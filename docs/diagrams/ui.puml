@@ -213,39 +213,23 @@ class ChatView {
   +cancelEditingMessage()
   +appendSystemLine(text: QString)
   +clearLog()
-  +setCallState(inCall: bool, muted: bool)
-  +setCallParticipants(participants: QStringList)
-  +setVideoEnabled(enabled: bool)
-  +setScreenShareEnabled(enabled: bool)
-  +showRemoteVideoFrame(peerLogin: QString, frame: QImage)
-  +removeRemoteVideo(peerLogin: QString)
+  +setCallState(inCall: bool)
   +messagesContainer() : QWidget*
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
   +attachButton() : QPushButton*
   +callToggleButton() : QPushButton*
-  +muteToggleButton() : QPushButton*
-  +videoToggleButton() : QPushButton*
-  +screenShareToggleButton() : QPushButton*
   +searchButton() : QPushButton*
-  +callParticipantsLabel() : QLabel*
-  +localVideoWidget() : QVideoWidget*
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
-  +toggleChatVisibilityButton() : QPushButton*
   +memberListToggleButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
-  -updateLocalVideoVisibility()
-  -onToggleChatVisibilityClicked()
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
   -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
-  +muteToggleRequested()
-  +videoToggleRequested()
-  +screenShareToggleRequested()
   +openSearchRequested()
   +memberListToggleRequested()
   +typingRequested()
@@ -256,17 +240,13 @@ class ChatView {
   +previewAttachmentRequested(attachmentId: qint64)
 }
 note right of ChatView
-  Issue #153: videoStrip_ и новый chatPanel_
-  (история + строка ввода) сидят в QSplitter
-  (chatSplitter_) вместо фиксированного
-  QVBoxLayout — во время звонка область видео
-  получает большую часть места
-  (setCallState(true, ...)), сворачивается
-  обратно во весь чат через
-  toggleChatVisibilityButton_. Видео-плитки
-  переключены с фиксированного размера на
-  минимальный + Expanding QSizePolicy, чтобы
-  реально расти в дополнительное пространство.
+  Issue #185: mute/видео/демонстрация экрана/
+  видео-плитки/список участников вынесены в
+  отдельный класс CallWindow (см. ниже) — здесь
+  остаётся только callToggleButton_ (Call/Leave
+  call), обычный QVBoxLayout вместо QSplitter
+  issue #153 (видео больше не делит место с
+  чатом внутри ChatView).
 
   Visual pass (issue #182): messageEdit_/
   attachButton_/sendButton_ теперь дети общего
@@ -310,6 +290,99 @@ note right of ChatView
   голого указателя, поскольку строка может
   исчезнуть (переключение канала, удаление
   сообщения) раньше, чем придёт ответ.
+end note
+
+class CallWindow {
+  +setMuted(muted: bool)
+  +setVideoEnabled(enabled: bool)
+  +setScreenShareEnabled(enabled: bool)
+  +setCallParticipants(participants: QStringList)
+  +showRemoteVideoFrame(peerLogin: QString, frame: QImage, isScreenShare: bool)
+  +removeRemoteVideo(peerLogin: QString, isScreenShare: bool)
+  +resetForNewCall()
+  +muteToggleButton() : QPushButton*
+  +videoToggleButton() : QPushButton*
+  +screenShareToggleButton() : QPushButton*
+  +leaveCallButton() : QPushButton*
+  +callParticipantsLabel() : QLabel*
+  +localVideoWidget() : QVideoWidget*
+  +localScreenShareVideoWidget() : QVideoWidget*
+  -updateVideoStripVisibility()
+  -nextRemoteTileCascadePosition() : QPoint
+  .. signals ..
+  +muteToggleRequested()
+  +videoToggleRequested()
+  +screenShareToggleRequested()
+  +leaveCallRequested()
+}
+CallWindow "1" *-- "0..*" DraggableVideoTile : owns, wraps each local/remote\nvideo widget (issue #185)
+note right of CallWindow
+  Issue #185: реальное отдельное top-level окно
+  (setWindowFlag(Qt::Window, true) поверх
+  QWidget с parent — MainWindow всё ещё владеет
+  временем жизни через дерево QObject), а не
+  область внутри ChatView. MainWindow
+  show()/hide() её вместе с фактическим входом/
+  выходом из звонка (см. leaveCallIfActive()).
+  leaveCallRequested() и ChatView::
+  callToggleRequested() (когда уже в звонке)
+  подключены к одному и тому же слоту
+  MainWindow::onCallToggleClicked() — оба
+  означают "выйти из звонка".
+
+  Камера и демонстрация экрана больше не
+  взаимоисключают друг друга (тот же issue #185,
+  на уровне CallManager — см. chat.puml):
+  отдельная плитка локального превью на каждую
+  (localVideoWidget()/localScreenShareVideoWidget()),
+  и remoteVideoTiles_ теперь ключуется по
+  "<login>#camera"/"<login>#screen", а не просто
+  по login — камера и демонстрация экрана одного
+  участника получают разные плитки.
+
+  videoStrip_ (issue #185, последняя часть) —
+  canvas-QWidget без layout'а, а не QHBoxLayout:
+  каждая плитка внутри — DraggableVideoTile (см.
+  ниже), сама решающая своё место и размер по
+  перетаскиванию мышью. nextRemoteTileCascadePosition()
+  даёт только стартовую позицию новой удалённой
+  плитке (по диагонали, с переносом каждые 8 штук),
+  а не финальную — пользователь может перетащить
+  куда угодно сразу после появления.
+end note
+
+class DraggableVideoTile {
+  +content() : QWidget*
+  +resizeGrip() : QWidget*
+  #resizeEvent(event: QResizeEvent*)
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
+  -handleMouseEvent(watched: QObject*, event: QEvent*) : bool
+}
+note right of DraggableVideoTile
+  Issue #185: универсальная обёртка вокруг любого
+  content (QVideoWidget для локальных превью,
+  QLabel для удалённых плиток, issue #91) — сама
+  не знает, что внутри. content() растягивается на
+  весь клиентский прямоугольник плитки; маленький
+  resizeGrip() в правом нижнем углу лежит поверх
+  ОТДЕЛЬНЫМ дочерним виджетом, а не рисуется через
+  paintEvent() поверх content() — content() обычно
+  композитится (особенно QVideoWidget) и перекрыл
+  бы обычную QPainter-отрисовку родителя.
+
+  Перетаскивание/resize реализованы через
+  installEventFilter() на content()/resizeGrip()
+  (тот же приём, что уже использует FooterBar для
+  кликабельного avatarLabel_), а не переопределением
+  mousePress/Move/ReleaseEvent() у самой плитки —
+  иначе события мыши получал бы только тот из двух
+  виджетов, что реально под курсором, и до плитки
+  они бы не доходили. Resize считает новый размер
+  от глобальной позиции курсора (устойчиво к
+  собственному изменению размера между кадрами
+  событий), move — от локальной (совпадает у
+  content() и у плитки, поскольку content() всегда
+  стоит в (0, 0) её координат).
 end note
 
 struct ChatMessage {
@@ -537,6 +610,7 @@ MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- FriendsPanel : owns (replaces ChannelsPanel\nin Friends mode, issue #187)
 MainWindow *-- ChatView : owns (main content area)
+MainWindow *-- CallWindow : owns (separate top-level\nwindow, issue #185)
 MainWindow *-- MemberListPanel : owns (right of ChatView, issue #182)
 MainWindow *-- DirectMessageView : owns (replaces ChatView\nin Friends mode, issue #187)
 MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
@@ -590,8 +664,9 @@ ChannelsPanel ..> IconFactory : plusIcon() >
 FooterBar ..> IconFactory : settingsIcon() >
 ChatView ..> IconFactory : plusIcon()/sendIcon()/membersIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
-MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState()/setCallParticipants() >
-MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteVideoFrame()/removeRemoteVideo() >
+MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >
+MainWindow ..> CallWindow : setMuted()/setVideoEnabled()/setScreenShareEnabled()\nsetCallParticipants() (issue #185) >
+MainWindow ..> CallWindow : showRemoteVideoFrame()/removeRemoteVideo()\nresetForNewCall() >
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
@@ -602,7 +677,8 @@ MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
 ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
 SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::scrollToMessage() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
-ChatView ..> MainWindow : callToggleRequested()/muteToggleRequested()\nvideoToggleRequested()/screenShareToggleRequested() >
+ChatView ..> MainWindow : callToggleRequested() >
+CallWindow ..> MainWindow : muteToggleRequested()/videoToggleRequested()\nscreenShareToggleRequested()/leaveCallRequested() (issue #185) >
 ChatView ..> MainWindow : memberListToggleRequested() (issue #184) >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
@@ -646,51 +722,48 @@ note right of MainWindow
   вместо легко пропускаемой строки внизу
   окна.
 
-  Call/Mute-кнопки в ChatView (issue #46
-  Phase 4) — чистые UI-сигналы, как и
-  остальные панели: сами не знают про
-  CallManager, только шлют
-  callToggleRequested()/muteToggleRequested(),
-  MainWindow решает join/leave по
-  CallManager::inCall() и зовёт назад
-  setCallState(). Mute — реальный per-track
-  mute (webrtc::AudioTrackInterface::
-  set_enabled), не UI-заглушка.
-  openChannel()/closeChatView() сначала
-  выходят из активного звонка — он
-  привязан к подписанному каналу.
+  Call-кнопка в ChatView (issue #46 Phase 4)
+  — чистый UI-сигнал: сама не знает про
+  CallManager, только шлёт
+  callToggleRequested(), MainWindow решает
+  join/leave по CallManager::inCall() и
+  зовёт назад setCallState(). При входе в
+  звонок MainWindow также показывает
+  CallWindow (issue #185) — дальнейшее
+  управление звонком (mute/видео/демонстрация
+  экрана/выход) идёт уже через неё, не через
+  ChatView. openChannel()/closeChatView()
+  сначала выходят из активного звонка через
+  leaveCallIfActive() — он привязан к
+  подписанному каналу.
 
-  Video-кнопка и полоска видео в ChatView
-  (issue #91) — тот же UI-сигнал/callback
-  паттерн: videoToggleRequested() ->
-  MainWindow решает enable/disable по
-  CallManager::videoEnabled(), зовёт назад
-  setVideoEnabled(). Локальное превью —
-  третий подписчик на CameraDevice::
-  frameAvailable() (рядом с превью в
-  SettingsDialog и CallManager::onCameraFrame()
-  — сигнал рассчитан на несколько
-  подписчиков сразу). Тайлы участников —
-  по QLabel/QPixmap на пира, создаются
-  лениво в showRemoteVideoFrame(). Выход
-  из звонка (setCallState(false, ...))
-  сбрасывает всю полоску разом — видео не
+  Mute/Video/Screen Share-кнопки живут в
+  CallWindow, не в ChatView (issue #185) —
+  тот же UI-сигнал/callback паттерн, что и
+  раньше, просто на другом виджете:
+  muteToggleRequested()/videoToggleRequested()/
+  screenShareToggleRequested() ->
+  MainWindow решает по CallManager
+  (inCall()/videoEnabled()/screenShareEnabled())
+  и зовёт назад setMuted()/setVideoEnabled()/
+  setScreenShareEnabled(). Mute — реальный
+  per-track mute (webrtc::AudioTrackInterface::
+  set_enabled), не UI-заглушка. Камера и
+  демонстрация экрана больше не
+  взаимоисключают друг друга на уровне
+  CallManager (issue #185, см. chat.puml) —
+  у каждой свой независимый трек и своя
+  плитка локального превью в CallWindow.
+  Локальное превью камеры — подписчик на
+  CameraDevice::frameAvailable() (рядом с
+  превью в SettingsDialog — сигнал рассчитан
+  на несколько подписчиков сразу). Тайлы
+  участников — по DraggableVideoTile на пару
+  "пир + вид (камера/экран)", создаются лениво
+  в showRemoteVideoFrame(). Выход из звонка
+  (leaveCallIfActive() -> resetForNewCall())
+  сбрасывает все плитки разом — видео не
   переживает звонок, которому принадлежит.
-
-  Screen Share-кнопка (issue #112) — тот же
-  паттерн рядом: screenShareToggleRequested()
-  -> CallManager::enableScreenShare()/
-  disableScreenShare(), взаимоисключающие с
-  video-кнопкой на стороне CallManager.
-  Локальное превью и videoStrip_ теперь
-  видны, если активно ЛИБО видео, ЛИБО шаринг
-  (updateLocalVideoVisibility(), на двух
-  собственных bool-флагах videoActive_/
-  screenShareActive_ — а не на последнем
-  вызванном setVideoEnabled()/
-  setScreenShareEnabled(), чтобы порядок двух
-  вызовов после взаимоисключающего тоггла не
-  влиял на итоговую видимость).
 
   DesktopNotifier (issue #92) shows a native
   QSystemTrayIcon notification for
