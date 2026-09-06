@@ -12,8 +12,8 @@ namespace {
 // вопросом рендеринга, который тесты этого проекта не проверяют (нет
 // сэмплирования пикселей); единственное, что здесь можно осмысленно
 // проверить, — это что строка непустая.
-TEST(ThemeTest, DiscordDarkStyleSheetIsNonEmpty) {
-    const QString stylesheet = ui_theme::discordDarkStyleSheet();
+TEST(ThemeTest, DarkStyleSheetIsNonEmpty) {
+    const QString stylesheet = ui_theme::darkStyleSheet();
 
     EXPECT_FALSE(stylesheet.isEmpty());
 }

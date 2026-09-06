@@ -15,11 +15,13 @@ class CommunityConnectDialog;
 /**
  * @brief Узкая иконочная полоса в самом левом краю боковой панели:
  *        кнопка "Friends" (issue #187) сверху, по одному значку-аватару
- *        на сообщество (первая буква, зелёный градиент), кнопка
- *        обновления и кнопка "+" внизу, открывающая CommunityConnectDialog
- *        (присоединение по коду приглашения или создание нового, issue
- *        #186); правый клик — для переименования/удаления/копирования
- *        кода приглашения.
+ *        на сообщество (первая буква, зелёный градиент) и кнопка "+"
+ *        внизу, открывающая CommunityConnectDialog (присоединение по
+ *        коду приглашения или создание нового, issue #186); правый
+ *        клик — для переименования/удаления/копирования кода
+ *        приглашения. Список обновляется сам по мере поступления
+ *        communityCreated()/communityDeleted()/communityRenamed()
+ *        (issue #182 — отдельная кнопка "Refresh" была не нужна).
  *
  * Список (issue #186) — только сообщества, в которых уже состоит
  * вошедший пользователь, а не все существующие: подключиться к новому
@@ -57,7 +59,6 @@ public:
 
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
-    [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
     [[nodiscard]] QPushButton* friendsButton() const { return friendsButton_; }
     [[nodiscard]] CommunityConnectDialog* connectDialog() const { return connectDialog_; }
 
@@ -88,7 +89,6 @@ private:
 
     QListWidget* listWidget_ = nullptr;
     QPushButton* addButton_ = nullptr;
-    QPushButton* refreshButton_ = nullptr;
     QPushButton* friendsButton_ = nullptr;
     CommunityConnectDialog* connectDialog_ = nullptr;
     QString currentUserLogin_;

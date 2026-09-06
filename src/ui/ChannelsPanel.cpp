@@ -51,16 +51,9 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
 
     auto* header = new QHBoxLayout;
     header->setSpacing(ui_theme::kSpacingSm);
-    auto* title = new QLabel(tr("Channels"), this);
+    // ЗАГЛАВНЫМИ — заголовок раздела читается заметнее (issue #182).
+    auto* title = new QLabel(tr("CHANNELS"), this);
     title->setProperty("sectionTitle", true);
-
-    refreshButton_ = new QPushButton(this);
-    refreshButton_->setObjectName(QStringLiteral("refreshChannelsButton"));
-    refreshButton_->setToolTip(tr("Refresh channels"));
-    refreshButton_->setIcon(ui_icons::refreshIcon());
-    refreshButton_->setIconSize(QSize(kIconSize, kIconSize));
-    refreshButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
-    refreshButton_->setProperty("iconOnly", true);
 
     addButton_ = new QPushButton(this);
     addButton_->setObjectName(QStringLiteral("createChannelButton"));
@@ -73,7 +66,6 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
 
     header->addWidget(title);
     header->addStretch();
-    header->addWidget(refreshButton_);
     header->addWidget(addButton_);
 
     filterEdit_ = new QLineEdit(this);
@@ -179,11 +171,13 @@ void ChannelsPanel::rebuildList() {
 
     listWidget_->clear();
     for (const ChatItem& channel : sorted) {
-        // Зашифрованные каналы получают тот же значок замка, что и
-        // заголовок ChatView (issue #138), прямо в строке списка, а не
-        // только после открытия канала (issue #152) — только в text(),
+        // "#" — маркер текстового канала (issue #182); зашифрованные
+        // каналы получают ещё и значок замка, тот же, что и заголовок
+        // ChatView (issue #138), прямо в строке списка, а не только
+        // после открытия канала (issue #152) — оба только в text(),
         // kNameRole хранит настоящее имя для channelSelected()/rename.
-        QString itemText = channel.isEncrypted ? QStringLiteral("\U0001F512 ") + channel.name : channel.name;
+        QString itemText = channel.isEncrypted ? QStringLiteral("# \U0001F512 ") + channel.name
+                                                : QStringLiteral("# ") + channel.name;
         bool unread = false;
         if (const auto it = activity_.constFind(channel.id); it != activity_.cend()) {
             if (!it->previewText.isEmpty()) {

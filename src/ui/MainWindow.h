@@ -34,6 +34,7 @@ class DirectMessageView;
 class FooterBar;
 class FriendsPanel;
 class LoginWindow;
+class MemberListPanel;
 class ModeratorsDialog;
 class ProfileDialog;
 class SearchDialog;
@@ -252,6 +253,7 @@ private:
     FriendsPanel* friendsPanel_ = nullptr;
     QStackedWidget* sidebarListStack_ = nullptr;
     ChatView* chatView_ = nullptr;
+    MemberListPanel* memberListPanel_ = nullptr;
     DirectMessageView* directMessageView_ = nullptr;
     QStackedWidget* contentStack_ = nullptr;
     FooterBar* footerBar_ = nullptr;

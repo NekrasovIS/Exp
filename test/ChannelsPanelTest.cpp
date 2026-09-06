@@ -28,8 +28,8 @@ TEST(ChannelsPanelTest, SetChannelsPopulatesTheListWidget) {
     panel.setChannels(sampleChannels());
 
     ASSERT_EQ(panel.listWidget()->count(), 2);
-    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("general"));
-    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("random"));
+    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("# general"));
+    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("# random"));
 }
 
 TEST(ChannelsPanelTest, SetChannelsReplacesPreviousContents) {
@@ -39,7 +39,7 @@ TEST(ChannelsPanelTest, SetChannelsReplacesPreviousContents) {
     panel.setChannels({ChatItem{.id = 12, .name = "announcements", .ownerLogin = "carol"}});
 
     ASSERT_EQ(panel.listWidget()->count(), 1);
-    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("announcements"));
+    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("# announcements"));
 }
 
 TEST(ChannelsPanelTest, SetChannelsWithEmptyListLeavesNoRows) {
@@ -111,7 +111,7 @@ TEST(ChannelsPanelTest, EncryptedChannelShowsLockPrefixInTextButRawNameInSelecti
     panel.setChannels({ChatItem{.id = 20, .name = "secrets", .ownerLogin = "alice", .isEncrypted = true}});
     QSignalSpy spy(&panel, &ChannelsPanel::channelSelected);
 
-    EXPECT_TRUE(panel.listWidget()->item(0)->text().startsWith(QStringLiteral("\U0001F512")));
+    EXPECT_TRUE(panel.listWidget()->item(0)->text().startsWith(QStringLiteral("# \U0001F512")));
     EXPECT_TRUE(panel.listWidget()->item(0)->text().endsWith(QStringLiteral("secrets")));
 
     emit panel.listWidget()->itemClicked(panel.listWidget()->item(0));
@@ -161,7 +161,7 @@ TEST(ChannelsPanelTest, RecordChannelActivityAddsPreviewAsSecondLine) {
 
     QListWidgetItem* item = panel.listWidget()->item(0);
     ASSERT_EQ(item->data(Qt::UserRole).toLongLong(), 10);
-    EXPECT_EQ(item->text(), QStringLiteral("general\nhey there"));
+    EXPECT_EQ(item->text(), QStringLiteral("# general\nhey there"));
 }
 
 TEST(ChannelsPanelTest, RecordChannelActivitySortsChannelsWithActivityFirst) {
@@ -232,13 +232,6 @@ TEST(ChannelsPanelTest, ANewerMessageArrivingAfterTheChannelWasReadIsMarkedUnrea
     panel.recordChannelActivity(10, 2, QStringLiteral("second"), QDateTime::currentDateTime());
 
     EXPECT_TRUE(panel.listWidget()->item(0)->font().bold());
-}
-
-TEST(ChannelsPanelTest, RefreshButtonExists) {
-    ChannelsPanel panel;
-
-    ASSERT_NE(panel.refreshButton(), nullptr);
-    EXPECT_TRUE(panel.refreshButton()->isEnabled());
 }
 
 }  // namespace

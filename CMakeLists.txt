@@ -82,6 +82,8 @@ add_library(devicehub_core
     src/ui/CommunityConnectDialog.cpp
     src/ui/ChannelsPanel.h
     src/ui/ChannelsPanel.cpp
+    src/ui/MemberListPanel.h
+    src/ui/MemberListPanel.cpp
     src/ui/FriendsPanel.h
     src/ui/FriendsPanel.cpp
     src/ui/DirectMessageView.h
@@ -248,6 +250,7 @@ add_executable(devicehub_tests
     test/ToastBannerTest.cpp
     test/NotificationPolicyTest.cpp
     test/CommunitiesPanelTest.cpp
+    test/MemberListPanelTest.cpp
     test/CommunityConnectDialogTest.cpp
     test/ChannelsPanelTest.cpp
     test/FriendsPanelTest.cpp

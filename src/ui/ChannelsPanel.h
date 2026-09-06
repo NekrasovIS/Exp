@@ -67,7 +67,6 @@ public:
 
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
-    [[nodiscard]] QPushButton* refreshButton() const { return refreshButton_; }
     /// Поле фильтра над списком (issue #152) — ввод текста сужает
     /// listWidget() до строк, чьё имя его содержит.
     [[nodiscard]] QLineEdit* filterEdit() const { return filterEdit_; }
@@ -104,7 +103,6 @@ private:
     QListWidget* listWidget_ = nullptr;
     QStackedWidget* listStack_ = nullptr;
     QPushButton* addButton_ = nullptr;
-    QPushButton* refreshButton_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;
     QString currentUserLogin_;
     QList<ChatItem> channels_;
