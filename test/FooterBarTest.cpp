@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QPushButton>
 #include <QSignalSpy>
 
 namespace devicehub {
@@ -43,6 +44,13 @@ TEST(FooterBarTest, AvatarHasPointingHandCursorToSignalItIsClickable) {
     FooterBar bar;
 
     EXPECT_EQ(bar.avatarLabel()->cursor().shape(), Qt::PointingHandCursor);
+}
+
+TEST(FooterBarTest, SettingsButtonExistsWithExpectedLabel) {
+    FooterBar bar;
+
+    ASSERT_NE(bar.settingsButton(), nullptr);
+    EXPECT_EQ(bar.settingsButton()->text(), QStringLiteral("⚙ Settings"));
 }
 
 }  // namespace

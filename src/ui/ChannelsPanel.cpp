@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -17,6 +18,8 @@
 #include <QSize>
 #include <QStackedWidget>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 #include "ui/IconFactory.h"
 #include "ui/Theme.h"
@@ -121,20 +124,85 @@ ChannelsPanel::ChannelsPanel(QWidget* parent) : QWidget(parent) {
 }
 
 void ChannelsPanel::setChannels(const QList<ChatItem>& channels) {
+    channels_ = channels;
+    rebuildList();
+}
+
+void ChannelsPanel::recordChannelActivity(qint64 channelId, qint64 messageId, const QString& previewText,
+                                           const QDateTime& activityAt) {
+    ChannelActivity& entry = activity_[channelId];
+    entry.previewText = previewText;
+    entry.activityAt = activityAt;
+    entry.lastMessageId = messageId;
+    if (channelId == openChannelId_) {
+        // Канал открыт прямо сейчас — это сообщение уже прочитано.
+        // Без этого lastReadMessageId_ оставался бы «снимком» на момент
+        // setOpenChannelId() и не отражал бы сообщения, реально
+        // увиденные, пока канал был открыт — следующий фоновый
+        // fetchLatestMessage() после того, как канал закрыт, ошибочно
+        // зажёг бы непрочитанное для сообщения, которое уже видели.
+        lastReadMessageId_[channelId] = messageId;
+        entry.unread = false;
+    } else {
+        entry.unread = messageId > lastReadMessageId_.value(channelId, -1);
+    }
+    rebuildList();
+}
+
+void ChannelsPanel::setOpenChannelId(qint64 channelId) {
+    openChannelId_ = channelId;
+    lastReadMessageId_[channelId] = activity_.value(channelId).lastMessageId;
+    if (const auto it = activity_.find(channelId); it != activity_.end() && it->unread) {
+        it->unread = false;
+        rebuildList();
+    }
+}
+
+void ChannelsPanel::rebuildList() {
+    // Каналы с известной активностью — по убыванию времени, первыми;
+    // остальные сохраняют относительный порядок, как его вернул сервер
+    // (issue #152: "сортировка по времени последней активности").
+    QList<ChatItem> sorted = channels_;
+    std::stable_sort(sorted.begin(), sorted.end(), [this](const ChatItem& a, const ChatItem& b) {
+        const auto ait = activity_.constFind(a.id);
+        const auto bit = activity_.constFind(b.id);
+        const bool aHasActivity = ait != activity_.cend();
+        const bool bHasActivity = bit != activity_.cend();
+        if (aHasActivity != bHasActivity) {
+            return aHasActivity;
+        }
+        if (aHasActivity && bHasActivity) {
+            return ait->activityAt > bit->activityAt;
+        }
+        return false;
+    });
+
     listWidget_->clear();
-    for (const ChatItem& channel : channels) {
+    for (const ChatItem& channel : sorted) {
         // Зашифрованные каналы получают тот же значок замка, что и
         // заголовок ChatView (issue #138), прямо в строке списка, а не
         // только после открытия канала (issue #152) — только в text(),
         // kNameRole хранит настоящее имя для channelSelected()/rename.
-        const QString displayName =
-            channel.isEncrypted ? QStringLiteral("\U0001F512 ") + channel.name : channel.name;
-        auto* item = new QListWidgetItem(displayName, listWidget_);
+        QString itemText = channel.isEncrypted ? QStringLiteral("\U0001F512 ") + channel.name : channel.name;
+        bool unread = false;
+        if (const auto it = activity_.constFind(channel.id); it != activity_.cend()) {
+            if (!it->previewText.isEmpty()) {
+                itemText += QStringLiteral("\n") + it->previewText;
+            }
+            unread = it->unread;
+        }
+        auto* item = new QListWidgetItem(itemText, listWidget_);
         item->setData(kIdRole, channel.id);
         item->setData(kOwnerRole, channel.ownerLogin);
         item->setData(kNameRole, channel.name);
+        if (unread) {
+            QFont font = item->font();
+            font.setBold(true);
+            item->setFont(font);
+            item->setForeground(QColor(QLatin1String(ui_theme::kAccentGradientStart)));
+        }
     }
-    listStack_->setCurrentIndex(channels.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
+    listStack_->setCurrentIndex(sorted.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
     applyFilter();
 }
 

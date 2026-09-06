@@ -105,5 +105,12 @@ TEST(CommunitiesPanelTest, CreatingThroughTheConnectDialogEmitsCreateRequested) 
     EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("New Community"));
 }
 
+TEST(CommunitiesPanelTest, RefreshButtonExists) {
+    CommunitiesPanel panel;
+
+    ASSERT_NE(panel.refreshButton(), nullptr);
+    EXPECT_TRUE(panel.refreshButton()->isEnabled());
+}
+
 }  // namespace
 }  // namespace devicehub

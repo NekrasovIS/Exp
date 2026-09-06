@@ -256,6 +256,8 @@ add_executable(devicehub_tests
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp
     test/FooterBarTest.cpp
+    test/SettingsDialogTest.cpp
+    test/DesktopNotifierTest.cpp
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
     test/IdentityKeyStoreTest.cpp

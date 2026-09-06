@@ -193,6 +193,24 @@ TEST(ChatViewTest, ClickingMuteToggleButtonEmitsMuteToggleRequested) {
     EXPECT_EQ(spy.count(), 1);
 }
 
+TEST(ChatViewTest, ClickingVideoToggleButtonEmitsVideoToggleRequested) {
+    ChatView view;
+    QSignalSpy spy(&view, &ChatView::videoToggleRequested);
+
+    emit view.videoToggleButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ChatViewTest, ClickingScreenShareToggleButtonEmitsScreenShareToggleRequested) {
+    ChatView view;
+    QSignalSpy spy(&view, &ChatView::screenShareToggleRequested);
+
+    emit view.screenShareToggleButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
 TEST(ChatViewTest, ClickingSearchButtonEmitsOpenSearchRequested) {
     ChatView view;
     QSignalSpy spy(&view, &ChatView::openSearchRequested);
