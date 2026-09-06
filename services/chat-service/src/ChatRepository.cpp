@@ -1,8 +1,13 @@
 #include "ChatRepository.h"
 
+#include <openssl/rand.h>
+
 #include <pqxx/pqxx>
 
 #include <algorithm>
+#include <array>
+#include <string_view>
+#include <utility>
 
 namespace chat_service {
 
@@ -19,6 +24,42 @@ bool isModerator(pqxx::work& transaction, std::int64_t communityId, const std::s
     return !rows.empty() && rows[0][0].as<bool>();
 }
 
+/// direct_message_threads хранит неупорядоченную пару в каноническом
+/// порядке (меньший login первым) — одна строка вместо двух, тот же
+/// приём, что и у friendships в user-service.
+std::pair<std::string, std::string> canonicalPair(const std::string& loginA, const std::string& loginB) {
+    return loginA < loginB ? std::make_pair(loginA, loginB) : std::make_pair(loginB, loginA);
+}
+
+/// Алфавит без визуально похожих символов (0/O, 1/I/l) — код
+/// приглашения (issue #186) вполне может диктоваться голосом или
+/// переписываться от руки, не только копи-пастом.
+constexpr std::string_view kInviteCodeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+constexpr std::size_t kInviteCodeLength = 10;
+
+/// 33^10 ≈ 1.8×10^15 комбинаций — коллизия при таком масштабе
+/// приложения практически невозможна, поэтому вызывающая сторона не
+/// повторяет попытку при (астрономически маловероятном) нарушении
+/// уникального индекса. RAND_bytes, не rand()/std::mt19937 — угадываемый
+/// код приглашения даёт доступ к чужому сообществу в обход
+/// присоединения по явному списку, тот же класс риска, что уже
+/// обосновывает RAND_bytes для OTP-кодов в auth-service (см.
+/// OtpStore.cpp). Каждый байт % 33 даёт небольшой численный перекос
+/// (256 не делится на 33 без остатка) — не имеет значения для кода,
+/// который не обязан быть криптографическим ключом, только не должен
+/// быть предсказуемым.
+std::string generateInviteCode() {
+    std::array<unsigned char, kInviteCodeLength> randomBytes{};
+    RAND_bytes(randomBytes.data(), static_cast<int>(randomBytes.size()));
+
+    std::string code;
+    code.reserve(kInviteCodeLength);
+    for (const unsigned char byte : randomBytes) {
+        code += kInviteCodeAlphabet[byte % kInviteCodeAlphabet.size()];
+    }
+    return code;
+}
+
 }  // namespace
 
 ChatRepository::ChatRepository(std::string connectionString) : connectionString_(std::move(connectionString)) {}
@@ -27,11 +68,14 @@ Community ChatRepository::createCommunity(const std::string& name, const std::st
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows = transaction.exec(
-        "INSERT INTO communities (name, owner_login) VALUES ($1, $2) RETURNING id", pqxx::params{name, ownerLogin});
+    const std::string inviteCode = generateInviteCode();
+    const pqxx::result rows =
+        transaction.exec("INSERT INTO communities (name, owner_login, invite_code) VALUES ($1, $2, $3) RETURNING id",
+                          pqxx::params{name, ownerLogin, inviteCode});
     transaction.commit();
 
-    return Community{.id = rows[0][0].as<std::int64_t>(), .name = name, .ownerLogin = ownerLogin};
+    return Community{
+        .id = rows[0][0].as<std::int64_t>(), .name = name, .ownerLogin = ownerLogin, .inviteCode = inviteCode};
 }
 
 std::vector<Community> ChatRepository::listCommunities() {
@@ -48,6 +92,62 @@ std::vector<Community> ChatRepository::listCommunities() {
                                          .ownerLogin = row[2].as<std::string>()});
     }
     return communities;
+}
+
+std::vector<Community> ChatRepository::listCommunitiesForMember(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT c.id, c.name, c.owner_login, c.invite_code FROM communities c "
+                          "JOIN memberships m ON m.community_id = c.id WHERE m.member_login = $1 ORDER BY c.id",
+                          pqxx::params{login});
+
+    std::vector<Community> communities;
+    communities.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        communities.push_back(
+            Community{.id = row[0].as<std::int64_t>(),
+                      .name = row[1].as<std::string>(),
+                      .ownerLogin = row[2].as<std::string>(),
+                      .inviteCode = row[3].is_null() ? std::nullopt : std::make_optional(row[3].as<std::string>())});
+    }
+    return communities;
+}
+
+std::optional<Community> ChatRepository::findCommunityByInviteCode(const std::string& code) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT id, name, owner_login FROM communities WHERE invite_code = $1", pqxx::params{code});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return Community{.id = rows[0][0].as<std::int64_t>(),
+                      .name = rows[0][1].as<std::string>(),
+                      .ownerLogin = rows[0][2].as<std::string>(),
+                      .inviteCode = code};
+}
+
+RegenerateInviteCodeResult ChatRepository::regenerateInviteCode(std::int64_t communityId,
+                                                                  const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{communityId});
+    if (ownerRows.empty()) {
+        return RegenerateInviteCodeResult{.result = MutationResult::kNotFound};
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        return RegenerateInviteCodeResult{.result = MutationResult::kForbidden};
+    }
+
+    const std::string newCode = generateInviteCode();
+    transaction.exec("UPDATE communities SET invite_code = $1 WHERE id = $2", pqxx::params{newCode, communityId});
+    transaction.commit();
+    return RegenerateInviteCodeResult{.result = MutationResult::kSuccess, .inviteCode = newCode};
 }
 
 MutationResult ChatRepository::renameCommunity(std::int64_t id, const std::string& newName,
@@ -520,6 +620,98 @@ std::optional<std::string> ChatRepository::findChannelKey(std::int64_t channelId
         return std::nullopt;
     }
     return rows[0][0].as<std::string>();
+}
+
+std::int64_t ChatRepository::findOrCreateThread(const std::string& loginA, const std::string& loginB) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const auto [canonicalA, canonicalB] = canonicalPair(loginA, loginB);
+    // INSERT ... ON CONFLICT DO NOTHING, затем SELECT, а не наоборот —
+    // избегает состояния гонки между проверкой существования и
+    // созданием при двух одновременных первых сообщениях одной паре.
+    transaction.exec(
+        "INSERT INTO direct_message_threads (user_a_login, user_b_login) VALUES ($1, $2) "
+        "ON CONFLICT (user_a_login, user_b_login) DO NOTHING",
+        pqxx::params{canonicalA, canonicalB});
+    const pqxx::result rows = transaction.exec(
+        "SELECT id FROM direct_message_threads WHERE user_a_login = $1 AND user_b_login = $2",
+        pqxx::params{canonicalA, canonicalB});
+    transaction.commit();
+    return rows[0][0].as<std::int64_t>();
+}
+
+std::vector<DirectMessageThread> ChatRepository::listMyThreads(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, CASE WHEN user_a_login = $1 THEN user_b_login ELSE user_a_login END, created_at "
+        "FROM direct_message_threads WHERE user_a_login = $1 OR user_b_login = $1 ORDER BY created_at DESC",
+        pqxx::params{login});
+
+    std::vector<DirectMessageThread> threads;
+    threads.reserve(rows.size());
+    for (const auto& row : rows) {
+        threads.push_back(DirectMessageThread{
+            .id = row[0].as<std::int64_t>(), .otherLogin = row[1].as<std::string>(), .createdAt = row[2].as<std::string>()});
+    }
+    return threads;
+}
+
+bool ChatRepository::isThreadParticipant(std::int64_t threadId, const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT 1 FROM direct_message_threads WHERE id = $1 AND (user_a_login = $2 OR user_b_login = $2)",
+                          pqxx::params{threadId, login});
+    return !rows.empty();
+}
+
+std::optional<DirectMessage> ChatRepository::insertDirectMessage(std::int64_t threadId, const std::string& authorLogin,
+                                                                   const std::string& body) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("INSERT INTO direct_messages (thread_id, author_login, body) "
+                          "SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM direct_message_threads WHERE id = $1) "
+                          "RETURNING id, sent_at",
+                          pqxx::params{threadId, authorLogin, body});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    transaction.commit();
+    return DirectMessage{.id = rows[0][0].as<std::int64_t>(),
+                         .authorLogin = authorLogin,
+                         .body = body,
+                         .sentAt = rows[0][1].as<std::string>()};
+}
+
+std::vector<DirectMessage> ChatRepository::listDirectMessages(std::int64_t threadId, int limit,
+                                                                std::optional<std::int64_t> beforeId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // Тот же приём "LIMIT по новейшим, затем развернуть", что и у
+    // listRecentMessages() — см. её doc-комментарий.
+    const pqxx::result rows = transaction.exec(
+        "SELECT id, author_login, body, sent_at FROM direct_messages "
+        "WHERE thread_id = $1 AND ($3::bigint IS NULL OR id < $3) "
+        "ORDER BY sent_at DESC, id DESC LIMIT $2",
+        pqxx::params{threadId, limit, beforeId});
+
+    std::vector<DirectMessage> messages;
+    messages.reserve(rows.size());
+    for (const auto& row : rows) {
+        messages.push_back(DirectMessage{.id = row[0].as<std::int64_t>(),
+                                          .authorLogin = row[1].as<std::string>(),
+                                          .body = row[2].as<std::string>(),
+                                          .sentAt = row[3].as<std::string>()});
+    }
+    std::reverse(messages.begin(), messages.end());
+    return messages;
 }
 
 }  // namespace chat_service

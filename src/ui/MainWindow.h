@@ -21,6 +21,7 @@
 #include "user/UserProfileClient.h"
 
 class QScreen;
+class QStackedWidget;
 class QTimer;
 
 namespace devicehub {
@@ -30,7 +31,9 @@ class ChannelsPanel;
 class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
+class DirectMessageView;
 class FooterBar;
+class FriendsPanel;
 class LoginWindow;
 class ModeratorsDialog;
 class ProfileDialog;
@@ -132,6 +135,26 @@ private:
     /// через statusBar() — так гораздо легче заметить.
     void showToast(const QString& text, ToastBanner::Variant variant);
 
+    /// Переключает боковую панель/основную область в режим "Friends"
+    /// (issue #187, Фаза 3) — FriendsPanel вместо ChannelsPanel,
+    /// DirectMessageView вместо ChatView; заново запрашивает список
+    /// друзей и входящих заявок.
+    void showFriendsMode();
+    /// Обратное переключение — вызывается при выборе сообщества, тем
+    /// самым не нужно отдельной кнопки "назад".
+    void showCommunitiesMode();
+    /// Открывает диалог с @p login — вызывается по клику на друга в
+    /// FriendsPanel; фактическое переключение contentStack_ происходит
+    /// в обработчике ChatRestClient::dmThreadOpened(), а не здесь,
+    /// поскольку id диалога до ответа сервера ещё не известен.
+    void openDmThreadWith(const QString& login);
+    /// Тик dmPollTimer_ (issue #187, Фаза 2 backend'а пока не
+    /// поддерживает живую доставку через WebSocket) — просто
+    /// перезапрашивает последние сообщения открытого диалога;
+    /// обработчик directMessagesListed() сам решает, какие из них уже
+    /// показаны (см. dmHistoryLoaded_/lastSeenDmMessageId_).
+    void pollOpenDmThread();
+
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
     AudioInputDevice audioInput_;
@@ -202,9 +225,30 @@ private:
     };
     std::optional<PendingEncryptedChannelSetup> pendingEncryptedSetup_;
 
+    /// Id открытого сейчас диалога личных сообщений (issue #187, Фаза
+    /// 3), -1 — ни один не открыт (режим Friends ещё не активен либо
+    /// друг ещё не выбран).
+    qint64 openDmThreadId_ = -1;
+    QString openDmOtherLogin_;
+    /// False сразу после openDmThreadWith() — следующий
+    /// directMessagesListed() для этого диалога заменяет весь список
+    /// (setMessages()) и переключается в true; последующие вызовы (от
+    /// dmPollTimer_) вместо этого только дозаписывают сообщения новее
+    /// lastSeenDmMessageId_ (appendMessage()) — REST отдаёт только
+    /// постраничную историю назад (before_id), не "новее X", поэтому
+    /// поллинг просто перезапрашивает последние сообщения целиком и
+    /// сам решает, что из них уже показано.
+    bool dmHistoryLoaded_ = false;
+    qint64 lastSeenDmMessageId_ = -1;
+    QTimer* dmPollTimer_ = nullptr;
+
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
+    FriendsPanel* friendsPanel_ = nullptr;
+    QStackedWidget* sidebarListStack_ = nullptr;
     ChatView* chatView_ = nullptr;
+    DirectMessageView* directMessageView_ = nullptr;
+    QStackedWidget* contentStack_ = nullptr;
     AccountMenu* accountMenu_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;

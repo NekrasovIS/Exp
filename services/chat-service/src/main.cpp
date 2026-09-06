@@ -6,6 +6,7 @@
 #include "ChatRepository.h"
 #include "ChatService.h"
 #include "HttpServer.h"
+#include "UserServiceClient.h"
 #include "WebSocketServer.h"
 
 namespace {
@@ -26,10 +27,13 @@ int main() {
     const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_WS_PORT", "8083"));
     const std::string authServiceHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
     const int authServicePort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
 
     chat_service::ChatRepository repository(connectionString);
     chat_service::ChatService chatService(repository);
     const chat_service::AuthServiceClient authServiceClient(authServiceHost, authServicePort);
+    const chat_service::UserServiceClient userServiceClient(userServiceHost, userServicePort);
 
     chat_service::WebSocketServer webSocketServer(chatService, authServiceClient, wsPort, host);
     if (!webSocketServer.start()) {
@@ -38,7 +42,7 @@ int main() {
     }
     std::cout << "chat-service: WebSocket listening on " << host << ":" << wsPort << "\n";
 
-    chat_service::HttpServer httpServer(chatService, authServiceClient);
+    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient);
     std::cout << "chat-service: REST listening on " << host << ":" << restPort << "\n";
     httpServer.listen(host, restPort);
 
