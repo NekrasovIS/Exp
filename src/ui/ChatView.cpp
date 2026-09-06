@@ -1,11 +1,13 @@
 #include "ui/ChatView.h"
 
 #include <QColor>
+#include <QDate>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QPixmap>
 #include <QPointer>
 #include <QPushButton>
@@ -282,6 +284,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     sendButton_->setIcon(ui_icons::sendIcon(QColor(ui_theme::kAccentGradientStart)));
     sendButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
     sendButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(messageEdit_, &QLineEdit::returnPressed, sendButton_, &QPushButton::click);
 
     composerLayout->addWidget(attachButton_);
     composerLayout->addWidget(messageEdit_, /*stretch=*/1);
@@ -359,11 +362,15 @@ void ChatView::setCurrentUserLogin(const QString& login) {
 }
 
 void ChatView::appendMessage(const ChatMessage& message) {
+    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, message)) {
+        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(message.sentAt));
+    }
     const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
     auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
+    requestPreviewIfImageAttachment(message, row);
     lastMessage_ = message;
     hasLastMessage_ = true;
 }
@@ -387,9 +394,18 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
     for (const ChatMessage& message : messages) {
         const bool showHeader =
             showHeaderForNext || !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, message);
+        // Тот же приём, что и у showHeaderForNext выше — previousInBatch{}
+        // по умолчанию пуст, поэтому isDifferentCalendarDay() для самого
+        // первого сообщения пачки вернёт true сама по себе (пустая
+        // метка времени не разбирается) без отдельной проверки "это
+        // первая итерация?".
+        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, message)) {
+            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(message.sentAt));
+        }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
         auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
         messagesLayout_->insertWidget(insertIndex++, row);
+        requestPreviewIfImageAttachment(message, row);
         previousInBatch = message;
         showHeaderForNext = false;
     }
@@ -429,6 +445,41 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+}
+
+void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
+    if (message.attachmentId < 0 || !isImageAttachment(message.attachmentFilename)) {
+        return;
+    }
+    pendingImagePreviewRows_.insert(message.attachmentId, row);
+    emit previewAttachmentRequested(message.attachmentId);
+}
+
+void ChatView::setAttachmentPreview(qint64 attachmentId, const QImage& image) {
+    const QPointer<ChatMessageRow> row = pendingImagePreviewRows_.take(attachmentId);
+    if (row.isNull()) {
+        return;
+    }
+    row->setAttachmentPreview(image);
+}
+
+QLabel* ChatView::buildDateSeparatorLabel(const QString& sentAt) {
+    const QDateTime parsed = chat_message_grouping::parseSentAt(sentAt);
+    QString text;
+    if (!parsed.isValid()) {
+        text = tr("Unknown date");
+    } else if (const QDate date = parsed.date(); date == QDate::currentDate()) {
+        text = tr("Today");
+    } else if (date == QDate::currentDate().addDays(-1)) {
+        text = tr("Yesterday");
+    } else {
+        text = QLocale().toString(date, QStringLiteral("MMMM d, yyyy"));
+    }
+    auto* label = new QLabel(text, messagesContainer_);
+    label->setObjectName(QStringLiteral("chatDateSeparator"));
+    label->setProperty("sectionTitle", true);
+    label->setAlignment(Qt::AlignCenter);
+    return label;
 }
 
 void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
@@ -597,6 +648,10 @@ void ChatView::clearLog() {
     // из другого канала), как только загрузятся сообщения нового
     // канала.
     cancelEditingMessage();
+    // Строки, на которые эти записи ссылались, только что удалены выше
+    // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
+    // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
+    pendingImagePreviewRows_.clear();
 }
 
 }  // namespace devicehub

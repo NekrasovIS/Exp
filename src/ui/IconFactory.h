@@ -27,6 +27,11 @@ QIcon communityAvatarIcon(const QString& label);
 /// вместо текстовой подписи.
 QIcon sendIcon(const QColor& fillColor);
 
+/// Нарисованная вручную иконка "друзья" (два пересекающихся круга) для
+/// кнопки Friends в CommunitiesPanel (issue #187) — тот же приём, что и
+/// у plusIcon(): QPainter напрямую, без SVG-плагина.
+QIcon friendsIcon(const QColor& strokeColor);
+
 /// Значок-шестерёнка (кольцо с зубцами вокруг, полая середина) —
 /// рисуется вручную по той же причине, что и остальные значки в этом
 /// файле. Используется как иконка кнопки настроек в FooterBar вместо

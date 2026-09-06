@@ -12,6 +12,19 @@ std::vector<Community> ChatService::listCommunities() {
     return repository_.listCommunities();
 }
 
+std::vector<Community> ChatService::listCommunitiesForMember(const std::string& login) {
+    return repository_.listCommunitiesForMember(login);
+}
+
+std::optional<Community> ChatService::findCommunityByInviteCode(const std::string& code) {
+    return repository_.findCommunityByInviteCode(code);
+}
+
+RegenerateInviteCodeResult ChatService::regenerateInviteCode(std::int64_t communityId,
+                                                               const std::string& requesterLogin) {
+    return repository_.regenerateInviteCode(communityId, requesterLogin);
+}
+
 MutationResult ChatService::renameCommunity(std::int64_t id, const std::string& newName,
                                              const std::string& requesterLogin) {
     return repository_.renameCommunity(id, newName, requesterLogin);
@@ -104,6 +117,28 @@ std::optional<AttachmentData> ChatService::findAttachmentData(std::int64_t attac
 
 std::vector<Message> ChatService::searchMessages(std::int64_t channelId, const std::string& query, int limit) {
     return repository_.searchMessages(channelId, query, limit);
+}
+
+std::int64_t ChatService::findOrCreateThread(const std::string& loginA, const std::string& loginB) {
+    return repository_.findOrCreateThread(loginA, loginB);
+}
+
+std::vector<DirectMessageThread> ChatService::listMyThreads(const std::string& login) {
+    return repository_.listMyThreads(login);
+}
+
+bool ChatService::isThreadParticipant(std::int64_t threadId, const std::string& login) {
+    return repository_.isThreadParticipant(threadId, login);
+}
+
+std::optional<DirectMessage> ChatService::postDirectMessage(std::int64_t threadId, const std::string& authorLogin,
+                                                              const std::string& body) {
+    return repository_.insertDirectMessage(threadId, authorLogin, body);
+}
+
+std::vector<DirectMessage> ChatService::listDirectMessages(std::int64_t threadId, int limit,
+                                                             std::optional<std::int64_t> beforeId) {
+    return repository_.listDirectMessages(threadId, limit, beforeId);
 }
 
 }  // namespace chat_service

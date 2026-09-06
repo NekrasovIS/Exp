@@ -1,5 +1,6 @@
 #include "user/UserProfileClient.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -83,6 +84,104 @@ void UserProfileClient::publishPublicKey(const QString& token, const QString& pu
             return;
         }
         emit profileUpdated(parseProfile(reply->readAll()));
+    });
+}
+
+void UserProfileClient::sendFriendRequest(const QString& token, const QString& recipientLogin) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/requests")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token),
+        QJsonDocument(QJsonObject{{"recipient_login", recipientLogin}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, recipientLogin]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit friendRequestSent(recipientLogin, object.value("status").toString());
+    });
+}
+
+void UserProfileClient::listIncomingFriendRequests(const QString& token) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/requests")));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QList<FriendRequestInfo> requests;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                const QJsonObject object = value.toObject();
+                requests.push_back(FriendRequestInfo{.id = object.value("id").toVariant().toLongLong(),
+                                                       .requesterLogin = object.value("requester_login").toString(),
+                                                       .createdAt = object.value("created_at").toString()});
+            }
+        }
+        emit incomingFriendRequestsListed(requests);
+    });
+}
+
+void UserProfileClient::acceptFriendRequest(const QString& token, qint64 requestId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/requests/%1/accept").arg(requestId)));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit friendRequestAccepted(requestId);
+    });
+}
+
+void UserProfileClient::declineFriendRequest(const QString& token, qint64 requestId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/requests/%1/decline").arg(requestId)));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit friendRequestDeclined(requestId);
+    });
+}
+
+void UserProfileClient::listFriends(const QString& token) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends")));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QStringList logins;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        if (document.isArray()) {
+            for (const QJsonValue& value : document.array()) {
+                logins.push_back(value.toString());
+            }
+        }
+        emit friendsListed(logins);
+    });
+}
+
+void UserProfileClient::removeFriend(const QString& token, const QString& login) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/%1").arg(login)));
+    QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, login]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit friendRemoved(login);
     });
 }
 

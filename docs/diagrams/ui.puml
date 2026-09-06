@@ -23,7 +23,25 @@ class MainWindow {
   -showToast(text: QString, variant: ToastVariant)
   -onAccountSettingsClicked()
   -signOut()
+  -showFriendsMode()
+  -showCommunitiesMode()
+  -openDmThreadWith(login: QString)
+  -pollOpenDmThread()
 }
+note right of MainWindow
+  Issue #187, Фаза 3: sidebarListStack_
+  (channelsPanel_/friendsPanel_) и
+  contentStack_ (chatView_/
+  directMessageView_) переключаются вместе
+  — showFriendsMode()/showCommunitiesMode().
+  dmPollTimer_ (4с) перезапрашивает
+  последние сообщения открытого диалога,
+  пока backend не доставляет их через
+  WebSocket (Фаза 2b); directMessagesListed()
+  сам решает, initial load это (setMessages)
+  или новые сообщения (appendMessage только
+  для id > lastSeenDmMessageId_).
+end note
 
 class CommunitiesPanel {
   +setCommunities(communities: QList<ChatItem>)
@@ -31,27 +49,95 @@ class CommunitiesPanel {
   +setCurrentUserLogin(login: QString)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
+  +friendsButton() : QPushButton*
+  +connectDialog() : CommunityConnectDialog*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   .. signals ..
   +createRequested(name: QString)
   +renameRequested(id: int64, newName: QString)
   +deleteRequested(id: int64)
-  +joinRequested(id: int64)
+  +joinByCodeRequested(code: QString)
+  +regenerateInviteCodeRequested(id: int64)
   +communitySelected(id: int64)
   +manageModeratorsRequested(id: int64, name: QString)
+  +friendsRequested()
 }
+
+class CommunityConnectDialog {
+  +inviteCodeEdit() : QLineEdit*
+  +joinButton() : QPushButton*
+  +nameEdit() : QLineEdit*
+  +createButton() : QPushButton*
+  -onJoinClicked()
+  -onCreateClicked()
+  .. signals ..
+  +joinRequested(code: QString)
+  +createRequested(name: QString)
+}
+
+class FriendsPanel {
+  +setFriends(logins: QStringList)
+  +setIncomingRequests(requests: QList<FriendRequestInfo>)
+  +friendsList() : QListWidget*
+  +requestsList() : QListWidget*
+  +addFriendButton() : QPushButton*
+  -showAddFriendDialog()
+  -showFriendContextMenu(pos: QPoint)
+  -showRequestContextMenu(pos: QPoint)
+  .. signals ..
+  +friendSelected(login: QString)
+  +addFriendRequested(recipientLogin: QString)
+  +acceptRequestRequested(requestId: int64)
+  +declineRequestRequested(requestId: int64)
+  +removeFriendRequested(login: QString)
+}
+note right of FriendsPanel
+  Issue #187, Фаза 3: заменяет
+  ChannelsPanel в режиме Friends
+  (MainWindow::showFriendsMode()) —
+  входящие заявки сверху (accept/decline
+  по правому клику), друзья снизу (клик
+  открывает диалог, правый клик —
+  расфрендить).
+end note
+
+class DirectMessageView {
+  +showPlaceholder()
+  +showThread(otherLogin: QString)
+  +setMessages(messages: QList<DirectMessageInfo>)
+  +appendMessage(message: DirectMessageInfo)
+  +messagesList() : QListWidget*
+  +messageEdit() : QLineEdit*
+  +sendButton() : QPushButton*
+  -onSendClicked()
+  .. signals ..
+  +sendMessageRequested(body: QString)
+}
+note right of DirectMessageView
+  Issue #187, Фаза 3: заменяет ChatView в
+  режиме Friends — сильно упрощена (без
+  вложений/поиска/звонков/шифрования/
+  редактирования, которых backend этой
+  фазы и не поддерживает для личных
+  сообщений); сообщения — обычные строки
+  "login: текст", а не ChatBubble/
+  ChatMessageRow.
+end note
 
 class ChannelsPanel {
   +setChannels(channels: QList<ChatItem>)
   +selectChannelId(id: int64)
   +setCurrentUserLogin(login: QString)
+  +recordChannelActivity(channelId: int64, messageId: int64, previewText: QString, activityAt: QDateTime)
+  +setOpenChannelId(channelId: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +filterEdit() : QLineEdit*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
   -applyFilter()
+  -rebuildList()
   .. signals ..
   +createRequested(name: QString, isEncrypted: bool)
   +renameRequested(id: int64, newName: QString)
@@ -75,6 +161,21 @@ note right of ChannelsPanel
   префикс "#" в отображаемом тексте — тоже
   только косметика, kNameRole/rename её
   не видят.
+
+  rebuildList() сортирует по activity_
+  (последняя активность — выше) и
+  накладывает превью второй строкой +
+  жирный/акцентный шрифт для
+  непрочитанного. "Прочитано" — id
+  последнего сообщения канала на момент
+  setOpenChannelId(); recordChannelActivity()
+  для открытого канала прямо сейчас
+  всегда продвигает эту метку вместе с
+  activity_, а не только в момент
+  открытия — иначе сообщение, реально
+  увиденное, зажигало бы непрочитанное
+  задним числом после переключения на
+  другой канал.
 end note
 
 class MemberListPanel {
@@ -106,6 +207,7 @@ class ChatView {
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
@@ -136,6 +238,8 @@ class ChatView {
   -connectMessageRow(row: ChatMessageRow*)
   -updateLocalVideoVisibility()
   -onToggleChatVisibilityClicked()
+  -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
+  -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -149,6 +253,7 @@ class ChatView {
   +deleteMessageRequested(id: qint64)
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
+  +previewAttachmentRequested(attachmentId: qint64)
 }
 note right of ChatView
   Issue #153: videoStrip_ и новый chatPanel_
@@ -184,7 +289,27 @@ note right of ChatView
   только сигнализирует клик через
   memberListToggleRequested() — MainWindow сама
   решает, показать панель или скрыть, переключая
-  memberListPanel_->setVisible().
+  memberListPanel_->setVisible() (наравне со
+  скрытием той же панели в режиме друзей, issue
+  #187 — оба места переключают один и тот же флаг
+  по независимым причинам).
+
+  Issue #188: appendMessage()/prependMessages()
+  вставляют разделитель даты
+  (buildDateSeparatorLabel()) перед любым
+  сообщением, чей день отличается от
+  предыдущего показанного (isDifferentCalendarDay()
+  в chat_message_grouping) — включая самое
+  первое сообщение канала. Для вложений-
+  изображений (isImageAttachment() у
+  ChatMessageRow) появление строки сразу
+  запрашивает фоновую загрузку превью
+  (previewAttachmentRequested()) через
+  pendingImagePreviewRows_ — QHash<qint64,
+  QPointer<ChatMessageRow>>, QPointer вместо
+  голого указателя, поскольку строка может
+  исчезнуть (переключение канала, удаление
+  сообщения) раньше, чем придёт ответ.
 end note
 
 struct ChatMessage {
@@ -244,6 +369,7 @@ class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
   +messageId() : qint64
   +updateBody(newBody: QString)
+  +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
@@ -261,15 +387,29 @@ note right of ChatMessageRow
   Own messages: right-click the bubble for a
   context menu (Edit/Delete) instead of
   always-visible buttons (issue #150).
+
+  Issue #188: isImageAttachment()/isVideoAttachment()
+  — свободные функции в namespace devicehub (по
+  расширению файла), не методы класса — ChatView
+  тоже вызывает isImageAttachment() напрямую, чтобы
+  решить, запрашивать ли превью, без дублирования
+  этой проверки. Изображение — плейсхолдер "Loading
+  preview…" сразу, реальная картинка приходит позже
+  через setAttachmentPreview() от ChatView; видео —
+  статичный значок-заглушка с именем файла, без
+  автозагрузки (нет дешёвого способа получить
+  превью-кадр видео без полной загрузки/декодирования
+  файла).
 end note
 
 package "devicehub::chat_message_grouping" <<Rectangle>> {
   class ChatMessageGrouping << (N,orchid) namespace >> {
     +parseSentAt(raw: QString) : QDateTime
     +shouldGroupWithPrevious(previous: ChatMessage, current: ChatMessage) : bool
+    +isDifferentCalendarDay(previous: ChatMessage, current: ChatMessage) : bool
   }
 }
-ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious() >
+ChatView ..> ChatMessageGrouping : shouldGroupWithPrevious()/\nisDifferentCalendarDay() >
 ChatMessageRow ..> ChatMessageGrouping : parseSentAt() (time label) >
 
 class ProfileDialog {
@@ -395,8 +535,10 @@ package "src/user" {
 
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
 MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
+MainWindow *-- FriendsPanel : owns (replaces ChannelsPanel\nin Friends mode, issue #187)
 MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- MemberListPanel : owns (right of ChatView, issue #182)
+MainWindow *-- DirectMessageView : owns (replaces ChatView\nin Friends mode, issue #187)
 MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
@@ -422,17 +564,24 @@ MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
 MainWindow ..> DesktopNotifier : notifyMessage() (from\nmessageReceived() handler) >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
 MainWindow ..> ChatRestClient : communityCreated()/Renamed()/Deleted()\nchannelCreated()/Renamed()/Deleted() >
+MainWindow ..> ChatRestClient : joinedCommunityByCode()\ninviteCodeRegenerated() (issue #186) >
 MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
 MainWindow ..> UserProfileClient : profileReceived()/Updated()\nerrorOccurred() (issue #110) >
+MainWindow ..> UserProfileClient : sendFriendRequest()/listFriends()\naccept|declineFriendRequest()/removeFriend()\n(issue #187, Фаза 3) >
+MainWindow ..> ChatRestClient : openDmThread()/listDmThreads()\nsendDirectMessage()/listDirectMessages()\n(issue #187, Фаза 3) >
+FriendsPanel ..> MainWindow : friendSelected()/addFriendRequested()\naccept|declineRequestRequested()\nremoveFriendRequested() >
+DirectMessageView ..> MainWindow : sendMessageRequested() >
 MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
 MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
 MainWindow ..> MemberListPanel : setMembers() (from\nChatRestClient::membersListed()) >
 ProfileDialog ..> MainWindow : saveRequested() >
 
-CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinRequested()\ncommunitySelected() >
+CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinByCodeRequested()\nregenerateInviteCodeRequested()/communitySelected() >
 CommunitiesPanel ..> MainWindow : manageModeratorsRequested() (issue #114) >
+CommunitiesPanel *-- CommunityConnectDialog : owns ("+" dialog, issue #186)
+CommunityConnectDialog ..> CommunitiesPanel : joinRequested()/createRequested() >
 ModeratorsDialog ..> MainWindow : promoteRequested()/demoteRequested() >
 MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestClient signals) >
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
@@ -446,6 +595,8 @@ MainWindow ..> ChatView : setVideoEnabled()/setScreenShareEnabled()\nshowRemoteV
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
+ChatView ..> MainWindow : previewAttachmentRequested() -> ChatRestClient::\ndownloadAttachment() (issue #188) >
+ChatRestClient ..> MainWindow : attachmentDownloaded() -> decode QImage\n-> ChatView::setAttachmentPreview() (issue #188) >
 ChatView ..> MainWindow : openSearchRequested() -> show()/raise()\nSearchDialog (issue #118) >
 MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
 ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
