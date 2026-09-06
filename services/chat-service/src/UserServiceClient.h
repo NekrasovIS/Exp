@@ -18,6 +18,8 @@ class UserServiceClient {
 public:
     UserServiceClient(std::string host, int port);
 
+    /// Дружба симметрична — @p loginA/@p loginB можно менять местами без
+    /// изменения результата.
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB) const;
 
 private:

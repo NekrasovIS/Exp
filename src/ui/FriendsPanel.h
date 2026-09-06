@@ -38,10 +38,18 @@ public:
     [[nodiscard]] QPushButton* addFriendButton() const { return addFriendButton_; }
 
 signals:
+    /// Клик по другу в списке — MainWindow открывает с ним диалог личных
+    /// сообщений (openDmThreadWith()).
     void friendSelected(const QString& login);
+    /// Клик по "+" после ввода логина в диалоге добавления — MainWindow
+    /// отправляет заявку через UserProfileClient::sendFriendRequest().
     void addFriendRequested(const QString& recipientLogin);
+    /// "Accept" в контекстном меню входящей заявки.
     void acceptRequestRequested(qint64 requestId);
+    /// "Decline" в контекстном меню входящей заявки.
     void declineRequestRequested(qint64 requestId);
+    /// "Remove Friend" в контекстном меню друга — расфрендить, работает
+    /// в любую сторону пары (см. UserProfileClient::removeFriend()).
     void removeFriendRequested(const QString& login);
 
 private:

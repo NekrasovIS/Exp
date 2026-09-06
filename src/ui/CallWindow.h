@@ -86,8 +86,17 @@ public:
     [[nodiscard]] QVideoWidget* localScreenShareVideoWidget() const { return localScreenShareVideoWidget_; }
 
 signals:
+    /// Клик по кнопке Mute — MainWindow решает, включать или выключать
+    /// per-track mute на CallManager, и вызывает назад setMuted() с
+    /// результатом; сама CallWindow состояние звонка не хранит.
     void muteToggleRequested();
+    /// Клик по кнопке видео — тот же паттерн, что и muteToggleRequested():
+    /// MainWindow решает по CallManager::videoEnabled() и вызывает назад
+    /// setVideoEnabled().
     void videoToggleRequested();
+    /// Клик по кнопке демонстрации экрана — тот же паттерн, что и
+    /// videoToggleRequested(), только для CallManager::screenShareEnabled()/
+    /// setScreenShareEnabled().
     void screenShareToggleRequested();
     /// Клик по "Leave call" в самом окне звонка — MainWindow подключает
     /// это к тому же обработчику, что и ChatView::callToggleRequested()
