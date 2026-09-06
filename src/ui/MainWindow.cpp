@@ -401,6 +401,7 @@ MainWindow::MainWindow(QWidget* parent)
         chatRestClient_.listMembers(lastToken_, id);
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::showFriendsMode);
+    connect(friendsPanel_, &FriendsPanel::backToCommunitiesRequested, this, &MainWindow::showCommunitiesMode);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
                 moderatorsDialog_->setCommunity(id, name);
