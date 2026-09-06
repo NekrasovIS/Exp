@@ -51,6 +51,19 @@ namespace devicehub {
  * ChatRestClient::uploadAttachment() — этот класс никогда сам не
  * трогает байты вложения, только id/имя файла, которые едут вместе с
  * messageReceived().
+ *
+ * connectToDirectMessageThread() (issue #187, Фаза 2b) — альтернатива
+ * connectToChannel() для живой доставки личных сообщений: тот же кадр
+ * Hello, но с `dm_thread_id` вместо `channel_id`, и тот же
+ * subscribed()/messageReceived() на ответ (DirectMessage не несёт
+ * attachment_id/attachment_filename — messageReceived() получит для
+ * них -1/пустую строку, как и для обычного сообщения без вложения).
+ * Никаких кадров звонка/typing/edit_message/delete_message для диалога
+ * не отправлять — chat-service не обрабатывает их для подписки на
+ * личный диалог. Использовать отдельный экземпляр ChatClient для
+ * диалогов, не тот же самый, что подписан на канал (нужен независимый
+ * WebSocket, чтобы диалог не занимал место активной подписки на канал,
+ * от которой также зависит групповой звонок в CallManager).
  */
 class ChatClient : public QObject {
     Q_OBJECT
@@ -61,12 +74,18 @@ public:
     /// Открывает соединение и подписывается на @p channelId, используя @p token.
     void connectToChannel(const QString& token, qint64 channelId);
 
+    /// Открывает соединение и подписывается на личный диалог @p threadId
+    /// (issue #187, Фаза 2b) — см. doc-комментарий класса.
+    void connectToDirectMessageThread(const QString& token, qint64 threadId);
+
     /// Отправляет @p body в канал, на который подписан этот клиент,
     /// опционально ссылаясь на уже загруженный @p attachmentId
     /// (issue #116) — -1 (значение по умолчанию) означает отсутствие
     /// вложения.
     void sendMessage(const QString& body, qint64 attachmentId = -1);
 
+    /// Закрывает соединение — независимо от того, был ли этот клиент
+    /// подписан на канал или на личный диалог.
     void disconnectFromChannel();
 
     /// Присоединяется к голосовому звонку в подписанном канале;
@@ -94,8 +113,10 @@ public:
     void sendDeleteMessage(qint64 id);
 
 signals:
-    /// Испускается, как только chat-service подтверждает подписку.
-    void subscribed(qint64 channelId);
+    /// Испускается, как только chat-service подтверждает подписку —
+    /// @p id это channelId или dmThreadId, в зависимости от того, какой
+    /// из connectToChannel()/connectToDirectMessageThread() был вызван.
+    void subscribed(qint64 id);
 
     /// Испускается для каждого сообщения, разосланного в подписанном
     /// канале. @p attachmentId равен -1, а @p attachmentFilename пуст,
@@ -138,6 +159,11 @@ private:
     QWebSocket webSocket_;
     QString pendingToken_;
     qint64 pendingChannelId_ = 0;
+    qint64 pendingDmThreadId_ = 0;
+    /// Различает, какой из двух Hello-кадров отправить в onConnected() —
+    /// pendingChannelId_/pendingDmThreadId_ сами по себе неотличимы
+    /// (0 — валидный сентинел "ещё не установлен" для обоих).
+    bool pendingIsDirectMessage_ = false;
 };
 
 }  // namespace devicehub

@@ -1,6 +1,7 @@
 #include "auth/AuthClient.h"
 #include "chat/ChatClient.h"
 #include "chat/ChatRestClient.h"
+#include "user/UserProfileClient.h"
 
 #include <gtest/gtest.h>
 
@@ -675,6 +676,133 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
         loop.exec();
     }
     EXPECT_EQ(peerLeftOnA, loginB);
+}
+
+TEST(ChatClientIntegrationTest, DirectMessageThreadDeliversLiveViaWebSocket) {
+    // issue #187, Фаза 2b: заменяет прежний REST-поллинг живой доставкой
+    // через отдельную WS-подписку на dm_thread_id — тот же формат
+    // проверки, что и ConnectSendAndReceiveRoundTrip для каналов, плюс
+    // предварительное оформление дружбы (требуется для openDmThread()).
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const QString loginA = QStringLiteral("chat-dm-test-a-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString loginB = QStringLiteral("chat-dm-test-b-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) ||
+        !registerTestUser(manager, userUrl, loginB, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    QString tokenA;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClientA, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            tokenA = token;
+            loop.quit();
+        });
+        QObject::connect(&authClientA, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        authClientA.requestToken(loginA, password);
+        loop.exec();
+    }
+    AuthClient authClientB(authUrl);
+    QString tokenB;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClientB, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            tokenB = token;
+            loop.quit();
+        });
+        authClientB.requestToken(loginB, password);
+        loop.exec();
+    }
+    if (tokenA.isEmpty() || tokenB.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    UserProfileClient userProfileClientA(userUrl);
+    UserProfileClient userProfileClientB(userUrl);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&userProfileClientA, &UserProfileClient::friendRequestSent, &loop,
+                          [&](const QString&, const QString&) { loop.quit(); });
+        userProfileClientA.sendFriendRequest(tokenA, loginB);
+        loop.exec();
+    }
+    bool becameFriends = false;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        // Встречная заявка — принимается сразу же (см. doc-комментарий
+        // UserProfileClient::sendFriendRequest()).
+        QObject::connect(&userProfileClientB, &UserProfileClient::friendRequestSent, &loop,
+                          [&](const QString&, const QString& status) {
+                              becameFriends = status == QStringLiteral("accepted");
+                              loop.quit();
+                          });
+        userProfileClientB.sendFriendRequest(tokenB, loginA);
+        loop.exec();
+    }
+    ASSERT_TRUE(becameFriends);
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 threadId = -1;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::dmThreadOpened, &loop,
+                          [&](qint64 id, const QString&) {
+                              threadId = id;
+                              loop.quit();
+                          });
+        chatRestClient.openDmThread(tokenA, loginB);
+        loop.exec();
+    }
+    ASSERT_GE(threadId, 0);
+
+    ChatClient dmClientA(chatWsUrl);
+    ChatClient dmClientB(chatWsUrl);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&dmClientA, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        dmClientA.connectToDirectMessageThread(tokenA, threadId);
+        loop.exec();
+    }
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&dmClientB, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        dmClientB.connectToDirectMessageThread(tokenB, threadId);
+        loop.exec();
+    }
+
+    QString receivedAuthor;
+    QString receivedBody;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&dmClientB, &ChatClient::messageReceived, &loop,
+                          [&](qint64, const QString& author, const QString& body, const QString&, qint64,
+                              const QString&) {
+                              receivedAuthor = author;
+                              receivedBody = body;
+                              loop.quit();
+                          });
+        dmClientA.sendMessage(QStringLiteral("hello over websocket"));
+        loop.exec();
+    }
+
+    EXPECT_EQ(receivedAuthor, loginA);
+    EXPECT_EQ(receivedBody, QStringLiteral("hello over websocket"));
 }
 
 }  // namespace

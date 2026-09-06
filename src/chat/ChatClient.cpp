@@ -16,11 +16,21 @@ ChatClient::ChatClient(QUrl webSocketUrl, QObject* parent)
 void ChatClient::connectToChannel(const QString& token, qint64 channelId) {
     pendingToken_ = token;
     pendingChannelId_ = channelId;
+    pendingIsDirectMessage_ = false;
+    webSocket_.open(webSocketUrl_);
+}
+
+void ChatClient::connectToDirectMessageThread(const QString& token, qint64 threadId) {
+    pendingToken_ = token;
+    pendingDmThreadId_ = threadId;
+    pendingIsDirectMessage_ = true;
     webSocket_.open(webSocketUrl_);
 }
 
 void ChatClient::onConnected() {
-    const QJsonObject hello{{"token", pendingToken_}, {"channel_id", pendingChannelId_}};
+    const QJsonObject hello = pendingIsDirectMessage_
+                                   ? QJsonObject{{"token", pendingToken_}, {"dm_thread_id", pendingDmThreadId_}}
+                                   : QJsonObject{{"token", pendingToken_}, {"channel_id", pendingChannelId_}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(hello).toJson(QJsonDocument::Compact)));
 }
 
@@ -35,7 +45,8 @@ void ChatClient::onTextMessageReceived(const QString& message) {
     if (object.contains("error")) {
         emit errorOccurred(object.value("error").toString());
     } else if (object.contains("subscribed")) {
-        emit subscribed(object.value("channel_id").toVariant().toLongLong());
+        emit subscribed(object.contains("dm_thread_id") ? object.value("dm_thread_id").toVariant().toLongLong()
+                                                          : object.value("channel_id").toVariant().toLongLong());
     } else if (object.contains("call_roster")) {
         QStringList participants;
         const QJsonArray roster = object.value("call_roster").toArray();

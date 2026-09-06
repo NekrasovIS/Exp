@@ -242,6 +242,7 @@ class WebSocketServer {
   -handleHello(webSocket, payload)
   -handleSubscribedMessage(webSocket, payload)
   -handleChatMessage(webSocket, subscription, body)
+  -handleDirectMessage(webSocket, subscription, body)
   -handleEditMessage(webSocket, subscription, body)
   -handleDeleteMessage(webSocket, subscription, body)
   -handleCallJoin(webSocket, subscription)
@@ -250,8 +251,19 @@ class WebSocketServer {
   -handleTyping(webSocket, subscription)
   -removeCallParticipant(subscription, socket)
   -broadcastToChannel(channelId: int64, json: string, excludeSocket)
+  -broadcastToDmThread(dmThreadId: int64, json: string)
   -broadcastToCallParticipants(channelId: int64, json: string, excludeSocket)
 }
+note right of WebSocketServer
+  Личные диалоги (issue #187, Фаза 2b):
+  Hello {"token", "dm_thread_id"} вместо
+  channel_id — isThreadParticipant()
+  проверяет участие, 404-приватность
+  ("no such thread") для чужого. После
+  подписки — только {"body"}, минуя
+  handleSubscribedMessage() (звонки/typing/
+  edit/delete не реализованы для диалогов).
+end note
 WebSocketServer --> ChatService : delegates to (&)
 WebSocketServer --> AuthServiceClient : authenticates via (const&)
 WebSocketServer *-- IxWebSocketServer : owns

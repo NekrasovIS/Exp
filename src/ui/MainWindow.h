@@ -161,12 +161,6 @@ private:
     /// в обработчике ChatRestClient::dmThreadOpened(), а не здесь,
     /// поскольку id диалога до ответа сервера ещё не известен.
     void openDmThreadWith(const QString& login);
-    /// Тик dmPollTimer_ (issue #187, Фаза 2 backend'а пока не
-    /// поддерживает живую доставку через WebSocket) — просто
-    /// перезапрашивает последние сообщения открытого диалога;
-    /// обработчик directMessagesListed() сам решает, какие из них уже
-    /// показаны (см. dmHistoryLoaded_/lastSeenDmMessageId_).
-    void pollOpenDmThread();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
@@ -175,6 +169,11 @@ private:
     ScreenCaptureDevice screenCapture_;
     AuthClient authClient_;
     ChatClient chatClient_;
+    /// Отдельное WebSocket-соединение для живой доставки личных
+    /// сообщений (issue #187, Фаза 2b) — не то же самое, что chatClient_
+    /// (подписан на канал сообщества и используется CallManager для
+    /// сигналинга звонка); диалог ЛС не должен занимать эту подписку.
+    ChatClient dmChatClient_;
     CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_, screenCapture_};
     ChatRestClient chatRestClient_;
     UserProfileClient userProfileClient_;
@@ -243,17 +242,6 @@ private:
     /// друг ещё не выбран).
     qint64 openDmThreadId_ = -1;
     QString openDmOtherLogin_;
-    /// False сразу после openDmThreadWith() — следующий
-    /// directMessagesListed() для этого диалога заменяет весь список
-    /// (setMessages()) и переключается в true; последующие вызовы (от
-    /// dmPollTimer_) вместо этого только дозаписывают сообщения новее
-    /// lastSeenDmMessageId_ (appendMessage()) — REST отдаёт только
-    /// постраничную историю назад (before_id), не "новее X", поэтому
-    /// поллинг просто перезапрашивает последние сообщения целиком и
-    /// сам решает, что из них уже показано.
-    bool dmHistoryLoaded_ = false;
-    qint64 lastSeenDmMessageId_ = -1;
-    QTimer* dmPollTimer_ = nullptr;
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;

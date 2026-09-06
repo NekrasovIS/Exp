@@ -22,6 +22,11 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
                                                                         : nlohmann::json(nullptr)}};
 }
+
+nlohmann::json toJson(const DirectMessage& message) {
+    return nlohmann::json{
+        {"id", message.id}, {"author", message.authorLogin}, {"body", message.body}, {"sent_at", message.sentAt}};
+}
 }  // namespace
 
 WebSocketServer::WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient, int port,
@@ -83,9 +88,13 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
         return;
     }
     const nlohmann::json body = nlohmann::json::parse(payload, nullptr, /*allow_exceptions=*/false);
+    const bool hasChannelId = body.contains("channel_id") && body["channel_id"].is_number_integer();
+    const bool hasDmThreadId = body.contains("dm_thread_id") && body["dm_thread_id"].is_number_integer();
     if (body.is_discarded() || !body.contains("token") || !body["token"].is_string() ||
-        !body.contains("channel_id") || !body["channel_id"].is_number_integer()) {
-        webSocket.send(nlohmann::json{{"error", "expected {\"token\", \"channel_id\"}"}}.dump());
+        (!hasChannelId && !hasDmThreadId)) {
+        webSocket.send(
+            nlohmann::json{{"error", "expected {\"token\", \"channel_id\"} or {\"token\", \"dm_thread_id\"}"}}
+                .dump());
         webSocket.close();
         return;
     }
@@ -94,6 +103,25 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
     if (!login.has_value()) {
         webSocket.send(nlohmann::json{{"error", "invalid token"}}.dump());
         webSocket.close();
+        return;
+    }
+
+    if (hasDmThreadId) {
+        const auto dmThreadId = body["dm_thread_id"].get<std::int64_t>();
+        // 404, а не 403, для не-участника — та же приватность, что и у
+        // HttpServer::handlePostDirectMessage()/handleListDirectMessages():
+        // не подтверждать чужому существование диалога.
+        if (!chatService_.isThreadParticipant(dmThreadId, *login)) {
+            webSocket.send(nlohmann::json{{"error", "no such thread"}}.dump());
+            webSocket.close();
+            return;
+        }
+        {
+            const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+            subscriptions_[&webSocket] =
+                Subscription{.login = *login, .isDirectMessage = true, .dmThreadId = dmThreadId};
+        }
+        webSocket.send(nlohmann::json{{"subscribed", true}, {"dm_thread_id", dmThreadId}}.dump());
         return;
     }
 
@@ -119,6 +147,15 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
     const nlohmann::json body = nlohmann::json::parse(payload, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded()) {
         webSocket.send(nlohmann::json{{"error", "malformed JSON"}}.dump());
+        return;
+    }
+
+    // Личные диалоги не проходят общую диспетчеризацию ниже — звонки/
+    // typing/edit/delete не поддерживаются для них на этом этапе (см.
+    // doc-комментарий класса), поэтому единственный валидный кадр —
+    // {"body"}.
+    if (subscription.isDirectMessage) {
+        handleDirectMessage(webSocket, subscription, body);
         return;
     }
 
@@ -170,6 +207,23 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
     }
 
     broadcastToChannel(subscription.channelId, toJson(*stored).dump());
+}
+
+void WebSocketServer::handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                           const nlohmann::json& body) {
+    if (!body.contains("body") || !body["body"].is_string()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"body\"}"}}.dump());
+        return;
+    }
+
+    const std::optional<DirectMessage> stored =
+        chatService_.postDirectMessage(subscription.dmThreadId, subscription.login, body["body"].get<std::string>());
+    if (!stored.has_value()) {
+        webSocket.send(nlohmann::json{{"error", "no such thread"}}.dump());
+        return;
+    }
+
+    broadcastToDmThread(subscription.dmThreadId, toJson(*stored).dump());
 }
 
 namespace {
@@ -360,6 +414,24 @@ void WebSocketServer::broadcastToCallParticipants(std::int64_t channelId, const 
         }
     }
     for (ix::WebSocket* client : targets) {
+        client->send(json);
+    }
+}
+
+void WebSocketServer::broadcastToDmThread(std::int64_t dmThreadId, const std::string& json) {
+    // Та же схема "собрать под локом, разослать вне его" (CP.22/CP.43),
+    // что и у broadcastToChannel() — см. её doc-комментарий.
+    std::vector<std::shared_ptr<ix::WebSocket>> targets;
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            const auto it = subscriptions_.find(client.get());
+            if (it != subscriptions_.end() && it->second.isDirectMessage && it->second.dmThreadId == dmThreadId) {
+                targets.push_back(client);
+            }
+        }
+    }
+    for (const std::shared_ptr<ix::WebSocket>& client : targets) {
         client->send(json);
     }
 }
