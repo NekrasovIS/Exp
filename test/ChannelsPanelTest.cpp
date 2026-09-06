@@ -161,7 +161,7 @@ TEST(ChannelsPanelTest, RecordChannelActivityAddsPreviewAsSecondLine) {
 
     QListWidgetItem* item = panel.listWidget()->item(0);
     ASSERT_EQ(item->data(Qt::UserRole).toLongLong(), 10);
-    EXPECT_EQ(item->text(), QStringLiteral("general\nhey there"));
+    EXPECT_EQ(item->text(), QStringLiteral("# general\nhey there"));
 }
 
 TEST(ChannelsPanelTest, RecordChannelActivitySortsChannelsWithActivityFirst) {

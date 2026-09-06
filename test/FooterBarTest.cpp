@@ -46,11 +46,13 @@ TEST(FooterBarTest, AvatarHasPointingHandCursorToSignalItIsClickable) {
     EXPECT_EQ(bar.avatarLabel()->cursor().shape(), Qt::PointingHandCursor);
 }
 
-TEST(FooterBarTest, SettingsButtonExistsWithExpectedLabel) {
+TEST(FooterBarTest, SettingsButtonExistsWithExpectedTooltip) {
+    // Issue #182: значок вместо подписанной кнопки — текст описан
+    // только в tooltip.
     FooterBar bar;
 
     ASSERT_NE(bar.settingsButton(), nullptr);
-    EXPECT_EQ(bar.settingsButton()->text(), QStringLiteral("⚙ Settings"));
+    EXPECT_EQ(bar.settingsButton()->toolTip(), QStringLiteral("Settings"));
 }
 
 }  // namespace
