@@ -31,4 +31,26 @@ std::optional<OtpIdentity> UserService::resolveOtpIdentifier(const std::string& 
     return repository_.resolveOtpIdentifier(identifier);
 }
 
+SendFriendRequestResult UserService::sendFriendRequest(const std::string& requesterLogin,
+                                                         const std::string& recipientLogin) {
+    return repository_.sendFriendRequest(requesterLogin, recipientLogin);
+}
+
+RespondToFriendRequestResult UserService::respondToFriendRequest(std::int64_t requestId,
+                                                                    const std::string& recipientLogin, bool accept) {
+    return repository_.respondToFriendRequest(requestId, recipientLogin, accept);
+}
+
+std::vector<FriendRequestInfo> UserService::listIncomingFriendRequests(const std::string& login) {
+    return repository_.listIncomingFriendRequests(login);
+}
+
+std::vector<std::string> UserService::listFriends(const std::string& login) {
+    return repository_.listFriends(login);
+}
+
+bool UserService::removeFriend(const std::string& loginA, const std::string& loginB) {
+    return repository_.removeFriend(loginA, loginB);
+}
+
 }  // namespace user_service

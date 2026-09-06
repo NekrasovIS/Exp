@@ -16,6 +16,10 @@ namespace user_service {
  *        (issue #156, все три без аутентификации — вызываются самим
  *        auth-service, а не напрямую клиентами), плюс
  *        GET /users/{login}/profile и PATCH /users/me (issue #110),
+ *        POST /friends/requests, GET /friends/requests,
+ *        POST /friends/requests/{id}/accept,
+ *        POST /friends/requests/{id}/decline, GET /friends,
+ *        DELETE /friends/{login} (issue #187, заявки в друзья) —
  *        которым нужен валидный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через
  *        AuthServiceClient у auth-service.
@@ -46,6 +50,12 @@ private:
     void handleGetProfile(const httplib::Request& request, httplib::Response& response);
     void handleUpdateOwnProfile(const httplib::Request& request, httplib::Response& response);
     void handleResolveOtpIdentifier(const httplib::Request& request, httplib::Response& response);
+    void handleSendFriendRequest(const httplib::Request& request, httplib::Response& response);
+    void handleListIncomingFriendRequests(const httplib::Request& request, httplib::Response& response);
+    void handleAcceptFriendRequest(const httplib::Request& request, httplib::Response& response);
+    void handleDeclineFriendRequest(const httplib::Request& request, httplib::Response& response);
+    void handleListFriends(const httplib::Request& request, httplib::Response& response);
+    void handleRemoveFriend(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

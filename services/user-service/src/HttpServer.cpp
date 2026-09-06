@@ -55,6 +55,22 @@ std::optional<std::string> parseIdentifier(const std::string& body) {
     }
     return json["identifier"].get<std::string>();
 }
+
+std::optional<std::string> parseRecipientLogin(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("recipient_login") || !json["recipient_login"].is_string()) {
+        return std::nullopt;
+    }
+    return json["recipient_login"].get<std::string>();
+}
+
+nlohmann::json toJson(const FriendRequestInfo& request) {
+    return nlohmann::json{
+        {"id", request.id}, {"requester_login", request.requesterLogin}, {"created_at", request.createdAt}};
+}
 }  // namespace
 
 HttpServer::HttpServer(UserService& userService, const AuthServiceClient& authServiceClient)
@@ -85,6 +101,26 @@ void HttpServer::registerRoutes() {
     });
     server_.Post("/users/resolve-otp-identifier", [this](const httplib::Request& request, httplib::Response& response) {
         handleResolveOtpIdentifier(request, response);
+    });
+    server_.Post("/friends/requests", [this](const httplib::Request& request, httplib::Response& response) {
+        handleSendFriendRequest(request, response);
+    });
+    server_.Get("/friends/requests", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListIncomingFriendRequests(request, response);
+    });
+    server_.Post(R"(/friends/requests/(\d+)/accept)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleAcceptFriendRequest(request, response);
+                  });
+    server_.Post(R"(/friends/requests/(\d+)/decline)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleDeclineFriendRequest(request, response);
+                  });
+    server_.Get("/friends", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListFriends(request, response);
+    });
+    server_.Delete(R"(/friends/([^/]+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleRemoveFriend(request, response);
     });
 }
 
@@ -224,6 +260,142 @@ void HttpServer::handleResolveOtpIdentifier(const httplib::Request& request, htt
                                                                    : nlohmann::json(nullptr)}}
                               .dump(),
                           kJsonContentType);
+}
+
+void HttpServer::handleSendFriendRequest(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const std::optional<std::string> recipientLogin = parseRecipientLogin(request.body);
+    if (!recipientLogin.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'recipient_login' string"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    switch (userService_.sendFriendRequest(*login, *recipientLogin)) {
+        using enum SendFriendRequestResult;
+        case kCannotFriendSelf:
+            response.status = 400;
+            response.set_content(nlohmann::json{{"error", "cannot send a friend request to yourself"}}.dump(),
+                                  kJsonContentType);
+            return;
+        case kNoSuchRecipient:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
+            return;
+        case kAlreadyFriends:
+            response.status = 409;
+            response.set_content(nlohmann::json{{"error", "already friends"}}.dump(), kJsonContentType);
+            return;
+        case kAlreadyRequested:
+            response.status = 409;
+            response.set_content(nlohmann::json{{"error", "a pending request already exists"}}.dump(),
+                                  kJsonContentType);
+            return;
+        case kSent:
+            response.status = 201;
+            response.set_content(nlohmann::json{{"status", "sent"}}.dump(), kJsonContentType);
+            return;
+        case kAutoAccepted:
+            response.status = 201;
+            response.set_content(nlohmann::json{{"status", "accepted"}}.dump(), kJsonContentType);
+            return;
+    }
+}
+
+void HttpServer::handleListIncomingFriendRequests(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json requests = nlohmann::json::array();
+    for (const FriendRequestInfo& friendRequest : userService_.listIncomingFriendRequests(*login)) {
+        requests.push_back(toJson(friendRequest));
+    }
+    response.set_content(requests.dump(), kJsonContentType);
+}
+
+void HttpServer::handleAcceptFriendRequest(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto requestId = std::stoll(request.matches[1].str());
+    switch (userService_.respondToFriendRequest(requestId, *login, /*accept=*/true)) {
+        using enum RespondToFriendRequestResult;
+        case kNoSuchRequest:
+        case kNotYourRequest:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no such pending request"}}.dump(), kJsonContentType);
+            return;
+        case kAccepted:
+            response.set_content(nlohmann::json{{"status", "accepted"}}.dump(), kJsonContentType);
+            return;
+        case kDeclined:
+            break;
+    }
+}
+
+void HttpServer::handleDeclineFriendRequest(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto requestId = std::stoll(request.matches[1].str());
+    switch (userService_.respondToFriendRequest(requestId, *login, /*accept=*/false)) {
+        using enum RespondToFriendRequestResult;
+        case kNoSuchRequest:
+        case kNotYourRequest:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no such pending request"}}.dump(), kJsonContentType);
+            return;
+        case kDeclined:
+            response.set_content(nlohmann::json{{"status", "declined"}}.dump(), kJsonContentType);
+            return;
+        case kAccepted:
+            break;
+    }
+}
+
+void HttpServer::handleListFriends(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json logins = nlohmann::json::array();
+    for (const std::string& friendLogin : userService_.listFriends(*login)) {
+        logins.push_back(friendLogin);
+    }
+    response.set_content(logins.dump(), kJsonContentType);
+}
+
+void HttpServer::handleRemoveFriend(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const bool removed = userService_.removeFriend(*login, request.matches[1].str());
+    if (!removed) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "not friends"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(nlohmann::json{{"status", "removed"}}.dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

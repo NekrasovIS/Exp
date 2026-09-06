@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace user_service {
 
@@ -60,6 +62,36 @@ struct OtpIdentity {
     std::optional<std::string> telegramChatId;
 };
 
+/// Заявка в друзья, как её возвращает listIncomingFriendRequests()
+/// (issue #187, Фаза 1).
+struct FriendRequestInfo {
+    std::int64_t id = 0;
+    std::string requesterLogin;
+    std::string createdAt;
+};
+
+/// @see UserRepository::sendFriendRequest().
+enum class SendFriendRequestResult {
+    kSent,
+    /// У получателя уже была pending-заявка отправителю — вместо
+    /// второй записи она сразу принимается, и стороны становятся
+    /// друзьями за один вызов.
+    kAutoAccepted,
+    kAlreadyFriends,
+    kAlreadyRequested,
+    kNoSuchRecipient,
+    kCannotFriendSelf,
+};
+
+/// @see UserRepository::respondToFriendRequest().
+enum class RespondToFriendRequestResult {
+    kAccepted,
+    kDeclined,
+    kNoSuchRequest,
+    /// Заявка существует, но @p recipientLogin — не её адресат.
+    kNotYourRequest,
+};
+
 /**
  * @brief Хранилище учётных записей пользователей на базе Postgres (libpqxx).
  *
@@ -92,6 +124,28 @@ public:
     /// по одному из полей, либо найден, но ни email, ни telegram_chat_id
     /// не заданы (отправлять код некуда).
     [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier);
+
+    /// Отправляет заявку в друзья от @p requesterLogin к @p recipientLogin
+    /// (issue #187). Взаимные заявки авто-принимаются — см.
+    /// SendFriendRequestResult::kAutoAccepted.
+    [[nodiscard]] SendFriendRequestResult sendFriendRequest(const std::string& requesterLogin,
+                                                             const std::string& recipientLogin);
+
+    /// Принимает (@p accept == true) или отклоняет заявку @p requestId —
+    /// только если её адресат — @p recipientLogin.
+    [[nodiscard]] RespondToFriendRequestResult respondToFriendRequest(std::int64_t requestId,
+                                                                       const std::string& recipientLogin,
+                                                                       bool accept);
+
+    /// Входящие pending-заявки для @p login, самые новые первыми.
+    [[nodiscard]] std::vector<FriendRequestInfo> listIncomingFriendRequests(const std::string& login);
+
+    /// Логины всех друзей @p login (порядок не гарантирован).
+    [[nodiscard]] std::vector<std::string> listFriends(const std::string& login);
+
+    /// @return True, если пара состояла в дружбе и была удалена; false,
+    /// если они не были друзьями.
+    [[nodiscard]] bool removeFriend(const std::string& loginA, const std::string& loginB);
 
 private:
     std::string connectionString_;

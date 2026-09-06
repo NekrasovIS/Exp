@@ -56,18 +56,55 @@ struct OtpIdentity {
   +telegramChatId: optional<string>
 }
 
+struct FriendRequestInfo {
+  +id: int64
+  +requesterLogin: string
+  +createdAt: string
+}
+
+enum SendFriendRequestResult {
+  kSent
+  kAutoAccepted
+  kAlreadyFriends
+  kAlreadyRequested
+  kNoSuchRecipient
+  kCannotFriendSelf
+}
+note bottom of SendFriendRequestResult
+  issue #187, Фаза 1: kAutoAccepted —
+  у получателя уже была pending-заявка
+  отправителю, она сразу принимается вместо
+  второй записи (взаимный интерес = дружба
+  за один вызов, без отдельного accept).
+end note
+
+enum RespondToFriendRequestResult {
+  kAccepted
+  kDeclined
+  kNoSuchRequest
+  kNotYourRequest
+}
+
 class UserRepository {
   +createUser(login: string, passwordHash: string) : bool
   +findPasswordHash(login: string) : optional<string>
   +findProfile(login: string) : optional<Profile>
   +updateProfile(login: string, update: ProfileUpdate) : UpdateProfileResult
   +resolveOtpIdentifier(identifier: string) : optional<OtpIdentity>
+  +sendFriendRequest(requesterLogin: string, recipientLogin: string) : SendFriendRequestResult
+  +respondToFriendRequest(requestId: int64, recipientLogin: string, accept: bool) : RespondToFriendRequestResult
+  +listIncomingFriendRequests(login: string) : vector<FriendRequestInfo>
+  +listFriends(login: string) : vector<string>
+  +removeFriend(loginA: string, loginB: string) : bool
 }
 UserRepository ..> PqxxConnection : opens per call
 UserRepository ..> Profile : creates
 UserRepository ..> ProfileUpdate : reads
 UserRepository ..> UpdateProfileResult : returns
 UserRepository ..> OtpIdentity : returns
+UserRepository ..> FriendRequestInfo : returns
+UserRepository ..> SendFriendRequestResult : returns
+UserRepository ..> RespondToFriendRequestResult : returns
 
 class UserService {
   +registerUser(login: string, password: string) : bool
@@ -75,6 +112,11 @@ class UserService {
   +getProfile(login: string) : optional<Profile>
   +updateProfile(login: string, update: ProfileUpdate) : UpdateProfileResult
   +resolveOtpIdentifier(identifier: string) : optional<OtpIdentity>
+  +sendFriendRequest(requesterLogin: string, recipientLogin: string) : SendFriendRequestResult
+  +respondToFriendRequest(requestId: int64, recipientLogin: string, accept: bool) : RespondToFriendRequestResult
+  +listIncomingFriendRequests(login: string) : vector<FriendRequestInfo>
+  +listFriends(login: string) : vector<string>
+  +removeFriend(loginA: string, loginB: string) : bool
 }
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
@@ -100,6 +142,12 @@ class HttpServer {
   -handleGetProfile(request, response)
   -handleUpdateOwnProfile(request, response)
   -handleResolveOtpIdentifier(request, response)
+  -handleSendFriendRequest(request, response)
+  -handleListIncomingFriendRequests(request, response)
+  -handleAcceptFriendRequest(request, response)
+  -handleDeclineFriendRequest(request, response)
+  -handleListFriends(request, response)
+  -handleRemoveFriend(request, response)
 }
 HttpServer --> UserService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
@@ -133,6 +181,19 @@ note right of HttpServer
                                         Telegram chat_id, отвечает
                                         {found, login, email,
                                         telegram_chat_id})
+  POST  /friends/requests           -> handleSendFriendRequest (issue #187,
+                                        Фаза 1; {recipient_login} — 201
+                                        "sent" или "accepted", если у
+                                        получателя уже была встречная
+                                        pending-заявка)
+  GET   /friends/requests           -> handleListIncomingFriendRequests
+  POST  /friends/requests/{id}/accept
+        /friends/requests/{id}/decline
+                                     -> handleAcceptFriendRequest /
+                                        handleDeclineFriendRequest (только
+                                        адресат конкретной заявки)
+  GET   /friends                    -> handleListFriends
+  DELETE /friends/{login}           -> handleRemoveFriend
 end note
 
 note right of json_guard.json_guard
