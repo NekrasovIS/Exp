@@ -12,7 +12,7 @@
 hairpin (см. комментарий в начале `verify-forwarding.mjs`).
 
 ```sh
-docker compose up -d janus
+docker compose --profile sfu up -d janus
 docker run --rm -it \
   --network exp_default \
   -e JANUS_HOST=janus \
