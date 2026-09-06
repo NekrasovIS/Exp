@@ -21,16 +21,18 @@
 #include "user/UserProfileClient.h"
 
 class QScreen;
+class QStackedWidget;
 class QTimer;
 
 namespace devicehub {
 
-class AccountMenu;
 class ChannelsPanel;
 class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
+class DirectMessageView;
 class FooterBar;
+class FriendsPanel;
 class LoginWindow;
 class ModeratorsDialog;
 class ProfileDialog;
@@ -39,8 +41,14 @@ class SettingsDialog;
 
 /**
  * @brief Оболочка главного окна: боковая панель сообществ/каналов
- *        слева, чат открытого канала в основной области, меню аккаунта
- *        справа сверху и подвал с профилем и точкой входа в настройки.
+ *        слева, чат открытого канала в основной области, подвал с
+ *        профилем и точкой входа в настройки.
+ *
+ * Интерфейс скрыт, пока пользователь не авторизован — единственное
+ * видимое окно при запуске это LoginWindow (issue #156); само
+ * MainWindow показывается только после успешного входа/регистрации, а
+ * закрытие LoginWindow без авторизации завершает приложение (см.
+ * main.cpp и обработчик LoginWindow::rejected() в конструкторе).
  *
  * Чистое представление/связующая логика — весь доступ к устройствам и
  * сети делегирован классам devicehub::* в src/devices, src/auth и
@@ -61,8 +69,6 @@ private:
     void onToggleMicClicked();
     void onToggleCameraClicked();
     void onToggleScreenCaptureClicked();
-    void onRequestTokenClicked();
-    void onRegisterClicked();
     void onSendChatMessageClicked();
     /// Клик по "Attach" (issue #116) — открывает выбор файла, затем
     /// загружает выбранный файл; сама отправка происходит после того,
@@ -78,10 +84,12 @@ private:
     void onRequestOtpCodeClicked(const QString& identifier);
     /// LoginWindow::verifyCodeRequested() — issue #156.
     void onVerifyOtpCodeClicked(const QString& identifier, const QString& code);
+    /// LoginWindow::passwordSignInRequested() — issue #156.
+    void onPasswordSignInClicked(const QString& login, const QString& password);
+    /// LoginWindow::registerRequested() — issue #156.
+    void onRegisterClicked(const QString& login, const QString& password);
     /// Клик по аватару в футере (issue #151) — показывает небольшое меню
-    /// (Edit Profile / Sign Out), привязанное к аватару, а не только к
-    /// действиям аккаунта из всплывающего AccountMenu в правом верхнем
-    /// углу.
+    /// (Edit Profile / Sign Out), привязанное к аватару.
     void onAccountSettingsClicked();
     /// Очищает локальное состояние авторизации и возвращает UI в
     /// состояние "не авторизован" — эндпоинта отзыва токена на сервере
@@ -131,6 +139,26 @@ private:
     /// удаление/присоединение, ошибки) идёт через этот toast, а не
     /// через statusBar() — так гораздо легче заметить.
     void showToast(const QString& text, ToastBanner::Variant variant);
+
+    /// Переключает боковую панель/основную область в режим "Friends"
+    /// (issue #187, Фаза 3) — FriendsPanel вместо ChannelsPanel,
+    /// DirectMessageView вместо ChatView; заново запрашивает список
+    /// друзей и входящих заявок.
+    void showFriendsMode();
+    /// Обратное переключение — вызывается при выборе сообщества, тем
+    /// самым не нужно отдельной кнопки "назад".
+    void showCommunitiesMode();
+    /// Открывает диалог с @p login — вызывается по клику на друга в
+    /// FriendsPanel; фактическое переключение contentStack_ происходит
+    /// в обработчике ChatRestClient::dmThreadOpened(), а не здесь,
+    /// поскольку id диалога до ответа сервера ещё не известен.
+    void openDmThreadWith(const QString& login);
+    /// Тик dmPollTimer_ (issue #187, Фаза 2 backend'а пока не
+    /// поддерживает живую доставку через WebSocket) — просто
+    /// перезапрашивает последние сообщения открытого диалога;
+    /// обработчик directMessagesListed() сам решает, какие из них уже
+    /// показаны (см. dmHistoryLoaded_/lastSeenDmMessageId_).
+    void pollOpenDmThread();
 
     DeviceEnumerator enumerator_;
     AudioOutputDevice audioOutput_;
@@ -202,10 +230,30 @@ private:
     };
     std::optional<PendingEncryptedChannelSetup> pendingEncryptedSetup_;
 
+    /// Id открытого сейчас диалога личных сообщений (issue #187, Фаза
+    /// 3), -1 — ни один не открыт (режим Friends ещё не активен либо
+    /// друг ещё не выбран).
+    qint64 openDmThreadId_ = -1;
+    QString openDmOtherLogin_;
+    /// False сразу после openDmThreadWith() — следующий
+    /// directMessagesListed() для этого диалога заменяет весь список
+    /// (setMessages()) и переключается в true; последующие вызовы (от
+    /// dmPollTimer_) вместо этого только дозаписывают сообщения новее
+    /// lastSeenDmMessageId_ (appendMessage()) — REST отдаёт только
+    /// постраничную историю назад (before_id), не "новее X", поэтому
+    /// поллинг просто перезапрашивает последние сообщения целиком и
+    /// сам решает, что из них уже показано.
+    bool dmHistoryLoaded_ = false;
+    qint64 lastSeenDmMessageId_ = -1;
+    QTimer* dmPollTimer_ = nullptr;
+
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
+    FriendsPanel* friendsPanel_ = nullptr;
+    QStackedWidget* sidebarListStack_ = nullptr;
     ChatView* chatView_ = nullptr;
-    AccountMenu* accountMenu_ = nullptr;
+    DirectMessageView* directMessageView_ = nullptr;
+    QStackedWidget* contentStack_ = nullptr;
     FooterBar* footerBar_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
     ModeratorsDialog* moderatorsDialog_ = nullptr;

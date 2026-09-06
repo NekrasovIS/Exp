@@ -2,13 +2,12 @@
 
 #include <gtest/gtest.h>
 
-#include <QApplication>
-#include <QDialog>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSignalSpy>
-#include <QTimer>
+
+#include "ui/CommunityConnectDialog.h"
 
 namespace devicehub {
 namespace {
@@ -71,26 +70,36 @@ TEST(CommunitiesPanelTest, ClickingAnItemEmitsCommunitySelected) {
     EXPECT_EQ(spy.at(0).at(0).toLongLong(), 2);
 }
 
-TEST(CommunitiesPanelTest, ClickingAddButtonOpensDialogAndEmitsCreateRequestedWithEnteredName) {
+TEST(CommunitiesPanelTest, ClickingAddButtonShowsTheConnectDialog) {
+    CommunitiesPanel panel;
+    ASSERT_NE(panel.connectDialog(), nullptr);
+    ASSERT_TRUE(panel.connectDialog()->isHidden());
+
+    panel.addButton()->click();
+
+    EXPECT_FALSE(panel.connectDialog()->isHidden());
+}
+
+TEST(CommunitiesPanelTest, JoiningThroughTheConnectDialogEmitsJoinByCodeRequested) {
+    // issue #186: подключение по коду приглашения, не по id из общего
+    // списка — CommunitiesPanel ретранслирует сигнал connectDialog()
+    // под своим собственным именем.
+    CommunitiesPanel panel;
+    QSignalSpy spy(&panel, &CommunitiesPanel::joinByCodeRequested);
+
+    panel.connectDialog()->inviteCodeEdit()->setText(QStringLiteral("ABC123"));
+    panel.connectDialog()->joinButton()->click();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("ABC123"));
+}
+
+TEST(CommunitiesPanelTest, CreatingThroughTheConnectDialogEmitsCreateRequested) {
     CommunitiesPanel panel;
     QSignalSpy spy(&panel, &CommunitiesPanel::createRequested);
 
-    // showAddDialog() uses QInputDialog::getText(), which blocks in its
-    // own exec() — same reason ChannelsPanelTest reaches into a dialog
-    // via QApplication::activeModalWidget() once its event loop is
-    // already spinning, not by calling the dialog's own code directly.
-    // QInputDialog's text-entry mode always builds exactly one QLineEdit,
-    // so a plain (unnamed) findChild is enough to reach it.
-    QTimer::singleShot(0, &panel, []() {
-        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-        ASSERT_NE(dialog, nullptr);
-        auto* nameEdit = dialog->findChild<QLineEdit*>();
-        ASSERT_NE(nameEdit, nullptr);
-        nameEdit->setText(QStringLiteral("New Community"));
-        dialog->accept();
-    });
-
-    panel.addButton()->click();
+    panel.connectDialog()->nameEdit()->setText(QStringLiteral("New Community"));
+    panel.connectDialog()->createButton()->click();
 
     ASSERT_EQ(spy.count(), 1);
     EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("New Community"));

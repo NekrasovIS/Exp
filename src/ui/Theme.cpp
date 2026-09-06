@@ -20,11 +20,6 @@ QString discordDarkStyleSheet() {
             background-color: #1c1e21;
         }
 
-        QWidget#topBar {
-            background-color: #1c1e21;
-            border-bottom: 1px solid #2a2d31;
-        }
-
         QWidget#sidebar {
             background-color: #202327;
         }
@@ -45,7 +40,7 @@ QString discordDarkStyleSheet() {
             border-right: 1px solid #2a2d31;
         }
 
-        devicehub--ChannelsPanel, devicehub--ChatView, devicehub--AccountMenu {
+        devicehub--ChannelsPanel, devicehub--ChatView {
             background-color: transparent;
         }
 
@@ -185,12 +180,6 @@ QString discordDarkStyleSheet() {
         QProgressBar::chunk {
             background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399, stop:1 #059669);
             border-radius: 8px;
-        }
-
-        QFrame#accountMenuPopup {
-            background-color: #202327;
-            border: 1px solid #2a2d31;
-            border-radius: 12px;
         }
 
         QWidget#toastBanner {

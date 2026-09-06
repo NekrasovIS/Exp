@@ -1,5 +1,6 @@
 #include "ui/LoginWindow.h"
 
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -13,6 +14,7 @@ namespace devicehub {
 namespace {
 constexpr int kIdentifierStepIndex = 0;
 constexpr int kCodeStepIndex = 1;
+constexpr int kPasswordStepIndex = 2;
 }  // namespace
 
 LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
@@ -27,14 +29,15 @@ LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
     auto* identifierPage = new QWidget(stack_);
     auto* identifierLayout = new QVBoxLayout(identifierPage);
     identifierLayout->setSpacing(ui_theme::kSpacingSm);
-    auto* identifierHint =
-        new QLabel(tr("Enter your login or email — we'll send you a one-time sign-in code."), identifierPage);
+    auto* identifierHint = new QLabel(
+        tr("Enter your login, email or Telegram chat ID — we'll send you a one-time sign-in code."),
+        identifierPage);
     identifierHint->setWordWrap(true);
     identifierLayout->addWidget(identifierHint);
 
     identifierEdit_ = new QLineEdit(identifierPage);
     identifierEdit_->setObjectName(QStringLiteral("loginIdentifierEdit"));
-    identifierEdit_->setPlaceholderText(tr("Login or email"));
+    identifierEdit_->setPlaceholderText(tr("Login, email or Telegram chat ID"));
     connect(identifierEdit_, &QLineEdit::returnPressed, this, &LoginWindow::onRequestCodeClicked);
     identifierLayout->addWidget(identifierEdit_);
 
@@ -43,6 +46,16 @@ LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
     requestCodeButton_->setProperty("accent", true);
     connect(requestCodeButton_, &QPushButton::clicked, this, &LoginWindow::onRequestCodeClicked);
     identifierLayout->addWidget(requestCodeButton_);
+
+    usePasswordButton_ = new QPushButton(tr("Sign in with password instead"), identifierPage);
+    usePasswordButton_->setObjectName(QStringLiteral("usePasswordButton"));
+    usePasswordButton_->setFlat(true);
+    connect(usePasswordButton_, &QPushButton::clicked, this, [this]() {
+        statusLabel_->clear();
+        stack_->setCurrentIndex(kPasswordStepIndex);
+        passwordLoginEdit_->setFocus();
+    });
+    identifierLayout->addWidget(usePasswordButton_);
 
     auto* codePage = new QWidget(stack_);
     auto* codeLayout = new QVBoxLayout(codePage);
@@ -70,8 +83,50 @@ LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
     connect(backButton_, &QPushButton::clicked, this, &LoginWindow::onBackClicked);
     codeLayout->addWidget(backButton_);
 
+    auto* passwordPage = new QWidget(stack_);
+    auto* passwordLayout = new QVBoxLayout(passwordPage);
+    passwordLayout->setSpacing(ui_theme::kSpacingSm);
+
+    auto* passwordHint = new QLabel(tr("Sign in with your login and password, or register a new account."),
+                                     passwordPage);
+    passwordHint->setWordWrap(true);
+    passwordLayout->addWidget(passwordHint);
+
+    passwordLoginEdit_ = new QLineEdit(passwordPage);
+    passwordLoginEdit_->setObjectName(QStringLiteral("loginPasswordLoginEdit"));
+    passwordLoginEdit_->setPlaceholderText(tr("Login"));
+    passwordLayout->addWidget(passwordLoginEdit_);
+
+    passwordEdit_ = new QLineEdit(passwordPage);
+    passwordEdit_->setObjectName(QStringLiteral("loginPasswordEdit"));
+    passwordEdit_->setPlaceholderText(tr("Password"));
+    passwordEdit_->setEchoMode(QLineEdit::Password);
+    connect(passwordEdit_, &QLineEdit::returnPressed, this, &LoginWindow::onPasswordSignInClicked);
+    passwordLayout->addWidget(passwordEdit_);
+
+    auto* passwordActionsRow = new QHBoxLayout;
+    passwordSignInButton_ = new QPushButton(tr("Sign In"), passwordPage);
+    passwordSignInButton_->setObjectName(QStringLiteral("passwordSignInButton"));
+    passwordSignInButton_->setProperty("accent", true);
+    connect(passwordSignInButton_, &QPushButton::clicked, this, &LoginWindow::onPasswordSignInClicked);
+    registerButton_ = new QPushButton(tr("Register"), passwordPage);
+    registerButton_->setObjectName(QStringLiteral("loginRegisterButton"));
+    connect(registerButton_, &QPushButton::clicked, this, &LoginWindow::onRegisterClicked);
+    passwordActionsRow->addWidget(passwordSignInButton_);
+    passwordActionsRow->addWidget(registerButton_);
+    passwordLayout->addLayout(passwordActionsRow);
+
+    backToCodeButton_ = new QPushButton(tr("Use a one-time code instead"), passwordPage);
+    backToCodeButton_->setObjectName(QStringLiteral("backToCodeButton"));
+    connect(backToCodeButton_, &QPushButton::clicked, this, [this]() {
+        statusLabel_->clear();
+        stack_->setCurrentIndex(kIdentifierStepIndex);
+    });
+    passwordLayout->addWidget(backToCodeButton_);
+
     stack_->insertWidget(kIdentifierStepIndex, identifierPage);
     stack_->insertWidget(kCodeStepIndex, codePage);
+    stack_->insertWidget(kPasswordStepIndex, passwordPage);
     stack_->setCurrentIndex(kIdentifierStepIndex);
     rootLayout->addWidget(stack_);
 
@@ -108,6 +163,28 @@ void LoginWindow::onBackClicked() {
     statusLabel_->clear();
 }
 
+void LoginWindow::onPasswordSignInClicked() {
+    const QString login = passwordLoginEdit_->text().trimmed();
+    const QString password = passwordEdit_->text();
+    if (login.isEmpty() || password.isEmpty()) {
+        statusLabel_->setText(tr("Enter both login and password."));
+        return;
+    }
+    statusLabel_->clear();
+    emit passwordSignInRequested(login, password);
+}
+
+void LoginWindow::onRegisterClicked() {
+    const QString login = passwordLoginEdit_->text().trimmed();
+    const QString password = passwordEdit_->text();
+    if (login.isEmpty() || password.isEmpty()) {
+        statusLabel_->setText(tr("Enter both login and password."));
+        return;
+    }
+    statusLabel_->clear();
+    emit registerRequested(login, password);
+}
+
 void LoginWindow::showCodeSent(const QString& identifier) {
     pendingIdentifier_ = identifier;
     codeSentLabel_->setText(
@@ -126,6 +203,8 @@ void LoginWindow::reset() {
     stack_->setCurrentIndex(kIdentifierStepIndex);
     identifierEdit_->clear();
     codeEdit_->clear();
+    passwordLoginEdit_->clear();
+    passwordEdit_->clear();
     statusLabel_->clear();
     pendingIdentifier_.clear();
 }
