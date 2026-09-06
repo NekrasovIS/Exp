@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QList>
+#include <QPointer>
 #include <QStringList>
 #include <QWidget>
 
@@ -83,6 +84,12 @@ public:
 
     /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
+
+    /// Передаёт загруженное изображение вложения дальше в строку,
+    /// которая его запросила (issue #188, см. previewAttachmentRequested())
+    /// — ничего не делает, если та строка с тех пор исчезла (например,
+    /// пользователь переключил канал раньше, чем пришёл ответ).
+    void setAttachmentPreview(qint64 attachmentId, const QImage& image);
 
     /// Прокручивает к строке @p id, если она сейчас показана (issue
     /// #118, переход к результату поиска) — @return false, если это
@@ -223,12 +230,31 @@ signals:
     /// из того ChatMessageRow, откуда пришёл.
     void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
 
+    /// Испускается сразу при появлении строки с вложением-изображением
+    /// (issue #188, см. isImageAttachment()) — MainWindow запускает
+    /// фоновую загрузку через ChatRestClient::downloadAttachment() и
+    /// передаёт результат обратно в setAttachmentPreview(), а не в
+    /// обработчик "сохранить на диск", который тот же REST-вызов
+    /// использует для настоящих кликов по "Download".
+    void previewAttachmentRequested(qint64 attachmentId);
+
 private:
     /// Подключает editRequested()/deleteRequested() свежесозданной
     /// строки к собственному состоянию режима редактирования этого
     /// view / deleteMessageRequested() — используется совместно
     /// appendMessage() (пока единственное место, где создаются строки).
     void connectMessageRow(ChatMessageRow* row);
+
+    /// Если у @p message есть вложение-изображение (issue #188),
+    /// запоминает @p row в pendingImagePreviewRows_ и испускает
+    /// previewAttachmentRequested() — общая часть appendMessage()/
+    /// prependMessages(), оба создают строки одинаково.
+    void requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row);
+
+    /// Строит центрированную метку-разделитель дат (issue #188) —
+    /// "Today"/"Yesterday"/полная дата в зависимости от того, на какой
+    /// день приходится @p sentAt относительно текущей даты.
+    [[nodiscard]] QLabel* buildDateSeparatorLabel(const QString& sentAt);
 
     /// Видимость локального превью/полосы — это "активно видео с
     /// камеры или демонстрация экрана" — пересчитывается из
@@ -300,6 +326,11 @@ private:
     /// в конструкторе.
     bool stickToBottom_ = true;
     qint64 editingMessageId_ = -1;
+    /// Строки, ожидающие ответа на previewAttachmentRequested() (issue
+    /// #188) — QPointer, а не голый указатель, поскольку строка вполне
+    /// может исчезнуть (переключение канала -> clearLog(), удаление
+    /// сообщения) раньше, чем придёт ответ.
+    QHash<qint64, QPointer<ChatMessageRow>> pendingImagePreviewRows_;
 };
 
 }  // namespace devicehub
