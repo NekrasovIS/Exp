@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <QListWidget>
+#include <QPushButton>
 #include <QSignalSpy>
 
 namespace devicehub {
@@ -57,6 +58,15 @@ TEST(FriendsPanelTest, SetIncomingRequestsReplacesPreviousContents) {
     panel.setIncomingRequests({});
 
     EXPECT_EQ(panel.requestsList()->count(), 0);
+}
+
+TEST(FriendsPanelTest, ClickingBackEmitsBackToCommunitiesRequested) {
+    FriendsPanel panel;
+    QSignalSpy spy(&panel, &FriendsPanel::backToCommunitiesRequested);
+
+    emit panel.backButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
 }
 
 }  // namespace

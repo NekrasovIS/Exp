@@ -34,6 +34,11 @@ FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
 
     auto* header = new QHBoxLayout;
     header->setSpacing(ui_theme::kSpacingSm);
+
+    backButton_ = new QPushButton(tr("< Communities"), this);
+    backButton_->setObjectName(QStringLiteral("backToCommunitiesButton"));
+    backButton_->setToolTip(tr("Back to communities"));
+
     auto* title = new QLabel(tr("Friends"), this);
     title->setProperty("sectionTitle", true);
 
@@ -46,6 +51,7 @@ FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
     addFriendButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addFriendButton_->setProperty("iconOnly", true);
 
+    header->addWidget(backButton_);
     header->addWidget(title);
     header->addStretch();
     header->addWidget(addFriendButton_);
@@ -74,6 +80,7 @@ FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(friendsTitle);
     layout->addWidget(friendsList_, /*stretch=*/1);
 
+    connect(backButton_, &QPushButton::clicked, this, &FriendsPanel::backToCommunitiesRequested);
     connect(addFriendButton_, &QPushButton::clicked, this, &FriendsPanel::showAddFriendDialog);
     connect(requestsList_, &QListWidget::customContextMenuRequested, this, &FriendsPanel::showRequestContextMenu);
     connect(friendsList_, &QListWidget::customContextMenuRequested, this, &FriendsPanel::showFriendContextMenu);
