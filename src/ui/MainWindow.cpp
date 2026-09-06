@@ -186,6 +186,11 @@ MainWindow::MainWindow(QWidget* parent)
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
         chatView_->setCurrentUserLogin(currentUserLogin_);
+        // SFU (issue #232): CallManager должен знать собственный логин,
+        // чтобы объявить его Janus'у как display при публикации — только
+        // так остальные участники смогут сопоставить чужой feed videoroom
+        // с логином (Janus сам про логины/каналы ничего не знает).
+        callManager_.setLocalLogin(currentUserLogin_);
         if (valid) {
             // Скрываем окно входа и впервые показываем интерфейс — до
             // этого момента MainWindow ни разу не был показан (issue

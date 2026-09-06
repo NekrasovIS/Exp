@@ -55,6 +55,15 @@ void ChatClient::onTextMessageReceived(const QString& message) {
             participants.append(login.toString());
         }
         emit callRosterReceived(participants);
+        // Отдельный сигнал, не новое поле в callRosterReceived() — тот же
+        // ответ на call_join, но не трогаем уже существующую сигнатуру
+        // (issue #232). Отсутствует/null, если chat-service не смог
+        // обеспечить SFU-комнату (Janus временно недоступен) — тогда
+        // сигнал просто не испускается.
+        const QJsonValue sfuRoom = object.value("sfu_room");
+        if (sfuRoom.isString()) {
+            emit sfuRoomAssigned(sfuRoom.toString());
+        }
     } else if (object.contains("call_peer_joined")) {
         emit callPeerJoined(object.value("call_peer_joined").toString());
     } else if (object.contains("call_peer_left")) {
@@ -62,6 +71,12 @@ void ChatClient::onTextMessageReceived(const QString& message) {
     } else if (object.contains("call_signal")) {
         const QJsonObject signal = object.value("call_signal").toObject();
         emit callSignalReceived(signal.value("from").toString(), signal.value("payload").toObject());
+    } else if (object.contains("janus_attached")) {
+        emit janusAttached(object.value("janus_attached").toObject().value("handle").toVariant().toLongLong());
+    } else if (object.contains("janus_message_ack")) {
+        emit janusMessageAck(object.value("janus_message_ack").toObject());
+    } else if (object.contains("janus_event")) {
+        emit janusEventReceived(object.value("janus_event").toObject());
     } else if (object.contains("user_typing")) {
         emit userTyping(object.value("user_typing").toString());
     } else if (object.contains("message_edited")) {
@@ -103,6 +118,20 @@ void ChatClient::leaveCall() {
 
 void ChatClient::sendCallSignal(const QString& to, const QJsonObject& payload) {
     const QJsonObject message{{"call_signal", QJsonObject{{"to", to}, {"payload", payload}}}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendJanusAttach() {
+    const QJsonObject message{{"janus_attach", true}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendJanusMessage(qint64 handle, const QJsonObject& body, const QJsonObject& jsep) {
+    QJsonObject inner{{"handle", handle}, {"body", body}};
+    if (!jsep.isEmpty()) {
+        inner.insert("jsep", jsep);
+    }
+    const QJsonObject message{{"janus_message", inner}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 

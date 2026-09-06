@@ -22,9 +22,11 @@
 #include <QString>
 #include <QVideoFrame>
 
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 class QAudioFormat;
 class QScreen;
@@ -136,6 +138,15 @@ public:
                 CameraDevice& camera, ScreenCaptureDevice& screenCapture, QObject* parent = nullptr);
     ~CallManager() override;
 
+    /// Собственный логин участника (issue #232) — Janus сам не знает про
+    /// пользователей/каналы chat-service, поэтому при публикации этот
+    /// класс объявляет его сам, полем "display", чтобы остальные
+    /// участники (через список publishers в ответе на join) могли
+    /// сопоставить чужой Janus-feed с логином. Установить один раз после
+    /// входа, до joinCall() — вызывающая сторона (MainWindow) делает это
+    /// сразу, как только известен логин.
+    void setLocalLogin(const QString& login) { localLogin_ = login; }
+
     /// Отправляет call_join, начинает захват с @p inputDevice и
     /// стриминг удалённого аудио на @p outputDevice, и начинает
     /// отправлять offer всем, кто уже в звонке, как только придёт ответ
@@ -233,6 +244,20 @@ private:
         /// треком).
         std::unique_ptr<RemoteVideoSink> remoteCameraVideoSink;
         std::unique_ptr<RemoteVideoSink> remoteScreenShareVideoSink;
+        /// SFU (issue #232): handle плагина videoroom на Janus-сессии
+        /// этого WS-подключения, которому принадлежит это соединение —
+        /// -1, пока не назначен (см. onJanusAttached()). Для
+        /// publishConnection_ — handle публикации; для записи в peers_
+        /// (переиспользуется под subscribe-соединение SFU вместо
+        /// mesh-пира, см. doc-комментарий класса) — handle подписки на
+        /// конкретный чужой feed.
+        qint64 janusHandle = -1;
+        /// Только для subscribe-записей в peers_ (janusHandle >= 0) — id
+        /// чужого Janus-feed, на который подписана эта запись; нужен,
+        /// чтобы найти нужную запись по feedId, когда комната сообщает об
+        /// уходе участника ("leaving"/"unpublished" несёт feedId, не
+        /// login — Janus логинов не знает).
+        QString sfuFeedId;
     };
 
     void onCallRosterReceived(const QStringList& participants);
@@ -240,9 +265,60 @@ private:
     void onCallPeerLeft(const QString& login);
     void onCallSignalReceived(const QString& from, const QJsonObject& payload);
 
+    /// SFU (issue #232): комната для этого звонка назначена
+    /// chat-service'ом — запускает публикацию (ensurePublishConnection()).
+    void onSfuRoomAssigned(const QString& room);
+    /// Ответ на последний отправленный sendJanusAttach() — по очереди
+    /// pendingAttach_ решает, была это публикация или подписка на
+    /// pendingSubscribeFeedId_ (см. doc-комментарий у них обоих: в любой
+    /// момент в полёте не больше одного janus_attach, следующий из
+    /// subscribeQueue_ отправляется только после того, как этот
+    /// полностью встал на место).
+    void onJanusAttached(qint64 handle);
+    /// Асинхронное событие Janus-сессии (issue #232) — маршрутизируется
+    /// по event["sender"] (id handle'а): "joined"/"event" на handle
+    /// публикации несут список publishers (для ensureSubscribeConnection())
+    /// или уход участника (для closePeerConnection()), "configured" с
+    /// jsep — ответ Janus на наш offer публикации; "attached" на handle
+    /// подписки несёт jsep-offer от Janus, на который нужно ответить и
+    /// отправить "start".
+    void onJanusEvent(const QJsonObject& event);
+
     void ensureFactory();
     PeerConnectionEntry* ensurePeerConnection(const QString& peerLogin);
     void closePeerConnection(const QString& peerLogin);
+
+    /// Создаёт (один раз на звонок) публикующее SFU-соединение,
+    /// attach'ит handle плагина videoroom и join'ится как publisher —
+    /// см. doc-комментарий класса о модели "один publish + N subscribe"
+    /// (issue #232), заменяющей mesh-пиры.
+    void ensurePublishConnection();
+    /// Гарантирует, что для чужого Janus-feed @p feedId (объявленного
+    /// как @p peerLogin) существует subscribe-соединение — переиспользует
+    /// peers_ (issue #232): один слот на peerLogin, как и было для mesh,
+    /// просто теперь это subscribe-, а не mesh-пир. No-op, если это наш
+    /// собственный feed (ownFeedId_) или peerLogin уже есть в peers_.
+    void ensureSubscribeConnection(const QString& feedId, const QString& peerLogin);
+    /// Начинает следующий отложенный attach из subscribeQueue_, если
+    /// сейчас ничего не в полёте — см. doc-комментарий pendingAttach_.
+    void processNextQueuedSubscribe();
+    /// Закрывает subscribe-соединение, отвечающее за чужой Janus-feed
+    /// @p feedId (найденное по PeerConnectionEntry::sfuFeedId) — реакция
+    /// на "leaving"/"unpublished" в событии комнаты.
+    void closeSubscribeConnectionByFeed(const QString& feedId);
+    /// Единая точка создания webrtc::PeerConnection с общей
+    /// STUN-конфигурацией и PeerObserver — переиспользуется
+    /// ensurePeerConnection() (mesh), ensurePublishConnection() и
+    /// созданием subscribe-записи в onJanusAttached() (issue #232),
+    /// вместо тройного дублирования одного и того же блока настройки.
+    webrtc::scoped_refptr<webrtc::PeerConnectionInterface> createPeerConnection(const QString& label,
+                                                                                 std::unique_ptr<PeerObserver>& observerOut);
+    /// Реакция на полный сбор ICE-кандидатов (issue #232) — для SFU-
+    /// соединений (janusHandle >= 0) здесь и только здесь отправляется
+    /// offer/answer Janus'у (без trickle, кандидаты уже внутри SDP); для
+    /// mesh — no-op, кандидаты трикклятся по одному через
+    /// handleLocalIceCandidate(), как и раньше.
+    void handleIceGatheringComplete(const QString& peerLogin);
 
     /// Запускает (пере)согласование local-description для
     /// PeerConnection пира `peerLogin` — создаёт и устанавливает offer
@@ -320,11 +396,39 @@ private:
     webrtc::scoped_refptr<CallVideoTrackSource> screenShareTrackSource_;
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> localScreenShareTrack_;
 
+    // peers_ переиспользуется под subscribe-соединения SFU (issue #232) —
+    // см. doc-комментарии ensureSubscribeConnection()/closePeerConnection():
+    // один слот на peerLogin, как и раньше для mesh-пиров, просто теперь
+    // за ним stands subscribe-, а не mesh-PeerConnection.
     std::unordered_map<std::string, PeerConnectionEntry> peers_;
     bool inCall_ = false;
     bool muted_ = false;
     bool videoEnabled_ = false;
     bool screenShareEnabled_ = false;
+
+    // --- SFU (issue #232) ---
+    QString localLogin_;
+    QString sfuRoom_;
+    /// Собственный Janus feed id (участник этой комнаты) — присваивается
+    /// из ответа "joined" на publishConnection_; пусто, пока не
+    /// опубликовались. ensureSubscribeConnection() использует его, чтобы
+    /// не подписываться на собственный поток, случайно оказавшийся в
+    /// списке publishers.
+    QString ownFeedId_;
+    PeerConnectionEntry publishConnection_;
+
+    /// В любой момент в полёте не больше одного janus_attach — ответ
+    /// Janus (onJanusAttached()) не несёт признака, ДЛЯ ЧЕГО был запрос,
+    /// поэтому это решает единственный "текущий" запрос: kPublish для
+    /// ensurePublishConnection(), kSubscribe для головы subscribeQueue_.
+    /// Следующий отложенный subscribe запускается только после того, как
+    /// текущий полностью встанет на место (см. processNextQueuedSubscribe()).
+    enum class PendingJanusAttach { kNone, kPublish, kSubscribe };
+    PendingJanusAttach pendingAttach_ = PendingJanusAttach::kNone;
+    QString pendingSubscribeFeedId_;
+    QString pendingSubscribePeerLogin_;
+    /// (feedId, peerLogin) пар, ждущих своей очереди на attach — issue #232.
+    std::deque<std::pair<QString, QString>> subscribeQueue_;
 };
 
 }  // namespace devicehub
