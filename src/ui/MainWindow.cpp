@@ -392,6 +392,13 @@ MainWindow::MainWindow(QWidget* parent)
         openDmThreadId_ = id;
         openDmOtherLogin_ = otherLogin;
         dmHistoryLoaded_ = false;
+        // Не переносить lastSeenDmMessageId_ от предыдущего диалога:
+        // корректность appendMessage()-only-для-новых в
+        // directMessagesListed() ниже иначе тихо зависела бы от того,
+        // что id сообщений — общая для всех диалогов последовательность
+        // (см. direct_messages.id в chat-service), а не от чего-то, что
+        // видно прямо здесь.
+        lastSeenDmMessageId_ = -1;
         directMessageView_->showThread(otherLogin);
         chatRestClient_.listDirectMessages(lastToken_, id, /*limit=*/50);
         dmPollTimer_->start(kDmPollIntervalMs);
@@ -1107,6 +1114,7 @@ void MainWindow::showFriendsMode() {
     openDmThreadId_ = -1;
     openDmOtherLogin_.clear();
     dmHistoryLoaded_ = false;
+    lastSeenDmMessageId_ = -1;
     dmPollTimer_->stop();
     if (!lastToken_.isEmpty()) {
         userProfileClient_.listFriends(lastToken_);
@@ -1120,6 +1128,7 @@ void MainWindow::showCommunitiesMode() {
     openDmThreadId_ = -1;
     openDmOtherLogin_.clear();
     dmHistoryLoaded_ = false;
+    lastSeenDmMessageId_ = -1;
     dmPollTimer_->stop();
 }
 
