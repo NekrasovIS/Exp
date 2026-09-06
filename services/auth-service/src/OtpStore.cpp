@@ -20,7 +20,10 @@ std::string OtpStore::generateNumericCode() {
     unsigned int value = 0;
     // RAND_bytes — криптографически стойкий генератор, не rand()/
     // std::rand(): предсказуемый код одноразового входа сводит на нет
-    // весь смысл этой схемы.
+    // весь смысл этой схемы. RAND_bytes() из OpenSSL пишет в
+    // unsigned char*, value — обычный unsigned int — reinterpret_cast
+    // стандартно переходит между этими несвязанными типами указателей;
+    // sizeof(value) рядом не даёт записи выйти за границы value.
     RAND_bytes(reinterpret_cast<unsigned char*>(&value), sizeof(value));
     value %= kCodeModulus;
     std::ostringstream out;

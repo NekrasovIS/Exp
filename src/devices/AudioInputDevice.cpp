@@ -83,6 +83,11 @@ float AudioInputDevice::computeLevel(const QByteArray& pcmData, const QAudioForm
         return 0.0f;
     }
 
+    // Qt отдаёт захваченный PCM как char* (QByteArray), а нужен int16_t*
+    // для доступа к сэмплам — reinterpret_cast стандартно переходит
+    // между этими несвязанными типами указателей; sampleCount ниже
+    // посчитан из настоящей длины pcmData, так что чтение через
+    // переинтерпретированный указатель не выйдет за границы.
     const auto* samples = reinterpret_cast<const int16_t*>(pcmData.constData());
     const qsizetype sampleCount = pcmData.size() / static_cast<qsizetype>(sizeof(int16_t));
 

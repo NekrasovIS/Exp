@@ -38,6 +38,10 @@ bool expectExact(TlsConnection& connection, int code) {
 std::string base64Encode(const std::string& input) {
     const int encodedLen = 4 * ((static_cast<int>(input.size()) + 2) / 3);
     std::string output(static_cast<std::size_t>(encodedLen), '\0');
+    // EVP_EncodeBlock() из OpenSSL работает с unsigned char*, а
+    // std::string::data() отдаёт char* — reinterpret_cast стандартно
+    // переходит между этими несвязанными типами указателей; encodedLen/
+    // input.size() рядом не дают записи/чтению выйти за границы буферов.
     const int written =
         EVP_EncodeBlock(reinterpret_cast<unsigned char*>(output.data()),
                          reinterpret_cast<const unsigned char*>(input.data()), static_cast<int>(input.size()));

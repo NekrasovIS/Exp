@@ -350,6 +350,11 @@ void CallManager::ensureFactory() {
     // observer'а PeerConnection ниже.
     audioDeviceModule_ = webrtc::make_ref_counted<CallAudioDeviceModule>(
         [this](const int16_t* samples, size_t frameCount, int /*sampleRateHz*/, size_t channels) {
+            // WebRTC отдаёт PCM как int16_t*, QByteArray хочет char* —
+            // reinterpret_cast стандартно переходит между этими
+            // несвязанными типами указателей (static_cast так не умеет);
+            // длина в байтах считается явно рядом, поэтому чтение через
+            // переинтерпретированный указатель не выйдет за границы.
             QByteArray pcm(reinterpret_cast<const char*>(samples),
                            static_cast<qsizetype>(frameCount * channels * sizeof(int16_t)));
             QMetaObject::invokeMethod(
@@ -541,6 +546,10 @@ void CallManager::onCapturedPcm(const QByteArray& data, const QAudioFormat& form
     if (channels == 0) {
         return;
     }
+    // Обратная граница той же пары типов, что и в onCapturedPcm-колбэке
+    // выше (там int16_t* -> char* для QByteArray, здесь наоборот) —
+    // frameCount ниже посчитан из настоящей длины data, так что чтение
+    // через переинтерпретированный указатель не выйдет за границы.
     const auto* samples = reinterpret_cast<const int16_t*>(data.constData());
     const size_t frameCount = static_cast<size_t>(data.size()) / sizeof(int16_t) / channels;
     audioDeviceModule_->pushCapturedAudio(samples, frameCount, format.sampleRate(), channels);
