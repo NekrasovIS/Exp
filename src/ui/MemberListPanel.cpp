@@ -1,9 +1,11 @@
 #include "ui/MemberListPanel.h"
 
+#include <QAction>
 #include <QFrame>
 #include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMenu>
 #include <QSize>
 #include <QVBoxLayout>
 
@@ -34,9 +36,12 @@ MemberListPanel::MemberListPanel(QWidget* parent) : QWidget(parent) {
     listWidget_->setObjectName(QStringLiteral("memberList"));
     listWidget_->setFrameShape(QFrame::NoFrame);
     listWidget_->setIconSize(QSize(kAvatarIconSize, kAvatarIconSize));
+    listWidget_->setContextMenuPolicy(Qt::CustomContextMenu);
 
     layout->addWidget(titleLabel_);
     layout->addWidget(listWidget_, /*stretch=*/1);
+
+    connect(listWidget_, &QListWidget::customContextMenuRequested, this, &MemberListPanel::showContextMenu);
 
     setMembers({});
 }
@@ -54,6 +59,33 @@ void MemberListPanel::setMembers(const QStringList& logins) {
     for (const QString& login : sorted) {
         auto* item = new QListWidgetItem(login, listWidget_);
         item->setIcon(ui_icons::communityAvatarIcon(login.left(1).toUpper()));
+    }
+}
+
+void MemberListPanel::setCurrentUserLogin(const QString& login) {
+    currentUserLogin_ = login;
+}
+
+void MemberListPanel::setChannelEncrypted(bool encrypted) {
+    channelEncrypted_ = encrypted;
+}
+
+void MemberListPanel::showContextMenu(const QPoint& pos) {
+    QListWidgetItem* item = listWidget_->itemAt(pos);
+    if (item == nullptr || !channelEncrypted_) {
+        return;
+    }
+    const QString login = item->text();
+    if (login == currentUserLogin_) {
+        return;  // Себе самому выдавать доступ бессмысленно — он уже есть.
+    }
+
+    QMenu menu(this);
+    QAction* grantKeyAction = menu.addAction(tr("Grant channel key access"));
+
+    QAction* chosen = menu.exec(listWidget_->mapToGlobal(pos));
+    if (chosen == grantKeyAction) {
+        emit grantChannelKeyAccessRequested(login);
     }
 }
 
