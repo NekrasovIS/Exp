@@ -1,0 +1,13 @@
+{
+  "name": "@devicehub/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Placeholder for the React Native mobile client (issue #125/#222/#223) — reserves its place in the monorepo; no UI yet, only wiring to @devicehub/core to prove the workspace link resolves.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@devicehub/core": "workspace:*"
+  }
+}
