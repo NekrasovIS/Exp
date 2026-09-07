@@ -1,0 +1,54 @@
+@startuml call_minimize_sequence
+title Сворачивание/разворачивание звонка (issue #215)
+
+participant User
+participant CallWindow
+participant MainWindow
+participant FloatingCallTilesOverlay as Overlay
+participant "DraggableVideoTile\n(local + remote)" as Tiles
+
+group Minimize (клик "Minimize" ИЛИ закрытие окна)
+  alt клик по minimizeButton()
+    User -> CallWindow : click
+    CallWindow -> CallWindow : emit minimizeRequested()
+  else закрытие окна (крестик/Alt+F4)
+    User -> CallWindow : closeEvent(event)
+    CallWindow -> CallWindow : event->ignore()\n(окно НЕ закрывается)
+    CallWindow -> CallWindow : emit minimizeRequested()
+  end
+  CallWindow -> MainWindow : minimizeRequested()
+  MainWindow -> CallWindow : detachTilesTo(overlay.canvas())
+  CallWindow -> CallWindow : tileHost_ = newParent\ncurrentTileSize_ = kMiniVideoTileSize
+  CallWindow -> Tiles : relocateAllTiles()\n(placeTile() каждой: setParent(), resize(), move())
+  Tiles -> Tiles : setParent(overlay.canvas())\n(та же плитка, тот же живой\nQVideoSink/кадры — не пересоздаётся)
+  MainWindow -> CallWindow : hide()
+  MainWindow -> Overlay : show(); raise()
+end
+
+note over Tiles
+  Видимость локальных плиток (камера/демонстрация
+  экрана) не трогается — только что выключенная
+  остаётся скрытой и в оверлее (см.
+  DetachTilesToPreservesDisabledLocalTileVisibility).
+  Удалённые плитки всегда видимы, пока существуют.
+end note
+
+... звонок продолжается, свёрнутым ...
+
+... новый удалённый видеопоток появился впервые ...
+CallWindow -> CallWindow : showRemoteVideoFrame(peerLogin, frame, isScreenShare)
+CallWindow -> Tiles : new DraggableVideoTile(label, tileHost_)\n(tileHost_ уже == overlay.canvas() — новая\nплитка сразу попадает в оверлей, не в скрытый videoStrip_)
+
+group Restore (клик "Expand" в оверлее)
+  User -> Overlay : click restoreButton()
+  Overlay -> Overlay : emit restoreRequested()
+  Overlay -> MainWindow : restoreRequested()
+  MainWindow -> CallWindow : reattachTiles()
+  CallWindow -> CallWindow : tileHost_ = videoStrip_\ncurrentTileSize_ = kVideoTileSize
+  CallWindow -> Tiles : relocateAllTiles()
+  Tiles -> Tiles : setParent(videoStrip_)
+  MainWindow -> Overlay : hide()
+  MainWindow -> CallWindow : show(); raise(); activateWindow()
+end
+
+@enduml

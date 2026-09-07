@@ -764,6 +764,24 @@ fan-out кадров камеры, что уже используется для
 покрывает плитку, поэтому реальные события мыши получал бы только он,
 а не родитель.
 
+Сворачивание звонка в плавающие мини-панели (issue #215) — кнопка
+«Minimize» в `CallWindow` (как и закрытие самого окна: `closeEvent()`
+теперь перенаправляет туда же, а не просто прячет окно без следа
+активного видео) прячет `CallWindow`, но не завершает звонок. Вместо неё
+`MainWindow` показывает лёгкий `FloatingCallTilesOverlay`
+(`src/ui/FloatingCallTilesOverlay`) — тот же canvas без layout'а, что и
+`videoStrip_`, только не хранящий собственных плиток. `CallWindow::
+detachTilesTo(canvas())` переносит все существующие `DraggableVideoTile`
+(`setParent()`, а не пересоздание — тот же живой `QVideoSink`/кадры) в
+оверлей компактным размером; `reattachTiles()` — обратное действие по
+клику «Expand». `tileHost_`/`currentTileSize_` внутри `CallWindow`
+запоминают, куда сейчас класть плитки и какого они размера, поэтому
+новый удалённый видеопоток, впервые появившийся уже после сворачивания,
+тоже сразу попадает в оверлей, а не молча создаётся в скрытом
+`videoStrip_`. Видимость локальных плиток при переносе не форсируется —
+участник без активного видео (только звук) не «появляется» только
+оттого, что звонок свернули.
+
 Приём удалённого видео потребовал нового бэкенд-пути, которого не было
 даже после #72/#74: `CallManager::PeerObserver` не переопределял
 `OnTrack()`, так что входящие видео-треки участников нигде не
@@ -919,6 +937,9 @@ docs/diagrams/*.puml`).
 - [call-video-receive-sequence.puml](docs/diagrams/call-video-receive-sequence.puml) —
   приём видео от участника звонка (issue #91)
   ([call-video-receive-sequence.png](docs/diagrams/call-video-receive-sequence.png))
+- [call-minimize-sequence.puml](docs/diagrams/call-minimize-sequence.puml) —
+  сворачивание/разворачивание звонка в плавающие мини-панели (issue #215)
+  ([call-minimize-sequence.png](docs/diagrams/call-minimize-sequence.png))
 
 ## Правила разработки
 

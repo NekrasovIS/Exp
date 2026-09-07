@@ -237,6 +237,31 @@ TEST(MainWindowUiTest, CallControlsExistAndCallWindowStartsHidden) {
     EXPECT_TRUE(muteToggleButton->window()->isHidden());
 }
 
+TEST(MainWindowUiTest, MinimizeButtonSwapsCallWindowForFloatingOverlayAndBack) {
+    // issue #215: "Minimize" на CallWindow прячет само окно и показывает
+    // вместо него FloatingCallTilesOverlay, не завершая звонок; "Expand" в
+    // оверлее — обратное действие. ->window() у обеих кнопок — сама
+    // CallWindow/FloatingCallTilesOverlay (обе — Qt::Window), см. паттерн
+    // выше в CallControlsExistAndCallWindowStartsHidden.
+    MainWindow window;
+    auto* minimizeButton = window.findChild<QPushButton*>("minimizeCallButton");
+    auto* restoreButton = window.findChild<QPushButton*>("restoreCallWindowButton");
+    ASSERT_NE(minimizeButton, nullptr);
+    ASSERT_NE(restoreButton, nullptr);
+    QWidget* callWindow = minimizeButton->window();
+    QWidget* overlay = restoreButton->window();
+    ASSERT_TRUE(callWindow->isHidden());
+    ASSERT_TRUE(overlay->isHidden());
+
+    minimizeButton->click();
+    EXPECT_TRUE(callWindow->isHidden());
+    EXPECT_FALSE(overlay->isHidden());
+
+    restoreButton->click();
+    EXPECT_FALSE(callWindow->isHidden());
+    EXPECT_TRUE(overlay->isHidden());
+}
+
 TEST(MainWindowUiTest, MemberListToggleButtonShowsAndHidesMemberListPanel) {
     // #184: панель участников видна по умолчанию, но её можно
     // свернуть/развернуть иконкой в шапке ChatView — сама MainWindow
