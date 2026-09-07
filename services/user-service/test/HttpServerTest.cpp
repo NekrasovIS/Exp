@@ -322,6 +322,20 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     EXPECT_EQ(profile["display_name"].get<std::string>(), "Alice B.");
     EXPECT_EQ(profile["avatar_url"].get<std::string>(), "https://example.test/alice.png");
     EXPECT_EQ(profile["public_key"].get<std::string>(), "base64-x25519-public-key");
+
+    // issue #225 (pentest): попытка самозванства через поле "login" в
+    // теле — HttpServer::handleUpdateOwnProfile() никогда не читает его
+    // из body, пишет только в логин из проверенного токена. Переиспользует
+    // тот же аккаунт, не регистрирует новый.
+    const httplib::Result impersonationResult =
+        client.Patch("/users/me", authHeader,
+                     nlohmann::json{{"login", "someone-else"}, {"display_name", "Still Alice"}}.dump(),
+                     "application/json");
+    ASSERT_TRUE(impersonationResult);
+    ASSERT_EQ(impersonationResult->status, 200);
+    profile = nlohmann::json::parse(impersonationResult->body);
+    EXPECT_EQ(profile["login"].get<std::string>(), login);
+    EXPECT_EQ(profile["display_name"].get<std::string>(), "Still Alice");
 }
 
 TEST(HttpServerTest, ResolveOtpIdentifierRouteRejectsMissingFieldWith400) {
@@ -507,10 +521,28 @@ TEST(HttpServerTest, SendFriendRequestRouteValidationAndAcceptRoundTrip) {
     }));
     const std::int64_t requestId = requests[0]["id"].get<std::int64_t>();
 
+    // issue #225 (pentest): принять/отклонить чужую заявку не от
+    // адресата — тот же requestId, но токен requester (отправителя, не
+    // получателя) вместо recipient. Переиспользует уже
+    // зарегистрированные аккаунты этого теста, а не заводит новые (см.
+    // комментарий выше про общий rate limit auth-service на файл).
+    const httplib::Result acceptByNonRecipientResult = client.Post(
+        "/friends/requests/" + std::to_string(requestId) + "/accept", requesterAuth, "", "application/json");
+    ASSERT_TRUE(acceptByNonRecipientResult);
+    EXPECT_EQ(acceptByNonRecipientResult->status, 404);
+
     const httplib::Result acceptResult = client.Post("/friends/requests/" + std::to_string(requestId) + "/accept",
                                                        recipientAuth, "", "application/json");
     ASSERT_TRUE(acceptResult);
     EXPECT_EQ(acceptResult->status, 200);
+
+    // issue #225 (pentest): повторное использование уже обработанного
+    // id — заявка больше не 'pending', WHERE-условие в
+    // respondToFriendRequest() уже не находит строку.
+    const httplib::Result acceptAgainResult = client.Post(
+        "/friends/requests/" + std::to_string(requestId) + "/accept", recipientAuth, "", "application/json");
+    ASSERT_TRUE(acceptAgainResult);
+    EXPECT_EQ(acceptAgainResult->status, 404);
 
     const nlohmann::json requesterFriends = nlohmann::json::parse(client.Get("/friends", requesterAuth)->body);
     const nlohmann::json recipientFriends = nlohmann::json::parse(client.Get("/friends", recipientAuth)->body);
