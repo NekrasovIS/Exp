@@ -269,7 +269,14 @@ cmake --build services/user-service/build --parallel
 в теле запроса, если есть, игнорируется; частичное тело (только
 `display_name`, только `avatar_url`, только `public_key`, только
 `email` или только `telegram_chat_id`) не затирает несопровождённые
-поля. Ещё один эндпоинт — `POST /users/resolve-otp-identifier` (issue
+поля. `GET /users/{login}/profile` отдаёт `email`/`telegram_chat_id`
+только когда `{login}` — сам вызывающий (issue #225/#243, pentest-
+находка: раньше отдавал их для любого запрошенного логина) — просмотр
+чужого профиля получает урезанную версию без этих двух полей;
+`login`/`display_name`/`avatar_url`/`public_key` видны всегда, они и
+задуманы публичными (`public_key`, например, нужен другим клиентам для
+E2E-шифрования, issue #136/#138/#217). Ещё один эндпоинт —
+`POST /users/resolve-otp-identifier` (issue
 #156/#174, без авторизации, вызывается самим auth-service) — принимает
 `{"identifier"}` (login, email или Telegram chat_id) и отвечает
 `{"found", "login", "email", "telegram_chat_id"}`, используется для
