@@ -28,7 +28,10 @@ interface RawResponse<T> {
   body: T | undefined;
 }
 
-async function readJsonBody<T>(response: Response): Promise<T | undefined> {
+/** Exported for the rare caller that needs the raw `Response` itself
+ * (e.g. chat-service's downloadAttachment, whose success body is raw
+ * bytes, not JSON — only its *error* body needs parsing). */
+export async function readJsonBody<T>(response: Response): Promise<T | undefined> {
   try {
     return (await response.json()) as T;
   } catch {

@@ -1,5 +1,4 @@
-// Entry point for @devicehub/core (issue #219). Client modules for
-// chat-service land here in #250.
+// Entry point for @devicehub/core (issue #219).
 
 export const CORE_PACKAGE_NAME = "@devicehub/core";
 
@@ -13,3 +12,14 @@ export type { AuthTokens, RegisterResult, VerifyTokenResult } from "./auth/types
 
 export { UserServiceClient } from "./user/UserServiceClient.js";
 export type { FriendRequestInfo, ProfileEdits, SendFriendRequestStatus, UserProfile } from "./user/types.js";
+
+export { ChatRestClient } from "./chat/ChatRestClient.js";
+export { ChatClient } from "./chat/ChatClient.js";
+export type { WebSocketFactory, WebSocketLike } from "./chat/ChatClient.js";
+export type {
+  ChatItem,
+  ChatMessageInfo,
+  DirectMessageInfo,
+  DirectMessageThreadInfo,
+  IncomingChatMessage,
+} from "./chat/types.js";
