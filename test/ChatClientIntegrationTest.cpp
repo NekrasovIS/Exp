@@ -585,6 +585,17 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
     }
     ASSERT_GT(channelId, 0);
 
+    {
+        // issue #231: call_join теперь проверяет членство в сообществе —
+        // A стал участником, создав его, но B должен вступить явно
+        // (см. тот же фикс в CallManagerIntegrationTest.cpp).
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityJoined, &loop, [&](qint64) { loop.quit(); });
+        chatRestClient.joinCommunity(tokenB, communityId);
+        loop.exec();
+    }
+
     ChatClient chatClientA(chatWsUrl);
     ChatClient chatClientB(chatWsUrl);
     {
