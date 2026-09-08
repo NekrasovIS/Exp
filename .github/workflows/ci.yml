@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [master]  # issue #260: see ci.yml on master/feature-258 for the full rationale — push+pull_request double-triggered every commit on a branch with an open PR
   pull_request:
 
 concurrency:
