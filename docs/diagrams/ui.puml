@@ -369,22 +369,30 @@ class CallWindow {
   +showRemoteVideoFrame(peerLogin: QString, frame: QImage, isScreenShare: bool)
   +removeRemoteVideo(peerLogin: QString, isScreenShare: bool)
   +resetForNewCall()
+  +detachTilesTo(newParent: QWidget*)
+  +reattachTiles()
   +muteToggleButton() : QPushButton*
   +videoToggleButton() : QPushButton*
   +screenShareToggleButton() : QPushButton*
+  +minimizeButton() : QPushButton*
   +leaveCallButton() : QPushButton*
   +callParticipantsLabel() : QLabel*
   +localVideoWidget() : QVideoWidget*
   +localScreenShareVideoWidget() : QVideoWidget*
+  #closeEvent(event: QCloseEvent*)
   -updateVideoStripVisibility()
-  -nextRemoteTileCascadePosition() : QPoint
+  -nextTileCascadePosition() : QPoint
+  -placeTile(tile: DraggableVideoTile*)
+  -relocateAllTiles()
   .. signals ..
   +muteToggleRequested()
   +videoToggleRequested()
   +screenShareToggleRequested()
   +leaveCallRequested()
+  +minimizeRequested()
 }
 CallWindow "1" *-- "0..*" DraggableVideoTile : owns, wraps each local/remote\nvideo widget (issue #185)
+CallWindow ..> FloatingCallTilesOverlay : detachTilesTo(canvas())\n(issue #215, ownership follows\nsetParent(), not duplicated)
 note right of CallWindow
   Issue #185: реальное отдельное top-level окно
   (setWindowFlag(Qt::Window, true) поверх
@@ -418,6 +426,19 @@ note right of CallWindow
   плитке (по диагонали, с переносом каждые 8 штук),
   а не финальную — пользователь может перетащить
   куда угодно сразу после появления.
+
+  Issue #215 (сворачивание): tileHost_/currentTileSize_
+  запоминают, куда сейчас класть плитки и какого они
+  размера — videoStrip_/kVideoTileSize в обычном
+  состоянии, canvas() FloatingCallTilesOverlay/
+  kMiniVideoTileSize, пока свёрнуто. detachTilesTo()/
+  reattachTiles() переносят (setParent(), не
+  пересоздают) обе локальные и все удалённые плитки
+  через общий relocateAllTiles()/placeTile(); новая
+  плитка, впервые созданная уже после сворачивания,
+  тоже попадает сразу в текущий tileHost_. closeEvent()
+  игнорирует закрытие окна и эмитит minimizeRequested()
+  вместо него — тот же путь, что и кнопка "Minimize".
 end note
 
 class DraggableVideoTile {
@@ -452,6 +473,27 @@ note right of DraggableVideoTile
   событий), move — от локальной (совпадает у
   content() и у плитки, поскольку content() всегда
   стоит в (0, 0) её координат).
+end note
+
+class FloatingCallTilesOverlay {
+  +canvas() : QWidget*
+  +restoreButton() : QPushButton*
+  .. signals ..
+  +restoreRequested()
+}
+note right of FloatingCallTilesOverlay
+  Issue #215: лёгкий контейнер, показываемый
+  MainWindow вместо CallWindow, пока звонок свёрнут
+  — сам не хранит и не создаёт никаких плиток, только
+  canvas() без layout'а (тот же паттерн, что и
+  videoStrip_ у CallWindow), куда CallWindow
+  переносит (detachTilesTo()) уже существующие
+  DraggableVideoTile. Отдельное top-level окно
+  (setWindowFlag(Qt::Window, true)), как и сама
+  CallWindow. Клик restoreButton() → restoreRequested()
+  → MainWindow::onCallRestoreRequested() вызывает
+  CallWindow::reattachTiles() и переключает видимость
+  окон обратно.
 end note
 
 struct ChatMessage {
@@ -680,6 +722,7 @@ MainWindow *-- ChannelsPanel : owns (sidebar's channel column, next to the rail)
 MainWindow *-- FriendsPanel : owns (replaces ChannelsPanel\nin Friends mode, issue #187)
 MainWindow *-- ChatView : owns (main content area)
 MainWindow *-- CallWindow : owns (separate top-level\nwindow, issue #185)
+MainWindow *-- FloatingCallTilesOverlay : owns (separate top-level\nwindow, issue #215)
 MainWindow *-- MemberListPanel : owns (right of ChatView, issue #182)
 MainWindow *-- DirectMessageView : owns (replaces ChatView\nin Friends mode, issue #187)
 MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
@@ -740,6 +783,8 @@ ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >
 MainWindow ..> CallWindow : setMuted()/setVideoEnabled()/setScreenShareEnabled()\nsetCallParticipants() (issue #185) >
 MainWindow ..> CallWindow : showRemoteVideoFrame()/removeRemoteVideo()\nresetForNewCall() >
+MainWindow ..> CallWindow : detachTilesTo(canvas())/reattachTiles()\n(issue #215) >
+MainWindow ..> FloatingCallTilesOverlay : show()/hide() (issue #215) >
 MainWindow ..> ChatView : prependMessages()/setLoadOlderVisible() (issue #100) >
 MainWindow ..> ChatRestClient : listMessages() (issue #100) >
 MainWindow ..> ChatView : updateMessageBody()/removeMessage()\n(from ChatClient::messageEdited()/messageDeleted(), issue #107) >
@@ -752,6 +797,8 @@ SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested() >
 CallWindow ..> MainWindow : muteToggleRequested()/videoToggleRequested()\nscreenShareToggleRequested()/leaveCallRequested() (issue #185) >
+CallWindow ..> MainWindow : minimizeRequested() (issue #215) >
+FloatingCallTilesOverlay ..> MainWindow : restoreRequested() (issue #215) >
 ChatView ..> MainWindow : memberListToggleRequested() (issue #184) >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
@@ -837,6 +884,22 @@ note right of MainWindow
   (leaveCallIfActive() -> resetForNewCall())
   сбрасывает все плитки разом — видео не
   переживает звонок, которому принадлежит.
+
+  Сворачивание звонка (issue #215): клик
+  "Minimize" в CallWindow, или закрытие её
+  окна (closeEvent() перенаправляет туда же),
+  шлёт minimizeRequested() — MainWindow
+  прячет CallWindow и показывает вместо неё
+  FloatingCallTilesOverlay, предварительно
+  перенеся туда все текущие плитки через
+  CallWindow::detachTilesTo(canvas()) —
+  тот же живой QVideoSink/кадры, а не заново
+  созданные виджеты. Клик "Expand" в оверлее
+  (restoreRequested()) — обратное действие
+  (onCallRestoreRequested(): reattachTiles() +
+  переключение видимости окон). Звонок сам не
+  завершается ни тем, ни другим — только
+  leaveCallButton()/leaveCallRequested().
 
   DesktopNotifier (issue #92) shows a native
   QSystemTrayIcon notification for

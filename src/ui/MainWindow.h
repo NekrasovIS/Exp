@@ -32,6 +32,7 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class DirectMessageView;
+class FloatingCallTilesOverlay;
 class FooterBar;
 class FriendsPanel;
 class LoginWindow;
@@ -82,6 +83,14 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+    /// CallWindow::minimizeRequested() (клик "Minimize" либо закрытие
+    /// самого окна, issue #215) — переносит текущие видео-плитки в
+    /// floatingCallTilesOverlay_ и показывает его вместо CallWindow.
+    void onCallMinimizeRequested();
+    /// FloatingCallTilesOverlay::restoreRequested() (issue #215) —
+    /// обратное действие: возвращает плитки в CallWindow и показывает
+    /// его снова вместо оверлея.
+    void onCallRestoreRequested();
 
     /// Выходит из текущего звонка, если он вообще идёт — общая часть
     /// onCallToggleClicked()/openChannel()/closeChatView() (звонок
@@ -284,6 +293,10 @@ private:
     FriendsPanel* friendsPanel_ = nullptr;
     ChatView* chatView_ = nullptr;
     CallWindow* callWindow_ = nullptr;
+    /// Показывается вместо callWindow_, пока звонок свёрнут (issue
+    /// #215) — см. doc-комментарий CallWindow о detachTilesTo()/
+    /// reattachTiles().
+    FloatingCallTilesOverlay* floatingCallTilesOverlay_ = nullptr;
     MemberListPanel* memberListPanel_ = nullptr;
     DirectMessageView* directMessageView_ = nullptr;
     QStackedWidget* contentStack_ = nullptr;

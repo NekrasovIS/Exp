@@ -676,6 +676,31 @@ push (внешний код зовёт `pushCapturedAudio()`, когда ест�
 Qt::QueuedConnection)`, прежде чем трогать состояние `CallManager` или
 звать `ChatClient`.
 
+Mesh-топология (полносвязный граф `PeerConnection`, N·(N-1)/2 соединений)
+не масштабируется дальше 4-6 участников, поэтому она заменяется на SFU
+(issue #123, зонтичная задача) поэтапно: #230 (эта секция — сама SFU-
+инфраструктура), #231 (chat-service управляет комнатами Janus), #232
+(`CallManager` переключается на Janus вместо mesh), #233 (mesh убирается
+совсем). Из вариантов постройки своего SFU с нуля / mediasoup / LiveKit /
+Janus Gateway выбран **Janus Gateway** (плагин `videoroom`) — написан на C
+(тот же язык, что и остальной бэкенд), сигналинг — тот же JSON поверх
+WebSocket/HTTP, что уже используется в проекте, и не требует написания
+собственного SFU-ядра с нуля. Разворачивается сервисом `janus` в
+`docker-compose.yml` (образ `canyan/janus-gateway` — единственный
+поддерживаемый на Docker Hub образ этого движка с готовым плагином
+videoroom; у него нет entrypoint-шаблонизации конфига через переменные
+окружения, поэтому вся конфигурация — через смонтированные `.jcfg`-файлы
+в `services/janus/config/`, с изменёнными относительно дефолтных
+`media.rtp_port_range` (совпадает с проброшенным диапазоном UDP-портов
+10000-10200) и `nat.stun_server` (публичный STUN Google — без него ICE не
+устанавливается через NAT Docker Desktop). В `janus.plugin.videoroom.jcfg`
+задана одна статическая тестовая комната (`devicehub-test`) для ручной
+проверки, что SFU реально пересылает медиа между участниками —
+воспроизводимый скрипт этой проверки лежит в `services/janus/verify/`
+(см. его README) и использует `werift` (WebRTC-стек на чистом
+TypeScript/JS без нативных биндингов) вместо браузера, чтобы устанавливать
+настоящие ICE/DTLS-соединения с Janus без ручного шага в двух вкладках.
+
 Реальный микрофон/динамики (issue #70) — `joinCall()` подключает
 `AudioInputDevice::pcmDataAvailable()` к `pushCapturedAudio()` и
 playout-sink `CallAudioDeviceModule` — к `AudioOutputDevice::writeAudio()`
@@ -808,6 +833,24 @@ fan-out кадров камеры, что уже используется для
 `mousePress/Move/ReleaseEvent()` самой плитки: `content()` целиком
 покрывает плитку, поэтому реальные события мыши получал бы только он,
 а не родитель.
+
+Сворачивание звонка в плавающие мини-панели (issue #215) — кнопка
+«Minimize» в `CallWindow` (как и закрытие самого окна: `closeEvent()`
+теперь перенаправляет туда же, а не просто прячет окно без следа
+активного видео) прячет `CallWindow`, но не завершает звонок. Вместо неё
+`MainWindow` показывает лёгкий `FloatingCallTilesOverlay`
+(`src/ui/FloatingCallTilesOverlay`) — тот же canvas без layout'а, что и
+`videoStrip_`, только не хранящий собственных плиток. `CallWindow::
+detachTilesTo(canvas())` переносит все существующие `DraggableVideoTile`
+(`setParent()`, а не пересоздание — тот же живой `QVideoSink`/кадры) в
+оверлей компактным размером; `reattachTiles()` — обратное действие по
+клику «Expand». `tileHost_`/`currentTileSize_` внутри `CallWindow`
+запоминают, куда сейчас класть плитки и какого они размера, поэтому
+новый удалённый видеопоток, впервые появившийся уже после сворачивания,
+тоже сразу попадает в оверлей, а не молча создаётся в скрытом
+`videoStrip_`. Видимость локальных плиток при переносе не форсируется —
+участник без активного видео (только звук) не «появляется» только
+оттого, что звонок свернули.
 
 Приём удалённого видео потребовал нового бэкенд-пути, которого не было
 даже после #72/#74: `CallManager::PeerObserver` не переопределял
@@ -1000,6 +1043,9 @@ docs/diagrams/*.puml`).
 - [call-video-receive-sequence.puml](docs/diagrams/call-video-receive-sequence.puml) —
   приём видео от участника звонка (issue #91)
   ([call-video-receive-sequence.png](docs/diagrams/call-video-receive-sequence.png))
+- [call-minimize-sequence.puml](docs/diagrams/call-minimize-sequence.puml) —
+  сворачивание/разворачивание звонка в плавающие мини-панели (issue #215)
+  ([call-minimize-sequence.png](docs/diagrams/call-minimize-sequence.png))
 
 ## Правила разработки
 
