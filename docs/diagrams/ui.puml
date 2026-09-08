@@ -19,6 +19,8 @@ class MainWindow {
   -finishOpeningChannel(id: int64)
   -closeChatView()
   -wrapPendingEncryptedChannelKeyForMember(login: QString, publicKeyBase64: QString)
+  -grantChannelKeyAccess(login: QString)
+  -finishGrantingChannelKeyAccess(login: QString, publicKeyBase64: QString)
   -decryptForDisplay(ciphertext: QString) : QString
   -showToast(text: QString, variant: ToastVariant)
   -onAccountSettingsClicked()
@@ -48,6 +50,26 @@ note right of MainWindow
   REST (listDirectMessages) грузит историю
   один раз при открытии диалога, дальше —
   только WS messageReceived().
+
+  Довыдача ключа канала новому участнику (issue #217):
+  grantChannelKeyAccess(login) по
+  MemberListPanel::grantChannelKeyAccessRequested() —
+  явная ошибка тостом, если у самого вошедшего
+  пользователя ещё нет ключа selectedChannelId_
+  (channelKeys_), иначе fetchProfile(login) и
+  pendingKeyGrant_ хранит (channelId, login) до ответа.
+  finishGrantingChannelKeyAccess() — вызывается из
+  того же обработчика profileReceived(), что и
+  wrapPendingEncryptedChannelKeyForMember() (issue
+  #138) — оборачивает channelKeys_[channelId] под
+  публичный ключ login и публикует через
+  ChatRestClient::setChannelKey(); явная ошибка
+  тостом, если у login ещё нет опубликованного ключа.
+  chat-service теперь разрешает setChannelKey() не
+  только владельцу/модератору, но и любому участнику,
+  у которого уже есть собственный ключ этого канала
+  (см. chat.puml) — отсюда и возможность выполнить это
+  действие рядовому участнику, а не только владельцу.
 end note
 
 class CommunitiesPanel {
@@ -209,8 +231,13 @@ end note
 
 class MemberListPanel {
   +setMembers(logins: QStringList)
+  +setCurrentUserLogin(login: QString)
+  +setChannelEncrypted(encrypted: bool)
   +titleLabel() : QLabel*
   +listWidget() : QListWidget*
+  -showContextMenu(pos: QPoint)
+  .. signals ..
+  +grantChannelKeyAccessRequested(login: QString)
 }
 note right of MemberListPanel
   Новый элемент раскладки (issue #182), которого
@@ -223,6 +250,19 @@ note right of MemberListPanel
   зашифрованных каналов (issue #138) — теперь
   ещё и для этой панели, независимо от того,
   идёт ли сейчас настройка шифрования.
+
+  Контекстное меню участника (issue #217) — тот же
+  паттерн customContextMenuRequested()/QMenu::exec(),
+  что уже использует CommunitiesPanel: "Grant channel
+  key access" показывается, только пока
+  setChannelEncrypted(true) (открытый в ChatView канал
+  зашифрован) и строка не совпадает с
+  setCurrentUserLogin() (себе самому доступ не
+  выдают). Сама панель не проверяет, есть ли у
+  вошедшего пользователя собственный развёрнутый ключ
+  этого канала — это решает MainWindow при обработке
+  grantChannelKeyAccessRequested(), показывая явную
+  ошибку тостом, если ключа нет.
 end note
 MemberListPanel ..> IconFactory : communityAvatarIcon() (первая\nбуква логина) >
 
@@ -724,6 +764,8 @@ DirectMessageView ..> MainWindow : sendMessageRequested() >
 MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
 MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
 MainWindow ..> MemberListPanel : setMembers() (from\nChatRestClient::membersListed()) >
+MainWindow ..> MemberListPanel : setCurrentUserLogin()/setChannelEncrypted()\n(issue #217) >
+MemberListPanel ..> MainWindow : grantChannelKeyAccessRequested() (issue #217) >
 ProfileDialog ..> MainWindow : saveRequested() >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinByCodeRequested()\nregenerateInviteCodeRequested()/communitySelected() >

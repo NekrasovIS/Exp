@@ -137,6 +137,7 @@ MainWindow::MainWindow(QWidget* parent)
             profileDialog_->setProfile(profile);
         }
         wrapPendingEncryptedChannelKeyForMember(profile.login, profile.publicKey);
+        finishGrantingChannelKeyAccess(profile.login, profile.publicKey);
     });
     connect(&userProfileClient_, &UserProfileClient::profileUpdated, this, [this](const UserProfile& profile) {
         footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
@@ -187,6 +188,7 @@ MainWindow::MainWindow(QWidget* parent)
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
         chatView_->setCurrentUserLogin(currentUserLogin_);
+        memberListPanel_->setCurrentUserLogin(currentUserLogin_);
         if (valid) {
             // Скрываем окно входа и впервые показываем интерфейс — до
             // этого момента MainWindow ни разу не был показан (issue
@@ -344,6 +346,8 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(chatView_, &ChatView::memberListToggleRequested, this,
             [this]() { memberListPanel_->setVisible(memberListPanel_->isHidden()); });
+    connect(memberListPanel_, &MemberListPanel::grantChannelKeyAccessRequested, this,
+            &MainWindow::grantChannelKeyAccess);
     connect(searchDialog_, &SearchDialog::searchRequested, this, [this](const QString& query) {
         if (selectedChannelId_ < 0 || query.trimmed().isEmpty()) {
             return;
@@ -687,7 +691,7 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatRestClient_, &ChatRestClient::myChannelKeyNotFound, this, [this](qint64 channelId) {
         if (channelId == selectedChannelId_) {
-            showToast(tr("You don't have access to this encrypted channel yet — ask the owner to grant it"),
+            showToast(tr("You don't have access to this encrypted channel yet — ask a member with access to grant it"),
                        ToastBanner::Variant::kInfo);
             finishOpeningChannel(channelId);
         }
@@ -1197,6 +1201,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     const auto it = std::find_if(channels_.cbegin(), channels_.cend(), [id](const ChatItem& item) { return item.id == id; });
     currentChannelEncrypted_ = it != channels_.cend() && it->isEncrypted;
     chatView_->setEncrypted(currentChannelEncrypted_);
+    memberListPanel_->setChannelEncrypted(currentChannelEncrypted_);
 
     if (currentChannelEncrypted_ && !channelKeys_.contains(id)) {
         // Отложено до myChannelKeyFetched()/myChannelKeyNotFound() —
@@ -1221,6 +1226,7 @@ void MainWindow::closeChatView() {
     selectedChannelId_ = -1;
     oldestMessageId_ = -1;
     currentChannelEncrypted_ = false;
+    memberListPanel_->setChannelEncrypted(false);
     channelsPanel_->setOpenChannelId(-1);
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
@@ -1244,6 +1250,36 @@ void MainWindow::wrapPendingEncryptedChannelKeyForMember(const QString& login, c
     if (pendingEncryptedSetup_->pendingMemberLogins.isEmpty()) {
         pendingEncryptedSetup_.reset();
     }
+}
+
+void MainWindow::grantChannelKeyAccess(const QString& login) {
+    if (!currentChannelEncrypted_ || !channelKeys_.contains(selectedChannelId_)) {
+        // Нечем делиться — у самого вошедшего пользователя ключ этого
+        // канала ещё не развёрнут (issue #217 требует явную ошибку,
+        // а не молчаливый no-op).
+        showToast(tr("You don't have this channel's key yourself yet"), ToastBanner::Variant::kError);
+        return;
+    }
+    pendingKeyGrant_ = PendingKeyGrant{.channelId = selectedChannelId_, .targetLogin = login};
+    userProfileClient_.fetchProfile(lastToken_, login);
+}
+
+void MainWindow::finishGrantingChannelKeyAccess(const QString& login, const QString& publicKeyBase64) {
+    if (!pendingKeyGrant_.has_value() || pendingKeyGrant_->targetLogin != login) {
+        return;  // Не связано с текущим запросом "поделиться ключом".
+    }
+    const PendingKeyGrant grant = *pendingKeyGrant_;
+    pendingKeyGrant_.reset();
+
+    if (publicKeyBase64.isEmpty()) {
+        showToast(tr("'%1' hasn't set up encryption yet and can't be granted access").arg(login),
+                   ToastBanner::Variant::kError);
+        return;
+    }
+    const QString wrappedKey = channel_crypto::wrapKeyForRecipient(
+        channelKeys_[grant.channelId], QByteArray::fromBase64(publicKeyBase64.toUtf8()));
+    chatRestClient_.setChannelKey(lastToken_, grant.channelId, login, wrappedKey);
+    showToast(tr("Granted '%1' access to this channel").arg(login), ToastBanner::Variant::kSuccess);
 }
 
 QString MainWindow::decryptForDisplay(const QString& ciphertext) const {

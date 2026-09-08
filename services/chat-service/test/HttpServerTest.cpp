@@ -1270,6 +1270,76 @@ TEST(HttpServerTest, SetChannelKeyRejectsNonOwnerNonModeratorWith403) {
     EXPECT_EQ(result->status, 403);
 }
 
+TEST(HttpServerTest, SetChannelKeyAllowsMemberWhoAlreadyHasTheKeyToGrantAnotherMember) {
+    // issue #217: обычный участник (не владелец, не модератор), у
+    // которого уже есть собственная обёрнутая копия ключа канала, может
+    // сам довыдать доступ другому участнику — раунд-трип через реальный
+    // HTTP-стек, а не только через ChatRepository/ChatService напрямую
+    // (см. ChatServiceIntegrationTest для того же сценария на уровне
+    // ниже).
+    auto fixtureOpt = TestFixture::create("http-server-grant-key-peer");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    const std::string suffix = uniqueSuffix();
+    const std::string memberWithKeyLogin = "http-server-grant-with-key-" + suffix;
+    const std::string newMemberLogin = "http-server-grant-new-member-" + suffix;
+    const std::optional<std::string> memberWithKeyToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, memberWithKeyLogin);
+    const std::optional<std::string> newMemberToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, newMemberLogin);
+    ASSERT_TRUE(memberWithKeyToken.has_value());
+    ASSERT_TRUE(newMemberToken.has_value());
+
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-grant-key-" + suffix, fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "secret", fixture.ownerLogin, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers ownerHeaders{{"Authorization", bearer(fixture.ownerToken)}};
+    httplib::Headers memberWithKeyHeaders{{"Authorization", bearer(*memberWithKeyToken)}};
+    httplib::Headers newMemberHeaders{{"Authorization", bearer(*newMemberToken)}};
+
+    ASSERT_TRUE(client.Post("/communities/" + std::to_string(community.id) + "/join", memberWithKeyHeaders, "",
+                             "application/json"));
+    ASSERT_TRUE(
+        client.Post("/communities/" + std::to_string(community.id) + "/join", newMemberHeaders, "", "application/json"));
+
+    // Владелец выдаёт ключ memberWithKeyLogin обычным путём (issue #138).
+    const httplib::Result ownerGrantResult =
+        client.Put("/channels/" + std::to_string(*channelId) + "/keys/" + memberWithKeyLogin, ownerHeaders,
+                   nlohmann::json{{"wrapped_key", "wrapped-for-member-with-key"}}.dump(), "application/json");
+    ASSERT_TRUE(ownerGrantResult);
+    ASSERT_EQ(ownerGrantResult->status, 200);
+
+    // newMemberLogin ещё не имеет ключа — попытка выдать доступ самому
+    // себе отклоняется (403), не молчаливый no-op.
+    const httplib::Result selfGrantAttempt =
+        client.Put("/channels/" + std::to_string(*channelId) + "/keys/" + newMemberLogin, newMemberHeaders,
+                   nlohmann::json{{"wrapped_key", "forged"}}.dump(), "application/json");
+    ASSERT_TRUE(selfGrantAttempt);
+    EXPECT_EQ(selfGrantAttempt->status, 403);
+
+    // memberWithKeyLogin — не владелец и не модератор — теперь сам
+    // довыдаёт доступ newMemberLogin.
+    const httplib::Result peerGrantResult =
+        client.Put("/channels/" + std::to_string(*channelId) + "/keys/" + newMemberLogin, memberWithKeyHeaders,
+                   nlohmann::json{{"wrapped_key", "wrapped-by-peer-member"}}.dump(), "application/json");
+    ASSERT_TRUE(peerGrantResult);
+    EXPECT_EQ(peerGrantResult->status, 200);
+
+    const httplib::Result newMemberKeyResult =
+        client.Get("/channels/" + std::to_string(*channelId) + "/keys/me", newMemberHeaders);
+    ASSERT_TRUE(newMemberKeyResult);
+    ASSERT_EQ(newMemberKeyResult->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(newMemberKeyResult->body)["wrapped_key"].get<std::string>(),
+              "wrapped-by-peer-member");
+}
+
 TEST(HttpServerTest, SearchMessagesRejectsEncryptedChannelWith400) {
     auto fixtureOpt = TestFixture::create("http-server-search-encrypted");
     if (!fixtureOpt.has_value()) {

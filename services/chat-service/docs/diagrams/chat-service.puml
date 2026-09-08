@@ -352,18 +352,25 @@ note right of HttpServer
   copy of the channel's symmetric
   key per member, sealed with that
   member's own X25519 public key
-  (client-side crypto_box_seal) —
-  setChannelKey()'s authority is the
-  same owner/moderator check as
-  renameChannel()/deleteChannel(),
-  since only whoever already holds
-  the raw key could have produced a
-  valid wrapped copy in the first
-  place. A member who joins after
-  creation has no key until the
-  owner/moderator wraps one for
-  them — no automatic re-wrap on
-  join. Search and attachment
+  (client-side crypto_box_seal).
+  setChannelKey()'s authority
+  (issue #217): channel owner,
+  community owner, moderator — OR
+  any other member who already has
+  their own row in channel_keys for
+  this channel, since only whoever
+  already holds the raw key could
+  have produced a valid wrapped copy
+  for someone else in the first
+  place; this lets any member of an
+  encrypted channel grant access to
+  a newly-joined member themselves,
+  not only the owner/moderator. A
+  member who joins after creation
+  still has no key until someone who
+  already has one wraps it for them
+  — no automatic re-wrap on join.
+  Search and attachment
   upload (POST /channels/{id}/
   attachments) are both rejected
   (400) for an encrypted channel in

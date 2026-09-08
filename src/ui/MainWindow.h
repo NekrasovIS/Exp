@@ -146,6 +146,23 @@ private:
     /// ожидается (то есть это не связанный с этим profileReceived(),
     /// например, собственный профиль вошедшего пользователя).
     void wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64);
+    /// Обработчик MemberListPanel::grantChannelKeyAccessRequested()
+    /// (issue #217) — "поделиться ключом" открытого сейчас
+    /// зашифрованного канала с конкретным @p login. Явная ошибка
+    /// тостом, если у самого вошедшего пользователя ещё нет
+    /// собственного ключа этого канала (нечем делиться), иначе
+    /// запрашивает открытый ключ @p login через fetchProfile() —
+    /// заворачивание и публикация завершаются в
+    /// finishGrantingChannelKeyAccess() по ответу profileReceived().
+    void grantChannelKeyAccess(const QString& login);
+    /// Вторая половина grantChannelKeyAccess() — вызывается из
+    /// обработчика profileReceived() для любого профиля, а не только
+    /// связанного с этим запросом, поэтому сверяет @p login с
+    /// pendingKeyGrant_ и ничего не делает, если это не он. Явная ошибка
+    /// тостом (issue #217), если @p publicKeyBase64 пуст — целевой
+    /// участник ещё не опубликовал открытый ключ, значит поделиться с
+    /// ним нечем.
+    void finishGrantingChannelKeyAccess(const QString& login, const QString& publicKeyBase64);
     /// Расшифровывает @p ciphertext ключом channelKeys_[selectedChannelId_]
     /// для отображения — строка-заглушка (никогда не исходный
     /// шифротекст), если ключ ещё не закэширован или расшифровка не
@@ -252,6 +269,16 @@ private:
         QSet<QString> pendingMemberLogins;
     };
     std::optional<PendingEncryptedChannelSetup> pendingEncryptedSetup_;
+
+    /// Состояние однократного сценария "поделиться ключом канала с
+    /// конкретным участником" (issue #217) — валидно между вызовом
+    /// grantChannelKeyAccess() и завершением ответного
+    /// finishGrantingChannelKeyAccess() для того же логина.
+    struct PendingKeyGrant {
+        qint64 channelId = -1;
+        QString targetLogin;
+    };
+    std::optional<PendingKeyGrant> pendingKeyGrant_;
 
     /// Id открытого сейчас диалога личных сообщений (issue #187, Фаза
     /// 3), -1 — ни один не открыт (режим Friends ещё не активен либо
