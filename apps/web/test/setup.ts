@@ -15,3 +15,19 @@ import { afterEach } from "vitest";
 afterEach(() => {
   cleanup();
 });
+
+// jsdom's Blob/File don't implement the standard Promise-based
+// arrayBuffer() (issue #267's MessageComposer relies on it, since
+// every real browser has it) — polyfilled here via the older
+// FileReader API, which jsdom *does* implement correctly, so the
+// component itself can keep using the modern, simpler call.
+if (typeof Blob.prototype.arrayBuffer !== "function") {
+  Blob.prototype.arrayBuffer = function arrayBufferPolyfill(this: Blob): Promise<ArrayBuffer> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(this);
+    });
+  };
+}

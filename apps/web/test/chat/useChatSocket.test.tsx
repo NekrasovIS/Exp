@@ -4,31 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatSocket } from "../../src/chat/useChatSocket.js";
 import { SessionProvider } from "../../src/session/SessionContext.js";
+import { FakeWebSocket } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
-
-// jsdom doesn't implement WebSocket at all — useChatSocket's default
-// factory (`(url) => new WebSocket(url)`) needs *some* global to
-// construct, so this fake stands in for it. Only the surface ChatClient
-// actually touches (WebSocketLike) is implemented.
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  closed = false;
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onmessage: ((event: { data: unknown }) => void) | null = null;
-
-  constructor(public readonly url: string) {
-    FakeWebSocket.instances.push(this);
-  }
-
-  send(_data: string): void {}
-
-  close(): void {
-    this.closed = true;
-  }
-}
 
 beforeEach(() => {
   localStorage.clear();
