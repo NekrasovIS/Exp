@@ -1,0 +1,146 @@
+/*
+ * Design tokens (issue #281) — single source of truth for color/spacing/
+ * typography across the web client. Every other stylesheet in apps/web
+ * reads these custom properties instead of hardcoding literals, so a
+ * future palette/scale change happens here once, not per-component.
+ *
+ * Light theme only for now (issue #281's own scope) — dark mode is a
+ * natural follow-up once every screen has a real light theme to invert
+ * against, not before.
+ */
+
+:root {
+  /* Accent — indigo, distinct from the neutral surfaces below and from
+     the semantic status colors (never reused as "another accent"). */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-contrast: #ffffff;
+
+  /* Surfaces — a faint indigo-tinted neutral, not a pure/generated grey,
+     so it reads as chosen rather than a browser default left in place. */
+  --color-bg: #f5f6fb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: #e0e2ec;
+  --color-border-strong: #c7cadb;
+
+  /* Text */
+  --color-text: #1c1e29;
+  --color-text-secondary: #4b4f63;
+  --color-text-muted: #8a8ea3;
+  --color-text-on-accent: #ffffff;
+
+  /* Status */
+  --color-danger: #dc2626;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+
+  /* Spacing scale (px) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Typography */
+  --font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-size-sm: 0.8125rem;
+  --font-size-base: 0.9375rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.375rem;
+  --line-height-base: 1.5;
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --shadow-sm: 0 1px 2px rgb(28 30 41 / 0.06), 0 1px 1px rgb(28 30 41 / 0.04);
+  --shadow-md: 0 4px 12px rgb(28 30 41 / 0.08);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+}
+
+button,
+input {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* Baseline element resets shared by every screen — component-specific
+   look (hover/focus states, layout) stays in each component's own CSS
+   module, this only removes the browser's unstyled defaults so a plain
+   <button>/<input> anywhere doesn't clash with styled siblings. */
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-4);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button[type="submit"],
+button[data-variant="primary"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+
+button[type="submit"]:hover:not(:disabled),
+button[data-variant="primary"]:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+input {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-3);
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+[role="alert"] {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+}
