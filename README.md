@@ -877,12 +877,45 @@ GUI-поток через `QMetaObject::invokeMethod(..., Qt::QueuedConnection)`
 pnpm workspaces (`pnpm-workspace.yaml`):
 ```
 apps/
-  web/       заглушка будущего React-клиента (issue #220/#221)
+  web/       React-клиент (issue #220, зонтичная задача — #264-#269):
+             каркас/сессия/роутинг (#264), вход/регистрация/OTP (#265),
+             сообщества/каналы (#266), чат канала (#267), друзья/личные
+             диалоги (#268) готовы; шифрование каналов (#269) отложено
   mobile/    заглушка будущего React Native-клиента (issue #222/#223)
 packages/
-  core/      общий TypeScript-слой доступа к бэкенду (пока пустой каркас —
-             клиенты auth/user/chat-service появляются в issue #248/#249/#250)
+  core/      общий TypeScript-слой доступа к бэкенду — клиенты auth/user/
+             chat-service (issue #248/#249/#250)
 ```
+
+`apps/web` — Vite + React + react-router-dom. `SessionProvider`
+(`src/session/SessionContext.tsx`) оборачивает `@devicehub/core`'s
+`SessionManager`: держит токены в localStorage (сам `SessionManager` их
+не хранит — см. его doc-комментарий), восстанавливает сессию при
+загрузке страницы, планирует фоновое обновление access-токена.
+`ProtectedRoute` — редирект на `/login` без валидной сессии. Живая
+доставка сообщений — `useChatSocket()` (`src/chat/useChatSocket.ts`),
+переиспользуемый хук над `ChatClient` из `packages/core`, подключается
+при монтировании компонента с заданным `channelId`/`dmThreadId` и
+отключается при размонтировании/смене — экраны из #265-#269 используют
+его, а не заводят собственную WebSocket-логику. `currentLogin`
+(`SessionContext`) — логин вошедшего пользователя, разобран из тела
+токена на клиенте (`decodeTokenSubject.ts`) без обращения к
+`/auth/verify`; используется только для UI-решений (например, «моё
+сообщение или чужое»), не как проверка авторизации — каждый реальный
+REST/WebSocket-запрос всё равно посылает сырой токен, и сервер
+проверяет подпись сам.
+
+`HomePage` переключается между двумя режимами (кнопка «Friends»,
+как и в DeviceHub): обычный (сообщества → каналы → чат канала, #266/
+#267) и режим друзей (`FriendsPanel` — заявки/друзья/добавление,
+список диалогов, сам диалог — #268). Личные сообщения отправляются
+через тот же WebSocket, что и сообщения канала (`ChatClient.sendMessage()`
+— REST-метод `sendDirectMessage()` в `packages/core` существует для
+полноты API, но не используется ни здесь, ни в DeviceHub: то же самое
+делает `MainWindow.cpp`). Зашифрованные каналы (issue #136/#138) в
+веб-клиенте пока не расшифровываются (`ChatView` показывает заглушку
+и не открывает подписку/не грузит историю для такого канала вообще,
+issue #269 — отдельная задача).
 
 Требует Node.js ≥20 и pnpm (`corepack enable`, либо `npm install -g pnpm`
 — версия закреплена в `package.json`'s `packageManager`). Команды из
