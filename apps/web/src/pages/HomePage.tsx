@@ -1,53 +1,23 @@
-// Issue #266/#267 — composes the communities/channels navigation and
-// the chat content area for whichever channel is selected. The
-// friends/DM mode (#268) still isn't built.
+// Issue #266/#267/#268 — top-level mode toggle, mirroring DeviceHub's
+// "Friends" button that swaps the sidebar/main-area content between
+// communities/channels/chat and friends/DMs.
 
 import { useState } from "react";
 
-import { ChatView } from "../chat/ChatView.js";
-import { ChannelsSidebar } from "../channels/ChannelsSidebar.js";
-import { useChannels } from "../channels/useChannels.js";
-import { CommunitiesSidebar } from "../communities/CommunitiesSidebar.js";
+import { CommunitiesMode } from "./CommunitiesMode.js";
+import { FriendsMode } from "./FriendsMode.js";
+
+type Mode = "communities" | "friends";
 
 export function HomePage() {
-  const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
-  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
-
-  // ChannelsSidebar loads its own copy of this same list to render
-  // itself — this second call (deduped by nothing, deliberately kept
-  // simple) is only to read the selected channel's isEncrypted flag,
-  // which ChatView needs and ChannelsSidebar's onSelectChannel(id)
-  // contract (already shipped in #266) doesn't carry.
-  const { channels } = useChannels(selectedCommunityId);
-  const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? null;
-
-  function handleSelectCommunity(communityId: number): void {
-    setSelectedCommunityId(communityId);
-    setSelectedChannelId(null);
-  }
+  const [mode, setMode] = useState<Mode>("communities");
 
   return (
     <div>
-      <CommunitiesSidebar
-        selectedCommunityId={selectedCommunityId}
-        onSelectCommunity={handleSelectCommunity}
-      />
-      <ChannelsSidebar
-        communityId={selectedCommunityId}
-        selectedChannelId={selectedChannelId}
-        onSelectChannel={setSelectedChannelId}
-      />
-      <main>
-        {selectedChannel === null || selectedCommunityId === null ? (
-          <p>Select a channel to start chatting.</p>
-        ) : (
-          <ChatView
-            channelId={selectedChannel.id}
-            communityId={selectedCommunityId}
-            isEncrypted={selectedChannel.isEncrypted}
-          />
-        )}
-      </main>
+      <button type="button" onClick={() => setMode(mode === "communities" ? "friends" : "communities")}>
+        {mode === "communities" ? "Friends" : "Back to communities"}
+      </button>
+      {mode === "communities" ? <CommunitiesMode /> : <FriendsMode />}
     </div>
   );
 }
