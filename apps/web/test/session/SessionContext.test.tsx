@@ -16,8 +16,20 @@ function futureTokens(overrides: Partial<{ token: string; refreshToken: string }
 }
 
 function Probe() {
-  const { isAuthenticated, getAccessToken } = useSession();
-  return <p data-testid="probe">{isAuthenticated ? `signed-in:${getAccessToken()}` : "signed-out"}</p>;
+  const { isAuthenticated, getAccessToken, currentLogin } = useSession();
+  return (
+    <p data-testid="probe">
+      {isAuthenticated ? `signed-in:${getAccessToken()}:${currentLogin ?? "?"}` : "signed-out"}
+    </p>
+  );
+}
+
+function tokenFor(login: string): string {
+  const payload = btoa(JSON.stringify({ sub: login, exp: 9999999999 }))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+  return `${payload}.sig`;
 }
 
 beforeEach(() => {
@@ -42,7 +54,18 @@ describe("SessionProvider", () => {
         <Probe />
       </SessionProvider>,
     );
-    expect(screen.getByTestId("probe")).toHaveTextContent("signed-in:stored-token");
+    expect(screen.getByTestId("probe")).toHaveTextContent("signed-in:stored-token:?");
+  });
+
+  it("exposes currentLogin decoded from the token payload", () => {
+    localStorage.setItem(kStorageKey, JSON.stringify(futureTokens({ token: tokenFor("alice") })));
+
+    render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    expect(screen.getByTestId("probe")).toHaveTextContent(`signed-in:${tokenFor("alice")}:alice`);
   });
 
   it("treats a corrupted stored value as no session, without throwing", () => {

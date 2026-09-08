@@ -8,6 +8,7 @@ import { AuthClient, SessionManager } from "@devicehub/core";
 import type { AuthTokens } from "@devicehub/core";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
+import { decodeTokenSubject } from "../auth/decodeTokenSubject.js";
 import { authServiceUrl } from "../config.js";
 
 const kStorageKey = "devicehub.web.session";
@@ -41,6 +42,10 @@ interface SessionContextValue {
    * onRefreshError below), only that the app has something to try. */
   isAuthenticated: boolean;
   getAccessToken: () => string | null;
+  /** The signed-in user's own login, decoded from the token payload
+   * (see decodeTokenSubject.ts) — display/UI-logic use only (e.g. "is
+   * this my message"), never an auth decision. null when signed out. */
+  currentLogin: string | null;
   /** Adopts a fresh token pair after login/register/OTP verification. */
   signIn: (tokens: AuthTokens) => void;
   signOut: () => void;
@@ -79,15 +84,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Constructed once — sessionManager is stable for the provider's lifetime.
   }, []);
 
-  const value = useMemo<SessionContextValue>(
-    () => ({
-      isAuthenticated: sessionManager.getAccessToken() !== null,
+  const value = useMemo<SessionContextValue>(() => {
+    const accessToken = sessionManager.getAccessToken();
+    return {
+      isAuthenticated: accessToken !== null,
       getAccessToken: () => sessionManager.getAccessToken(),
+      currentLogin: accessToken === null ? null : decodeTokenSubject(accessToken),
       signIn: (tokens) => sessionManager.setTokens(tokens),
       signOut: () => sessionManager.clear(),
-    }),
-    [sessionManager, tokenVersion],
-  );
+    };
+  }, [sessionManager, tokenVersion]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

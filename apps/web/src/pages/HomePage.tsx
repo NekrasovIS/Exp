@@ -1,16 +1,25 @@
-// Issue #266 — composes the communities/channels navigation. The chat
-// content area for the selected channel (#267) and the friends/DM mode
-// (#268) aren't built yet, so this still ends in a placeholder for
-// those, just one that now reflects a real selected channel id.
+// Issue #266/#267 — composes the communities/channels navigation and
+// the chat content area for whichever channel is selected. The
+// friends/DM mode (#268) still isn't built.
 
 import { useState } from "react";
 
+import { ChatView } from "../chat/ChatView.js";
 import { ChannelsSidebar } from "../channels/ChannelsSidebar.js";
+import { useChannels } from "../channels/useChannels.js";
 import { CommunitiesSidebar } from "../communities/CommunitiesSidebar.js";
 
 export function HomePage() {
   const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
+
+  // ChannelsSidebar loads its own copy of this same list to render
+  // itself — this second call (deduped by nothing, deliberately kept
+  // simple) is only to read the selected channel's isEncrypted flag,
+  // which ChatView needs and ChannelsSidebar's onSelectChannel(id)
+  // contract (already shipped in #266) doesn't carry.
+  const { channels } = useChannels(selectedCommunityId);
+  const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? null;
 
   function handleSelectCommunity(communityId: number): void {
     setSelectedCommunityId(communityId);
@@ -29,10 +38,14 @@ export function HomePage() {
         onSelectChannel={setSelectedChannelId}
       />
       <main>
-        {selectedChannelId === null ? (
+        {selectedChannel === null || selectedCommunityId === null ? (
           <p>Select a channel to start chatting.</p>
         ) : (
-          <p>Channel view for #{selectedChannelId} lands in issue #267.</p>
+          <ChatView
+            channelId={selectedChannel.id}
+            communityId={selectedCommunityId}
+            isEncrypted={selectedChannel.isEncrypted}
+          />
         )}
       </main>
     </div>
