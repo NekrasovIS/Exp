@@ -98,6 +98,26 @@ TEST(TokenServiceTest, RefreshTokenIsRejectedAsAnAccessToken) {
     EXPECT_FALSE(service.verifyToken(refreshToken.value).has_value());
 }
 
+TEST(TokenServiceTest, PayloadSplicedWithAnotherUsersSignatureIsRejected) {
+    // issue #224 (pentest): "склеенный" токен — payload одного
+    // пользователя + подпись от токена другого — не должен пройти
+    // проверку, даже несмотря на то, что оба подписаны одним и тем же
+    // секретом. HMAC покрывает конкретный payload целиком, так что
+    // подпись, снятая с payload'а B, не совпадёт с ожидаемой подписью
+    // payload'а A.
+    const TokenService service("test-secret");
+    const Token tokenAlice = service.issueToken("alice");
+    const Token tokenBob = service.issueToken("bob");
+
+    const auto aliceSeparator = tokenAlice.value.find('.');
+    const auto bobSeparator = tokenBob.value.find('.');
+    ASSERT_NE(aliceSeparator, std::string::npos);
+    ASSERT_NE(bobSeparator, std::string::npos);
+    const std::string splicedToken = tokenAlice.value.substr(0, aliceSeparator) + tokenBob.value.substr(bobSeparator);
+
+    EXPECT_FALSE(service.verifyToken(splicedToken).has_value());
+}
+
 TEST(TokenServiceTest, ExpiredRefreshTokenIsRejected) {
     const TokenService service("test-secret", std::chrono::seconds{3600}, std::chrono::seconds{0});
     const Token refreshToken = service.issueRefreshToken("alice");
