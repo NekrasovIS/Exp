@@ -73,6 +73,10 @@ struct AttachmentData {
     std::string filename;
     std::string contentType;
     std::string data;
+    /// Issue #256 (pentest) — нужен HttpServer'у, чтобы проверить
+    /// членство запрашивающего в сообществе-владельце этого канала
+    /// перед тем, как отдать содержимое вложения.
+    std::int64_t channelId = 0;
 };
 
 /// Поля, нужные createAttachment() помимо целевого channelId —
@@ -212,6 +216,14 @@ public:
     /// знать, для кого обернуть ключ зашифрованного канала в момент его
     /// создания (issue #138).
     [[nodiscard]] std::vector<std::string> listMembers(std::int64_t communityId);
+
+    /// Issue #256 (pentest): проверка членства, которой раньше не было ни
+    /// на одном per-community/per-channel маршруте — только валидность
+    /// токена. HttpServer вызывает это перед тем, как отдать/изменить
+    /// что-либо, скоупленное на конкретное сообщество, отвечая 404 (не
+    /// подтверждая существование ресурса) при провале — тот же принцип,
+    /// что уже реализован для личных диалогов через isThreadParticipant().
+    [[nodiscard]] bool isMember(std::int64_t communityId, const std::string& login);
 
     /// Разрешено собственному владельцу канала, владельцу родительского
     /// сообщества либо модератору родительского сообщества (issue #114)

@@ -51,6 +51,10 @@ std::vector<std::string> ChatService::listMembers(std::int64_t communityId) {
     return repository_.listMembers(communityId);
 }
 
+bool ChatService::isMember(std::int64_t communityId, const std::string& login) {
+    return repository_.isMember(communityId, login);
+}
+
 MutationResult ChatService::renameChannel(std::int64_t id, const std::string& newName,
                                            const std::string& requesterLogin) {
     return repository_.renameChannel(id, newName, requesterLogin);
