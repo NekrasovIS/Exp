@@ -28,11 +28,6 @@ jobs:
     # job'ом, но это уже лучше, чем job, который никогда не завершается.
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
-      # Нативный GitHub Actions cache backend vcpkg (x-gha) заливает в
-      # кэш каждый собранный порт сразу по готовности — упавший на
-      # середине прогон всё равно сохраняет то, что успел собрать.
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
     steps:
       - name: Checkout
@@ -40,12 +35,41 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Export GitHub Actions cache environment variables (vcpkg x-gha backend)
-        uses: actions/github-script@v7
+      # issue #246: build-and-test падал с exit code 143 (SIGTERM извне
+      # процесса — сигнатура OOM-killer'а или нехватки диска, не сбой
+      # самой сборки) прямо посреди компиляции qtdeclarative — самого
+      # тяжёлого модуля Qt6 по памяти/диску на translation unit, уже
+      # после того, как фикс кэша (issue #232 выше) устранил повторную
+      # пересборку qtbase с нуля. ubuntu-latest — 4 ядра/16 ГБ RAM,
+      # ~14 ГБ свободного диска из коробки; предустановленные .NET/
+      # Android SDK/GHC/Swift на образе runner'а не нужны этой сборке
+      # вообще, но исходно съедают заметную часть этого диска — сносим
+      # их перед тем, как vcpkg начнёт собирать Qt6/WebRTC из исходников.
+      - name: Free disk space (unused preinstalled toolchains not needed by this build)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # issue #232 CI fix: заменяет прежний VCPKG_BINARY_SOURCES=x-gha —
+      # тот бэкенд (нативный REST API кэша Actions, через
+      # ACTIONS_CACHE_URL/ACTIONS_RUNTIME_TOKEN) на практике никогда не
+      # восстанавливал кэш между прогонами (qtbase собирался с нуля
+      # заново, ~40 минут, при каждой попытке), что в паре с ограниченным
+      # временем жизни раннера на этом аккаунте (см. комментарий issue
+      # #169 про macOS выше) делало сборку Qt6/WebRTC из исходников
+      # обречённой почти на любом прогоне. Тот же простой файловый
+      # backend (vcpkg-архивы + actions/cache), что уже стабильно
+      # работает для services/sanitizers/coverage/fuzz ниже — никакого
+      # VCPKG_BINARY_SOURCES не нужно, это дефолтное расположение кэша
+      # vcpkg на Linux.
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-devicehub-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-devicehub-${{ runner.os }}-
 
       - name: Install build dependencies (autotools for vcpkg's libb2 port, X11/xkbcommon/OpenGL/PulseAudio dev headers for qtbase's Linux platform plugin)
         run: |
@@ -61,11 +85,35 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libpulse-dev libdrm-dev \
             libfontconfig1-dev libfreetype-dev nasm
 
+      # issue #246: VCPKG_MAX_CONCURRENCY ограничивает и число портов,
+      # собираемых параллельно, и параллелизм (-j) сборки внутри
+      # каждого порта — по умолчанию оба равны nproc (4 на этом
+      # раннере), так что qtdeclarative мог компилировать 4 тяжёлых
+      # translation unit сразу, упираясь в потолок RAM. 2 — компромисс:
+      # заметно меньше пиковая память, сборка дольше, но раньше она
+      # вообще не завершалась.
+      #
+      # issue #255: даже после этого сборка всё равно падала —
+      # "No space left on device" на финальной линковке ("ld: final
+      # link failed"), путь в ошибке указывал на
+      # vcpkg_installed/x64-linux/debug/lib/libicudata.a. Причина —
+      # CMakeLists.txt:20-21 использует CMAKE_BUILD_TYPE=Debug (нужен
+      # только один набор бинарников для прогона тестов в CI), но vcpkg
+      # в manifest-режиме по умолчанию собирает ОБА варианта — debug и
+      # release — каждого порта независимо от этого, что фактически
+      # удваивает занимаемое диском место для всего дерева Qt6/WebRTC.
+      # VCPKG_BUILD_TYPE=release заставляет vcpkg собирать только
+      # release — debug пропускается целиком, не просто не паковается.
+      # Безопасно линковать release-варианты статических библиотек в
+      # наш Debug-бинарник на Linux/GCC/Clang — в отличие от MSVC, здесь
+      # нет ABI-несовместимости debug/release CRT для статической линковки.
       - name: Configure
-        run: cmake -S . -B build
+        env:
+          VCPKG_MAX_CONCURRENCY: 2
+        run: cmake -S . -B build -DVCPKG_BUILD_TYPE=release
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 2
 
       - name: Test
         # Никакого реального дисплея на раннере нет — Qt-тесты всё равно
@@ -353,3 +401,38 @@ jobs:
             ./services/${{ matrix.service }}/build-fuzz/$target -max_total_time=30
             echo "::endgroup::"
           done
+
+  web-clients:
+    # TypeScript monorepo (issue #219, apps/web + apps/mobile +
+    # packages/core) — completely separate toolchain from the C++/Qt
+    # project above (no vcpkg, no Qt6/WebRTC build), so this job stays
+    # fast rather than sharing build-and-test's runtime.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm (via corepack, version pinned in package.json)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format

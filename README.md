@@ -863,6 +863,42 @@ GUI-поток через `QMetaObject::invokeMethod(..., Qt::QueuedConnection)`
   Hello для не-участника диалога, отказ на кадры, не поддерживаемые для
   диалогов (например `call_join`).
 
+## Веб/мобильные клиенты (монорепо, issue #219)
+
+Первый шаг к тонкому web-клиенту (issue #124/#220/#221) и мобильному
+клиенту (issue #125/#222/#223, см. зонтичную задачу #214) — общий слой
+доступа к бэкенду на TypeScript, который оба будущих клиента будут
+переиспользовать один в один, без дублирования протокола REST/WebSocket.
+Бэкенд (`auth-service`/`user-service`/`chat-service`) не меняется вообще
+— это чисто клиентский слой, полностью отдельный от C++/Qt-части
+репозитория (свой `package.json`/`node_modules`/`.gitignore`-записи, не
+пересекается со сборкой DeviceHub/сервисов).
+
+pnpm workspaces (`pnpm-workspace.yaml`):
+```
+apps/
+  web/       заглушка будущего React-клиента (issue #220/#221)
+  mobile/    заглушка будущего React Native-клиента (issue #222/#223)
+packages/
+  core/      общий TypeScript-слой доступа к бэкенду (пока пустой каркас —
+             клиенты auth/user/chat-service появляются в issue #248/#249/#250)
+```
+
+Требует Node.js ≥20 и pnpm (`corepack enable`, либо `npm install -g pnpm`
+— версия закреплена в `package.json`'s `packageManager`). Команды из
+корня репозитория:
+```bash
+pnpm install
+pnpm build   # tsc -p tsconfig.json в каждом пакете
+pnpm test    # vitest run в каждом пакете
+pnpm lint    # ESLint (flat config) по apps/*, packages/*
+pnpm format  # prettier --check по тем же путям
+```
+`eslint.config.mjs`/`.prettierignore` намеренно ограничены путями
+JS/TS-монорепо — репозиторий также содержит C++/Qt-проект и
+vendored-зависимости vcpkg в `vcpkg/`, которые не должны попадать под
+эти проверки.
+
 ## Дашборд CI (Grafana)
 
 История прогонов CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
