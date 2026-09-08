@@ -197,6 +197,76 @@ TEST(HttpServerTest, ListCommunitiesRejectsInvalidTokenWith401) {
     EXPECT_EQ(result->status, 401);
 }
 
+// Issue #229 (покрытие тестами) — в отличие от трёх тестов выше, не
+// пробует зарегистрироваться через auth-service заранее и не пропускает
+// себя, если он недоступен: HttpServer::authenticate() возвращает
+// std::nullopt без единого сетевого обращения, когда заголовок
+// Authorization вообще отсутствует, — тот же самый ранний выход, что
+// уже проверен для /communities выше, но теперь для каждого
+// зарегистрированного маршрута (registerRoutes()) по отдельности, а не
+// только для одного. Раньше HttpServer.cpp показывал буквально 0%
+// покрытия в CI-джобе coverage: она поднимает только Postgres, не
+// auth-service, так что все 49 тестов этого файла (кроме этих трёх)
+// пропускали себя целиком.
+TEST(HttpServerTest, EveryRouteRejectsMissingAuthorizationHeaderWith401) {
+    struct RouteCase {
+        std::string method;
+        std::string path;
+    };
+    const std::vector<RouteCase> routes{
+        {"POST", "/communities"},
+        {"GET", "/communities"},
+        {"GET", "/communities/mine"},
+        {"POST", "/communities/join-by-code"},
+        {"PATCH", "/communities/1"},
+        {"DELETE", "/communities/1"},
+        {"POST", "/communities/1/join"},
+        {"POST", "/communities/1/invite/regenerate"},
+        {"POST", "/communities/1/channels"},
+        {"GET", "/communities/1/channels"},
+        {"PATCH", "/channels/1"},
+        {"DELETE", "/channels/1"},
+        {"GET", "/channels/1/messages"},
+        {"POST", "/communities/1/moderators"},
+        {"DELETE", "/communities/1/moderators/someone"},
+        {"GET", "/communities/1/moderators"},
+        {"POST", "/channels/1/attachments"},
+        {"GET", "/attachments/1"},
+        {"GET", "/channels/1/messages/search"},
+        {"GET", "/communities/1/members"},
+        {"PUT", "/channels/1/keys/someone"},
+        {"GET", "/channels/1/keys/me"},
+        {"POST", "/dm/threads"},
+        {"GET", "/dm/threads"},
+        {"POST", "/dm/threads/1/messages"},
+        {"GET", "/dm/threads/1/messages"},
+    };
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient("127.0.0.1", 1);  // недостижим, не должен вызываться
+    const ScopedServer server(chatService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    for (const RouteCase& route : routes) {
+        httplib::Result result;
+        if (route.method == "GET") {
+            result = client.Get(route.path);
+        } else if (route.method == "POST") {
+            result = client.Post(route.path, "{}", "application/json");
+        } else if (route.method == "PATCH") {
+            result = client.Patch(route.path, "{}", "application/json");
+        } else if (route.method == "PUT") {
+            result = client.Put(route.path, "{}", "application/json");
+        } else {
+            result = client.Delete(route.path);
+        }
+
+        ASSERT_TRUE(result) << route.method << " " << route.path;
+        EXPECT_EQ(result->status, 401) << route.method << " " << route.path;
+    }
+}
+
 TEST(HttpServerTest, CreateCommunityRejectsMissingNameWith400) {
     auto fixtureOpt = TestFixture::create("http-server-create-community-400");
     if (!fixtureOpt.has_value()) {
