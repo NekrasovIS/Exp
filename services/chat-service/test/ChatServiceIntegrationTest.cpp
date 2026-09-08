@@ -122,6 +122,7 @@ TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     const std::string suffix = uniqueSuffix();
     const std::string owner = "integration-test-owner-" + suffix;
     const std::string intruder = "integration-test-intruder-" + suffix;
+    const std::string outsider = "integration-test-outsider-" + suffix;
 
     Community community{};
     try {
@@ -131,12 +132,23 @@ TEST(ChatServiceIntegrationTest, RenameAndDeleteAreRestrictedToTheOwner) {
     }
     const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
     ASSERT_TRUE(channelId.has_value());
+    // intruder — состоит в сообществе (issue #256: членство теперь
+    // проверяется отдельно от прав владельца), но не владелец.
+    ASSERT_TRUE(service.joinCommunity(community.id, intruder));
 
-    // Не-владельцам запрещено, а не просто молча игнорируется.
+    // Не-владельцам, состоящим в сообществе, запрещено — а не просто
+    // молча игнорируется.
     EXPECT_EQ(service.renameCommunity(community.id, "hijacked", intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.deleteCommunity(community.id, intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.renameChannel(*channelId, "hijacked", intruder), MutationResult::kForbidden);
     EXPECT_EQ(service.deleteChannel(*channelId, intruder), MutationResult::kForbidden);
+
+    // Issue #256 (pentest): кто-то, вообще не состоящий в сообществе,
+    // получает kNotFound — не подтверждаем существование ресурса чужому.
+    EXPECT_EQ(service.renameCommunity(community.id, "hijacked", outsider), MutationResult::kNotFound);
+    EXPECT_EQ(service.deleteCommunity(community.id, outsider), MutationResult::kNotFound);
+    EXPECT_EQ(service.renameChannel(*channelId, "hijacked", outsider), MutationResult::kNotFound);
+    EXPECT_EQ(service.deleteChannel(*channelId, outsider), MutationResult::kNotFound);
 
     // Несуществующие id сообщаются отдельно от "forbidden".
     EXPECT_EQ(service.renameCommunity(-1, "nowhere", owner), MutationResult::kNotFound);
@@ -252,6 +264,7 @@ TEST(ChatServiceIntegrationTest, RegenerateInviteCodeIsOwnerOnlyAndInvalidatesTh
     const std::string suffix = uniqueSuffix();
     const std::string owner = "integration-test-owner-" + suffix;
     const std::string other = "integration-test-other-" + suffix;
+    const std::string outsider = "integration-test-outsider-" + suffix;
     Community created{};
     try {
         created = service.createCommunity("integration-test-regen-" + suffix, owner);
@@ -261,8 +274,14 @@ TEST(ChatServiceIntegrationTest, RegenerateInviteCodeIsOwnerOnlyAndInvalidatesTh
 
     const std::string originalCode = *created.inviteCode;
 
+    // other — состоит в сообществе, но не владелец (issue #256): forbidden.
+    ASSERT_TRUE(service.joinCommunity(created.id, other));
     const RegenerateInviteCodeResult forbidden = service.regenerateInviteCode(created.id, other);
     EXPECT_EQ(forbidden.result, MutationResult::kForbidden);
+
+    // outsider вообще не состоит в сообществе — kNotFound, не подтверждаем
+    // существование ресурса чужому.
+    EXPECT_EQ(service.regenerateInviteCode(created.id, outsider).result, MutationResult::kNotFound);
 
     const RegenerateInviteCodeResult success = service.regenerateInviteCode(created.id, owner);
     ASSERT_EQ(success.result, MutationResult::kSuccess);
@@ -444,6 +463,7 @@ TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwne
     const std::string suffix = uniqueSuffix();
     const std::string owner = "moderation-test-owner-" + suffix;
     const std::string intruder = "moderation-test-intruder-" + suffix;
+    const std::string outsider = "moderation-test-outsider-" + suffix;
     const std::string target = "moderation-test-target-" + suffix;
     Community community{};
     try {
@@ -451,9 +471,13 @@ TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwne
     } catch (const std::exception& error) {
         GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
     }
+    // intruder — состоит в сообществе (issue #256), но не владелец.
+    ASSERT_TRUE(service.joinCommunity(community.id, intruder));
 
     EXPECT_TRUE(service.listModerators(community.id).empty());
     EXPECT_EQ(service.promoteModerator(community.id, target, intruder), MutationResult::kForbidden);
+    // outsider вообще не состоит в сообществе — kNotFound.
+    EXPECT_EQ(service.promoteModerator(community.id, target, outsider), MutationResult::kNotFound);
     EXPECT_EQ(service.promoteModerator(-1, target, owner), MutationResult::kNotFound);
 
     // Владелец может назначить модератора — цель не обязана уже быть
@@ -462,6 +486,7 @@ TEST(ChatServiceIntegrationTest, PromoteAndDemoteModeratorAreRestrictedToTheOwne
     EXPECT_EQ(service.listModerators(community.id), std::vector<std::string>{target});
 
     EXPECT_EQ(service.demoteModerator(community.id, target, intruder), MutationResult::kForbidden);
+    EXPECT_EQ(service.demoteModerator(community.id, target, outsider), MutationResult::kNotFound);
     EXPECT_EQ(service.demoteModerator(community.id, target, owner), MutationResult::kSuccess);
     EXPECT_TRUE(service.listModerators(community.id).empty());
 
@@ -649,7 +674,7 @@ TEST(ChatServiceIntegrationTest, ListMembersReturnsEveryoneWhoJoined) {
     EXPECT_TRUE(service.listMembers(-1).empty());
 }
 
-TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAndRestrictsToOwnerOrModerator) {
+TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAndRejectsOutsiders) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
 
@@ -669,8 +694,11 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     ASSERT_TRUE(channelId.has_value());
 
     const std::string member = "integration-test-member-" + suffix;
+    const std::string intruder = "integration-test-intruder-" + suffix;
     const std::string outsider = "integration-test-outsider-" + suffix;
     ASSERT_TRUE(service.joinCommunity(community.id, member));
+    // intruder — состоит в сообществе (issue #256), но не владелец/модератор.
+    ASSERT_TRUE(service.joinCommunity(community.id, intruder));
 
     // Ключ ещё не установлен — искать нечего.
     EXPECT_FALSE(service.findChannelKey(*channelId, owner).has_value());
@@ -689,8 +717,13 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     // Никто не обернул ключ для outsider.
     EXPECT_FALSE(service.findChannelKey(*channelId, outsider).has_value());
 
-    // У outsider нет полномочий устанавливать чей-либо ключ в этом канале.
-    EXPECT_EQ(service.setChannelKey(*channelId, member, outsider, "forged"), MutationResult::kForbidden);
+    // У intruder (состоит в сообществе, но не владелец/модератор) нет
+    // полномочий устанавливать чей-либо ключ в этом канале.
+    EXPECT_EQ(service.setChannelKey(*channelId, member, intruder, "forged"), MutationResult::kForbidden);
+
+    // outsider вообще не состоит в сообществе (issue #256) — kNotFound,
+    // не подтверждаем существование канала чужому.
+    EXPECT_EQ(service.setChannelKey(*channelId, member, outsider, "forged"), MutationResult::kNotFound);
 
     // Перезапись существующего ключа успешна (ON CONFLICT DO UPDATE).
     EXPECT_EQ(service.setChannelKey(*channelId, member, owner, "re-wrapped-for-member"), MutationResult::kSuccess);
@@ -699,6 +732,53 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     EXPECT_EQ(*updatedMemberKey, "re-wrapped-for-member");
 
     EXPECT_EQ(service.setChannelKey(-1, member, owner, "irrelevant"), MutationResult::kNotFound);
+}
+
+TEST(ChatServiceIntegrationTest, SetChannelKeyAllowsAnyMemberWhoAlreadyHasTheKeyToGrantOthers) {
+    // issue #217: доступ к каналу может выдать дальше не только владелец
+    // канала/сообщества или модератор, но и любой обычный участник, у
+    // которого уже есть собственная обёрнутая копия ключа — без этого
+    // новому участнику зашифрованного сообщества пришлось бы ждать
+    // владельца, чтобы получить доступ к истории.
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-grant-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-grant-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId =
+        service.createChannel(community.id, "secret", owner, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string memberWithKey = "integration-test-grant-with-key-" + suffix;
+    const std::string memberWithoutKeyYet = "integration-test-grant-without-key-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, memberWithKey));
+    ASSERT_TRUE(service.joinCommunity(community.id, memberWithoutKeyYet));
+
+    // memberWithoutKeyYet — обычный участник без ключа, ещё не может
+    // выдавать доступ никому, включая самого себя.
+    EXPECT_EQ(service.setChannelKey(*channelId, memberWithoutKeyYet, memberWithoutKeyYet, "forged"),
+              MutationResult::kForbidden);
+
+    // Владелец выдаёт доступ memberWithKey — обычным путём (issue #138).
+    ASSERT_EQ(service.setChannelKey(*channelId, memberWithKey, owner, "wrapped-for-member-with-key"),
+              MutationResult::kSuccess);
+
+    // Теперь memberWithKey — не владелец и не модератор — может сам
+    // довыдать доступ memberWithoutKeyYet.
+    EXPECT_EQ(service.setChannelKey(*channelId, memberWithoutKeyYet, memberWithKey, "wrapped-by-peer-member"),
+              MutationResult::kSuccess);
+    const std::optional<std::string> grantedKey = service.findChannelKey(*channelId, memberWithoutKeyYet);
+    ASSERT_TRUE(grantedKey.has_value());
+    EXPECT_EQ(*grantedKey, "wrapped-by-peer-member");
 }
 
 TEST(ChatServiceIntegrationTest, FindOrCreateThreadIsIdempotentAndArgumentOrderIndependent) {

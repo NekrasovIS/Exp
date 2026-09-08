@@ -89,6 +89,51 @@ services:
       ci-metrics-postgres:
         condition: service_healthy
 
+  # SFU-инфраструктура для групповых звонков (issue #123/#230/#231),
+  # заменяет mesh-топологию WebRTC-соединений. canyan/janus-gateway —
+  # единственный проверенно доступный на Docker Hub образ Janus Gateway с
+  # уже собранным плагином videoroom; у него нет entrypoint-обвязки с
+  # шаблонизацией конфига через переменные окружения (сам бинарник —
+  # единственная команда контейнера), поэтому конфигурация идёт
+  # исключительно через смонтированные .jcfg-файлы поверх дефолтных (см.
+  # комментарии в services/janus/config/janus.jcfg).
+  #
+  # За отдельным профилем, не в default up -d — в отличие от Postgres
+  # выше, ни один сервис пока не требует Janus для прохождения своих
+  # тестов (chat-service::JanusClient отказывает мягко, если Janus
+  # недоступен — см. doc-комментарий WebSocketServer::handleCallJoin()), а
+  # `docker compose up -d --wait` гоняется в каждой job CI (.github/
+  # workflows/ci.yml) — пока это не изменится (issue #232/#233), лишний
+  # образ/healthcheck там не нужен ни одной из них. Тот же приём, что и у
+  # ci-metrics-postgres/grafana ниже, хоть и по другой причине.
+  janus:
+    profiles: ["sfu"]
+    image: canyan/janus-gateway:latest
+    ports:
+      # 8088 — plain HTTP Janus API: chat-service (issue #231, JanusClient)
+      # работает нативным процессом на хосте, а не внутри docker-compose,
+      # поэтому ему, как и разработчику для ручной проверки curl'ом, нужен
+      # опубликованный на хост порт, а не только внутренняя docker-сеть.
+      # 8188 — WebSocket Janus API, тем же способом, на будущее (сейчас не
+      # используется — JanusClient ходит только по HTTP). 10000-10200/udp
+      # — диапазон RTP-медиа, должен совпадать с media.rtp_port_range в
+      # janus.jcfg.
+      - "8188:8188"
+      - "8088:8088"
+      - "10000-10200:10000-10200/udp"
+    volumes:
+      - ./services/janus/config/janus.jcfg:/usr/local/etc/janus/janus.jcfg:ro
+      - ./services/janus/config/janus.plugin.videoroom.jcfg:/usr/local/etc/janus/janus.plugin.videoroom.jcfg:ro
+    healthcheck:
+      # В образе нет curl/wget/nc — единственный доступный примитив для
+      # проверки того, что Janus слушает HTTP-порт, это встроенный в bash
+      # /dev/tcp (bash в образе есть, хоть и не как login shell по
+      # умолчанию).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8088"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   user-service-postgres-data:
   chat-service-postgres-data:

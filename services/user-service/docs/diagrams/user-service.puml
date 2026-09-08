@@ -171,7 +171,12 @@ note right of HttpServer
                                         called by auth-service itself)
   POST  /users/verify-credentials   -> handleVerifyCredentials (ditto)
   GET   /users/{login}/profile      -> handleGetProfile (issue #110,
-                                        any authenticated caller)
+                                        any authenticated caller; issue
+                                        #225/#243 pentest fix — email/
+                                        telegram_chat_id only when
+                                        {login} is the caller's own,
+                                        toPublicJson() instead of
+                                        toJson() otherwise)
   PATCH /users/me                   -> handleUpdateOwnProfile (issue #110,
                                         always writes the token's own
                                         subject — login in the body, if
@@ -210,6 +215,30 @@ note right of HttpServer
                                         для chat-service, см.
                                         UserServiceClient в chat-service;
                                         отвечает {friends: bool})
+end note
+
+note right of HttpServer
+  Issue #225 (pentest), верифицировано без находок:
+  - PATCH /users/me никогда не читает "login" из
+    тела запроса (см. handleUpdateOwnProfile()) —
+    самозванство через тело невозможно.
+  - accept/decline чужой заявки — WHERE recipient_login
+    сверяется с логином из токена в
+    UserRepository::respondToFriendRequest(), не
+    совпало -> kNotYourRequest -> тот же 404, что и
+    kNoSuchRequest (не палит существование чужой
+    заявки другим кодом ответа).
+  - Повторное использование id уже обработанной
+    заявки — тот же respondToFriendRequest() ищет
+    строку с WHERE status = 'pending', уже
+    accepted/declined запись не находится -> 404.
+  - POST /users/register, /users/verify-credentials,
+    /users/resolve-otp-identifier не проверяют
+    Authorization по конструкции (вызываются только
+    auth-service) — каждый принимает и возвращает
+    данные ровно по одному переданному
+    логину/identifier, без пакетного доступа или
+    перечисления остальных пользователей.
 end note
 
 note right of json_guard.json_guard

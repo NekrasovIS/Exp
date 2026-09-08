@@ -38,6 +38,7 @@
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
 #include "ui/DirectMessageView.h"
+#include "ui/FloatingCallTilesOverlay.h"
 #include "ui/FooterBar.h"
 #include "ui/FriendsPanel.h"
 #include "ui/LoginWindow.h"
@@ -136,6 +137,7 @@ MainWindow::MainWindow(QWidget* parent)
             profileDialog_->setProfile(profile);
         }
         wrapPendingEncryptedChannelKeyForMember(profile.login, profile.publicKey);
+        finishGrantingChannelKeyAccess(profile.login, profile.publicKey);
     });
     connect(&userProfileClient_, &UserProfileClient::profileUpdated, this, [this](const UserProfile& profile) {
         footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
@@ -186,6 +188,7 @@ MainWindow::MainWindow(QWidget* parent)
         communitiesPanel_->setCurrentUserLogin(currentUserLogin_);
         channelsPanel_->setCurrentUserLogin(currentUserLogin_);
         chatView_->setCurrentUserLogin(currentUserLogin_);
+        memberListPanel_->setCurrentUserLogin(currentUserLogin_);
         if (valid) {
             // Скрываем окно входа и впервые показываем интерфейс — до
             // этого момента MainWindow ни разу не был показан (issue
@@ -280,6 +283,9 @@ MainWindow::MainWindow(QWidget* parent)
     // действию, что и клик по кнопке звонка в ChatView, когда мы уже в
     // звонке — переиспользуем тот же слот, а не дублируем его тело.
     connect(callWindow_, &CallWindow::leaveCallRequested, this, &MainWindow::onCallToggleClicked);
+    connect(callWindow_, &CallWindow::minimizeRequested, this, &MainWindow::onCallMinimizeRequested);
+    connect(floatingCallTilesOverlay_, &FloatingCallTilesOverlay::restoreRequested, this,
+            &MainWindow::onCallRestoreRequested);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
     connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
@@ -340,6 +346,8 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(chatView_, &ChatView::memberListToggleRequested, this,
             [this]() { memberListPanel_->setVisible(memberListPanel_->isHidden()); });
+    connect(memberListPanel_, &MemberListPanel::grantChannelKeyAccessRequested, this,
+            &MainWindow::grantChannelKeyAccess);
     connect(searchDialog_, &SearchDialog::searchRequested, this, [this](const QString& query) {
         if (selectedChannelId_ < 0 || query.trimmed().isEmpty()) {
             return;
@@ -404,8 +412,7 @@ MainWindow::MainWindow(QWidget* parent)
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
     });
-    connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::showFriendsMode);
-    connect(friendsPanel_, &FriendsPanel::backToCommunitiesRequested, this, &MainWindow::showCommunitiesMode);
+    connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
                 moderatorsDialog_->setCommunity(id, name);
@@ -684,7 +691,7 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatRestClient_, &ChatRestClient::myChannelKeyNotFound, this, [this](qint64 channelId) {
         if (channelId == selectedChannelId_) {
-            showToast(tr("You don't have access to this encrypted channel yet — ask the owner to grant it"),
+            showToast(tr("You don't have access to this encrypted channel yet — ask a member with access to grant it"),
                        ToastBanner::Variant::kInfo);
             finishOpeningChannel(channelId);
         }
@@ -813,13 +820,18 @@ void MainWindow::buildUi() {
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
     sidebarLayout->setSpacing(0);
     communitiesPanel_ = new CommunitiesPanel(sidebar);
-    channelsPanel_ = new ChannelsPanel(sidebar);
-    friendsPanel_ = new FriendsPanel(sidebar);
-    sidebarListStack_ = new QStackedWidget(sidebar);
-    sidebarListStack_->addWidget(channelsPanel_);
-    sidebarListStack_->addWidget(friendsPanel_);
+    // Собственный host, а не sidebar целиком (issue #216) — FriendsPanel
+    // всплывает поверх *своего* родителя целиком (см. её doc-комментарий),
+    // а перекрывать иконочную полосу сообществ она не должна: та обязана
+    // оставаться видимой и кликабельной, пока открыта панель друзей.
+    auto* channelsHost = new QWidget(sidebar);
+    auto* channelsHostLayout = new QVBoxLayout(channelsHost);
+    channelsHostLayout->setContentsMargins(0, 0, 0, 0);
+    channelsPanel_ = new ChannelsPanel(channelsHost);
+    channelsHostLayout->addWidget(channelsPanel_);
+    friendsPanel_ = new FriendsPanel(channelsHost);
     sidebarLayout->addWidget(communitiesPanel_);
-    sidebarLayout->addWidget(sidebarListStack_, /*stretch=*/1);
+    sidebarLayout->addWidget(channelsHost, /*stretch=*/1);
 
     chatView_ = new ChatView(central);
     directMessageView_ = new DirectMessageView(central);
@@ -838,6 +850,7 @@ void MainWindow::buildUi() {
     // жизни через дерево QObject (this как родитель), показывает/скрывает
     // по фактическому входу/выходу из звонка.
     callWindow_ = new CallWindow(this);
+    floatingCallTilesOverlay_ = new FloatingCallTilesOverlay(this);
 
     // Список участников сообщества справа от чата — элемент раскладки,
     // которого раньше не было вовсе (issue #182); та же 240px ширина,
@@ -1023,6 +1036,21 @@ void MainWindow::onCallToggleClicked() {
     callWindow_->activateWindow();
 }
 
+void MainWindow::onCallMinimizeRequested() {
+    callWindow_->detachTilesTo(floatingCallTilesOverlay_->canvas());
+    callWindow_->hide();
+    floatingCallTilesOverlay_->show();
+    floatingCallTilesOverlay_->raise();
+}
+
+void MainWindow::onCallRestoreRequested() {
+    callWindow_->reattachTiles();
+    floatingCallTilesOverlay_->hide();
+    callWindow_->show();
+    callWindow_->raise();
+    callWindow_->activateWindow();
+}
+
 void MainWindow::onMuteToggleClicked() {
     callManager_.setMuted(!callManager_.isMuted());
     callWindow_->setMuted(callManager_.isMuted());
@@ -1065,8 +1093,13 @@ void MainWindow::leaveCallIfActive() {
     callManager_.leaveCall();
     callParticipants_.clear();
     callWindow_->setCallParticipants(callParticipants_);
+    // resetForNewCall() уже возвращает плитки в videoStrip_ первым делом
+    // (issue #215, на случай если звонок закончился, пока был свёрнут) —
+    // оверлей на этот момент мог быть виден, прячем и его, не только
+    // callWindow_.
     callWindow_->resetForNewCall();
     callWindow_->hide();
+    floatingCallTilesOverlay_->hide();
     chatView_->setCallState(false);
 }
 
@@ -1168,6 +1201,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     const auto it = std::find_if(channels_.cbegin(), channels_.cend(), [id](const ChatItem& item) { return item.id == id; });
     currentChannelEncrypted_ = it != channels_.cend() && it->isEncrypted;
     chatView_->setEncrypted(currentChannelEncrypted_);
+    memberListPanel_->setChannelEncrypted(currentChannelEncrypted_);
 
     if (currentChannelEncrypted_ && !channelKeys_.contains(id)) {
         // Отложено до myChannelKeyFetched()/myChannelKeyNotFound() —
@@ -1192,6 +1226,7 @@ void MainWindow::closeChatView() {
     selectedChannelId_ = -1;
     oldestMessageId_ = -1;
     currentChannelEncrypted_ = false;
+    memberListPanel_->setChannelEncrypted(false);
     channelsPanel_->setOpenChannelId(-1);
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
@@ -1217,6 +1252,36 @@ void MainWindow::wrapPendingEncryptedChannelKeyForMember(const QString& login, c
     }
 }
 
+void MainWindow::grantChannelKeyAccess(const QString& login) {
+    if (!currentChannelEncrypted_ || !channelKeys_.contains(selectedChannelId_)) {
+        // Нечем делиться — у самого вошедшего пользователя ключ этого
+        // канала ещё не развёрнут (issue #217 требует явную ошибку,
+        // а не молчаливый no-op).
+        showToast(tr("You don't have this channel's key yourself yet"), ToastBanner::Variant::kError);
+        return;
+    }
+    pendingKeyGrant_ = PendingKeyGrant{.channelId = selectedChannelId_, .targetLogin = login};
+    userProfileClient_.fetchProfile(lastToken_, login);
+}
+
+void MainWindow::finishGrantingChannelKeyAccess(const QString& login, const QString& publicKeyBase64) {
+    if (!pendingKeyGrant_.has_value() || pendingKeyGrant_->targetLogin != login) {
+        return;  // Не связано с текущим запросом "поделиться ключом".
+    }
+    const PendingKeyGrant grant = *pendingKeyGrant_;
+    pendingKeyGrant_.reset();
+
+    if (publicKeyBase64.isEmpty()) {
+        showToast(tr("'%1' hasn't set up encryption yet and can't be granted access").arg(login),
+                   ToastBanner::Variant::kError);
+        return;
+    }
+    const QString wrappedKey = channel_crypto::wrapKeyForRecipient(
+        channelKeys_[grant.channelId], QByteArray::fromBase64(publicKeyBase64.toUtf8()));
+    chatRestClient_.setChannelKey(lastToken_, grant.channelId, login, wrappedKey);
+    showToast(tr("Granted '%1' access to this channel").arg(login), ToastBanner::Variant::kSuccess);
+}
+
 QString MainWindow::decryptForDisplay(const QString& ciphertext) const {
     const auto it = channelKeys_.constFind(selectedChannelId_);
     if (it == channelKeys_.constEnd()) {
@@ -1229,8 +1294,16 @@ void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {
     toastBanner_->showMessage(text, variant, kToastTimeoutMs);
 }
 
+void MainWindow::onFriendsButtonClicked() {
+    if (friendsPanel_->isOpen()) {
+        showCommunitiesMode();
+    } else {
+        showFriendsMode();
+    }
+}
+
 void MainWindow::showFriendsMode() {
-    sidebarListStack_->setCurrentWidget(friendsPanel_);
+    friendsPanel_->setOpen(true);
     contentStack_->setCurrentWidget(directMessageView_);
     // Список участников — для канала сообщества, в режиме друзей нет
     // выбранного сообщества, которое он мог бы описывать (issue #182 +
@@ -1248,7 +1321,7 @@ void MainWindow::showFriendsMode() {
 }
 
 void MainWindow::showCommunitiesMode() {
-    sidebarListStack_->setCurrentWidget(channelsPanel_);
+    friendsPanel_->setOpen(false);
     contentStack_->setCurrentWidget(chatView_);
     memberListPanel_->setVisible(true);
     openDmThreadId_ = -1;

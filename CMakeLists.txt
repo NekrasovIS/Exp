@@ -94,6 +94,8 @@ add_library(devicehub_core
     src/ui/ChatView.cpp
     src/ui/CallWindow.h
     src/ui/CallWindow.cpp
+    src/ui/FloatingCallTilesOverlay.h
+    src/ui/FloatingCallTilesOverlay.cpp
     src/ui/DraggableVideoTile.h
     src/ui/DraggableVideoTile.cpp
     src/ui/ChatMessageRow.h
@@ -266,6 +268,7 @@ add_executable(devicehub_tests
     test/DirectMessageViewTest.cpp
     test/ChatViewTest.cpp
     test/CallWindowTest.cpp
+    test/FloatingCallTilesOverlayTest.cpp
     test/DraggableVideoTileTest.cpp
     test/ChatMessageRowTest.cpp
     test/ChatBubbleTest.cpp

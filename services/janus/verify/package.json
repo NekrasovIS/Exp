@@ -1,0 +1,9 @@
+{
+  "name": "janus-forwarding-verify",
+  "private": true,
+  "type": "module",
+  "description": "Ручная/CI-скриптовая проверка реального ICE/DTLS forwarding через Janus videoroom (issue #230) — не часть сборки DeviceHub/сервисов.",
+  "dependencies": {
+    "werift": "^0.24.4"
+  }
+}

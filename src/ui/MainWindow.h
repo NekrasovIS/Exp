@@ -32,6 +32,7 @@ class ChatView;
 class CommunitiesPanel;
 class DesktopNotifier;
 class DirectMessageView;
+class FloatingCallTilesOverlay;
 class FooterBar;
 class FriendsPanel;
 class LoginWindow;
@@ -82,6 +83,14 @@ private:
     void onVideoToggleClicked();
     void onEditProfileClicked();
     void onScreenShareToggleClicked();
+    /// CallWindow::minimizeRequested() (клик "Minimize" либо закрытие
+    /// самого окна, issue #215) — переносит текущие видео-плитки в
+    /// floatingCallTilesOverlay_ и показывает его вместо CallWindow.
+    void onCallMinimizeRequested();
+    /// FloatingCallTilesOverlay::restoreRequested() (issue #215) —
+    /// обратное действие: возвращает плитки в CallWindow и показывает
+    /// его снова вместо оверлея.
+    void onCallRestoreRequested();
 
     /// Выходит из текущего звонка, если он вообще идёт — общая часть
     /// onCallToggleClicked()/openChannel()/closeChatView() (звонок
@@ -137,6 +146,23 @@ private:
     /// ожидается (то есть это не связанный с этим profileReceived(),
     /// например, собственный профиль вошедшего пользователя).
     void wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64);
+    /// Обработчик MemberListPanel::grantChannelKeyAccessRequested()
+    /// (issue #217) — "поделиться ключом" открытого сейчас
+    /// зашифрованного канала с конкретным @p login. Явная ошибка
+    /// тостом, если у самого вошедшего пользователя ещё нет
+    /// собственного ключа этого канала (нечем делиться), иначе
+    /// запрашивает открытый ключ @p login через fetchProfile() —
+    /// заворачивание и публикация завершаются в
+    /// finishGrantingChannelKeyAccess() по ответу profileReceived().
+    void grantChannelKeyAccess(const QString& login);
+    /// Вторая половина grantChannelKeyAccess() — вызывается из
+    /// обработчика profileReceived() для любого профиля, а не только
+    /// связанного с этим запросом, поэтому сверяет @p login с
+    /// pendingKeyGrant_ и ничего не делает, если это не он. Явная ошибка
+    /// тостом (issue #217), если @p publicKeyBase64 пуст — целевой
+    /// участник ещё не опубликовал открытый ключ, значит поделиться с
+    /// ним нечем.
+    void finishGrantingChannelKeyAccess(const QString& login, const QString& publicKeyBase64);
     /// Расшифровывает @p ciphertext ключом channelKeys_[selectedChannelId_]
     /// для отображения — строка-заглушка (никогда не исходный
     /// шифротекст), если ключ ещё не закэширован или расшифровка не
@@ -148,14 +174,21 @@ private:
     /// через statusBar() — так гораздо легче заметить.
     void showToast(const QString& text, ToastBanner::Variant variant);
 
-    /// Переключает боковую панель/основную область в режим "Friends"
-    /// (issue #187, Фаза 3) — FriendsPanel вместо ChannelsPanel,
+    /// Открывает FriendsPanel как всплывающую панель поверх ChannelsPanel
+    /// (issue #187, Фаза 3; issue #216 — оверлей вместо подмены панели в
+    /// общей раскладке) и переключает основную область на
     /// DirectMessageView вместо ChatView; заново запрашивает список
     /// друзей и входящих заявок.
     void showFriendsMode();
-    /// Обратное переключение — вызывается при выборе сообщества, тем
-    /// самым не нужно отдельной кнопки "назад".
+    /// Обратное переключение — сворачивает FriendsPanel и возвращает
+    /// основную область к ChatView. Вызывается и по повторному клику на
+    /// кнопку "Friends" (см. onFriendsButtonClicked()), и при выборе
+    /// сообщества, и при выходе из аккаунта — тем самым не нужно
+    /// отдельной кнопки "назад" в самой FriendsPanel.
     void showCommunitiesMode();
+    /// Кнопка "Friends" в CommunitiesPanel — переключатель (issue #216):
+    /// открывает FriendsPanel, если она сейчас свёрнута, иначе сворачивает.
+    void onFriendsButtonClicked();
     /// Открывает диалог с @p login — вызывается по клику на друга в
     /// FriendsPanel; фактическое переключение contentStack_ происходит
     /// в обработчике ChatRestClient::dmThreadOpened(), а не здесь,
@@ -237,6 +270,16 @@ private:
     };
     std::optional<PendingEncryptedChannelSetup> pendingEncryptedSetup_;
 
+    /// Состояние однократного сценария "поделиться ключом канала с
+    /// конкретным участником" (issue #217) — валидно между вызовом
+    /// grantChannelKeyAccess() и завершением ответного
+    /// finishGrantingChannelKeyAccess() для того же логина.
+    struct PendingKeyGrant {
+        qint64 channelId = -1;
+        QString targetLogin;
+    };
+    std::optional<PendingKeyGrant> pendingKeyGrant_;
+
     /// Id открытого сейчас диалога личных сообщений (issue #187, Фаза
     /// 3), -1 — ни один не открыт (режим Friends ещё не активен либо
     /// друг ещё не выбран).
@@ -245,10 +288,15 @@ private:
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
+    /// Всплывает поверх ChannelsPanel, не заменяет её в раскладке (issue
+    /// #216) — см. doc-комментарий класса FriendsPanel.
     FriendsPanel* friendsPanel_ = nullptr;
-    QStackedWidget* sidebarListStack_ = nullptr;
     ChatView* chatView_ = nullptr;
     CallWindow* callWindow_ = nullptr;
+    /// Показывается вместо callWindow_, пока звонок свёрнут (issue
+    /// #215) — см. doc-комментарий CallWindow о detachTilesTo()/
+    /// reattachTiles().
+    FloatingCallTilesOverlay* floatingCallTilesOverlay_ = nullptr;
     MemberListPanel* memberListPanel_ = nullptr;
     DirectMessageView* directMessageView_ = nullptr;
     QStackedWidget* contentStack_ = nullptr;
