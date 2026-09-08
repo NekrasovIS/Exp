@@ -10,6 +10,7 @@ import { useState, type FormEvent } from "react";
 import { useChannels } from "./useChannels.js";
 import { useEncryptedChannelSetup } from "../crypto/useEncryptedChannelSetup.js";
 import { useIdentityKeys } from "../crypto/useIdentityKeys.js";
+import styles from "../pages/sidebarNav.module.css";
 
 interface ChannelsSidebarProps {
   communityId: number | null;
@@ -58,14 +59,15 @@ export function ChannelsSidebar({ communityId, selectedChannelId, onSelectChanne
   }
 
   return (
-    <nav aria-label="Channels">
-      {loading && <p>Loading channels…</p>}
+    <nav aria-label="Channels" className={styles.nav}>
+      {loading && <p className={styles.mutedText}>Loading channels…</p>}
       {error !== null && <p role="alert">{error}</p>}
-      <ul>
+      <ul className={styles.list}>
         {channels.map((channel) => (
           <li key={channel.id}>
             <button
               type="button"
+              className={styles.listItemButton}
               aria-current={channel.id === selectedChannelId}
               onClick={() => onSelectChannel(channel.id)}
             >
@@ -74,10 +76,10 @@ export function ChannelsSidebar({ communityId, selectedChannelId, onSelectChanne
           </li>
         ))}
       </ul>
-      <form onSubmit={handleCreate}>
+      <form onSubmit={handleCreate} className={styles.form}>
         <label htmlFor="new-channel-name">New channel</label>
         <input id="new-channel-name" value={name} onChange={(event) => setName(event.target.value)} />
-        <label htmlFor="new-channel-encrypted">
+        <label htmlFor="new-channel-encrypted" className={styles.checkboxLabel}>
           <input
             id="new-channel-encrypted"
             type="checkbox"

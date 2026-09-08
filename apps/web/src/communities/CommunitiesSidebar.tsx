@@ -6,6 +6,7 @@
 import { useState, type FormEvent } from "react";
 
 import { useCommunities } from "./useCommunities.js";
+import styles from "../pages/sidebarNav.module.css";
 
 interface CommunitiesSidebarProps {
   selectedCommunityId: number | null;
@@ -36,14 +37,15 @@ export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: C
   }
 
   return (
-    <nav aria-label="Communities">
-      {loading && <p>Loading communities…</p>}
+    <nav aria-label="Communities" className={styles.nav}>
+      {loading && <p className={styles.mutedText}>Loading communities…</p>}
       {error !== null && <p role="alert">{error}</p>}
-      <ul>
+      <ul className={styles.list}>
         {communities.map((community) => (
           <li key={community.id}>
             <button
               type="button"
+              className={styles.listItemButton}
               aria-current={community.id === selectedCommunityId}
               onClick={() => onSelectCommunity(community.id)}
             >
@@ -52,7 +54,7 @@ export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: C
           </li>
         ))}
       </ul>
-      <form onSubmit={handleJoin}>
+      <form onSubmit={handleJoin} className={styles.form}>
         <label htmlFor="community-invite-code">Invite code</label>
         <input id="community-invite-code" value={code} onChange={(event) => setCode(event.target.value)} />
         {joinError !== null && <p role="alert">{joinError}</p>}
