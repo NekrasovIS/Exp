@@ -674,7 +674,7 @@ TEST(ChatServiceIntegrationTest, ListMembersReturnsEveryoneWhoJoined) {
     EXPECT_TRUE(service.listMembers(-1).empty());
 }
 
-TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAndRestrictsToOwnerOrModerator) {
+TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAndRejectsOutsiders) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
 
@@ -732,6 +732,53 @@ TEST(ChatServiceIntegrationTest, SetChannelKeyRoundTripsThroughFindChannelKeyAnd
     EXPECT_EQ(*updatedMemberKey, "re-wrapped-for-member");
 
     EXPECT_EQ(service.setChannelKey(-1, member, owner, "irrelevant"), MutationResult::kNotFound);
+}
+
+TEST(ChatServiceIntegrationTest, SetChannelKeyAllowsAnyMemberWhoAlreadyHasTheKeyToGrantOthers) {
+    // issue #217: доступ к каналу может выдать дальше не только владелец
+    // канала/сообщества или модератор, но и любой обычный участник, у
+    // которого уже есть собственная обёрнутая копия ключа — без этого
+    // новому участнику зашифрованного сообщества пришлось бы ждать
+    // владельца, чтобы получить доступ к истории.
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-grant-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-grant-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId =
+        service.createChannel(community.id, "secret", owner, /*isEncrypted=*/true);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string memberWithKey = "integration-test-grant-with-key-" + suffix;
+    const std::string memberWithoutKeyYet = "integration-test-grant-without-key-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, memberWithKey));
+    ASSERT_TRUE(service.joinCommunity(community.id, memberWithoutKeyYet));
+
+    // memberWithoutKeyYet — обычный участник без ключа, ещё не может
+    // выдавать доступ никому, включая самого себя.
+    EXPECT_EQ(service.setChannelKey(*channelId, memberWithoutKeyYet, memberWithoutKeyYet, "forged"),
+              MutationResult::kForbidden);
+
+    // Владелец выдаёт доступ memberWithKey — обычным путём (issue #138).
+    ASSERT_EQ(service.setChannelKey(*channelId, memberWithKey, owner, "wrapped-for-member-with-key"),
+              MutationResult::kSuccess);
+
+    // Теперь memberWithKey — не владелец и не модератор — может сам
+    // довыдать доступ memberWithoutKeyYet.
+    EXPECT_EQ(service.setChannelKey(*channelId, memberWithoutKeyYet, memberWithKey, "wrapped-by-peer-member"),
+              MutationResult::kSuccess);
+    const std::optional<std::string> grantedKey = service.findChannelKey(*channelId, memberWithoutKeyYet);
+    ASSERT_TRUE(grantedKey.has_value());
+    EXPECT_EQ(*grantedKey, "wrapped-by-peer-member");
 }
 
 TEST(ChatServiceIntegrationTest, FindOrCreateThreadIsIdempotentAndArgumentOrderIndependent) {

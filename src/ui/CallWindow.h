@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QWidget>
 
+class QCloseEvent;
 class QImage;
 class QLabel;
 class QPushButton;
@@ -32,6 +33,17 @@ class DraggableVideoTile;
  * DraggableVideoTile и свободно позиционируется мышью внутри canvas
  * videoStrip_ (обычный QWidget без layout'а, а не QHBoxLayout, который
  * раньше сам решал место каждой плитки).
+ *
+ * Сворачивание (issue #215): "Minimize" (или закрытие окна — closeEvent()
+ * перенаправляет туда же, а не просто прячет окно) не завершает звонок,
+ * а переносит (setParent(), не пересоздаёт) все текущие плитки в
+ * FloatingCallTilesOverlay через detachTilesTo() — тот же живой
+ * QVideoSink/кадры, только видимый в компактном окне вместо этого.
+ * tileHost_ запоминает, куда сейчас нужно класть плитки (videoStrip_
+ * либо canvas() оверлея), поэтому новый удалённый видеопоток, впервые
+ * появившийся уже после сворачивания, тоже попадает в оверлей, а не
+ * молча создаётся в скрытом videoStrip_. reattachTiles() — обратное
+ * действие, вызывается MainWindow-ом по клику "Expand" в оверлее.
  */
 class CallWindow : public QWidget {
     Q_OBJECT
@@ -74,9 +86,24 @@ public:
     /// следующий звонок не унаследовал их от предыдущего.
     void resetForNewCall();
 
+    /// Переносит все текущие плитки (обе локальные + все удалённые) в
+    /// @p newParent, уменьшая их до компактного размера (issue #215) —
+    /// используется при сворачивании в FloatingCallTilesOverlay. Любая
+    /// плитка, созданная после этого вызова (showRemoteVideoFrame() для
+    /// участника, ещё не имевшего своей), тоже попадает сразу в
+    /// @p newParent, пока не будет вызван reattachTiles().
+    void detachTilesTo(QWidget* newParent);
+
+    /// Обратное действие — переносит все текущие плитки назад в
+    /// videoStrip_, восстанавливая полный размер и заново расставляя их
+    /// каскадом (issue #215); дальнейшие новые плитки снова создаются в
+    /// videoStrip_ напрямую.
+    void reattachTiles();
+
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
     [[nodiscard]] QPushButton* videoToggleButton() const { return videoToggleButton_; }
     [[nodiscard]] QPushButton* screenShareToggleButton() const { return screenShareToggleButton_; }
+    [[nodiscard]] QPushButton* minimizeButton() const { return minimizeButton_; }
     [[nodiscard]] QPushButton* leaveCallButton() const { return leaveCallButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
@@ -103,6 +130,18 @@ signals:
     /// в состоянии "уже в звонке" (оба сводятся к одному и тому же
     /// «выйти из звонка»).
     void leaveCallRequested();
+    /// Клик "Minimize", или закрытие окна (см. closeEvent()) — issue #215.
+    /// MainWindow вызывает detachTilesTo() с canvas() своего
+    /// FloatingCallTilesOverlay и показывает его вместо этого окна.
+    void minimizeRequested();
+
+protected:
+    /// Закрытие окна сворачивает звонок в мини-панели вместо того, чтобы
+    /// просто спрятать окно без какого-либо видимого следа активного
+    /// видео (issue #215) — событие игнорируется (окно не закрывается
+    /// само по себе), решение, что показать вместо него, остаётся за
+    /// MainWindow, как и для явного клика "Minimize".
+    void closeEvent(QCloseEvent* event) override;
 
 private:
     /// Пересчитывает видимость всей videoStrip_ — видна, пока показывать
@@ -111,18 +150,31 @@ private:
     /// теперь независимы друг от друга, а не два взаимоисключающих).
     void updateVideoStripVisibility();
 
-    /// Позиция для только что созданной удалённой плитки — по диагонали
-    /// каскадом от предыдущей (с переносом после нескольких шагов, а не
-    /// бесконечно за пределы окна), так что несколько новых плиток не
-    /// садятся друг на друга ровно в одной точке. Пользователь всё равно
-    /// может перетащить любую плитку куда угодно после появления — это
-    /// только стартовая позиция.
-    [[nodiscard]] QPoint nextRemoteTileCascadePosition();
+    /// Позиция для очередной плитки, помещаемой в tileHost_ прямо
+    /// сейчас, — по диагонали каскадом от предыдущей (с переносом после
+    /// нескольких шагов, а не бесконечно за пределы canvas'а), так что
+    /// несколько плиток подряд не садятся друг на друга ровно в одной
+    /// точке. Пользователь всё равно может перетащить любую плитку куда
+    /// угодно после появления — это только стартовая позиция. Общая для
+    /// новых удалённых плиток (showRemoteVideoFrame()) и для
+    /// detachTilesTo()/reattachTiles() (issue #215), не только для
+    /// первых, как было раньше.
+    [[nodiscard]] QPoint nextTileCascadePosition();
+
+    /// Помещает @p tile в tileHost_ текущим currentTileSize_ и очередной
+    /// каскадной позицией — общая часть showRemoteVideoFrame() и
+    /// detachTilesTo()/reattachTiles() (issue #215).
+    void placeTile(DraggableVideoTile* tile);
+    /// Общая часть detachTilesTo()/reattachTiles() — заново каскадно
+    /// расставляет обе локальные плитки и все удалённые в уже
+    /// установленных tileHost_/currentTileSize_ (issue #215).
+    void relocateAllTiles();
 
     QLabel* callParticipantsLabel_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QPushButton* videoToggleButton_ = nullptr;
     QPushButton* screenShareToggleButton_ = nullptr;
+    QPushButton* minimizeButton_ = nullptr;
     QPushButton* leaveCallButton_ = nullptr;
     /// Canvas без layout'а — DraggableVideoTile-плитки внутри него
     /// позиционируются вручную (изначально) и мышью (после).
@@ -135,9 +187,16 @@ private:
     /// камера и демонстрация экрана одного участника не делили одну
     /// плитку.
     QHash<QString, DraggableVideoTile*> remoteVideoTiles_;
-    int nextRemoteTileCascadeIndex_ = 0;
+    int nextTileCascadeIndex_ = 0;
     bool videoActive_ = false;
     bool screenShareActive_ = false;
+    /// Куда новые/перенесённые плитки сейчас помещаются (issue #215) —
+    /// videoStrip_ в обычном состоянии, canvas() FloatingCallTilesOverlay,
+    /// пока звонок свёрнут. Никогда не nullptr после конструктора.
+    QWidget* tileHost_ = nullptr;
+    /// Текущая сторона плитки в пикселях — kVideoTileSize в обычном
+    /// состоянии, kMiniVideoTileSize, пока свёрнуто (issue #215).
+    int currentTileSize_ = 0;
 };
 
 }  // namespace devicehub

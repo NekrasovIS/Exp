@@ -1,5 +1,6 @@
 #include "ui/CallWindow.h"
 
+#include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
@@ -16,6 +17,10 @@ namespace devicehub {
 
 namespace {
 constexpr int kVideoTileSize = 160;
+/// Компактный размер плитки, пока звонок свёрнут (issue #215) — заметно
+/// меньше, чтобы FloatingCallTilesOverlay реально выглядел как
+/// picture-in-picture, а не уменьшенная копия CallWindow.
+constexpr int kMiniVideoTileSize = 96;
 constexpr int kCascadeStep = 28;
 constexpr int kCascadeMaxSteps = 8;
 
@@ -52,6 +57,10 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     screenShareToggleButton_->setObjectName(QStringLiteral("screenShareToggleButton"));
     connect(screenShareToggleButton_, &QPushButton::clicked, this, &CallWindow::screenShareToggleRequested);
 
+    minimizeButton_ = new QPushButton(tr("Minimize"), this);
+    minimizeButton_->setObjectName(QStringLiteral("minimizeCallButton"));
+    connect(minimizeButton_, &QPushButton::clicked, this, &CallWindow::minimizeRequested);
+
     leaveCallButton_ = new QPushButton(tr("Leave call"), this);
     leaveCallButton_->setObjectName(QStringLiteral("leaveCallButton"));
     leaveCallButton_->setProperty("accent", true);
@@ -63,6 +72,7 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     controlsRow->addWidget(videoToggleButton_);
     controlsRow->addWidget(screenShareToggleButton_);
     controlsRow->addStretch(1);
+    controlsRow->addWidget(minimizeButton_);
     controlsRow->addWidget(leaveCallButton_);
 
     callParticipantsLabel_ = new QLabel(this);
@@ -75,6 +85,8 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     // выстраивается сама по QHBoxLayout, как раньше.
     videoStrip_ = new QWidget(this);
     videoStrip_->setVisible(false);
+    tileHost_ = videoStrip_;
+    currentTileSize_ = kVideoTileSize;
 
     localVideoWidget_ = new QVideoWidget();
     localVideoWidget_->setObjectName(QStringLiteral("localVideoWidget"));
@@ -131,11 +143,22 @@ void CallWindow::setCallParticipants(const QStringList& participants) {
     callParticipantsLabel_->setVisible(true);
 }
 
-QPoint CallWindow::nextRemoteTileCascadePosition() {
-    const int step = nextRemoteTileCascadeIndex_ % kCascadeMaxSteps;
-    ++nextRemoteTileCascadeIndex_;
-    const int baseY = ui_theme::kSpacingSm + kVideoTileSize + ui_theme::kSpacingSm;
+QPoint CallWindow::nextTileCascadePosition() {
+    const int step = nextTileCascadeIndex_ % kCascadeMaxSteps;
+    ++nextTileCascadeIndex_;
+    const int baseY = ui_theme::kSpacingSm + currentTileSize_ + ui_theme::kSpacingSm;
     return {ui_theme::kSpacingSm + step * kCascadeStep, baseY + step * kCascadeStep};
+}
+
+void CallWindow::placeTile(DraggableVideoTile* tile) {
+    // Видимость намеренно не трогает — вызывающая сторона решает: у
+    // новой удалённой плитки (showRemoteVideoFrame()) она всегда
+    // становится видимой, а у локальных камеры/демонстрации экрана при
+    // detachTilesTo()/reattachTiles() (issue #215) нужно сохранить их
+    // текущее состояние enabled/disabled, а не форсировать true.
+    tile->setParent(tileHost_);
+    tile->resize(currentTileSize_, currentTileSize_);
+    tile->move(nextTileCascadePosition());
 }
 
 void CallWindow::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame, bool isScreenShare) {
@@ -146,16 +169,15 @@ void CallWindow::showRemoteVideoFrame(const QString& peerLogin, const QImage& fr
         label = new QLabel();
         label->setObjectName(QStringLiteral("remoteVideoTile"));
         label->setScaledContents(true);
-        tile = new DraggableVideoTile(label, videoStrip_);
-        tile->resize(kVideoTileSize, kVideoTileSize);
-        tile->move(nextRemoteTileCascadePosition());
+        tile = new DraggableVideoTile(label, tileHost_);
+        placeTile(tile);
         remoteVideoTiles_.insert(key, tile);
     } else {
         label = qobject_cast<QLabel*>(tile->content());
     }
     tile->setVisible(true);
     label->setPixmap(QPixmap::fromImage(frame));
-    videoStrip_->setVisible(true);
+    updateVideoStripVisibility();
 }
 
 void CallWindow::removeRemoteVideo(const QString& peerLogin, bool isScreenShare) {
@@ -168,11 +190,49 @@ void CallWindow::removeRemoteVideo(const QString& peerLogin, bool isScreenShare)
 }
 
 void CallWindow::resetForNewCall() {
+    // Возвращает tileHost_/размер к нормальному состоянию первым делом
+    // (issue #215) — предыдущий звонок мог закончиться, пока был свёрнут
+    // в FloatingCallTilesOverlay; новый звонок не должен унаследовать ни
+    // это, ни его мини-размер плиток.
+    reattachTiles();
     for (DraggableVideoTile* tile : std::as_const(remoteVideoTiles_)) {
         delete tile;
     }
     remoteVideoTiles_.clear();
     setCallParticipants({});
+}
+
+void CallWindow::detachTilesTo(QWidget* newParent) {
+    tileHost_ = newParent;
+    currentTileSize_ = kMiniVideoTileSize;
+    relocateAllTiles();
+}
+
+void CallWindow::reattachTiles() {
+    tileHost_ = videoStrip_;
+    currentTileSize_ = kVideoTileSize;
+    relocateAllTiles();
+}
+
+void CallWindow::relocateAllTiles() {
+    nextTileCascadeIndex_ = 0;
+    placeTile(localCameraTile_);
+    placeTile(localScreenShareTile_);
+    for (DraggableVideoTile* tile : std::as_const(remoteVideoTiles_)) {
+        placeTile(tile);
+        // В отличие от локальных плиток выше (сохраняют свою видимость,
+        // см. doc-комментарий placeTile()), удалённая плитка в
+        // remoteVideoTiles_ по инварианту этого класса всегда должна
+        // быть видна, пока существует (см. removeRemoteVideo()) —
+        // явно восстанавливаем на случай, если что-то её скрыло.
+        tile->setVisible(true);
+    }
+    updateVideoStripVisibility();
+}
+
+void CallWindow::closeEvent(QCloseEvent* event) {
+    event->ignore();
+    emit minimizeRequested();
 }
 
 }  // namespace devicehub

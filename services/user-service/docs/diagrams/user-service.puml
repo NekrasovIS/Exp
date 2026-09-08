@@ -217,6 +217,30 @@ note right of HttpServer
                                         отвечает {friends: bool})
 end note
 
+note right of HttpServer
+  Issue #225 (pentest), верифицировано без находок:
+  - PATCH /users/me никогда не читает "login" из
+    тела запроса (см. handleUpdateOwnProfile()) —
+    самозванство через тело невозможно.
+  - accept/decline чужой заявки — WHERE recipient_login
+    сверяется с логином из токена в
+    UserRepository::respondToFriendRequest(), не
+    совпало -> kNotYourRequest -> тот же 404, что и
+    kNoSuchRequest (не палит существование чужой
+    заявки другим кодом ответа).
+  - Повторное использование id уже обработанной
+    заявки — тот же respondToFriendRequest() ищет
+    строку с WHERE status = 'pending', уже
+    accepted/declined запись не находится -> 404.
+  - POST /users/register, /users/verify-credentials,
+    /users/resolve-otp-identifier не проверяют
+    Authorization по конструкции (вызываются только
+    auth-service) — каждый принимает и возвращает
+    данные ровно по одному переданному
+    логину/identifier, без пакетного доступа или
+    перечисления остальных пользователей.
+end note
+
 note right of json_guard.json_guard
   Issue #129: nlohmann::json::parse()
   is recursive-descent and stack-

@@ -648,16 +648,26 @@ MutationResult ChatRepository::setChannelKey(std::int64_t channelId, const std::
     pqxx::work transaction(connection);
 
     const pqxx::result rows = transaction.exec(
-        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM channels ch "
-        "JOIN communities co ON co.id = ch.community_id WHERE ch.id = $1",
-        pqxx::params{channelId});
+        "SELECT ch.owner_login, ch.community_id, co.owner_login, "
+        "EXISTS(SELECT 1 FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.member_login = $2) "
+        "FROM channels ch JOIN communities co ON co.id = ch.community_id WHERE ch.id = $1",
+        pqxx::params{channelId, requesterLogin});
     if (rows.empty()) {
         return MutationResult::kNotFound;
     }
     const std::string channelOwner = rows[0][0].as<std::string>();
     const auto communityId = rows[0][1].as<std::int64_t>();
     const std::string communityOwner = rows[0][2].as<std::string>();
-    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+    // issue #217: помимо владельца канала/сообщества и модератора, ключ
+    // теперь может выдать дальше и любой участник, кто уже сам обладает
+    // развёрнутым ключом этого канала (собственная строка в
+    // channel_keys) — только тот, кто уже владеет сырым ключом, в
+    // принципе мог изготовить для кого-то ещё валидную обёрнутую копию
+    // (см. doc-комментарий в заголовке), так что это не ослабляет
+    // реальную защиту, а лишь снимает искусственное ограничение только
+    // владельцем/модератором.
+    const bool requesterAlreadyHasKey = rows[0][3].as<bool>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner && !requesterAlreadyHasKey) {
         // Issue #256 (pentest) — см. тот же комментарий в regenerateInviteCode().
         if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
             return MutationResult::kNotFound;
