@@ -34,6 +34,13 @@ class SmtpCodeDeliveryChannel : public ICodeDeliveryChannel {
 public:
     explicit SmtpCodeDeliveryChannel(SmtpConfig config);
 
+    /// Issue #227 (покрытие тестами) — не покрыто юнит-тестами и
+    /// осознанно оставлено так: реальный SMTP-хендшейк поверх
+    /// TlsConnection нельзя проверить без настоящего (или полностью
+    /// эмулирующего протокол) SMTP-сервера, а не просто мока интерфейса
+    /// ICodeDeliveryChannel. fromEnvironment() ниже (разбор конфигурации
+    /// — то, что действительно можно и нужно тестировать без сети) уже
+    /// покрыт SmtpCodeDeliveryChannelTest.
     void send(const std::string& destination, const std::string& code) const override;
 
     /// Читает SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/SMTP_FROM

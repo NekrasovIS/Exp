@@ -125,6 +125,7 @@ add_executable(auth_service_tests
     test/OtpStoreTest.cpp
     test/SmtpCodeDeliveryChannelTest.cpp
     test/TelegramCodeDeliveryChannelTest.cpp
+    test/LoggingCodeDeliveryChannelTest.cpp
     test/UserServiceClientIntegrationTest.cpp
     test/base64_utilsTest.cpp
     test/HttpServerTest.cpp

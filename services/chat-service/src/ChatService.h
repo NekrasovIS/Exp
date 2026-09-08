@@ -31,6 +31,7 @@ public:
     [[nodiscard]] std::vector<Channel> listChannels(std::int64_t communityId);
     [[nodiscard]] std::optional<Channel> findChannel(std::int64_t id);
     [[nodiscard]] std::vector<std::string> listMembers(std::int64_t communityId);
+    [[nodiscard]] bool isMember(std::int64_t communityId, const std::string& login);
     [[nodiscard]] MutationResult renameChannel(std::int64_t id, const std::string& newName,
                                                 const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteChannel(std::int64_t id, const std::string& requesterLogin);
