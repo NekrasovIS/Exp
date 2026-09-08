@@ -12,6 +12,9 @@
 namespace chat_service {
 
 namespace {
+/// Issue #226 (pentest) — см. doc-комментарий у проверки в handleCallSignal().
+constexpr std::size_t kMaxCallSignalPayloadBytes = 64 * 1024;
+
 nlohmann::json toJson(const Message& message) {
     return nlohmann::json{
         {"id", message.id},
@@ -129,6 +132,19 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
     }
 
     const auto channelId = body["channel_id"].get<std::int64_t>();
+    // Issue #256 (pentest): раньше подписка на channel_id не проверяла
+    // членство в сообществе-владельце вообще — только валидность
+    // токена, в отличие от dm_thread_id выше (isThreadParticipant()).
+    // Любой аутентифицированный пользователь мог подписаться на живой
+    // поток сообщений/typing/edit/delete/call-сигналинга чужого канала.
+    // Тот же 404-стиль ответа и здесь — не подтверждаем существование
+    // канала не-участнику.
+    const std::optional<Channel> channel = chatService_.findChannel(channelId);
+    if (!channel.has_value() || !chatService_.isMember(channel->communityId, *login)) {
+        webSocket.send(nlohmann::json{{"error", "no such channel"}}.dump());
+        webSocket.close();
+        return;
+    }
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
         subscriptions_[&webSocket] = Subscription{.login = *login, .channelId = channelId};
@@ -348,6 +364,17 @@ void WebSocketServer::handleCallSignal(ix::WebSocket& webSocket, const Subscript
                                         const nlohmann::json& body) {
     if (!body.contains("to") || !body["to"].is_string() || !body.contains("payload")) {
         webSocket.send(nlohmann::json{{"error", "expected {\"to\", \"payload\"}"}}.dump());
+        return;
+    }
+    // Issue #226 (pentest): "payload" — непрозрачные данные (SDP/ICE),
+    // ретранслируемые целевому пиру без разбора; json_guard's проверка
+    // глубины вложенности выше в handleSubscribedMessage() не спасает
+    // от одной очень длинной строки (глубина 1) — нужен отдельный
+    // предел на сериализованный размер. Реальные SDP/ICE-кандидаты —
+    // единицы-десятки КБ, 64 КиБ — запас с большим запасом, не с запасом
+    // впритык.
+    if (body["payload"].dump().size() > kMaxCallSignalPayloadBytes) {
+        webSocket.send(nlohmann::json{{"error", "'payload' exceeds the size limit"}}.dump());
         return;
     }
 

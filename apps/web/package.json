@@ -1,0 +1,13 @@
+{
+  "name": "@devicehub/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Placeholder for the thin React web client (issue #124/#220/#221) — reserves its place in the monorepo; no UI yet, only wiring to @devicehub/core to prove the workspace link resolves.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@devicehub/core": "workspace:*"
+  }
+}

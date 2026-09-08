@@ -1,0 +1,10 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# esbuild's postinstall script only downloads its prebuilt native binary
+# for the current platform — a well-known, widely-trusted dependency of
+# vitest/vite, safe to allow (pnpm now requires explicit opt-in for any
+# dependency's install-time scripts).
+allowBuilds:
+  esbuild: true

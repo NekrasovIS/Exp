@@ -132,6 +132,21 @@ HttpServer --> TokenService : delegates to (const&)
 HttpServer --> UserServiceClient : checks credentials via (const&)
 HttpServer --> ICodeDeliveryChannel : доставляет код через (email, const&)
 HttpServer --> ICodeDeliveryChannel : доставляет код через (Telegram, const*,\nnullable — issue #174)
+note right of HttpServer
+  RateLimiter (issue #102) по request.remote_addr
+  защищает handleIssueToken/handleRegister/
+  handleOtpRequest/handleOtpVerify — каждый
+  начинается с rateLimiter_.allow(...) и отвечает
+  429 при исчерпании окна. handleVerifyToken и
+  handleRefresh сознательно НЕ лимитированы (issue
+  #224, pentest-проход подтвердил это как осознанное
+  решение, не пропуск) — ни один не принимает
+  учётные данные, только уже подписанный токен;
+  подобрать валидную HMAC-подпись перебором
+  нереально, так что ограничивать частоту здесь
+  нечего защищать от подбора — только от общей CPU-
+  нагрузки, что не входит в задачу RateLimiter.
+end note
 HttpServer *-- OtpStore : owns
 HttpServer *-- HttplibServer : owns
 

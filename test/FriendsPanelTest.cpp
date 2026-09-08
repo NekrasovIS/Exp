@@ -3,8 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <QListWidget>
-#include <QPushButton>
 #include <QSignalSpy>
+#include <QWidget>
 
 namespace devicehub {
 namespace {
@@ -60,13 +60,33 @@ TEST(FriendsPanelTest, SetIncomingRequestsReplacesPreviousContents) {
     EXPECT_EQ(panel.requestsList()->count(), 0);
 }
 
-TEST(FriendsPanelTest, ClickingBackEmitsBackToCommunitiesRequested) {
+// issue #216: FriendsPanel больше не заменяет ChannelsPanel в общей
+// раскладке (и с ней не убирается кнопка "< Communities" — панель
+// всплывает поверх своего родителя, закрывается тем же переключателем
+// "Friends", что её открыл, см. MainWindow::onFriendsButtonClicked()).
+TEST(FriendsPanelTest, SetOpenTogglesIsOpen) {
+    QWidget host;
+    host.resize(240, 600);
+    FriendsPanel panel(&host);
+
+    EXPECT_FALSE(panel.isOpen());
+
+    panel.setOpen(true);
+    EXPECT_TRUE(panel.isOpen());
+
+    panel.setOpen(false);
+    EXPECT_FALSE(panel.isOpen());
+}
+
+// Без родителя-виджета (как во всех остальных тестах этого файла) панель
+// не может ничего перекрывать собой — setOpen() безопасно ничего не
+// делает, а не падает на nullptr parentWidget().
+TEST(FriendsPanelTest, SetOpenWithoutAParentIsANoOp) {
     FriendsPanel panel;
-    QSignalSpy spy(&panel, &FriendsPanel::backToCommunitiesRequested);
 
-    emit panel.backButton()->clicked();
+    panel.setOpen(true);
 
-    EXPECT_EQ(spy.count(), 1);
+    EXPECT_FALSE(panel.isOpen());
 }
 
 }  // namespace

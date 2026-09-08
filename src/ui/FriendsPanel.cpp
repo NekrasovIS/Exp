@@ -1,6 +1,9 @@
 #include "ui/FriendsPanel.h"
 
+#include <QAbstractAnimation>
 #include <QColor>
+#include <QEasingCurve>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -9,6 +12,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPoint>
+#include <QPropertyAnimation>
 #include <QPushButton>
 #include <QSize>
 #include <QVBoxLayout>
@@ -22,6 +26,7 @@ namespace {
 constexpr int kRequestIdRole = Qt::UserRole;
 constexpr int kIconButtonSize = 28;
 constexpr int kIconSize = 14;
+constexpr int kSlideDurationMs = 200;
 }  // namespace
 
 FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
@@ -35,10 +40,6 @@ FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
     auto* header = new QHBoxLayout;
     header->setSpacing(ui_theme::kSpacingSm);
 
-    backButton_ = new QPushButton(tr("< Communities"), this);
-    backButton_->setObjectName(QStringLiteral("backToCommunitiesButton"));
-    backButton_->setToolTip(tr("Back to communities"));
-
     auto* title = new QLabel(tr("Friends"), this);
     title->setProperty("sectionTitle", true);
 
@@ -51,7 +52,6 @@ FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
     addFriendButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     addFriendButton_->setProperty("iconOnly", true);
 
-    header->addWidget(backButton_);
     header->addWidget(title);
     header->addStretch();
     header->addWidget(addFriendButton_);
@@ -80,12 +80,27 @@ FriendsPanel::FriendsPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(friendsTitle);
     layout->addWidget(friendsList_, /*stretch=*/1);
 
-    connect(backButton_, &QPushButton::clicked, this, &FriendsPanel::backToCommunitiesRequested);
     connect(addFriendButton_, &QPushButton::clicked, this, &FriendsPanel::showAddFriendDialog);
     connect(requestsList_, &QListWidget::customContextMenuRequested, this, &FriendsPanel::showRequestContextMenu);
     connect(friendsList_, &QListWidget::customContextMenuRequested, this, &FriendsPanel::showFriendContextMenu);
     connect(friendsList_, &QListWidget::itemClicked, this,
             [this](QListWidgetItem* item) { emit friendSelected(item->text()); });
+
+    // Оверлей (issue #216): не участвует в layout'е родителя (тот же
+    // приём, что и у ToastBanner) — сама следит за его resize() и
+    // держит собственную геометрию синхронной, пока не идёт анимация.
+    slideAnimation_ = new QPropertyAnimation(this, "geometry", this);
+    slideAnimation_->setDuration(kSlideDurationMs);
+    slideAnimation_->setEasingCurve(QEasingCurve::OutCubic);
+    connect(slideAnimation_, &QPropertyAnimation::finished, this, [this]() {
+        if (!open_) {
+            hide();
+        }
+    });
+    if (parent != nullptr) {
+        parent->installEventFilter(this);
+    }
+    hide();
 }
 
 void FriendsPanel::setFriends(const QStringList& logins) {
@@ -101,6 +116,44 @@ void FriendsPanel::setIncomingRequests(const QList<FriendRequestInfo>& requests)
         auto* item = new QListWidgetItem(tr("%1 wants to be friends").arg(request.requesterLogin), requestsList_);
         item->setData(kRequestIdRole, request.id);
     }
+}
+
+void FriendsPanel::setOpen(bool open) {
+    if (open == open_ || parentWidget() == nullptr) {
+        return;
+    }
+    open_ = open;
+
+    if (open) {
+        setGeometry(hiddenGeometry());
+        show();
+        raise();
+    }
+    slideAnimation_->stop();
+    slideAnimation_->setStartValue(geometry());
+    slideAnimation_->setEndValue(open ? visibleGeometry() : hiddenGeometry());
+    slideAnimation_->start();
+}
+
+bool FriendsPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == parentWidget() && event->type() == QEvent::Resize &&
+        slideAnimation_->state() != QAbstractAnimation::Running) {
+        // Держим геометрию синхронной с изменившимся размером родителя —
+        // во время самой анимации не трогаем, чтобы не оборвать слайд на
+        // полпути (редкий edge case, сознательно не пытаемся починить).
+        setGeometry(open_ ? visibleGeometry() : hiddenGeometry());
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+QRect FriendsPanel::visibleGeometry() const {
+    return parentWidget()->rect();
+}
+
+QRect FriendsPanel::hiddenGeometry() const {
+    QRect rect = parentWidget()->rect();
+    rect.moveLeft(-rect.width());
+    return rect;
 }
 
 void FriendsPanel::showAddFriendDialog() {

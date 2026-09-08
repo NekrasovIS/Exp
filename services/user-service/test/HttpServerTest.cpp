@@ -324,6 +324,53 @@ TEST(HttpServerTest, UpdateOwnProfileRoundTripsThroughGetProfileAndPreservesUnse
     EXPECT_EQ(profile["public_key"].get<std::string>(), "base64-x25519-public-key");
 }
 
+TEST(HttpServerTest, GetProfileRouteHidesEmailAndTelegramChatIdForOtherUsers) {
+    // issue #225 (pentest) / issue #243: email/telegram_chat_id — приватные
+    // каналы доставки OTP-кода, не публичный профиль. Раньше
+    // GET /users/{login}/profile отдавал их безусловно, даже когда
+    // {login} — не сам вызывающий, а произвольный другой пользователь.
+    const std::string tokenA = registerViaAuthServiceAndGetToken("http-server-profile-privacy-a");
+    const std::string tokenB = registerViaAuthServiceAndGetToken("http-server-profile-privacy-b");
+    if (tokenA.empty() || tokenB.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headersB{{"Authorization", "Bearer " + tokenB}};
+    const std::string email = uniqueLogin("profile-privacy-email") + "@example.test";
+    const std::string telegramChatId = uniqueLogin("profile-privacy-chat-id");
+    const httplib::Result patchResult = client.Patch(
+        "/users/me", headersB, nlohmann::json{{"email", email}, {"telegram_chat_id", telegramChatId}}.dump(),
+        "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+    const std::string loginB = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+
+    // B видит свои же приватные поля, глядя на собственный профиль.
+    const httplib::Result ownProfileResult = client.Get("/users/" + loginB + "/profile", headersB);
+    ASSERT_TRUE(ownProfileResult);
+    ASSERT_EQ(ownProfileResult->status, 200);
+    const nlohmann::json ownProfile = nlohmann::json::parse(ownProfileResult->body);
+    EXPECT_EQ(ownProfile["email"].get<std::string>(), email);
+    EXPECT_EQ(ownProfile["telegram_chat_id"].get<std::string>(), telegramChatId);
+
+    // A смотрит на профиль B — приватные поля должны отсутствовать
+    // целиком (не просто null), публичные — остаются на месте.
+    httplib::Headers headersA{{"Authorization", "Bearer " + tokenA}};
+    const httplib::Result otherProfileResult = client.Get("/users/" + loginB + "/profile", headersA);
+    ASSERT_TRUE(otherProfileResult);
+    ASSERT_EQ(otherProfileResult->status, 200);
+    const nlohmann::json otherProfile = nlohmann::json::parse(otherProfileResult->body);
+    EXPECT_FALSE(otherProfile.contains("email"));
+    EXPECT_FALSE(otherProfile.contains("telegram_chat_id"));
+    EXPECT_EQ(otherProfile["login"].get<std::string>(), loginB);
+}
+
 TEST(HttpServerTest, ResolveOtpIdentifierRouteRejectsMissingFieldWith400) {
     UserRepository repository(connectionString());
     UserService userService(repository);
@@ -461,6 +508,140 @@ TEST(HttpServerTest, SendFriendRequestRouteRejectsMissingTokenWith401) {
 
     ASSERT_TRUE(result);
     EXPECT_EQ(result->status, 401);
+}
+
+// Issue #228 (покрытие тестами) — authenticate() возвращает
+// std::nullopt без сетевого обращения к auth-service, когда заголовок
+// Authorization вообще отсутствует/не в формате "Bearer <token>" (см.
+// HttpServer::authenticate()), так что этот сценарий для каждого
+// маршрута ниже проверяется без живого auth-service, в отличие от
+// самих round-trip тестов дальше в этом файле.
+TEST(HttpServerTest, UpdateOwnProfileRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Patch("/users/me", nlohmann::json{{"display_name", "Mallory"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, ListIncomingFriendRequestsRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/friends/requests");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, AcceptFriendRequestRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/friends/requests/1/accept", "", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, DeclineFriendRequestRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/friends/requests/1/decline", "", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, ListFriendsRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/friends");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, RemoveFriendRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Delete("/friends/anyone");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Issue #228 (покрытие тестами) — /internal/friendship не вызывает
+// authenticate() вообще (см. HttpServer::handleCheckFriendship()):
+// внутренний маршрут только для chat-service (см. README), а не для
+// клиентов напрямую — так что весь его функционал проверяется без
+// живого auth-service, в отличие от остальных маршрутов /friends/*.
+TEST(HttpServerTest, CheckFriendshipRouteRejectsMissingQueryParamsWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/internal/friendship?user_a=alice");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, CheckFriendshipRouteReturnsFalseThenTrueAfterBefriending) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    const std::string loginA = uniqueLogin("http-server-checkfriend-a");
+    const std::string loginB = uniqueLogin("http-server-checkfriend-b");
+    ASSERT_TRUE(userService.registerUser(loginA, "irrelevant-password"));
+    ASSERT_TRUE(userService.registerUser(loginB, "irrelevant-password"));
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result beforeResult =
+        client.Get("/internal/friendship?user_a=" + loginA + "&user_b=" + loginB);
+    ASSERT_TRUE(beforeResult);
+    ASSERT_EQ(beforeResult->status, 200);
+    EXPECT_FALSE(nlohmann::json::parse(beforeResult->body)["friends"].get<bool>());
+
+    ASSERT_EQ(userService.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kSent);
+    const std::vector<FriendRequestInfo> incoming = userService.listIncomingFriendRequests(loginB);
+    ASSERT_FALSE(incoming.empty());
+    ASSERT_EQ(userService.respondToFriendRequest(incoming[0].id, loginB, /*accept=*/true),
+              RespondToFriendRequestResult::kAccepted);
+
+    const httplib::Result afterResult =
+        client.Get("/internal/friendship?user_a=" + loginA + "&user_b=" + loginB);
+    ASSERT_TRUE(afterResult);
+    ASSERT_EQ(afterResult->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(afterResult->body)["friends"].get<bool>());
 }
 
 // Остальные сценарии (400/201/incoming-list/accept/friends-list)
