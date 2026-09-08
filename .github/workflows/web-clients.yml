@@ -1,0 +1,64 @@
+name: Web clients
+
+on:
+  push:
+    branches: ["**"]
+    # issue #258: обратная сторона фильтра в ci.yml — этот workflow
+    # тестирует только TS-монорепо (apps/, packages/ — issue
+    # #219/#247-250), полностью отдельный тулчейн от C++/Qt/vcpkg-стороны
+    # (ci.yml). PR/push, трогающие только services/, src/, test/ и т.п.,
+    # не должны ждать/запускать pnpm install-build-test-lint здесь без
+    # всякой причины.
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-*.yaml"
+      - "package.json"
+      - ".github/workflows/web-clients.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-*.yaml"
+      - "package.json"
+      - ".github/workflows/web-clients.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-clients:
+    # TypeScript monorepo (issue #219, apps/web + apps/mobile +
+    # packages/core) — completely separate toolchain from the C++/Qt
+    # project in ci.yml (no vcpkg, no Qt6/WebRTC build), so this job stays
+    # fast rather than sharing build-and-test's runtime.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm (via corepack, version pinned in package.json)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format
