@@ -38,6 +38,7 @@
 #include "ui/CommunitiesPanel.h"
 #include "ui/DesktopNotifier.h"
 #include "ui/DirectMessageView.h"
+#include "ui/FloatingCallTilesOverlay.h"
 #include "ui/FooterBar.h"
 #include "ui/FriendsPanel.h"
 #include "ui/LoginWindow.h"
@@ -280,6 +281,9 @@ MainWindow::MainWindow(QWidget* parent)
     // действию, что и клик по кнопке звонка в ChatView, когда мы уже в
     // звонке — переиспользуем тот же слот, а не дублируем его тело.
     connect(callWindow_, &CallWindow::leaveCallRequested, this, &MainWindow::onCallToggleClicked);
+    connect(callWindow_, &CallWindow::minimizeRequested, this, &MainWindow::onCallMinimizeRequested);
+    connect(floatingCallTilesOverlay_, &FloatingCallTilesOverlay::restoreRequested, this,
+            &MainWindow::onCallRestoreRequested);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
     connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
@@ -842,6 +846,7 @@ void MainWindow::buildUi() {
     // жизни через дерево QObject (this как родитель), показывает/скрывает
     // по фактическому входу/выходу из звонка.
     callWindow_ = new CallWindow(this);
+    floatingCallTilesOverlay_ = new FloatingCallTilesOverlay(this);
 
     // Список участников сообщества справа от чата — элемент раскладки,
     // которого раньше не было вовсе (issue #182); та же 240px ширина,
@@ -1027,6 +1032,21 @@ void MainWindow::onCallToggleClicked() {
     callWindow_->activateWindow();
 }
 
+void MainWindow::onCallMinimizeRequested() {
+    callWindow_->detachTilesTo(floatingCallTilesOverlay_->canvas());
+    callWindow_->hide();
+    floatingCallTilesOverlay_->show();
+    floatingCallTilesOverlay_->raise();
+}
+
+void MainWindow::onCallRestoreRequested() {
+    callWindow_->reattachTiles();
+    floatingCallTilesOverlay_->hide();
+    callWindow_->show();
+    callWindow_->raise();
+    callWindow_->activateWindow();
+}
+
 void MainWindow::onMuteToggleClicked() {
     callManager_.setMuted(!callManager_.isMuted());
     callWindow_->setMuted(callManager_.isMuted());
@@ -1069,8 +1089,13 @@ void MainWindow::leaveCallIfActive() {
     callManager_.leaveCall();
     callParticipants_.clear();
     callWindow_->setCallParticipants(callParticipants_);
+    // resetForNewCall() уже возвращает плитки в videoStrip_ первым делом
+    // (issue #215, на случай если звонок закончился, пока был свёрнут) —
+    // оверлей на этот момент мог быть виден, прячем и его, не только
+    // callWindow_.
     callWindow_->resetForNewCall();
     callWindow_->hide();
+    floatingCallTilesOverlay_->hide();
     chatView_->setCallState(false);
 }
 

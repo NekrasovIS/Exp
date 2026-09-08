@@ -196,5 +196,106 @@ TEST(CallWindowTest, ClickingLeaveCallButtonEmitsLeaveCallRequested) {
     EXPECT_EQ(spy.count(), 1);
 }
 
+TEST(CallWindowTest, ClickingMinimizeButtonEmitsMinimizeRequested) {
+    CallWindow window;
+    QSignalSpy spy(&window, &CallWindow::minimizeRequested);
+
+    emit window.minimizeButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(CallWindowTest, ClosingTheWindowEmitsMinimizeRequestedInsteadOfClosing) {
+    // issue #215: closeEvent() перенаправляет на то же самое, что и клик
+    // "Minimize" — окно не закрывается само по себе (event->ignore()), а
+    // значит close() не должен переводить его в скрытое состояние, если
+    // оно перед этим было видимым.
+    CallWindow window;
+    window.show();
+    QSignalSpy spy(&window, &CallWindow::minimizeRequested);
+
+    window.close();
+
+    EXPECT_EQ(spy.count(), 1);
+    EXPECT_FALSE(window.isHidden());
+}
+
+TEST(CallWindowTest, DetachTilesToMovesActiveTilesToNewHostAndShrinksThem) {
+    // issue #215: свёрнутое состояние — плитки переносятся (setParent), а
+    // не пересоздаются, и уменьшаются до компактного размера.
+    CallWindow window;
+    QWidget overlayCanvas;
+    window.setVideoEnabled(true);
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
+    auto* localTile = qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget());
+    auto* remoteTile = qobject_cast<DraggableVideoTile*>(
+        window.findChild<QLabel*>(QStringLiteral("remoteVideoTile"))->parentWidget());
+    const int fullSize = localTile->width();
+
+    window.detachTilesTo(&overlayCanvas);
+
+    EXPECT_EQ(localTile->parentWidget(), &overlayCanvas);
+    EXPECT_EQ(remoteTile->parentWidget(), &overlayCanvas);
+    EXPECT_LT(localTile->width(), fullSize);
+    EXPECT_LT(remoteTile->width(), fullSize);
+}
+
+TEST(CallWindowTest, DetachTilesToPreservesDisabledLocalTileVisibility) {
+    // issue #215: участник без активного видео не должен внезапно
+    // "появиться" только оттого, что звонок свернули — detachTilesTo()
+    // переносит плитки как есть, не форсируя их видимыми.
+    CallWindow window;
+    QWidget overlayCanvas;
+    ASSERT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
+
+    window.detachTilesTo(&overlayCanvas);
+
+    EXPECT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
+}
+
+TEST(CallWindowTest, ReattachTilesRestoresVideoStripAsHostAndFullSize) {
+    CallWindow window;
+    QWidget overlayCanvas;
+    window.setVideoEnabled(true);
+    window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
+    auto* localTile = qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget());
+    auto* remoteTile = qobject_cast<DraggableVideoTile*>(
+        window.findChild<QLabel*>(QStringLiteral("remoteVideoTile"))->parentWidget());
+    const int fullSize = localTile->width();
+    window.detachTilesTo(&overlayCanvas);
+    ASSERT_LT(localTile->width(), fullSize);
+
+    window.reattachTiles();
+
+    EXPECT_NE(localTile->parentWidget(), &overlayCanvas);
+    EXPECT_NE(remoteTile->parentWidget(), &overlayCanvas);
+    EXPECT_EQ(localTile->width(), fullSize);
+    EXPECT_EQ(remoteTile->width(), fullSize);
+    // Инвариант удалённых плиток (см. removeRemoteVideo()) — всегда видны,
+    // пока существуют, независимо от свёрнутого/развёрнутого состояния.
+    EXPECT_FALSE(remoteTile->isHidden());
+}
+
+TEST(CallWindowTest, TilesCreatedWhileMinimizedGoStraightToTheOverlayHost) {
+    // issue #215: новый удалённый видеопоток, впервые появившийся уже
+    // после сворачивания, тоже должен попасть в оверлей, а не молча
+    // создаться в скрытом videoStrip_.
+    CallWindow window;
+    QWidget overlayCanvas;
+    window.detachTilesTo(&overlayCanvas);
+
+    window.showRemoteVideoFrame(QStringLiteral("bob"), QImage(4, 4, QImage::Format_ARGB32),
+                                 /*isScreenShare=*/false);
+
+    // Плитка теперь живёт под overlayCanvas, а не под window (setParent()
+    // в placeTile() переносит её из дерева CallWindow), поэтому искать
+    // нужно там же.
+    auto* remoteTile = qobject_cast<DraggableVideoTile*>(
+        overlayCanvas.findChild<QLabel*>(QStringLiteral("remoteVideoTile"))->parentWidget());
+    EXPECT_EQ(remoteTile->parentWidget(), &overlayCanvas);
+}
+
 }  // namespace
 }  // namespace devicehub
