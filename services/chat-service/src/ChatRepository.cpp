@@ -24,6 +24,17 @@ bool isModerator(pqxx::work& transaction, std::int64_t communityId, const std::s
     return !rows.empty() && rows[0][0].as<bool>();
 }
 
+/// @return True, если @p login состоит в @p communityId, в рамках уже
+/// открытой @p transaction — issue #256 (pentest): используется owner/
+/// moderator-gated мутациями ниже, чтобы отличать "не состоит в
+/// сообществе вообще" (kNotFound, не подтверждаем существование) от
+/// "состоит, но не владелец/модератор" (kForbidden).
+bool isMemberOfCommunity(pqxx::work& transaction, std::int64_t communityId, const std::string& login) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT 1 FROM memberships WHERE community_id = $1 AND member_login = $2", pqxx::params{communityId, login});
+    return !rows.empty();
+}
+
 /// direct_message_threads хранит неупорядоченную пару в каноническом
 /// порядке (меньший login первым) — одна строка вместо двух, тот же
 /// приём, что и у friendships в user-service.
@@ -150,6 +161,11 @@ RegenerateInviteCodeResult ChatRepository::regenerateInviteCode(std::int64_t com
         return RegenerateInviteCodeResult{.result = MutationResult::kNotFound};
     }
     if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest): не состоит в сообществе вообще — 404,
+        // не подтверждаем существование, а не 403.
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return RegenerateInviteCodeResult{.result = MutationResult::kNotFound};
+        }
         return RegenerateInviteCodeResult{.result = MutationResult::kForbidden};
     }
 
@@ -170,6 +186,10 @@ MutationResult ChatRepository::renameCommunity(std::int64_t id, const std::strin
         return MutationResult::kNotFound;
     }
     if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest) — см. тот же комментарий в regenerateInviteCode().
+        if (!isMemberOfCommunity(transaction, id, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
         return MutationResult::kForbidden;
     }
 
@@ -188,6 +208,10 @@ MutationResult ChatRepository::deleteCommunity(std::int64_t id, const std::strin
         return MutationResult::kNotFound;
     }
     if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest) — см. тот же комментарий в regenerateInviteCode().
+        if (!isMemberOfCommunity(transaction, id, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
         return MutationResult::kForbidden;
     }
 
@@ -277,6 +301,12 @@ std::vector<std::string> ChatRepository::listMembers(std::int64_t communityId) {
     return members;
 }
 
+bool ChatRepository::isMember(std::int64_t communityId, const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+    return isMemberOfCommunity(transaction, communityId, login);
+}
+
 MutationResult ChatRepository::renameChannel(std::int64_t id, const std::string& newName,
                                               const std::string& requesterLogin) {
     pqxx::connection connection(connectionString_);
@@ -292,9 +322,16 @@ MutationResult ChatRepository::renameChannel(std::int64_t id, const std::string&
     const std::string channelOwner = rows[0][0].as<std::string>();
     const auto communityId = rows[0][1].as<std::int64_t>();
     const std::string communityOwner = rows[0][2].as<std::string>();
-    if (requesterLogin != channelOwner && requesterLogin != communityOwner &&
-        !isModerator(transaction, communityId, requesterLogin)) {
-        return MutationResult::kForbidden;
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        // Issue #256 (pentest): не состоит в сообществе вообще — не
+        // подтверждаем существование канала кому попало, тот же 404,
+        // что и для реально несуществующего id.
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return MutationResult::kForbidden;
+        }
     }
 
     try {
@@ -320,9 +357,14 @@ MutationResult ChatRepository::deleteChannel(std::int64_t id, const std::string&
     const std::string channelOwner = rows[0][0].as<std::string>();
     const auto communityId = rows[0][1].as<std::int64_t>();
     const std::string communityOwner = rows[0][2].as<std::string>();
-    if (requesterLogin != channelOwner && requesterLogin != communityOwner &&
-        !isModerator(transaction, communityId, requesterLogin)) {
-        return MutationResult::kForbidden;
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        // Issue #256 (pentest) — см. тот же комментарий в renameChannel().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return MutationResult::kForbidden;
+        }
     }
 
     // messages каскадно удаляются через ON DELETE CASCADE (см. db/init.sql).
@@ -357,6 +399,10 @@ MutationResult ChatRepository::promoteModerator(std::int64_t communityId, const 
         return MutationResult::kNotFound;
     }
     if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest) — см. тот же комментарий в regenerateInviteCode().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
         return MutationResult::kForbidden;
     }
 
@@ -379,6 +425,10 @@ MutationResult ChatRepository::demoteModerator(std::int64_t communityId, const s
         return MutationResult::kNotFound;
     }
     if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest) — см. тот же комментарий в regenerateInviteCode().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
         return MutationResult::kForbidden;
     }
 
@@ -549,15 +599,17 @@ std::optional<AttachmentData> ChatRepository::findAttachmentData(std::int64_t at
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows = transaction.exec(
-        "SELECT filename, content_type, data_base64 FROM attachments WHERE id = $1", pqxx::params{attachmentId});
+    const pqxx::result rows =
+        transaction.exec("SELECT filename, content_type, data_base64, channel_id FROM attachments WHERE id = $1",
+                          pqxx::params{attachmentId});
     if (rows.empty()) {
         return std::nullopt;
     }
 
     return AttachmentData{.filename = rows[0][0].as<std::string>(),
                            .contentType = rows[0][1].as<std::string>(),
-                           .data = rows[0][2].as<std::string>()};
+                           .data = rows[0][2].as<std::string>(),
+                           .channelId = rows[0][3].as<std::int64_t>()};
 }
 
 std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, const std::string& query, int limit) {
@@ -605,9 +657,14 @@ MutationResult ChatRepository::setChannelKey(std::int64_t channelId, const std::
     const std::string channelOwner = rows[0][0].as<std::string>();
     const auto communityId = rows[0][1].as<std::int64_t>();
     const std::string communityOwner = rows[0][2].as<std::string>();
-    if (requesterLogin != channelOwner && requesterLogin != communityOwner &&
-        !isModerator(transaction, communityId, requesterLogin)) {
-        return MutationResult::kForbidden;
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        // Issue #256 (pentest) — см. тот же комментарий в regenerateInviteCode().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return MutationResult::kForbidden;
+        }
     }
 
     transaction.exec(
