@@ -1,0 +1,47 @@
+/*
+ * Shared field/button layout for OtpLoginForm and PasswordAuthForm
+ * (issue #282) — both are a vertical stack of label+input pairs, an
+ * optional error, a primary submit button, and a secondary text
+ * button, so the shape lives here once instead of twice.
+ */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.submitButton {
+  width: 100%;
+}
+
+.secondaryButton {
+  width: 100%;
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.secondaryButton:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: transparent;
+  background: transparent;
+}
