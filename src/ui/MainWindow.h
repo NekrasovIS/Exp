@@ -165,14 +165,21 @@ private:
     /// через statusBar() — так гораздо легче заметить.
     void showToast(const QString& text, ToastBanner::Variant variant);
 
-    /// Переключает боковую панель/основную область в режим "Friends"
-    /// (issue #187, Фаза 3) — FriendsPanel вместо ChannelsPanel,
+    /// Открывает FriendsPanel как всплывающую панель поверх ChannelsPanel
+    /// (issue #187, Фаза 3; issue #216 — оверлей вместо подмены панели в
+    /// общей раскладке) и переключает основную область на
     /// DirectMessageView вместо ChatView; заново запрашивает список
     /// друзей и входящих заявок.
     void showFriendsMode();
-    /// Обратное переключение — вызывается при выборе сообщества, тем
-    /// самым не нужно отдельной кнопки "назад".
+    /// Обратное переключение — сворачивает FriendsPanel и возвращает
+    /// основную область к ChatView. Вызывается и по повторному клику на
+    /// кнопку "Friends" (см. onFriendsButtonClicked()), и при выборе
+    /// сообщества, и при выходе из аккаунта — тем самым не нужно
+    /// отдельной кнопки "назад" в самой FriendsPanel.
     void showCommunitiesMode();
+    /// Кнопка "Friends" в CommunitiesPanel — переключатель (issue #216):
+    /// открывает FriendsPanel, если она сейчас свёрнута, иначе сворачивает.
+    void onFriendsButtonClicked();
     /// Открывает диалог с @p login — вызывается по клику на друга в
     /// FriendsPanel; фактическое переключение contentStack_ происходит
     /// в обработчике ChatRestClient::dmThreadOpened(), а не здесь,
@@ -272,8 +279,9 @@ private:
 
     CommunitiesPanel* communitiesPanel_ = nullptr;
     ChannelsPanel* channelsPanel_ = nullptr;
+    /// Всплывает поверх ChannelsPanel, не заменяет её в раскладке (issue
+    /// #216) — см. doc-комментарий класса FriendsPanel.
     FriendsPanel* friendsPanel_ = nullptr;
-    QStackedWidget* sidebarListStack_ = nullptr;
     ChatView* chatView_ = nullptr;
     CallWindow* callWindow_ = nullptr;
     MemberListPanel* memberListPanel_ = nullptr;

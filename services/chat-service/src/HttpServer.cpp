@@ -18,17 +18,23 @@ constexpr int kDefaultMessageLimit = 50;
 /// doc-комментарий класса ChatRepository о том, почему вложения
 /// хранятся как base64 TEXT, а не как BYTEA/на диске.
 constexpr std::size_t kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
+/// Issue #226 (pentest) — см. doc-комментарий у проверки в
+/// handleUploadAttachment().
+constexpr std::size_t kMaxAttachmentFilenameLength = 255;
 constexpr int kDefaultSearchLimit = 20;
 
 // Имена файлов вложений приходят от недоверенного клиента (issue #116)
 // и встраиваются дословно в заголовок ответа Content-Disposition —
-// перед этим вырезает CR/LF (инъекция типа header/response-splitting) и
-// '"' (иначе позволило бы вырваться из значения имени файла в кавычках).
+// перед этим вырезает '"' (иначе позволило бы вырваться из значения
+// имени файла в кавычках) и все управляющие символы ASCII (0x00-0x1F,
+// включая CR/LF — инъекция типа header/response-splitting, issue #226
+// pentest: сюда же относятся и прочие control-символы, не только
+// CR/LF, на случай менее строгих клиентских парсеров заголовков).
 std::string sanitizeForHeaderValue(const std::string& value) {
     std::string sanitized;
     sanitized.reserve(value.size());
     for (const char c : value) {
-        if (c != '\r' && c != '\n' && c != '"') {
+        if (static_cast<unsigned char>(c) >= 0x20 && c != '"') {
             sanitized += c;
         }
     }
@@ -418,6 +424,16 @@ void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::R
                               body["is_encrypted"].get<bool>();
 
     const auto communityId = std::stoll(request.matches[1].str());
+    // Issue #256 (pentest): раньше кто угодно мог создать канал в чужом
+    // сообществе, зная только его id — тот же 404, что и для реально
+    // несуществующего сообщества, не подтверждаем его существование не-участнику.
+    if (!chatService_.isMember(communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such community, or channel name already taken"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
     const std::optional<std::int64_t> channelId =
         chatService_.createChannel(communityId, body["name"].get<std::string>(), *login, isEncrypted);
     if (!channelId.has_value()) {
@@ -432,12 +448,23 @@ void HttpServer::handleCreateChannel(const httplib::Request& request, httplib::R
 }
 
 void HttpServer::handleListChannels(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
 
     const auto communityId = std::stoll(request.matches[1].str());
+    // Issue #256 (pentest): раньше это отдавалось любому аутентифицированному
+    // пользователю, а не только участникам сообщества — 404 не подтверждает
+    // существование сообщества чужаку, тот же принцип, что уже применяется
+    // к личным диалогам (isThreadParticipant()).
+    if (!chatService_.isMember(communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such community"}}.dump(), kJsonContentType);
+        return;
+    }
+
     nlohmann::json channels = nlohmann::json::array();
     for (const Channel& channel : chatService_.listChannels(communityId)) {
         channels.push_back(toJson(channel));
@@ -480,12 +507,24 @@ void HttpServer::handleDeleteChannel(const httplib::Request& request, httplib::R
 }
 
 void HttpServer::handleListMessages(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
 
     const auto channelId = std::stoll(request.matches[1].str());
+    // Issue #256 (pentest): раньше отдавало полную историю сообщений
+    // канала любому аутентифицированному пользователю — 404 и для
+    // несуществующего канала, и для существующего, но чужого (не
+    // подтверждаем существование не-участнику).
+    const std::optional<Channel> channel = chatService_.findChannel(channelId);
+    if (!channel.has_value() || !chatService_.isMember(channel->communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such channel"}}.dump(), kJsonContentType);
+        return;
+    }
+
     const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultMessageLimit;
     const std::optional<std::int64_t> beforeId =
         request.has_param("before_id") ? std::make_optional(std::stoll(request.get_param_value("before_id")))
@@ -534,15 +573,23 @@ void HttpServer::handleDemoteModerator(const httplib::Request& request, httplib:
 }
 
 void HttpServer::handleListModerators(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
 
     const auto communityId = std::stoll(request.matches[1].str());
+    // Issue #256 (pentest) — см. тот же комментарий в handleListChannels().
+    if (!chatService_.isMember(communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such community"}}.dump(), kJsonContentType);
+        return;
+    }
+
     nlohmann::json moderators = nlohmann::json::array();
-    for (const std::string& login : chatService_.listModerators(communityId)) {
-        moderators.push_back(login);
+    for (const std::string& moderatorLogin : chatService_.listModerators(communityId)) {
+        moderators.push_back(moderatorLogin);
     }
     response.set_content(moderators.dump(), kJsonContentType);
 }
@@ -569,6 +616,19 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
             kJsonContentType);
         return;
     }
+    // Issue #226 (pentest): не было предела длины вообще — filename
+    // дословно попадает в заголовок Content-Disposition при каждом
+    // скачивании (см. sanitizeForHeaderValue() выше), так что
+    // произвольно длинное имя было бы вектором для непропорционально
+    // большого заголовка ответа на каждой попытке скачать файл снова.
+    // 255 — обычный предел имени файла большинства файловых систем, не
+    // специфичное для этого проекта число.
+    if (body["filename"].get<std::string>().size() > kMaxAttachmentFilenameLength) {
+        response.status = 400;
+        response.set_content(
+            nlohmann::json{{"error", "'filename' exceeds the 255-character limit"}}.dump(), kJsonContentType);
+        return;
+    }
 
     const std::string dataBase64 = body["data_base64"].get<std::string>();
     const std::optional<std::string> decoded = base64::decode(dataBase64);
@@ -586,7 +646,15 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
 
     const auto channelId = std::stoll(request.matches[1].str());
     const std::optional<Channel> channel = chatService_.findChannel(channelId);
-    if (channel.has_value() && channel->isEncrypted) {
+    // Issue #256 (pentest): раньше кто угодно мог загрузить файл в чужой
+    // канал, зная только его id — та же ошибка, что и для реально
+    // несуществующего канала, не подтверждаем его существование не-участнику.
+    if (!channel.has_value() || !chatService_.isMember(channel->communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such channel"}}.dump(), kJsonContentType);
+        return;
+    }
+    if (channel->isEncrypted) {
         // Вложения ещё не шифруются на стороне клиента на этом этапе
         // (issue #138) — отклоняем вместо того, чтобы молча хранить
         // открытый текст в канале, который UI представляет как зашифрованный.
@@ -619,7 +687,8 @@ void HttpServer::handleUploadAttachment(const httplib::Request& request, httplib
 }
 
 void HttpServer::handleDownloadAttachment(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
@@ -627,6 +696,16 @@ void HttpServer::handleDownloadAttachment(const httplib::Request& request, httpl
     const auto attachmentId = std::stoll(request.matches[1].str());
     const std::optional<AttachmentData> attachment = chatService_.findAttachmentData(attachmentId);
     if (!attachment.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such attachment"}}.dump(), kJsonContentType);
+        return;
+    }
+    // Issue #256 (pentest): раньше кто угодно мог скачать любой файл,
+    // зная только его id — тот же 404, что и для реально
+    // несуществующего вложения, не подтверждаем его существование
+    // не-участнику канала, которому оно принадлежит.
+    const std::optional<Channel> channel = chatService_.findChannel(attachment->channelId);
+    if (!channel.has_value() || !chatService_.isMember(channel->communityId, *login)) {
         response.status = 404;
         response.set_content(nlohmann::json{{"error", "no such attachment"}}.dump(), kJsonContentType);
         return;
@@ -649,7 +728,8 @@ void HttpServer::handleDownloadAttachment(const httplib::Request& request, httpl
 }
 
 void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
@@ -663,7 +743,15 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
 
     const auto channelId = std::stoll(request.matches[1].str());
     const std::optional<Channel> channel = chatService_.findChannel(channelId);
-    if (channel.has_value() && channel->isEncrypted) {
+    // Issue #256 (pentest): раньше отдавало результаты поиска по чужой
+    // истории сообщений любому аутентифицированному пользователю — 404
+    // и для несуществующего канала, и для существующего, но чужого.
+    if (!channel.has_value() || !chatService_.isMember(channel->communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such channel"}}.dump(), kJsonContentType);
+        return;
+    }
+    if (channel->isEncrypted) {
         // Поиску на стороне сервера нужны открытые тела для сопоставления
         // — сохранённое тело зашифрованного канала является шифротекстом,
         // так что искать здесь по существу нечего (issue #138).
@@ -684,15 +772,23 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
 }
 
 void HttpServer::handleListMembers(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
         response.status = 401;
         return;
     }
 
     const auto communityId = std::stoll(request.matches[1].str());
+    // Issue #256 (pentest) — см. тот же комментарий в handleListChannels().
+    if (!chatService_.isMember(communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such community"}}.dump(), kJsonContentType);
+        return;
+    }
+
     nlohmann::json members = nlohmann::json::array();
-    for (const std::string& login : chatService_.listMembers(communityId)) {
-        members.push_back(login);
+    for (const std::string& memberLogin : chatService_.listMembers(communityId)) {
+        members.push_back(memberLogin);
     }
     response.set_content(members.dump(), kJsonContentType);
 }

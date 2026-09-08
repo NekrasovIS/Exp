@@ -31,6 +31,13 @@ class TelegramCodeDeliveryChannel : public ICodeDeliveryChannel {
 public:
     explicit TelegramCodeDeliveryChannel(TelegramConfig config);
 
+    /// Issue #227 (покрытие тестами) — не покрыто юнит-тестами и
+    /// осознанно оставлено так: реальный HTTPS-запрос к Bot API поверх
+    /// TlsConnection нельзя проверить без настоящего (или полностью
+    /// эмулирующего протокол) сервера, а не просто мока интерфейса
+    /// ICodeDeliveryChannel. fromEnvironment() ниже (разбор конфигурации
+    /// — то, что действительно можно и нужно тестировать без сети) уже
+    /// покрыт TelegramCodeDeliveryChannelTest.
     void send(const std::string& destination, const std::string& code) const override;
 
     /// Читает TELEGRAM_BOT_TOKEN из переменных окружения. @return

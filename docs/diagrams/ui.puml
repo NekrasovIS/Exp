@@ -25,16 +25,22 @@ class MainWindow {
   -showToast(text: QString, variant: ToastVariant)
   -onAccountSettingsClicked()
   -signOut()
+  -onFriendsButtonClicked()
   -showFriendsMode()
   -showCommunitiesMode()
   -openDmThreadWith(login: QString)
 }
 note right of MainWindow
-  Issue #187, Фаза 3: sidebarListStack_
-  (channelsPanel_/friendsPanel_) и
-  contentStack_ (chatView_/
-  directMessageView_) переключаются вместе
-  — showFriendsMode()/showCommunitiesMode().
+  Issue #187, Фаза 3 + issue #216: friendsPanel_
+  всплывает поверх channelsPanel_ (не
+  переключается общим QStackedWidget — тот убран),
+  contentStack_ (chatView_/directMessageView_)
+  по-прежнему переключается —
+  showFriendsMode()/showCommunitiesMode().
+  onFriendsButtonClicked() — переключатель:
+  открывает, если friendsPanel_->isOpen() лжив,
+  иначе сворачивает тем же кликом (кнопка
+  "< Communities" внутри FriendsPanel убрана).
   Фаза 2b: dmChatClient_ — отдельный
   ChatClient для живой доставки открытого
   диалога (connectToDirectMessageThread()),
@@ -102,12 +108,17 @@ class CommunityConnectDialog {
 class FriendsPanel {
   +setFriends(logins: QStringList)
   +setIncomingRequests(requests: QList<FriendRequestInfo>)
+  +setOpen(open: bool)
+  +isOpen() : bool
   +friendsList() : QListWidget*
   +requestsList() : QListWidget*
   +addFriendButton() : QPushButton*
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
   -showAddFriendDialog()
   -showFriendContextMenu(pos: QPoint)
   -showRequestContextMenu(pos: QPoint)
+  -visibleGeometry() : QRect
+  -hiddenGeometry() : QRect
   .. signals ..
   +friendSelected(login: QString)
   +addFriendRequested(recipientLogin: QString)
@@ -116,13 +127,30 @@ class FriendsPanel {
   +removeFriendRequested(login: QString)
 }
 note right of FriendsPanel
-  Issue #187, Фаза 3: заменяет
-  ChannelsPanel в режиме Friends
-  (MainWindow::showFriendsMode()) —
-  входящие заявки сверху (accept/decline
-  по правому клику), друзья снизу (клик
+  Issue #187, Фаза 3, редизайн в issue #216:
+  всплывает поверх ChannelsPanel (слайд
+  слева, QPropertyAnimation на "geometry",
+  200ms), не заменяет её в общей раскладке —
+  та же схема "не участвует в layout'е
+  родителя, следит за его resize() через
+  eventFilter", что и у ToastBanner, плюс
+  анимация. Родитель — отдельный host-виджет
+  вокруг ChannelsPanel (не весь sidebar) —
+  иначе панель перекрыла бы ещё и иконочную
+  полосу сообществ, которая должна
+  оставаться кликабельной, пока открыта
+  панель друзей (клик по сообществу
+  закрывает её через showCommunitiesMode()).
+  Кнопка "< Communities" (issue #208/#210)
+  убрана — закрывается тем же переключателем
+  "Friends", что открыл (MainWindow::
+  onFriendsButtonClicked()), не отдельной
+  кнопкой внутри самой панели.
+
+  Входящие заявки сверху (accept/decline по
+  правому клику), друзья снизу (клик
   открывает диалог, правый клик —
-  расфрендить).
+  расфрендить) — не изменилось.
 end note
 
 class DirectMessageView {

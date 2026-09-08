@@ -171,7 +171,12 @@ note right of HttpServer
                                         called by auth-service itself)
   POST  /users/verify-credentials   -> handleVerifyCredentials (ditto)
   GET   /users/{login}/profile      -> handleGetProfile (issue #110,
-                                        any authenticated caller)
+                                        any authenticated caller; issue
+                                        #225/#243 pentest fix — email/
+                                        telegram_chat_id only when
+                                        {login} is the caller's own,
+                                        toPublicJson() instead of
+                                        toJson() otherwise)
   PATCH /users/me                   -> handleUpdateOwnProfile (issue #110,
                                         always writes the token's own
                                         subject — login in the body, if

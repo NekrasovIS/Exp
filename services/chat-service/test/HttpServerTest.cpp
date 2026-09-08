@@ -197,6 +197,76 @@ TEST(HttpServerTest, ListCommunitiesRejectsInvalidTokenWith401) {
     EXPECT_EQ(result->status, 401);
 }
 
+// Issue #229 (покрытие тестами) — в отличие от трёх тестов выше, не
+// пробует зарегистрироваться через auth-service заранее и не пропускает
+// себя, если он недоступен: HttpServer::authenticate() возвращает
+// std::nullopt без единого сетевого обращения, когда заголовок
+// Authorization вообще отсутствует, — тот же самый ранний выход, что
+// уже проверен для /communities выше, но теперь для каждого
+// зарегистрированного маршрута (registerRoutes()) по отдельности, а не
+// только для одного. Раньше HttpServer.cpp показывал буквально 0%
+// покрытия в CI-джобе coverage: она поднимает только Postgres, не
+// auth-service, так что все 49 тестов этого файла (кроме этих трёх)
+// пропускали себя целиком.
+TEST(HttpServerTest, EveryRouteRejectsMissingAuthorizationHeaderWith401) {
+    struct RouteCase {
+        std::string method;
+        std::string path;
+    };
+    const std::vector<RouteCase> routes{
+        {"POST", "/communities"},
+        {"GET", "/communities"},
+        {"GET", "/communities/mine"},
+        {"POST", "/communities/join-by-code"},
+        {"PATCH", "/communities/1"},
+        {"DELETE", "/communities/1"},
+        {"POST", "/communities/1/join"},
+        {"POST", "/communities/1/invite/regenerate"},
+        {"POST", "/communities/1/channels"},
+        {"GET", "/communities/1/channels"},
+        {"PATCH", "/channels/1"},
+        {"DELETE", "/channels/1"},
+        {"GET", "/channels/1/messages"},
+        {"POST", "/communities/1/moderators"},
+        {"DELETE", "/communities/1/moderators/someone"},
+        {"GET", "/communities/1/moderators"},
+        {"POST", "/channels/1/attachments"},
+        {"GET", "/attachments/1"},
+        {"GET", "/channels/1/messages/search"},
+        {"GET", "/communities/1/members"},
+        {"PUT", "/channels/1/keys/someone"},
+        {"GET", "/channels/1/keys/me"},
+        {"POST", "/dm/threads"},
+        {"GET", "/dm/threads"},
+        {"POST", "/dm/threads/1/messages"},
+        {"GET", "/dm/threads/1/messages"},
+    };
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient("127.0.0.1", 1);  // недостижим, не должен вызываться
+    const ScopedServer server(chatService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    for (const RouteCase& route : routes) {
+        httplib::Result result;
+        if (route.method == "GET") {
+            result = client.Get(route.path);
+        } else if (route.method == "POST") {
+            result = client.Post(route.path, "{}", "application/json");
+        } else if (route.method == "PATCH") {
+            result = client.Patch(route.path, "{}", "application/json");
+        } else if (route.method == "PUT") {
+            result = client.Put(route.path, "{}", "application/json");
+        } else {
+            result = client.Delete(route.path);
+        }
+
+        ASSERT_TRUE(result) << route.method << " " << route.path;
+        EXPECT_EQ(result->status, 401) << route.method << " " << route.path;
+    }
+}
+
 TEST(HttpServerTest, CreateCommunityRejectsMissingNameWith400) {
     auto fixtureOpt = TestFixture::create("http-server-create-community-400");
     if (!fixtureOpt.has_value()) {
@@ -329,9 +399,12 @@ TEST(HttpServerTest, RenameCommunityRejectsNonOwnerWith403) {
     auto& fixture = *fixtureOpt;
     ChatService chatService(fixture.repository);
     const Community community = chatService.createCommunity("http-test-rc-403-" + uniqueSuffix(), fixture.ownerLogin);
-    const std::optional<std::string> intruderToken =
-        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-intruder-" + uniqueSuffix());
+    const std::string intruderLogin = "http-server-intruder-" + uniqueSuffix();
+    const std::optional<std::string> intruderToken = registerAndGetToken(fixture.authHost, fixture.authPort, intruderLogin);
     ASSERT_TRUE(intruderToken.has_value());
+    // Issue #256 (pentest): intruder состоит в сообществе, но не владелец —
+    // иначе (не состоит вообще) ответ стал бы 404, не 403.
+    ASSERT_TRUE(chatService.joinCommunity(community.id, intruderLogin));
 
     const ScopedServer server(chatService, fixture.authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
@@ -387,9 +460,11 @@ TEST(HttpServerTest, DeleteCommunityRejectsNonOwnerWith403) {
     auto& fixture = *fixtureOpt;
     ChatService chatService(fixture.repository);
     const Community community = chatService.createCommunity("http-test-dc-403-" + uniqueSuffix(), fixture.ownerLogin);
-    const std::optional<std::string> intruderToken =
-        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-dc-intruder-" + uniqueSuffix());
+    const std::string intruderLogin = "http-server-dc-intruder-" + uniqueSuffix();
+    const std::optional<std::string> intruderToken = registerAndGetToken(fixture.authHost, fixture.authPort, intruderLogin);
     ASSERT_TRUE(intruderToken.has_value());
+    // Issue #256 (pentest): intruder состоит в сообществе, но не владелец.
+    ASSERT_TRUE(chatService.joinCommunity(community.id, intruderLogin));
 
     const ScopedServer server(chatService, fixture.authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
@@ -535,9 +610,11 @@ TEST(HttpServerTest, RegenerateInviteCodeRejectsNonOwnerWith403) {
     ChatService chatService(fixture.repository);
     const Community community =
         chatService.createCommunity("http-test-regen-invite-403-" + uniqueSuffix(), fixture.ownerLogin);
-    const std::optional<std::string> otherToken =
-        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-regen-other-" + uniqueSuffix());
+    const std::string otherLogin = "http-server-regen-other-" + uniqueSuffix();
+    const std::optional<std::string> otherToken = registerAndGetToken(fixture.authHost, fixture.authPort, otherLogin);
     ASSERT_TRUE(otherToken.has_value());
+    // Issue #256 (pentest): other состоит в сообществе, но не владелец.
+    ASSERT_TRUE(chatService.joinCommunity(community.id, otherLogin));
 
     const ScopedServer server(chatService, fixture.authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
@@ -733,9 +810,11 @@ TEST(HttpServerTest, DeleteChannelRejectsNonOwnerWith403) {
     const Community community = chatService.createCommunity("http-test-dch403-" + uniqueSuffix(), fixture.ownerLogin);
     const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
     ASSERT_TRUE(channelId.has_value());
-    const std::optional<std::string> intruderToken =
-        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-dch-intruder-" + uniqueSuffix());
+    const std::string intruderLogin = "http-server-dch-intruder-" + uniqueSuffix();
+    const std::optional<std::string> intruderToken = registerAndGetToken(fixture.authHost, fixture.authPort, intruderLogin);
     ASSERT_TRUE(intruderToken.has_value());
+    // Issue #256 (pentest): intruder состоит в сообществе, но не владелец.
+    ASSERT_TRUE(chatService.joinCommunity(community.id, intruderLogin));
 
     const ScopedServer server(chatService, fixture.authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
@@ -802,9 +881,11 @@ TEST(HttpServerTest, PromoteModeratorRejectsNonOwnerWith403) {
     auto& fixture = *fixtureOpt;
     ChatService chatService(fixture.repository);
     const Community community = chatService.createCommunity("http-test-mod-403-" + uniqueSuffix(), fixture.ownerLogin);
-    const std::optional<std::string> intruderToken =
-        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-mod-intruder-" + uniqueSuffix());
+    const std::string intruderLogin = "http-server-mod-intruder-" + uniqueSuffix();
+    const std::optional<std::string> intruderToken = registerAndGetToken(fixture.authHost, fixture.authPort, intruderLogin);
     ASSERT_TRUE(intruderToken.has_value());
+    // Issue #256 (pentest): intruder состоит в сообществе, но не владелец.
+    ASSERT_TRUE(chatService.joinCommunity(community.id, intruderLogin));
 
     const ScopedServer server(chatService, fixture.authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
@@ -1164,8 +1245,8 @@ TEST(HttpServerTest, SetChannelKeyRejectsNonOwnerNonModeratorWith403) {
         GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
     }
     auto& fixture = *fixtureOpt;
-    const std::optional<std::string> outsiderToken =
-        registerAndGetToken(fixture.authHost, fixture.authPort, "http-server-set-key-outsider-" + uniqueSuffix());
+    const std::string outsiderLogin = "http-server-set-key-outsider-" + uniqueSuffix();
+    const std::optional<std::string> outsiderToken = registerAndGetToken(fixture.authHost, fixture.authPort, outsiderLogin);
     ASSERT_TRUE(outsiderToken.has_value());
 
     ChatService chatService(fixture.repository);
@@ -1174,6 +1255,9 @@ TEST(HttpServerTest, SetChannelKeyRejectsNonOwnerNonModeratorWith403) {
     const std::optional<std::int64_t> channelId =
         chatService.createChannel(community.id, "secret", fixture.ownerLogin, /*isEncrypted=*/true);
     ASSERT_TRUE(channelId.has_value());
+    // Issue #256 (pentest): outsider состоит в сообществе, но не
+    // владелец/модератор — иначе (не состоит вообще) ответ стал бы 404.
+    ASSERT_TRUE(chatService.joinCommunity(community.id, outsiderLogin));
 
     const ScopedServer server(chatService, fixture.authServiceClient);
     httplib::Client client(kTestHost, kTestPort);
@@ -1302,6 +1386,161 @@ TEST(HttpServerTest, UploadAttachmentRejectsEncryptedChannelWith400) {
 
     ASSERT_TRUE(result);
     EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadAttachmentRejectsOverlongFilenameWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-upload-longname");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-upload-longname-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    // Issue #226 (pentest): раньше не было предела длины вообще — см.
+    // doc-комментарий у проверки в HttpServer::handleUploadAttachment().
+    const std::string overlongFilename(256, 'a');
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", headers,
+        nlohmann::json{{"filename", overlongFilename}, {"content_type", "text/plain"}, {"data_base64", "SGVsbG8="}}
+            .dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, DownloadAttachmentSanitizesControlCharactersInContentDispositionHeader) {
+    auto fixtureOpt = TestFixture::create("http-server-download-sanitize");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-download-sanitize-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    // Issue #226 (pentest): имя вложения дословно попадает в заголовок
+    // Content-Disposition при скачивании — раньше sanitizeForHeaderValue()
+    // вырезала только '\r', '\n' и '"', теперь — все управляющие символы
+    // ASCII (0x00-0x1F). Здесь — CR, LF и произвольный control-байт (0x01)
+    // в одном имени, как попытка response-splitting/header-инъекции.
+    const std::string maliciousFilename = "evil\r\nX-Injected: yes\x01.txt";
+    const httplib::Result uploadResult = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", headers,
+        nlohmann::json{{"filename", maliciousFilename}, {"content_type", "text/plain"}, {"data_base64", "SGVsbG8="}}
+            .dump(),
+        "application/json");
+    ASSERT_TRUE(uploadResult);
+    ASSERT_EQ(uploadResult->status, 201);
+    const nlohmann::json uploadBody = nlohmann::json::parse(uploadResult->body);
+    const auto attachmentId = uploadBody["id"].get<std::int64_t>();
+
+    const httplib::Result downloadResult = client.Get("/attachments/" + std::to_string(attachmentId), headers);
+    ASSERT_TRUE(downloadResult);
+    ASSERT_EQ(downloadResult->status, 200);
+
+    const std::string disposition = downloadResult->get_header_value("Content-Disposition");
+    EXPECT_EQ(disposition.find('\r'), std::string::npos);
+    EXPECT_EQ(disposition.find('\n'), std::string::npos);
+    EXPECT_EQ(disposition.find('\x01'), std::string::npos);
+    // Ни один заголовок ответа не должен называться "X-Injected" —
+    // подтверждает, что CRLF не разорвал один заголовок на два.
+    EXPECT_TRUE(downloadResult->get_header_value("X-Injected").empty());
+}
+
+TEST(HttpServerTest, NonMemberCannotReadOrWriteCommunityScopedResources) {
+    auto fixtureOpt = TestFixture::create("http-server-nonmember");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    const std::string outsiderLogin = "http-server-nonmember-outsider-" + uniqueSuffix();
+    const std::optional<std::string> outsiderToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, outsiderLogin);
+    ASSERT_TRUE(outsiderToken.has_value());
+
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-nonmember-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<Message> posted =
+        chatService.postMessage(*channelId, fixture.ownerLogin, "owner's private message");
+    ASSERT_TRUE(posted.has_value());
+    const std::optional<AttachmentMetadata> attachment = chatService.createAttachment(
+        *channelId, AttachmentUpload{.uploaderLogin = fixture.ownerLogin,
+                                      .filename = "secret.txt",
+                                      .contentType = "text/plain",
+                                      .dataBase64 = "c2ho"});
+    ASSERT_TRUE(attachment.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers outsiderHeaders{{"Authorization", bearer(*outsiderToken)}};
+
+    // Issue #256 (pentest): все эти маршруты раньше проверяли только
+    // валидность токена, не членство в сообществе-владельце ресурса —
+    // outsiderLogin никогда не состоял в community/channelId выше.
+    const httplib::Result listChannels =
+        client.Get("/communities/" + std::to_string(community.id) + "/channels", outsiderHeaders);
+    ASSERT_TRUE(listChannels);
+    EXPECT_EQ(listChannels->status, 404);
+
+    const httplib::Result listMessages =
+        client.Get("/channels/" + std::to_string(*channelId) + "/messages", outsiderHeaders);
+    ASSERT_TRUE(listMessages);
+    EXPECT_EQ(listMessages->status, 404);
+
+    const httplib::Result listMembers =
+        client.Get("/communities/" + std::to_string(community.id) + "/members", outsiderHeaders);
+    ASSERT_TRUE(listMembers);
+    EXPECT_EQ(listMembers->status, 404);
+
+    const httplib::Result listModerators =
+        client.Get("/communities/" + std::to_string(community.id) + "/moderators", outsiderHeaders);
+    ASSERT_TRUE(listModerators);
+    EXPECT_EQ(listModerators->status, 404);
+
+    const httplib::Result searchMessages = client.Get(
+        "/channels/" + std::to_string(*channelId) + "/messages/search?q=private", outsiderHeaders);
+    ASSERT_TRUE(searchMessages);
+    EXPECT_EQ(searchMessages->status, 404);
+
+    const httplib::Result downloadAttachment =
+        client.Get("/attachments/" + std::to_string(attachment->id), outsiderHeaders);
+    ASSERT_TRUE(downloadAttachment);
+    EXPECT_EQ(downloadAttachment->status, 404);
+
+    const httplib::Result createChannel =
+        client.Post("/communities/" + std::to_string(community.id) + "/channels", outsiderHeaders,
+                    nlohmann::json{{"name", "intruded"}}.dump(), "application/json");
+    ASSERT_TRUE(createChannel);
+    EXPECT_EQ(createChannel->status, 404);
+
+    const httplib::Result uploadAttachment = client.Post(
+        "/channels/" + std::to_string(*channelId) + "/attachments", outsiderHeaders,
+        nlohmann::json{{"filename", "intruded.txt"}, {"content_type", "text/plain"}, {"data_base64", "SGVsbG8="}}
+            .dump(),
+        "application/json");
+    ASSERT_TRUE(uploadAttachment);
+    EXPECT_EQ(uploadAttachment->status, 404);
 }
 
 // Регистрирует через auth-service, как и registerAndGetToken(), но

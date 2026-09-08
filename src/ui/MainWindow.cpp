@@ -408,8 +408,7 @@ MainWindow::MainWindow(QWidget* parent)
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
     });
-    connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::showFriendsMode);
-    connect(friendsPanel_, &FriendsPanel::backToCommunitiesRequested, this, &MainWindow::showCommunitiesMode);
+    connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
             [this](qint64 id, const QString& name) {
                 moderatorsDialog_->setCommunity(id, name);
@@ -817,13 +816,18 @@ void MainWindow::buildUi() {
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
     sidebarLayout->setSpacing(0);
     communitiesPanel_ = new CommunitiesPanel(sidebar);
-    channelsPanel_ = new ChannelsPanel(sidebar);
-    friendsPanel_ = new FriendsPanel(sidebar);
-    sidebarListStack_ = new QStackedWidget(sidebar);
-    sidebarListStack_->addWidget(channelsPanel_);
-    sidebarListStack_->addWidget(friendsPanel_);
+    // Собственный host, а не sidebar целиком (issue #216) — FriendsPanel
+    // всплывает поверх *своего* родителя целиком (см. её doc-комментарий),
+    // а перекрывать иконочную полосу сообществ она не должна: та обязана
+    // оставаться видимой и кликабельной, пока открыта панель друзей.
+    auto* channelsHost = new QWidget(sidebar);
+    auto* channelsHostLayout = new QVBoxLayout(channelsHost);
+    channelsHostLayout->setContentsMargins(0, 0, 0, 0);
+    channelsPanel_ = new ChannelsPanel(channelsHost);
+    channelsHostLayout->addWidget(channelsPanel_);
+    friendsPanel_ = new FriendsPanel(channelsHost);
     sidebarLayout->addWidget(communitiesPanel_);
-    sidebarLayout->addWidget(sidebarListStack_, /*stretch=*/1);
+    sidebarLayout->addWidget(channelsHost, /*stretch=*/1);
 
     chatView_ = new ChatView(central);
     directMessageView_ = new DirectMessageView(central);
@@ -1265,8 +1269,16 @@ void MainWindow::showToast(const QString& text, ToastBanner::Variant variant) {
     toastBanner_->showMessage(text, variant, kToastTimeoutMs);
 }
 
+void MainWindow::onFriendsButtonClicked() {
+    if (friendsPanel_->isOpen()) {
+        showCommunitiesMode();
+    } else {
+        showFriendsMode();
+    }
+}
+
 void MainWindow::showFriendsMode() {
-    sidebarListStack_->setCurrentWidget(friendsPanel_);
+    friendsPanel_->setOpen(true);
     contentStack_->setCurrentWidget(directMessageView_);
     // Список участников — для канала сообщества, в режиме друзей нет
     // выбранного сообщества, которое он мог бы описывать (issue #182 +
@@ -1284,7 +1296,7 @@ void MainWindow::showFriendsMode() {
 }
 
 void MainWindow::showCommunitiesMode() {
-    sidebarListStack_->setCurrentWidget(channelsPanel_);
+    friendsPanel_->setOpen(false);
     contentStack_->setCurrentWidget(chatView_);
     memberListPanel_->setVisible(true);
     openDmThreadId_ = -1;

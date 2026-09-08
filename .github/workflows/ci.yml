@@ -401,3 +401,38 @@ jobs:
             ./services/${{ matrix.service }}/build-fuzz/$target -max_total_time=30
             echo "::endgroup::"
           done
+
+  web-clients:
+    # TypeScript monorepo (issue #219, apps/web + apps/mobile +
+    # packages/core) — completely separate toolchain from the C++/Qt
+    # project above (no vcpkg, no Qt6/WebRTC build), so this job stays
+    # fast rather than sharing build-and-test's runtime.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm (via corepack, version pinned in package.json)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format
