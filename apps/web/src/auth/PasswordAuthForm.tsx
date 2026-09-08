@@ -5,6 +5,7 @@
 import { AuthClient } from "@devicehub/core";
 import { useMemo, useState, type FormEvent } from "react";
 
+import styles from "./authForm.module.css";
 import { describeAuthError } from "./describeAuthError.js";
 import { authServiceUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
@@ -53,26 +54,34 @@ export function PasswordAuthForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <label htmlFor="password-auth-login">Login</label>
-      <input
-        id="password-auth-login"
-        value={login}
-        onChange={(event) => setLogin(event.target.value)}
-        autoFocus
-      />
-      <label htmlFor="password-auth-password">Password</label>
-      <input
-        id="password-auth-password"
-        type="password"
-        value={password}
-        onChange={(event) => setPassword(event.target.value)}
-      />
+    <form onSubmit={handleSubmit} className={styles.form}>
+      <div className={styles.field}>
+        <label htmlFor="password-auth-login">Login</label>
+        <input
+          id="password-auth-login"
+          value={login}
+          onChange={(event) => setLogin(event.target.value)}
+          autoFocus
+        />
+      </div>
+      <div className={styles.field}>
+        <label htmlFor="password-auth-password">Password</label>
+        <input
+          id="password-auth-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </div>
       {error !== null && <p role="alert">{error}</p>}
-      <button type="submit" disabled={submitting}>
+      <button type="submit" className={styles.submitButton} disabled={submitting}>
         {mode === "signIn" ? "Sign in" : "Create account"}
       </button>
-      <button type="button" onClick={() => setMode(mode === "signIn" ? "register" : "signIn")}>
+      <button
+        type="button"
+        className={styles.secondaryButton}
+        onClick={() => setMode(mode === "signIn" ? "register" : "signIn")}
+      >
         {mode === "signIn" ? "Create an account instead" : "Sign in instead"}
       </button>
     </form>

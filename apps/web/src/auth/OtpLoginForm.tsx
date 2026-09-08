@@ -7,6 +7,7 @@
 import { AuthClient } from "@devicehub/core";
 import { useMemo, useState, type FormEvent } from "react";
 
+import styles from "./authForm.module.css";
 import { describeAuthError } from "./describeAuthError.js";
 import { authServiceUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
@@ -61,15 +62,17 @@ export function OtpLoginForm() {
 
   if (step === "code") {
     return (
-      <form onSubmit={handleVerifyCode}>
-        <p>We sent a code to the channel linked to your account.</p>
-        <label htmlFor="otp-code">6-digit code</label>
-        <input id="otp-code" value={code} onChange={(event) => setCode(event.target.value)} autoFocus />
+      <form onSubmit={handleVerifyCode} className={styles.form}>
+        <p className={styles.hint}>We sent a code to the channel linked to your account.</p>
+        <div className={styles.field}>
+          <label htmlFor="otp-code">6-digit code</label>
+          <input id="otp-code" value={code} onChange={(event) => setCode(event.target.value)} autoFocus />
+        </div>
         {error !== null && <p role="alert">{error}</p>}
-        <button type="submit" disabled={submitting}>
+        <button type="submit" className={styles.submitButton} disabled={submitting}>
           Verify
         </button>
-        <button type="button" onClick={() => setStep("identifier")}>
+        <button type="button" className={styles.secondaryButton} onClick={() => setStep("identifier")}>
           Back
         </button>
       </form>
@@ -77,16 +80,18 @@ export function OtpLoginForm() {
   }
 
   return (
-    <form onSubmit={handleRequestCode}>
-      <label htmlFor="otp-identifier">Login, email, or Telegram chat ID</label>
-      <input
-        id="otp-identifier"
-        value={identifier}
-        onChange={(event) => setIdentifier(event.target.value)}
-        autoFocus
-      />
+    <form onSubmit={handleRequestCode} className={styles.form}>
+      <div className={styles.field}>
+        <label htmlFor="otp-identifier">Login, email, or Telegram chat ID</label>
+        <input
+          id="otp-identifier"
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          autoFocus
+        />
+      </div>
       {error !== null && <p role="alert">{error}</p>}
-      <button type="submit" disabled={submitting}>
+      <button type="submit" className={styles.submitButton} disabled={submitting}>
         Send code
       </button>
     </form>
