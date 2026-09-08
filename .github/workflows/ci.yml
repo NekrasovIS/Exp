@@ -2,8 +2,35 @@ name: CI
 
 on:
   push:
-    branches: [master]  # issue #260: see ci.yml on master/feature-258 for the full rationale — push+pull_request double-triggered every commit on a branch with an open PR
+    # issue #260: раньше было ["**"] — push в ветку с открытым PR
+    # запускает и это событие, и pull_request (synchronize) на тот же
+    # коммит; concurrency.group ниже их не дедуплицирует, потому что
+    # github.ref у push (refs/heads/<branch>) и pull_request
+    # (refs/pull/<N>/merge) — разные значения. Получались два
+    # одновременных идентичных прогона build-and-test (~1.5-2ч каждый),
+    # конкурирующих за один и тот же ограниченный пул раннеров этого
+    # аккаунта. pull_request ниже и так покрывает каждый коммит любого
+    # открытого PR — push здесь остаётся только для проверки после
+    # мержа в master; ветка без открытого PR перестаёт получать CI до
+    # открытия PR (приемлемо при текущем workflow проекта — PR
+    # открывается сразу после пуша).
+    branches: [master]
+    # issue #258: этот workflow — только C++/Qt/vcpkg-сторона проекта
+    # (DeviceHub + services/); TS-монорепо (apps/, packages/ — issue
+    # #219/#247-250) отсюда ничего не собирает и не тестирует, поэтому
+    # PR/push, трогающие только её, не должны ждать build-and-test
+    # (~1.5-2ч на сборку Qt6/WebRTC из vcpkg) без всякой причины — см.
+    # web-clients.yml с обратным фильтром для той стороны. В репозитории
+    # нет branch protection (проверено на момент issue #258), так что
+    # пропуск всего workflow'а по путям не рискует зависшим required-check.
+    paths-ignore: &tsMonorepoPaths
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-*.yaml"
+      - "package.json"
+      - "**.md"
   pull_request:
+    paths-ignore: *tsMonorepoPaths
 
 concurrency:
   # issue #169: macOS-раннеры этого аккаунта — общий, сильно
@@ -401,38 +428,3 @@ jobs:
             ./services/${{ matrix.service }}/build-fuzz/$target -max_total_time=30
             echo "::endgroup::"
           done
-
-  web-clients:
-    # TypeScript monorepo (issue #219, apps/web + apps/mobile +
-    # packages/core) — completely separate toolchain from the C++/Qt
-    # project above (no vcpkg, no Qt6/WebRTC build), so this job stays
-    # fast rather than sharing build-and-test's runtime.
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Enable pnpm (via corepack, version pinned in package.json)
-        run: corepack enable
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-
-      - name: Test
-        run: pnpm test
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Format check
-        run: pnpm format
