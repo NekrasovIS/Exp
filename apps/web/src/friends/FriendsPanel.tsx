@@ -6,6 +6,7 @@
 import { useState, type FormEvent } from "react";
 
 import { useFriends } from "./useFriends.js";
+import styles from "./FriendsPanel.module.css";
 
 interface FriendsPanelProps {
   onOpenThreadWith: (login: string) => void;
@@ -44,41 +45,45 @@ export function FriendsPanel({ onOpenThreadWith }: FriendsPanelProps) {
   }
 
   return (
-    <nav aria-label="Friends">
-      {loading && <p>Loading friends…</p>}
+    <nav aria-label="Friends" className={styles.nav}>
+      {loading && <p className={styles.mutedText}>Loading friends…</p>}
       {error !== null && <p role="alert">{error}</p>}
 
-      <h2>Incoming requests</h2>
-      <ul>
+      <h2 className={styles.sectionTitle}>Incoming requests</h2>
+      <ul className={styles.list}>
         {incomingRequests.map((request) => (
-          <li key={request.id}>
-            {request.requesterLogin}
-            <button type="button" onClick={() => void acceptRequest(request.id)}>
-              Accept
-            </button>
-            <button type="button" onClick={() => void declineRequest(request.id)}>
-              Decline
-            </button>
+          <li key={request.id} className={styles.row}>
+            <span className={styles.rowLogin}>{request.requesterLogin}</span>
+            <span className={styles.rowActions}>
+              <button type="button" onClick={() => void acceptRequest(request.id)}>
+                Accept
+              </button>
+              <button type="button" onClick={() => void declineRequest(request.id)}>
+                Decline
+              </button>
+            </span>
           </li>
         ))}
       </ul>
 
-      <h2>Friends</h2>
-      <ul>
+      <h2 className={styles.sectionTitle}>Friends</h2>
+      <ul className={styles.list}>
         {friends.map((login) => (
-          <li key={login}>
-            {login}
-            <button type="button" onClick={() => onOpenThreadWith(login)}>
-              Message
-            </button>
-            <button type="button" onClick={() => void removeFriend(login)}>
-              Remove
-            </button>
+          <li key={login} className={styles.row}>
+            <span className={styles.rowLogin}>{login}</span>
+            <span className={styles.rowActions}>
+              <button type="button" onClick={() => onOpenThreadWith(login)}>
+                Message
+              </button>
+              <button type="button" onClick={() => void removeFriend(login)}>
+                Remove
+              </button>
+            </span>
           </li>
         ))}
       </ul>
 
-      <form onSubmit={handleSendRequest}>
+      <form onSubmit={handleSendRequest} className={styles.form}>
         <label htmlFor="friend-request-login">Add a friend</label>
         <input
           id="friend-request-login"
