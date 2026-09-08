@@ -2,7 +2,12 @@ name: Web clients
 
 on:
   push:
-    branches: ["**"]
+    # issue #260: push в ветку с открытым PR и pull_request
+    # (synchronize) запускают этот workflow дважды на один коммит — см.
+    # тот же комментарий в ci.yml. push здесь остаётся только для
+    # master; pull_request ниже покрывает каждый коммит любого
+    # открытого PR.
+    branches: [master]
     # issue #258: обратная сторона фильтра в ci.yml — этот workflow
     # тестирует только TS-монорепо (apps/, packages/ — issue
     # #219/#247-250), полностью отдельный тулчейн от C++/Qt/vcpkg-стороны
