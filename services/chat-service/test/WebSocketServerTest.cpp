@@ -1,6 +1,7 @@
 #include "AuthServiceClient.h"
 #include "ChatRepository.h"
 #include "ChatService.h"
+#include "JanusClient.h"
 #include "WebSocketServer.h"
 
 #include <gtest/gtest.h>
@@ -159,6 +160,10 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
 
     const std::string loginA = "ws-test-a-" + suffix;
     const std::string loginB = "ws-test-b-" + suffix;
+    // call_join требует членства в сообществе канала (issue #231) — ни
+    // loginA, ни loginB им иначе не являются (владелец только owner).
+    ASSERT_TRUE(service.joinCommunity(community.id, loginA));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginB));
     const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
     if (!tokenA.has_value()) {
         GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
@@ -171,7 +176,9 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
     ASSERT_TRUE(service.joinCommunity(community.id, loginB));
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
@@ -230,7 +237,73 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
     server.stop();
 }
 
-TEST(WebSocketServerTest, HelloWithChannelIdRejectsNonMemberOfCommunity) {
+// issue #231: janus_room_id вычисляется детерминированно от channelId, а
+// JanusClient::ensureRoomExists() проверяет "exists" перед "create" —
+// повторный call_join на тот же канал должен всегда получать одну и ту же
+// SFU-комнату, а не плодить новые videoroom в Janus.
+TEST(WebSocketServerTest, SfuRoomIsStableAcrossRepeatedCallJoin) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18094"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-sfuroom-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-sfuroom-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string login = "ws-sfuroom-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, login));
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, login);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"call_join", true}});
+    const std::optional<nlohmann::json> firstJoin =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); });
+    ASSERT_TRUE(firstJoin.has_value());
+    if ((*firstJoin)["sfu_room"].is_null()) {
+        GTEST_SKIP() << "Janus not reachable — run `docker compose --profile sfu up -d janus` to run this test.";
+    }
+    const std::string firstRoom = (*firstJoin)["sfu_room"].get<std::string>();
+    EXPECT_EQ(firstRoom, "channel-" + std::to_string(*channelId));
+
+    client.send(nlohmann::json{{"call_leave", true}});
+    client.send(nlohmann::json{{"call_join", true}});
+    const std::optional<nlohmann::json> secondJoin =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); });
+    ASSERT_TRUE(secondJoin.has_value());
+    EXPECT_EQ((*secondJoin)["sfu_room"].get<std::string>(), firstRoom);
+
+    server.stop();
+}
+
+// issue #231: раньше call_join не проверял членство в канале вообще.
+TEST(WebSocketServerTest, CallJoinRejectsNonChannelMember) {
     ix::initNetSystem();
 
     const std::string dbConnectionString = envOrDefault(
@@ -238,6 +311,146 @@ TEST(WebSocketServerTest, HelloWithChannelIdRejectsNonMemberOfCommunity) {
     const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
     const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
     const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18095"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-nonmember-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-nonmember-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    // Валидный токен, но login никогда не вступал в community —
+    // подписка на текстовый чат канала (hello) сама по себе членство не
+    // проверяет (issue #231 сознательно этого не меняет, см. doc-комментарий
+    // класса), но call_join теперь должен.
+    const std::string outsider = "ws-nonmember-" + suffix;
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, outsider);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"call_join", true}});
+    const std::optional<nlohmann::json> response =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error") || m.contains("call_roster"); });
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ((*response)["error"].get<std::string>(), "not a member of this channel");
+
+    server.stop();
+}
+
+// issue #232: прокси Janus-сигналинга через WebSocketServer — join как
+// publisher без SDP (сама по себе валидная просьба Janus, ответ на неё —
+// "ack" сразу и реальный videoroom-эвент асинхронно, тот же протокол,
+// что services/janus/verify/verify-forwarding.mjs исследовал для #230),
+// плюс проверка, что чужую комнату через body.room подставить нельзя.
+TEST(WebSocketServerTest, JanusProxyAttachAndJoinRoundTrip) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18099"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-janusproxy-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-janusproxy-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string login = "ws-janusproxy-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, login));
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, login);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"call_join", true}});
+    const std::optional<nlohmann::json> joinResponse =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); });
+    ASSERT_TRUE(joinResponse.has_value());
+    if ((*joinResponse)["sfu_room"].is_null()) {
+        GTEST_SKIP() << "Janus not reachable — run `docker compose --profile sfu up -d janus` to run this test.";
+    }
+    const std::string room = (*joinResponse)["sfu_room"].get<std::string>();
+
+    client.send(nlohmann::json{{"janus_attach", true}});
+    const std::optional<nlohmann::json> attached =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("janus_attached"); });
+    ASSERT_TRUE(attached.has_value());
+    const auto handle = (*attached)["janus_attached"]["handle"].get<std::int64_t>();
+
+    // Чужая комната через body.room отклоняется, не доходя до Janus.
+    client.send(nlohmann::json{{"janus_message", {{"handle", handle}, {"body", {{"room", "someone-elses-room"}}}}}});
+    const std::optional<nlohmann::json> mismatch =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ((*mismatch)["error"].get<std::string>(), "room mismatch");
+
+    // join как publisher без SDP — валидный самостоятельный запрос
+    // videoroom; ack приходит сразу, реальный результат — асинхронно.
+    client.send(nlohmann::json{
+        {"janus_message",
+         {{"handle", handle}, {"body", {{"request", "join"}, {"room", room}, {"ptype", "publisher"}}}}}});
+    const std::optional<nlohmann::json> ack =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("janus_message_ack"); });
+    ASSERT_TRUE(ack.has_value());
+
+    const std::optional<nlohmann::json> event = client.waitFor([](const nlohmann::json& m) {
+        return m.contains("janus_event") && m["janus_event"].contains("plugindata") &&
+               m["janus_event"]["plugindata"]["data"].value("videoroom", "") == "joined";
+    });
+    ASSERT_TRUE(event.has_value());
+    EXPECT_EQ((*event)["janus_event"]["plugindata"]["data"]["room"].get<std::string>(), room);
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, HelloWithChannelIdRejectsNonMemberOfCommunity) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18098"));
 
     ChatRepository repository(dbConnectionString);
     ChatService service(repository);
@@ -262,7 +475,9 @@ TEST(WebSocketServerTest, HelloWithChannelIdRejectsNonMemberOfCommunity) {
     // никогда не состоял в этом сообществе (issue #256, pentest).
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -319,7 +534,9 @@ TEST(WebSocketServerTest, SecondHelloShapedFrameOnAnAlreadySubscribedConnectionD
     ASSERT_TRUE(service.joinCommunity(ownCommunity.id, login));
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -377,7 +594,9 @@ TEST(WebSocketServerTest, HelloWithMissingFieldsIsRejectedWithError) {
     }
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -415,7 +634,9 @@ TEST(WebSocketServerTest, HelloWithInvalidTokenIsRejectedWithError) {
     ASSERT_TRUE(channelId.has_value());
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -477,7 +698,9 @@ TEST(WebSocketServerTest, CallSignalRejectsPayloadExceedingSizeLimit) {
     ASSERT_TRUE(service.joinCommunity(community.id, loginB));
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
@@ -553,7 +776,9 @@ TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
     ASSERT_TRUE(service.joinCommunity(community.id, login));
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -649,7 +874,9 @@ TEST(WebSocketServerTest, ChatMessageIsBroadcastToAllSubscribersIncludingSender)
     ASSERT_TRUE(service.joinCommunity(community.id, loginB));
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
@@ -708,7 +935,9 @@ TEST(WebSocketServerTest, ChatMessageWithMissingBodyReturnsError) {
     }
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -759,7 +988,9 @@ TEST(WebSocketServerTest, ModeratorCanDeleteAnotherSubscribersMessageButNotEditI
     ASSERT_EQ(service.promoteModerator(community.id, moderatorLogin, owner), MutationResult::kSuccess);
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
@@ -830,7 +1061,9 @@ TEST(WebSocketServerTest, ChatMessageWithAttachmentIdBroadcastsAttachmentFields)
     }
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -872,6 +1105,9 @@ TEST(WebSocketServerTest, DisconnectWithoutLeaveNotifiesRemainingCallParticipant
 
     const std::string loginA = "ws-disconnect-a-" + suffix;
     const std::string loginB = "ws-disconnect-b-" + suffix;
+    // call_join требует членства в сообществе канала (issue #231).
+    ASSERT_TRUE(service.joinCommunity(community.id, loginA));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginB));
     const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
     if (!tokenA.has_value()) {
         GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
@@ -884,7 +1120,9 @@ TEST(WebSocketServerTest, DisconnectWithoutLeaveNotifiesRemainingCallParticipant
     ASSERT_TRUE(service.joinCommunity(community.id, loginB));
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
@@ -945,7 +1183,9 @@ TEST(WebSocketServerTest, DirectMessageIsBroadcastToBothParticipantsIncludingSen
     ASSERT_TRUE(tokenB.has_value());
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
@@ -1007,7 +1247,9 @@ TEST(WebSocketServerTest, DirectMessageHelloRejectsNonParticipant) {
     }
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
@@ -1052,7 +1294,9 @@ TEST(WebSocketServerTest, DirectMessageWithMissingBodyReturnsError) {
     }
 
     AuthServiceClient authServiceClient(authHost, authPort);
-    WebSocketServer server(service, authServiceClient, wsPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
     ASSERT_TRUE(server.start());
 
     WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");

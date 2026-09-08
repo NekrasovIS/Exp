@@ -151,6 +151,8 @@ add_library(chat_service_core
     src/ChatService.cpp
     src/AuthServiceClient.h
     src/AuthServiceClient.cpp
+    src/JanusClient.h
+    src/JanusClient.cpp
     src/UserServiceClient.h
     src/UserServiceClient.cpp
     src/HttpServer.h
@@ -191,6 +193,7 @@ add_executable(chat_service_tests
     test/WebSocketServerTest.cpp
     test/HttpServerTest.cpp
     test/AuthServiceClientTest.cpp
+    test/JanusClientTest.cpp
     test/UserServiceClientTest.cpp
 )
 target_link_libraries(chat_service_tests PRIVATE

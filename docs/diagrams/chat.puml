@@ -34,6 +34,8 @@ class ChatClient {
   +joinCall()
   +leaveCall()
   +sendCallSignal(to: QString, payload: QJsonObject)
+  +sendJanusAttach()
+  +sendJanusMessage(handle: qint64, body: QJsonObject, jsep: QJsonObject = {})
   +sendTyping()
   +sendEditMessage(id: qint64, newBody: QString)
   +sendDeleteMessage(id: qint64)
@@ -44,9 +46,13 @@ class ChatClient {
   +messageDeleted(id: qint64)
   +errorOccurred(message: QString)
   +callRosterReceived(participants: QStringList)
+  +sfuRoomAssigned(room: QString)
   +callPeerJoined(login: QString)
   +callPeerLeft(login: QString)
   +callSignalReceived(from: QString, payload: QJsonObject)
+  +janusAttached(handle: qint64)
+  +janusMessageAck(response: QJsonObject)
+  +janusEventReceived(event: QJsonObject)
   +userTyping(login: QString)
 }
 ChatClient *-- QWebSocket : owns
@@ -61,6 +67,7 @@ class CallManager {
   +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)
   +leaveCall()
   +inCall() : bool
+  +setLocalLogin(login: QString)
   +setMuted(muted: bool)
   +isMuted() : bool
   +enableVideo(device: QCameraDevice)
@@ -76,9 +83,11 @@ class CallManager {
   +remoteVideoFrameReceived(peerLogin: QString, frame: QImage, isScreenShare: bool)
   +remoteVideoTrackRemoved(peerLogin: QString, isScreenShare: bool)
   -ensureFactory()
-  -ensurePeerConnection(peerLogin: QString) : PeerConnectionEntry*
+  -createPeerConnection(label: QString, observerOut: unique_ptr<PeerObserver>&) : PeerConnectionInterface*
+  -ensurePeerConnection(peerLogin: QString) : PeerConnectionEntry* {mesh, unused since #232}
   -closePeerConnection(peerLogin: QString)
   -negotiateLocal(peerLogin: QString)
+  -handleIceGatheringComplete(peerLogin: QString)
   -onCapturedPcm(data: QByteArray, format: QAudioFormat)
   -onCameraFrame(frame: QVideoFrame)
   -onScreenShareFrame(frame: QVideoFrame)
@@ -89,14 +98,22 @@ class CallManager {
   -attachTrack(entry: PeerConnectionEntry&, track: VideoTrackInterface*, sender: RtpSenderInterface*&)
   -handleRemoteTrack(peerLogin: QString, transceiver: RtpTransceiverInterface*)
   -handleRemoteVideoFrame(peerLogin: QString, frame: QImage, isScreenShare: bool)
+  -onSfuRoomAssigned(room: QString)
+  -ensurePublishConnection()
+  -ensureSubscribeConnection(feedId: QString, peerLogin: QString)
+  -processNextQueuedSubscribe()
+  -closeSubscribeConnectionByFeed(feedId: QString)
+  -onJanusAttached(handle: qint64)
+  -onJanusEvent(event: QJsonObject)
 }
-CallManager --> ChatClient : uses (&), listens to call_* signals
+CallManager --> ChatClient : uses (&), listens to call_*\nand janus_* signals
 CallManager --> AudioInputDevice : uses (&), pcmDataAvailable()\n-> pushCapturedAudio() (issue #70)
 CallManager --> AudioOutputDevice : uses (&), PlayoutSink\n-> writeAudio() (issue #70)
 CallManager --> CameraDevice : uses (&), frameAvailable()\n-> pushFrame() (issue #72)
 CallManager --> ScreenCaptureDevice : uses (&), frameAvailable()\n-> pushFrame() (issue #112)
 CallManager *-- WebrtcPeerConnectionFactory : owns (built lazily on joinCall())
-CallManager "1" *-- "0..*" WebrtcPeerConnection : owns, one per\nremote participant (mesh)
+CallManager "1" *-- "0..1" WebrtcPeerConnection : owns, publishConnection_\n(issue #232, own outgoing media)
+CallManager "1" *-- "0..*" WebrtcPeerConnection : owns via peers_, one\nsubscribe connection per remote\nparticipant (issue #232; mesh\nbefore it, unused since)
 CallManager *-- CallAudioDeviceModule : owns (issue #64), registered\nas the factory's ADM
 CallManager "1" *-- "0..2" CallVideoTrackSource : owns (issue #72, split into\ntwo independent tracks in #185),\neach created lazily on first use
 note right of CallManager
@@ -191,6 +208,45 @@ note right of CallManager
   reverse of CallVideoTrackSource's ARGBToI420) and the hop
   to the GUI thread via QMetaObject::invokeMethod (OnFrame()
   fires on a WebRTC decode thread) are unchanged.
+end note
+
+note right of CallManager
+  SFU (issue #123/#230/#231/#232): mesh's "one PeerConnection
+  per remote participant" is replaced by "one publish
+  PeerConnection (own audio/camera/screen) + one subscribe
+  PeerConnection per remote feed", talking to Janus videoroom
+  through chat-service's WebSocket proxy (janus_attach/
+  janus_message/janus_event) instead of directly — mesh's own
+  call_join/call_leave signaling still runs (chat-service uses
+  it to assign the SFU room via sfuRoomAssigned()), but
+  onCallRosterReceived() no longer drives ensurePeerConnection()/
+  negotiateLocal() for it; mesh code stays in the file, unused,
+  until #233 removes it.
+
+  Both publish and subscribe connections skip ICE trickle
+  entirely (the proxy has no "janus":"trickle" request) —
+  PeerObserver::OnIceGatheringChange() waits for full candidate
+  gathering, then handleIceGatheringComplete() sends the offer/
+  answer (with every candidate embedded in the SDP) as Janus's
+  "configure"/"start" request. handleLocalDescriptionSet()
+  recognizes this by PeerConnectionEntry::janusHandle >= 0 and
+  skips its usual immediate call_signal send for those entries.
+
+  Publisher discovery: on our own "joined" event, and on every
+  later room "event" carrying a publishers list, this class
+  calls ensureSubscribeConnection(feedId, display) for each —
+  "display" is the remote peer's login, set via setLocalLogin()
+  when *they* joined as publisher, since Janus itself has no
+  notion of chat-service logins. peers_ is reused verbatim for
+  these subscribe connections (one per peerLogin, same as mesh
+  used it) so handleRemoteTrack()/RemoteVideoSink above need no
+  changes — only which PeerConnection the frames arrive from.
+
+  Known gap: a track added to an already-connected
+  publishConnection_ (enableVideo()/enableScreenShare() called
+  mid-call) isn't pushed to already-subscribed peers — Janus
+  doesn't do that automatically, and re-subscribing an existing
+  subscribe handle to a newly added stream isn't implemented yet.
 end note
 
 class ChatRestClient {

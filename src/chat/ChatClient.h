@@ -28,6 +28,16 @@ namespace devicehub {
  * callSignalReceived срабатывают для соответствующих серверных кадров.
  * Валидно только после того, как сработал subscribed().
  *
+ * Прокси-сигналинг SFU (issue #232) — параллельный, более новый путь
+ * поверх того же WebSocket: sendJanusAttach()/sendJanusMessage()
+ * отправляют `{"janus_attach"}`/`{"janus_message": {"handle", "body",
+ * "jsep"?}}`, chat-service пересылает их напрямую своей Janus-сессии
+ * для этого подключения (см. WebSocketServer, там же и объяснение,
+ * почему Janus никогда не виден клиенту напрямую). janusAttached()/
+ * janusMessageAck()/janusEventReceived() — соответствующие ответы;
+ * sfuRoomAssigned() — id комнаты Janus для звонка, отдельным сигналом
+ * рядом с callRosterReceived() на тот же ответ joinCall().
+ *
  * sendTyping() (issue #96) отправляет `{"typing": true}`; userTyping()
  * срабатывает на соответствующую рассылку `{"user_typing": "<login>"}`
  * от другого подписчика (chat-service никогда не отправляет это эхом
@@ -99,6 +109,23 @@ public:
     /// offer/answer или ICE-кандидат) участнику звонка @p to.
     void sendCallSignal(const QString& to, const QJsonObject& payload);
 
+    /// Прокси-сигналинг SFU (issue #232): attach'ит новый handle плагина
+    /// videoroom на Janus-сессии этого WS-подключения (chat-service
+    /// создаёт саму сессию при самом первом вызове за время жизни
+    /// соединения — см. doc-комментарий класса). Вызывает ответ
+    /// janusAttached().
+    void sendJanusAttach();
+
+    /// Пересылает @p body (+опционально @p jsep, если не пустой) как
+    /// есть указанному Janus-@p handle через chat-service — этот класс
+    /// никогда не разбирает их содержимое ("join"/"configure"/
+    /// "subscribe"/"start" и т.п., см. протокол Janus videoroom).
+    /// Прямой ответ (может быть просто подтверждением, реальный результат
+    /// приходит асинхронно) — через janusMessageAck(); асинхронные
+    /// события той же сессии (в т.ч. jsep-answer от Janus) — через
+    /// janusEventReceived().
+    void sendJanusMessage(qint64 handle, const QJsonObject& body, const QJsonObject& jsep = QJsonObject());
+
     /// Сообщает chat-service, что локальный пользователь печатает в
     /// подписанном канале — вызывает userTyping() у всех остальных
     /// подписчиков.
@@ -138,6 +165,15 @@ signals:
     /// включая себя.
     void callRosterReceived(const QStringList& participants);
 
+    /// SFU-комната для этого звонка (issue #123/#230/#231/#232) — id
+    /// videoroom-комнаты Janus для подписанного канала, поле "sfu_room"
+    /// в том же ответе на joinCall(), что и callRosterReceived(), но
+    /// отдельным сигналом, чтобы не трогать её уже существующую
+    /// сигнатуру. Не испускается, если chat-service не смог обеспечить
+    /// комнату (Janus временно недоступен) — CallManager в этом случае
+    /// просто не получает SFU-путь для этого звонка.
+    void sfuRoomAssigned(const QString& room);
+
     /// Ещё один участник присоединился к звонку.
     void callPeerJoined(const QString& login);
 
@@ -147,6 +183,21 @@ signals:
     /// Сигналинговый payload, ретранслированный от другого участника
     /// звонка.
     void callSignalReceived(const QString& from, const QJsonObject& payload);
+
+    /// Ответ на sendJanusAttach() — @p handle нового handle'а плагина
+    /// videoroom.
+    void janusAttached(qint64 handle);
+
+    /// Прямой ответ chat-service на sendJanusMessage() — может быть
+    /// просто подтверждением приёма (реальный результат см.
+    /// janusEventReceived()).
+    void janusMessageAck(const QJsonObject& response);
+
+    /// Асинхронное событие Janus-сессии этого подключения (issue #232) —
+    /// jsep-answer на configure(), приглашение подписаться на нового
+    /// publisher-а и т.п. Пересылается дословно, как получено от Janus
+    /// через chat-service.
+    void janusEventReceived(const QJsonObject& event);
 
     /// Другой подписчик печатает в подписанном канале.
     void userTyping(const QString& login);

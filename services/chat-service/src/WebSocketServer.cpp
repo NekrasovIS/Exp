@@ -4,7 +4,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <optional>
+#include <thread>
 #include <vector>
 
 namespace chat_service {
@@ -32,9 +34,9 @@ nlohmann::json toJson(const DirectMessage& message) {
 }
 }  // namespace
 
-WebSocketServer::WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient, int port,
-                                  const std::string& host)
-    : chatService_(chatService), authServiceClient_(authServiceClient), server_(port, host) {
+WebSocketServer::WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                                  const JanusClient& janusClient, int port, const std::string& host)
+    : chatService_(chatService), authServiceClient_(authServiceClient), janusClient_(janusClient), server_(port, host) {
     server_.setOnClientMessageCallback(
         [this](const std::shared_ptr<ix::ConnectionState>& connectionState, ix::WebSocket& webSocket,
                const ix::WebSocketMessagePtr& message) { handleMessage(connectionState, webSocket, message); });
@@ -77,6 +79,7 @@ void WebSocketServer::handleMessage(const std::shared_ptr<ix::ConnectionState>& 
             if (subscription.has_value()) {
                 removeCallParticipant(*subscription, &webSocket);
             }
+            stopJanusProxySession(&webSocket);
             break;
         }
         default:
@@ -186,6 +189,10 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleCallLeave(webSocket, subscription);
     } else if (body.contains("call_signal")) {
         handleCallSignal(webSocket, subscription, body["call_signal"]);
+    } else if (body.contains("janus_attach")) {
+        handleJanusAttach(webSocket);
+    } else if (body.contains("janus_message")) {
+        handleJanusMessage(webSocket, subscription, body["janus_message"]);
     } else if (body.contains("typing")) {
         handleTyping(webSocket, subscription);
     } else if (body.contains("edit_message")) {
@@ -307,6 +314,31 @@ void WebSocketServer::handleDeleteMessage(ix::WebSocket& webSocket, const Subscr
 }
 
 void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription) {
+    // Issue #231: раньше call_join не проверял членство в канале вообще —
+    // любой обладатель валидного токена мог присоединиться к звонку любого
+    // канала. Переиспользуем ту же проверку, что и у остального доступа к
+    // каналу, вместо отдельной системы прав только для звонков.
+    if (!chatService_.isChannelMember(subscription.channelId, subscription.login)) {
+        webSocket.send(nlohmann::json{{"error", "not a member of this channel"}}.dump());
+        return;
+    }
+
+    // SFU-комната (issue #123/#230/#231): id детерминированно вычисляется
+    // из channelId, поэтому повторный call_join на тот же канал не плодит
+    // новые videoroom — ensureRoomExists() сама идемпотентна на стороне
+    // Janus (проверяет "exists" перед "create"). Недоступность Janus не
+    // должна ронять mesh-присутствие ниже (оно от SFU не зависит, пока
+    // существуют оба пути — issue #232/#233 всё это переключат/уберут) —
+    // отсутствие "sfu_room" в ответе означает "SFU для этого звонка сейчас
+    // недоступен", клиент, ещё не умеющий его использовать (issue #232),
+    // это поле просто игнорирует.
+    const std::string janusRoomId = "channel-" + std::to_string(subscription.channelId);
+    std::optional<std::string> sfuRoom;
+    if (janusClient_.ensureRoomExists(janusRoomId)) {
+        chatService_.recordCallRoom(subscription.channelId, janusRoomId);
+        sfuRoom = janusRoomId;
+    }
+
     nlohmann::json roster = nlohmann::json::array();
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
@@ -317,7 +349,9 @@ void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscriptio
         participants[subscription.login] = &webSocket;
     }
 
-    webSocket.send(nlohmann::json{{"call_roster", roster}}.dump());
+    webSocket.send(nlohmann::json{{"call_roster", roster},
+                                   {"sfu_room", sfuRoom.has_value() ? nlohmann::json(*sfuRoom) : nlohmann::json(nullptr)}}
+                       .dump());
     broadcastToCallParticipants(subscription.channelId, nlohmann::json{{"call_peer_joined", subscription.login}}.dump(),
                                  &webSocket);
 }
@@ -363,6 +397,133 @@ void WebSocketServer::handleCallSignal(ix::WebSocket& webSocket, const Subscript
 
     target->send(
         nlohmann::json{{"call_signal", {{"from", subscription.login}, {"payload", body["payload"]}}}}.dump());
+}
+
+void WebSocketServer::handleJanusAttach(ix::WebSocket& webSocket) {
+    std::int64_t sessionId = 0;
+    bool haveSession = false;
+    {
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        if (const auto it = janusSessions_.find(&webSocket); it != janusSessions_.end()) {
+            sessionId = it->second.sessionId;
+            haveSession = true;
+        }
+    }
+
+    if (!haveSession) {
+        const std::optional<std::int64_t> newSessionId = janusClient_.createSession();
+        if (!newSessionId) {
+            webSocket.send(nlohmann::json{{"error", "SFU unavailable"}}.dump());
+            return;
+        }
+        sessionId = *newSessionId;
+
+        // pumpJanusEvents() переживёт возврат из этого обработчика и
+        // должно продолжать слать в этот же сокет из отдельного потока —
+        // нужен shared_ptr, не сырой &webSocket (тот же приём, что и у
+        // adресатов в broadcastToChannel()).
+        std::shared_ptr<ix::WebSocket> socketHandle;
+        for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            if (client.get() == &webSocket) {
+                socketHandle = client;
+                break;
+            }
+        }
+        if (!socketHandle) {
+            webSocket.send(nlohmann::json{{"error", "connection not found"}}.dump());
+            return;
+        }
+
+        JanusProxySession session;
+        session.sessionId = sessionId;
+        session.eventPump = std::jthread([this, socketHandle, sessionId](const std::stop_token& stopToken) {
+            pumpJanusEvents(socketHandle, sessionId, stopToken);
+        });
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        janusSessions_[&webSocket] = std::move(session);
+    }
+
+    const std::optional<std::int64_t> handleId = janusClient_.attachHandle(sessionId, "janus.plugin.videoroom");
+    if (!handleId) {
+        webSocket.send(nlohmann::json{{"error", "failed to attach Janus handle"}}.dump());
+        return;
+    }
+    webSocket.send(nlohmann::json{{"janus_attached", {{"handle", *handleId}}}}.dump());
+}
+
+void WebSocketServer::handleJanusMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                          const nlohmann::json& body) {
+    if (!body.contains("handle") || !body["handle"].is_number_integer() || !body.contains("body") ||
+        !body["body"].is_object()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"handle\", \"body\", \"jsep\"?}"}}.dump());
+        return;
+    }
+
+    // Единственный барьер против использования через этот прокси чужой
+    // комнаты (issue #232): если body содержит "room", он обязан быть
+    // комнатой именно этого канала — та же формула, что и в
+    // handleCallJoin(). Без этой проверки клиент мог бы просто подставить
+    // room другого канала и обойти проверку членства из call_join.
+    if (body["body"].contains("room")) {
+        const std::string expectedRoom = "channel-" + std::to_string(subscription.channelId);
+        if (!body["body"]["room"].is_string() || body["body"]["room"].get<std::string>() != expectedRoom) {
+            webSocket.send(nlohmann::json{{"error", "room mismatch"}}.dump());
+            return;
+        }
+    }
+
+    std::int64_t sessionId = 0;
+    {
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        const auto it = janusSessions_.find(&webSocket);
+        if (it == janusSessions_.end()) {
+            webSocket.send(nlohmann::json{{"error", "no Janus session — send janus_attach first"}}.dump());
+            return;
+        }
+        sessionId = it->second.sessionId;
+    }
+
+    const auto handleId = body["handle"].get<std::int64_t>();
+    const std::optional<nlohmann::json> jsep = body.contains("jsep") ? std::make_optional(body["jsep"]) : std::nullopt;
+    const std::optional<nlohmann::json> response = janusClient_.sendMessage(sessionId, handleId, body["body"], jsep);
+    if (!response) {
+        webSocket.send(nlohmann::json{{"error", "SFU unavailable"}}.dump());
+        return;
+    }
+    webSocket.send(nlohmann::json{{"janus_message_ack", *response}}.dump());
+}
+
+void WebSocketServer::pumpJanusEvents(std::shared_ptr<ix::WebSocket> socket, std::int64_t sessionId,
+                                       std::stop_token stopToken) {
+    while (!stopToken.stop_requested()) {
+        const std::optional<nlohmann::json> event = janusClient_.longPollOnce(sessionId);
+        if (stopToken.stop_requested()) {
+            return;
+        }
+        if (!event) {
+            // Janus временно недоступен — не крутиться busy-loop'ом,
+            // пока остановка не запрошена или он не отвечает снова.
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
+        }
+        socket->send(nlohmann::json{{"janus_event", *event}}.dump());
+    }
+}
+
+void WebSocketServer::stopJanusProxySession(ix::WebSocket* socket) {
+    JanusProxySession session;
+    {
+        const std::lock_guard<std::mutex> lock(janusSessionsMutex_);
+        const auto it = janusSessions_.find(socket);
+        if (it == janusSessions_.end()) {
+            return;
+        }
+        session = std::move(it->second);
+        janusSessions_.erase(it);
+    }
+    // session разрушается здесь, уже вне лока — деструктор std::jthread
+    // запрашивает остановку и join'ится, что может занять время вплоть до
+    // тайм-аута текущего long-poll внутри pumpJanusEvents().
 }
 
 void WebSocketServer::handleTyping(ix::WebSocket& webSocket, const Subscription& subscription) {

@@ -133,3 +133,17 @@ CREATE TABLE IF NOT EXISTS direct_messages (
 );
 
 CREATE INDEX IF NOT EXISTS direct_messages_thread_id_sent_at_idx ON direct_messages (thread_id, sent_at);
+
+-- SFU-инфраструктура для групповых звонков (issue #123/#231) — сопоставление
+-- канала с videoroom-комнатой в Janus (services/janus/). janus_room_id
+-- сейчас всегда вычисляется детерминированно ("channel-<id>",
+-- ChatService::ensureCallRoom()), поэтому эта таблица не источник истины
+-- для самого id, а учёт/идемпотентность создания: JanusClient проверяет
+-- существование комнаты в Janus напрямую при каждом call_join (Janus не
+-- сохраняет динамически созданные комнаты между перезапусками), а не
+-- полагается только на наличие этой строки.
+CREATE TABLE IF NOT EXISTS channel_janus_rooms (
+    channel_id BIGINT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+    janus_room_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

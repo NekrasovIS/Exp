@@ -5,12 +5,16 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #include "AuthServiceClient.h"
 #include "ChatService.h"
+#include "JanusClient.h"
 
 namespace chat_service {
 
@@ -32,10 +36,14 @@ namespace chat_service {
  *     из одного и того же потока реального времени, а не делали
  *     оптимистичное локальное эхо).
  *   - `{"call_join": true}` — присоединиться к голосовому звонку для
- *     подписанного канала; отвечает `{"call_roster": [...]}`
- *     (существующие участники звонка, не сохраняются, эфемерны в
- *     пределах этого процесса) и рассылает им
- *     `{"call_peer_joined": "<login>"}`.
+ *     подписанного канала; требует членства в сообществе канала (issue
+ *     #231 — раньше не проверялось вообще), иначе `{"error": "not a
+ *     member of this channel"}`. Отвечает `{"call_roster": [...],
+ *     "sfu_room": "channel-<id>"}` (существующий mesh-ростер участников,
+ *     не сохраняется, эфемерен в пределах этого процесса; "sfu_room" —
+ *     id videoroom-комнаты Janus для этого канала, идемпотентно создаётся
+ *     через JanusClient при первом обращении, null, если Janus сейчас
+ *     недоступен) и рассылает остальным `{"call_peer_joined": "<login>"}`.
  *   - `{"call_leave": true}` — покинуть звонок; рассылает
  *     `{"call_peer_left": "<login>"}` оставшимся участникам.
  *     Отключение (Close/Error) без явного выхода даёт тот же эффект.
@@ -46,6 +54,22 @@ namespace chat_service {
  *     класс никогда не заглядывает внутрь `payload`. Отвечает
  *     `{"error": "peer not in call"}` отправителю, если `to` не является
  *     текущим участником звонка.
+ *   - `{"janus_attach": true}` (issue #232) — прокси-сигналинг SFU:
+ *     attach'ит новый handle плагина videoroom к Janus-сессии этого
+ *     WS-подключения (создаёт сессию при самом первом вызове; живёт до
+ *     закрытия соединения, не до call_leave). Отвечает
+ *     `{"janus_attached": {"handle": N}}`.
+ *   - `{"janus_message": {"handle": N, "body": {...}, "jsep": {...}?}}` —
+ *     пересылает `body`/`jsep` как есть указанному handle'у ("join"/
+ *     "configure"/"subscribe"/"start" и т.п. — этот класс не разбирает
+ *     их содержимое, кроме поля `room`, если оно есть: оно обязано
+ *     совпадать с комнатой ИМЕННО этого канала — единственный барьер
+ *     против использования чужой комнаты через этот прокси, см.
+ *     handleJanusMessage()). Отвечает `{"janus_message_ack": {...}}` —
+ *     прямым ответом Janus на сам запрос (может быть просто "ack",
+ *     реальный результат/jsep-answer от Janus прилетит асинхронно как
+ *     `{"janus_event": {...}}` через отдельный поток long-poll на эту
+ *     сессию, запущенный в janus_attach).
  *   - `{"typing": true}` — issue #96: рассылает
  *     `{"user_typing": "<login>"}` каждому другому подписчику того же
  *     канала (никогда не отправителю обратно). Эфемерно, как и
@@ -86,8 +110,8 @@ namespace chat_service {
  */
 class WebSocketServer {
 public:
-    WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient, int port,
-                     const std::string& host = "127.0.0.1");
+    WebSocketServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                     const JanusClient& janusClient, int port, const std::string& host = "127.0.0.1");
 
     /// Начинает принимать соединения; возвращает управление после начала прослушивания (дальше асинхронно).
     bool start();
@@ -108,6 +132,18 @@ private:
         std::int64_t dmThreadId = 0;
     };
 
+    /// Janus-сессия, проксируемая через одно WS-подключение (issue #232)
+    /// — создаётся при первом `janus_attach`, живёт до закрытия
+    /// соединения (не до `call_leave`: простая привязка ко времени жизни
+    /// сокета, не к состоянию звонка — см. doc-комментарий класса).
+    /// eventPump — единственный поток, делающий long-poll GET на эту
+    /// sessionId (у Janus нет параллельных long-poll на одну сессию); его
+    /// деструктор (std::jthread) сам запрашивает остановку и join'ится.
+    struct JanusProxySession {
+        std::int64_t sessionId = 0;
+        std::jthread eventPump;
+    };
+
     void handleMessage(const std::shared_ptr<ix::ConnectionState>& connectionState, ix::WebSocket& webSocket,
                         const ix::WebSocketMessagePtr& message);
     void handleHello(ix::WebSocket& webSocket, const std::string& payload);
@@ -122,6 +158,26 @@ private:
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// issue #232: attach новый videoroom-handle на Janus-сессию этого
+    /// подключения, создавая саму сессию (и запуская pumpJanusEvents())
+    /// при первом обращении.
+    void handleJanusAttach(ix::WebSocket& webSocket);
+    /// issue #232: пересылает {"handle", "body", "jsep"?} указанному
+    /// handle'у Janus-сессии этого подключения — см. doc-комментарий
+    /// класса о проверке поля "room".
+    void handleJanusMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// Тело фонового потока JanusProxySession::eventPump — один
+    /// блокирующий long-poll на @p sessionId за раз, пока не запрошена
+    /// остановка; каждое полученное событие уходит в @p socket как
+    /// `{"janus_event": ...}`. См. doc-комментарий класса о верхней
+    /// границе задержки остановки.
+    void pumpJanusEvents(std::shared_ptr<ix::WebSocket> socket, std::int64_t sessionId, std::stop_token stopToken);
+    /// Останавливает (join'ит) и удаляет Janus-прокси-сессию @p socket,
+    /// если она есть — вызывается при закрытии WS-соединения. Извлекает
+    /// сессию из карты под локом, но join (потенциально небыстрый, см.
+    /// pumpJanusEvents()) происходит уже вне его — тот же принцип CP.43,
+    /// что и у broadcastToChannel()/broadcastToCallParticipants().
+    void stopJanusProxySession(ix::WebSocket* socket);
     void handleTyping(ix::WebSocket& webSocket, const Subscription& subscription);
     void removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket);
     /// Отправляет @p json каждому сокету, подписанному на чат @p channelId,
@@ -146,6 +202,7 @@ private:
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;
+    const JanusClient& janusClient_;
     ix::WebSocketServer server_;
 
     std::mutex subscriptionsMutex_;
@@ -154,6 +211,14 @@ private:
     // отдельно от подписки на *чат* канала выше — клиент может быть
     // подписан на текстовый чат канала, не будучи в его звонке.
     std::unordered_map<std::int64_t, std::unordered_map<std::string, ix::WebSocket*>> callParticipants_;
+
+    // Отдельный мьютекс, не subscriptionsMutex_ — janusSessions_ живёт по
+    // своему собственному циклу (привязан к сокету, не к call_join/leave)
+    // и его собственная операция (join фонового потока в
+    // stopJanusProxySession()) не должна удерживать лок, под которым
+    // рассылки и call-присутствие ждут своей очереди.
+    std::mutex janusSessionsMutex_;
+    std::unordered_map<ix::WebSocket*, JanusProxySession> janusSessions_;
 };
 
 }  // namespace chat_service

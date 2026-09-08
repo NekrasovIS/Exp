@@ -6,6 +6,7 @@
 #include "ChatRepository.h"
 #include "ChatService.h"
 #include "HttpServer.h"
+#include "JanusClient.h"
 #include "UserServiceClient.h"
 #include "WebSocketServer.h"
 
@@ -29,13 +30,21 @@ int main() {
     const int authServicePort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
     const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
     const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    // SFU-инфраструктура для групповых звонков (issue #123/#230/#231) —
+    // plain HTTP JSON API Janus Gateway (см. JanusClient); опубликован на
+    // хост docker-compose.yml (сервис janus, профиль "sfu"), поскольку
+    // chat-service — нативный процесс на хосте, а не контейнер в той же
+    // docker-сети.
+    const std::string janusHost = envOrDefault("JANUS_HOST", "127.0.0.1");
+    const int janusPort = std::stoi(envOrDefault("JANUS_PORT", "8088"));
 
     chat_service::ChatRepository repository(connectionString);
     chat_service::ChatService chatService(repository);
     const chat_service::AuthServiceClient authServiceClient(authServiceHost, authServicePort);
     const chat_service::UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const chat_service::JanusClient janusClient(janusHost, janusPort);
 
-    chat_service::WebSocketServer webSocketServer(chatService, authServiceClient, wsPort, host);
+    chat_service::WebSocketServer webSocketServer(chatService, authServiceClient, janusClient, wsPort, host);
     if (!webSocketServer.start()) {
         std::cerr << "chat-service: failed to start WebSocket server on " << host << ":" << wsPort << "\n";
         return 1;
