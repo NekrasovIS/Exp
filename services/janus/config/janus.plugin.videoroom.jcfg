@@ -1,0 +1,25 @@
+# Оверрайд конфига плагина videoroom (issue #230) — одна статическая
+# комната для ручной проверки, что SFU реально форвардит между
+# участниками, прежде чем chat-service (issue #231) начнёт создавать
+# комнаты динамически через Admin API на каждый call_join.
+
+general: {
+	# ID комнат/участников — строками, а не только числом: chat-service
+	# в issue #231 будет мапить room_id на существующий channel_id,
+	# которому в БД уже назначен свой числовой первичный ключ — string_ids
+	# позволяет не пересекаться с этим пространством, используя, например,
+	# "channel-<id>" напрямую как room_id.
+	string_ids = true
+}
+
+room-devicehub-test: {
+	# ID комнаты для клиентов — "devicehub-test" (Janus берёт ID из имени
+	# секции, отбрасывая префикс "room-"), не "room-devicehub-test".
+	description = "DeviceHub SFU manual test room"
+	publishers = 8
+	bitrate = 512000
+	bitrate_cap = false
+	fir_freq = 10
+	videocodec = "vp8,h264"
+	record = false
+}
