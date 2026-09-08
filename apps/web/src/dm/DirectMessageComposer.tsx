@@ -3,6 +3,8 @@
 
 import { useState, type FormEvent } from "react";
 
+import styles from "../chat/chatView.module.css";
+
 interface DirectMessageComposerProps {
   onSend: (body: string) => void;
 }
@@ -20,7 +22,7 @@ export function DirectMessageComposer({ onSend }: DirectMessageComposerProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} className={styles.simpleComposerForm}>
       <label htmlFor="dm-body">Message</label>
       <input id="dm-body" value={body} onChange={(event) => setBody(event.target.value)} />
       <button type="submit">Send</button>

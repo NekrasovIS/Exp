@@ -1,0 +1,52 @@
+/*
+ * issue #285 — deliberately not importing pages/sidebarNav.module.css
+ * (#283): that branch and this one are independent, unmerged sibling
+ * PRs off #281, and depending on both would mean stacking this PR on
+ * two parents at once, which GitHub's single-base PRs don't represent
+ * well. Small, intentional duplication of the same nav-list shape
+ * instead of a cross-branch dependency; worth folding into one shared
+ * file again once both have landed on master.
+ */
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-3);
+  gap: var(--space-3);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+}
+
+.listItemButton {
+  width: 100%;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+}
+
+.listItemButton:hover:not(:disabled) {
+  background: var(--color-bg);
+  border-color: transparent;
+}
+
+.listItemButton[aria-current="true"] {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+
+.mutedText {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}

@@ -4,18 +4,27 @@
 
 import type { DirectMessageInfo } from "@devicehub/core";
 
+import styles from "../chat/MessageList.module.css";
+
 interface DirectMessageListProps {
   messages: DirectMessageInfo[];
+  currentLogin: string | null;
 }
 
-export function DirectMessageList({ messages }: DirectMessageListProps) {
+export function DirectMessageList({ messages, currentLogin }: DirectMessageListProps) {
   return (
-    <ul>
-      {messages.map((message) => (
-        <li key={message.id}>
-          <strong>{message.author}</strong> <span>{message.body}</span>
-        </li>
-      ))}
+    <ul className={styles.list}>
+      {messages.map((message) => {
+        const isOwn = message.author === currentLogin;
+        return (
+          <li key={message.id} className={`${styles.row} ${isOwn ? styles.rowOwn : ""}`}>
+            <div className={`${styles.bubble} ${isOwn ? styles.bubbleOwn : ""}`}>
+              <strong className={styles.author}>{message.author}</strong>
+              <span>{message.body}</span>
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
