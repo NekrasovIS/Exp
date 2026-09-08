@@ -1,0 +1,31 @@
+.search {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.queryInput {
+  flex: 1;
+}
+
+.results {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.results li {
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) 0;
+}

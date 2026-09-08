@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 
+import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { useSession } from "../session/SessionContext.js";
 import { MessageComposer } from "./MessageComposer.js";
@@ -25,27 +26,31 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
-    <section>
-      <button type="button" onClick={() => setSearchOpen((open) => !open)}>
-        {searchOpen ? "Close search" : "Search"}
-      </button>
+    <section className={styles.section}>
+      <div className={styles.header}>
+        <button type="button" onClick={() => setSearchOpen((open) => !open)}>
+          {searchOpen ? "Close search" : "Search"}
+        </button>
+      </div>
       {searchOpen && <MessageSearch channelId={channelId} />}
 
-      {loading && <p>Loading messages…</p>}
-      {error !== null && <p role="alert">{error}</p>}
-      {hasMore && !loading && (
-        <button type="button" onClick={() => void loadOlder()}>
-          Load older messages
-        </button>
-      )}
-      <MessageList
-        messages={messages}
-        editedIds={editedIds}
-        currentLogin={currentLogin}
-        isModerator={isModerator}
-        onEdit={editMessage}
-        onDelete={deleteMessage}
-      />
+      <div className={styles.scrollArea}>
+        {loading && <p className={styles.statusText}>Loading messages…</p>}
+        {error !== null && <p role="alert">{error}</p>}
+        {hasMore && !loading && (
+          <button type="button" className={styles.loadOlderButton} onClick={() => void loadOlder()}>
+            Load older messages
+          </button>
+        )}
+        <MessageList
+          messages={messages}
+          editedIds={editedIds}
+          currentLogin={currentLogin}
+          isModerator={isModerator}
+          onEdit={editMessage}
+          onDelete={deleteMessage}
+        />
+      </div>
       <MessageComposer channelId={channelId} onSend={sendMessage} />
     </section>
   );
