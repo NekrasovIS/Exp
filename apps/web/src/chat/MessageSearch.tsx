@@ -8,6 +8,7 @@ import { ChatRestClient } from "@devicehub/core";
 import type { ChatMessageInfo } from "@devicehub/core";
 import { useMemo, useState, type FormEvent } from "react";
 
+import styles from "./MessageSearch.module.css";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -46,17 +47,22 @@ export function MessageSearch({ channelId }: MessageSearchProps) {
     // A plain <div role="search"> rather than the standard HTML
     // <search> element — this React/DOM version's dev build doesn't
     // recognize <search> yet and warns on every render.
-    <div role="search">
-      <form onSubmit={handleSearch}>
+    <div role="search" className={styles.search}>
+      <form onSubmit={handleSearch} className={styles.form}>
         <label htmlFor="message-search-query">Search this channel</label>
-        <input id="message-search-query" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input
+          id="message-search-query"
+          className={styles.queryInput}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
         <button type="submit" disabled={searching}>
           Search
         </button>
       </form>
       {error !== null && <p role="alert">{error}</p>}
       {results !== null && (
-        <ul>
+        <ul className={styles.results}>
           {results.length === 0 && <li>No matches.</li>}
           {results.map((message) => (
             <li key={message.id}>

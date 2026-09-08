@@ -5,6 +5,7 @@
 import type { ChatMessageInfo } from "@devicehub/core";
 import { useState } from "react";
 
+import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
 
 interface MessageListProps {
@@ -40,44 +41,56 @@ export function MessageList({
   }
 
   return (
-    <ul>
+    <ul className={styles.list}>
       {messages.map((message) => {
         const isOwn = message.author === currentLogin;
         return (
-          <li key={message.id}>
-            <strong>{message.author}</strong>{" "}
-            {editingId === message.id ? (
-              <>
-                <input value={draft} onChange={(event) => setDraft(event.target.value)} />
-                <button type="button" onClick={() => commitEdit(message.id)}>
-                  Save
-                </button>
-                <button type="button" onClick={() => setEditingId(null)}>
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <span>{message.body}</span>
-                {editedIds.has(message.id) && <em> (edited)</em>}
-                {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
-                  <AttachmentDownloadLink
-                    attachmentId={message.attachmentId}
-                    filename={message.attachmentFilename}
+          <li key={message.id} className={`${styles.row} ${isOwn ? styles.rowOwn : ""}`}>
+            <div className={`${styles.bubble} ${isOwn ? styles.bubbleOwn : ""}`}>
+              <strong className={styles.author}>{message.author}</strong>
+              {editingId === message.id ? (
+                <>
+                  <input
+                    className={styles.editInput}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
                   />
-                )}
-                {isOwn && (
-                  <button type="button" onClick={() => startEditing(message)}>
-                    Edit
-                  </button>
-                )}
-                {(isOwn || isModerator) && (
-                  <button type="button" onClick={() => onDelete(message.id)}>
-                    Delete
-                  </button>
-                )}
-              </>
-            )}
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.actionButton} onClick={() => commitEdit(message.id)}>
+                      Save
+                    </button>
+                    <button type="button" className={styles.actionButton} onClick={() => setEditingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span>{message.body}</span>
+                  {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
+                  {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
+                    <span className={styles.attachment}>
+                      <AttachmentDownloadLink
+                        attachmentId={message.attachmentId}
+                        filename={message.attachmentFilename}
+                      />
+                    </span>
+                  )}
+                  {(isOwn || isModerator) && (
+                    <div className={styles.actions}>
+                      {isOwn && (
+                        <button type="button" className={styles.actionButton} onClick={() => startEditing(message)}>
+                          Edit
+                        </button>
+                      )}
+                      <button type="button" className={styles.actionButton} onClick={() => onDelete(message.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </li>
         );
       })}

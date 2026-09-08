@@ -8,6 +8,7 @@
 import type { ChatMessageInfo } from "@devicehub/core";
 import { useEffect, useState, type FormEvent } from "react";
 
+import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
 import { useSession } from "../session/SessionContext.js";
@@ -75,23 +76,28 @@ export function EncryptedChatViewContent({
   }
 
   return (
-    <section>
-      {loading && <p>Loading messages…</p>}
-      {error !== null && <p role="alert">{error}</p>}
-      {hasMore && !loading && (
-        <button type="button" onClick={() => void loadOlder()}>
-          Load older messages
-        </button>
-      )}
-      <MessageList
-        messages={decryptedMessages}
-        editedIds={editedIds}
-        currentLogin={currentLogin}
-        isModerator={isModerator}
-        onEdit={handleEdit}
-        onDelete={deleteMessage}
-      />
-      <form onSubmit={handleSend}>
+    <section className={styles.section}>
+      <div className={styles.header}>
+        <span className={styles.encryptedBadge}>🔒 Encrypted</span>
+      </div>
+      <div className={styles.scrollArea}>
+        {loading && <p className={styles.statusText}>Loading messages…</p>}
+        {error !== null && <p role="alert">{error}</p>}
+        {hasMore && !loading && (
+          <button type="button" className={styles.loadOlderButton} onClick={() => void loadOlder()}>
+            Load older messages
+          </button>
+        )}
+        <MessageList
+          messages={decryptedMessages}
+          editedIds={editedIds}
+          currentLogin={currentLogin}
+          isModerator={isModerator}
+          onEdit={handleEdit}
+          onDelete={deleteMessage}
+        />
+      </div>
+      <form onSubmit={handleSend} className={styles.simpleComposerForm}>
         <label htmlFor="encrypted-message-body">Message</label>
         <input id="encrypted-message-body" value={body} onChange={(event) => setBody(event.target.value)} />
         <button type="submit">Send</button>

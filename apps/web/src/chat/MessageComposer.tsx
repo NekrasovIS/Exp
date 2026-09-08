@@ -6,6 +6,7 @@
 import { ChatRestClient } from "@devicehub/core";
 import { useMemo, useState, type FormEvent } from "react";
 
+import styles from "./MessageComposer.module.css";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -57,23 +58,39 @@ export function MessageComposer({ channelId, onSend }: MessageComposerProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <>
       {error !== null && <p role="alert">{error}</p>}
       {pendingAttachment !== null && (
-        <p>
+        <p className={styles.pendingAttachment}>
           Attached: {pendingAttachment.filename}{" "}
           <button type="button" onClick={() => setPendingAttachment(null)}>
             Remove
           </button>
         </p>
       )}
-      <label htmlFor="message-body">Message</label>
-      <input id="message-body" value={body} onChange={(event) => setBody(event.target.value)} />
-      <label htmlFor="message-attachment">Attach a file</label>
-      <input id="message-attachment" type="file" onChange={(event) => void handleFileSelected(event)} />
-      <button type="submit" disabled={uploading}>
-        Send
-      </button>
-    </form>
+      <form onSubmit={handleSubmit} className={styles.form}>
+        <label htmlFor="message-attachment" className={styles.attachLabel}>
+          Attach a file
+        </label>
+        <input
+          id="message-attachment"
+          className={styles.attachInput}
+          type="file"
+          onChange={(event) => void handleFileSelected(event)}
+        />
+        <label htmlFor="message-body" className={styles.bodyLabel}>
+          Message
+        </label>
+        <input
+          id="message-body"
+          className={styles.bodyInput}
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+        />
+        <button type="submit" disabled={uploading}>
+          Send
+        </button>
+      </form>
+    </>
   );
 }

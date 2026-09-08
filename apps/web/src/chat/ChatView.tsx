@@ -7,6 +7,7 @@
 
 import { useChannelKey } from "../crypto/useChannelKey.js";
 import { useIdentityKeys } from "../crypto/useIdentityKeys.js";
+import placeholderStyles from "../pages/pageLayout.module.css";
 import { ChatViewContent } from "./ChatViewContent.js";
 import { EncryptedChatViewContent } from "./EncryptedChatViewContent.js";
 
@@ -24,10 +25,10 @@ export function ChatView({ channelId, communityId, isEncrypted }: ChatViewProps)
     return <ChatViewContent channelId={channelId} communityId={communityId} />;
   }
   if (loading) {
-    return <p>Loading…</p>;
+    return <p className={placeholderStyles.placeholder}>Loading…</p>;
   }
   if (channelKey === null) {
-    return <p>You don't have access to this encrypted channel yet.</p>;
+    return <p className={placeholderStyles.placeholder}>You don't have access to this encrypted channel yet.</p>;
   }
   return <EncryptedChatViewContent channelId={channelId} communityId={communityId} channelKey={channelKey} />;
 }
