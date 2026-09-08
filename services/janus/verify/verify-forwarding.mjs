@@ -87,7 +87,12 @@ async function message(sessionId, handleId, body, jsep) {
 function waitForConnected(pc, label, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new Error(`${label}: timeout waiting for connectionState=connected (last state: ${pc.connectionState})`)),
+      () =>
+        reject(
+          new Error(
+            `${label}: timeout waiting for connectionState=connected (last state: ${pc.connectionState})`,
+          ),
+        ),
       timeoutMs,
     );
     pc.connectionStateChange.subscribe((state) => {
@@ -142,9 +147,14 @@ async function main() {
     display: "test-pub-B",
   });
   const publishersSeenByB = joinB.plugindata.data.publishers ?? [];
-  console.log("B видит publishers в комнате:", publishersSeenByB.map((p) => p.display));
+  console.log(
+    "B видит publishers в комнате:",
+    publishersSeenByB.map((p) => p.display),
+  );
   if (!publishersSeenByB.some((p) => p.id === myIdA)) {
-    throw new Error("B did not see A in the room's publisher list — SFU room state is not tracking participants correctly");
+    throw new Error(
+      "B did not see A in the room's publisher list — SFU room state is not tracking participants correctly",
+    );
   }
   console.log("OK: B видит A как активного publisher-а в комнате.");
 
