@@ -40,13 +40,19 @@ export function useChannels(communityId: number | null) {
   }, [refresh]);
 
   const createChannel = useCallback(
+    // Issue #269: returns the created channel's id/isEncrypted (not
+    // void) so an encrypted creation can chain the key-generation/
+    // wrap-for-members step (useEncryptedChannelSetup) — that step
+    // needs the real channel id, which only exists once this call
+    // resolves.
     async (name: string, isEncrypted = false) => {
       const token = getAccessToken();
       if (token === null || communityId === null) {
-        return;
+        return null;
       }
-      await client.createChannel(token, communityId, name, isEncrypted);
+      const created = await client.createChannel(token, communityId, name, isEncrypted);
       await refresh();
+      return created;
     },
     [client, getAccessToken, communityId, refresh],
   );
