@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelsSidebar } from "../../src/channels/ChannelsSidebar.js";
+import { getSodium } from "../../src/crypto/sodium.js";
 import { SessionProvider } from "../../src/session/SessionContext.js";
-import { jsonResponse } from "../testUtils.js";
+import { fakeToken, jsonResponse } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
+const kLogin = "alice";
 
 function renderSidebar(communityId: number | null, onSelectChannel = vi.fn()) {
   render(
@@ -98,5 +100,52 @@ describe("ChannelsSidebar", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't create/i);
+  });
+
+  it("sets up encryption for members with a published key and reports the rest as skipped", async () => {
+    localStorage.setItem(
+      kStorageKey,
+      JSON.stringify({
+        token: fakeToken(kLogin),
+        refreshToken: "refresh-token",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      }),
+    );
+    const sodium = await getSodium();
+    const bob = sodium.crypto_box_keypair();
+
+    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && /\/communities\/42\/channels$/.test(url)) {
+        return jsonResponse(201, { id: 9, name: "secret", is_encrypted: true });
+      }
+      if (/\/communities\/42\/channels$/.test(url)) {
+        return jsonResponse(200, []);
+      }
+      if (/\/communities\/42\/members/.test(url)) {
+        return jsonResponse(200, [kLogin, "bob", "carol"]);
+      }
+      if (/\/users\/bob\/profile/.test(url)) {
+        return jsonResponse(200, {
+          login: "bob",
+          public_key: sodium.to_base64(bob.publicKey, sodium.base64_variants.ORIGINAL),
+        });
+      }
+      if (/\/users\/carol\/profile/.test(url)) {
+        return jsonResponse(200, { login: "carol" });
+      }
+      if (init?.method === "PUT" && /\/keys\//.test(url)) {
+        return jsonResponse(200, {});
+      }
+      return jsonResponse(200, []);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    renderSidebar(42);
+
+    await screen.findByLabelText("New channel");
+    await userEvent.type(screen.getByLabelText("New channel"), "secret");
+    await userEvent.click(screen.getByLabelText("Encrypted channel"));
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/carol.*haven't set up encryption/i);
   });
 });
