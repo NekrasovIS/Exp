@@ -92,10 +92,25 @@ jobs:
       # translation unit сразу, упираясь в потолок RAM. 2 — компромисс:
       # заметно меньше пиковая память, сборка дольше, но раньше она
       # вообще не завершалась.
+      #
+      # issue #255: даже после этого сборка всё равно падала —
+      # "No space left on device" на финальной линковке ("ld: final
+      # link failed"), путь в ошибке указывал на
+      # vcpkg_installed/x64-linux/debug/lib/libicudata.a. Причина —
+      # CMakeLists.txt:20-21 использует CMAKE_BUILD_TYPE=Debug (нужен
+      # только один набор бинарников для прогона тестов в CI), но vcpkg
+      # в manifest-режиме по умолчанию собирает ОБА варианта — debug и
+      # release — каждого порта независимо от этого, что фактически
+      # удваивает занимаемое диском место для всего дерева Qt6/WebRTC.
+      # VCPKG_BUILD_TYPE=release заставляет vcpkg собирать только
+      # release — debug пропускается целиком, не просто не паковается.
+      # Безопасно линковать release-варианты статических библиотек в
+      # наш Debug-бинарник на Linux/GCC/Clang — в отличие от MSVC, здесь
+      # нет ABI-несовместимости debug/release CRT для статической линковки.
       - name: Configure
         env:
           VCPKG_MAX_CONCURRENCY: 2
-        run: cmake -S . -B build
+        run: cmake -S . -B build -DVCPKG_BUILD_TYPE=release
 
       - name: Build
         run: cmake --build build --parallel 2
