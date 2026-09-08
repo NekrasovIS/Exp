@@ -81,9 +81,11 @@ describe("PasswordAuthForm", () => {
   });
 
   it("registering a fresh login signs in automatically", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(
-      jsonResponse(201, { registered: true, token: "t1", refresh_token: "r1", expires_at: 9999999999 }),
-    );
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(201, { registered: true, token: "t1", refresh_token: "r1", expires_at: 9999999999 }),
+      );
     vi.stubGlobal("fetch", fetchSpy);
     renderForm();
 

@@ -64,12 +64,7 @@ export function OtpLoginForm() {
       <form onSubmit={handleVerifyCode}>
         <p>We sent a code to the channel linked to your account.</p>
         <label htmlFor="otp-code">6-digit code</label>
-        <input
-          id="otp-code"
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          autoFocus
-        />
+        <input id="otp-code" value={code} onChange={(event) => setCode(event.target.value)} autoFocus />
         {error !== null && <p role="alert">{error}</p>}
         <button type="submit" disabled={submitting}>
           Verify
