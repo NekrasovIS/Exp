@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -257,6 +258,123 @@ TEST(HttpServerTest, VerifyRouteReturnsValidForGoodToken) {
     const nlohmann::json body = nlohmann::json::parse(result->body);
     EXPECT_TRUE(body["valid"].get<bool>());
     EXPECT_EQ(body["subject"].get<std::string>(), "alice");
+}
+
+TEST(HttpServerTest, RefreshRouteRejectsMissingFieldWith400) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/auth/refresh", nlohmann::json::object().dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, RefreshRouteRejectsMalformedJsonWith400) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/auth/refresh", "not json", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, RefreshRouteRejectsInvalidTokenWith401) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/auth/refresh", nlohmann::json{{"refresh_token", "not-a-real-token"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Issue #224 (pentest) — refresh-токен и access-токен подписаны одним
+// секретом и отличаются только полем "typ" в полезной нагрузке
+// (TokenService.h); маршрут не должен принимать access-токен там, где
+// ожидается refresh-токен.
+TEST(HttpServerTest, RefreshRouteRejectsAnAccessTokenPresentedAsARefreshTokenWith401) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const Token accessToken = tokenService.issueToken("alice");
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/auth/refresh", nlohmann::json{{"refresh_token", accessToken.value}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, RefreshRouteRejectsAnExpiredRefreshTokenWith401) {
+    const TokenService tokenService("test-secret", std::chrono::seconds{3600}, std::chrono::seconds{0});
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const Token refreshToken = tokenService.issueRefreshToken("alice");
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/auth/refresh", nlohmann::json{{"refresh_token", refreshToken.value}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, RefreshRouteIssuesFreshAccessTokenForAValidRefreshToken) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const Token refreshToken = tokenService.issueRefreshToken("alice");
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/auth/refresh", nlohmann::json{{"refresh_token", refreshToken.value}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body);
+    const std::string newAccessToken = body["token"].get<std::string>();
+    EXPECT_FALSE(newAccessToken.empty());
+    EXPECT_GT(body["expires_at"].get<std::int64_t>(), 0);
+
+    // Свежий токен действительно проходит как обычный access-токен — не
+    // просто непустая строка.
+    const std::optional<std::string> newAccessSubject = tokenService.verifyToken(newAccessToken);
+    ASSERT_TRUE(newAccessSubject.has_value());
+    EXPECT_EQ(*newAccessSubject, "alice");
+}
+
+// Issue #224 (pentest) — TokenService.h документирует, что
+// refresh-токены намеренно не ротируются: обмен просто выпускает новый
+// access-токен, сам refresh-токен продолжает работать до истечения
+// своего срока. Закрепляет это поведение на уровне самого HTTP-маршрута
+// (не только TokenService), а не оставляет как незадокументированный
+// побочный эффект.
+TEST(HttpServerTest, RefreshRouteAllowsReusingTheSameRefreshTokenMultipleTimes) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const Token refreshToken = tokenService.issueRefreshToken("alice");
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const nlohmann::json requestBody{{"refresh_token", refreshToken.value}};
+
+    const httplib::Result first = client.Post("/auth/refresh", requestBody.dump(), "application/json");
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first->status, 200);
+
+    const httplib::Result second = client.Post("/auth/refresh", requestBody.dump(), "application/json");
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second->status, 200);
 }
 
 TEST(HttpServerTest, RegisterRouteRejectsMissingFieldsWith400) {
