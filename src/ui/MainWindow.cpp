@@ -1042,10 +1042,21 @@ void MainWindow::onCallToggleClicked() {
 }
 
 void MainWindow::onCallMinimizeRequested() {
+    // issue #287: без явного move() мини-окно открывается там, где
+    // решит оконный менеджер по умолчанию — никак не привязано к тому,
+    // где только что было CallWindow, что ощущается как "появилось не
+    // там". Читаем geometry() до hide() — после hide() она у скрытого
+    // окна на некоторых платформах не гарантированно валидна.
+    floatingCallTilesOverlay_->move(callWindow_->geometry().topLeft());
     callWindow_->detachTilesTo(floatingCallTilesOverlay_->canvas());
     callWindow_->hide();
     floatingCallTilesOverlay_->show();
     floatingCallTilesOverlay_->raise();
+    // activateWindow() рядом с raise() (issue #287) — raise() один
+    // только поднимает окно в z-order, не гарантируя ему фокус или то,
+    // что оконный менеджер реально выведет его поверх остальных (тот
+    // же паттерн уже применяется в onCallRestoreRequested() ниже).
+    floatingCallTilesOverlay_->activateWindow();
 }
 
 void MainWindow::onCallRestoreRequested() {
