@@ -31,7 +31,15 @@ std::optional<Credentials> parseCredentials(const std::string& body) {
     return Credentials{.login = json["login"].get<std::string>(), .password = json["password"].get<std::string>()};
 }
 
-nlohmann::json toJson(const Profile& profile) {
+/// Поля, видимые ЛЮБОМУ аутентифицированному вызывающему через
+/// GET /users/{login}/profile для чужого логина (issue #225, найдено
+/// при pentest-проходе — раньше отдавался тот же набор полей, что и для
+/// собственного профиля). login/display_name/avatar_url/public_key —
+/// осознанно публичные (public_key, например, нужен другим клиентам для
+/// E2E-шифрования, issue #136/#138/#217); email/telegram_chat_id — это
+/// приватные каналы доставки OTP-кода (issue #156/#174), в этот объект
+/// никогда не попадают.
+nlohmann::json toPublicJson(const Profile& profile) {
     return nlohmann::json{
         {"login", profile.login},
         {"display_name",
@@ -39,10 +47,20 @@ nlohmann::json toJson(const Profile& profile) {
         {"avatar_url",
          profile.avatarUrl.has_value() ? nlohmann::json(*profile.avatarUrl) : nlohmann::json(nullptr)},
         {"public_key",
-         profile.publicKey.has_value() ? nlohmann::json(*profile.publicKey) : nlohmann::json(nullptr)},
-        {"email", profile.email.has_value() ? nlohmann::json(*profile.email) : nlohmann::json(nullptr)},
-        {"telegram_chat_id", profile.telegramChatId.has_value() ? nlohmann::json(*profile.telegramChatId)
-                                                                  : nlohmann::json(nullptr)}};
+         profile.publicKey.has_value() ? nlohmann::json(*profile.publicKey) : nlohmann::json(nullptr)}};
+}
+
+/// Полный профиль, включая email/telegram_chat_id — только для
+/// владельца аккаунта, смотрящего на собственный профиль (issue #225):
+/// вызывающая сторона обязана сама сверить логин из токена с
+/// запрошенным логином до использования этой функции, она сама такую
+/// проверку не делает.
+nlohmann::json toJson(const Profile& profile) {
+    nlohmann::json json = toPublicJson(profile);
+    json["email"] = profile.email.has_value() ? nlohmann::json(*profile.email) : nlohmann::json(nullptr);
+    json["telegram_chat_id"] =
+        profile.telegramChatId.has_value() ? nlohmann::json(*profile.telegramChatId) : nlohmann::json(nullptr);
+    return json;
 }
 
 std::optional<std::string> parseIdentifier(const std::string& body) {
@@ -155,18 +173,25 @@ void HttpServer::handleVerifyCredentials(const httplib::Request& request, httpli
 }
 
 void HttpServer::handleGetProfile(const httplib::Request& request, httplib::Response& response) {
-    if (!authenticate(request).has_value()) {
+    const std::optional<std::string> callerLogin = authenticate(request);
+    if (!callerLogin.has_value()) {
         response.status = 401;
         return;
     }
 
-    const std::optional<Profile> profile = userService_.getProfile(request.matches[1].str());
+    const std::string requestedLogin = request.matches[1].str();
+    const std::optional<Profile> profile = userService_.getProfile(requestedLogin);
     if (!profile.has_value()) {
         response.status = 404;
         response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
         return;
     }
-    response.set_content(toJson(*profile).dump(), kJsonContentType);
+    // issue #225 (pentest): email/telegram_chat_id — приватные каналы
+    // доставки OTP-кода, не публичный профиль — видны только владельцу
+    // аккаунта, смотрящему на самого себя, не любому другому
+    // аутентифицированному вызывающему.
+    const bool isOwnProfile = requestedLogin == *callerLogin;
+    response.set_content((isOwnProfile ? toJson(*profile) : toPublicJson(*profile)).dump(), kJsonContentType);
 }
 
 void HttpServer::handleUpdateOwnProfile(const httplib::Request& request, httplib::Response& response) {
