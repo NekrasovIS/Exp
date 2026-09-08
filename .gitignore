@@ -3,4 +3,9 @@ build-*/
 __pycache__/
 .DS_Store
 .claude/
+
+# JS/TS monorepo (issue #219) — apps/*, packages/*
 node_modules/
+dist/
+*.tsbuildinfo
+.pnpm-store/

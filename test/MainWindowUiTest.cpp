@@ -15,6 +15,7 @@
 #include <QTabWidget>
 
 #include "devices/DeviceEnumerator.h"
+#include "ui/FriendsPanel.h"
 #include "ui/MemberListPanel.h"
 
 // Эти тесты намеренно никогда не нажимают кнопку, которая запускала бы
@@ -255,6 +256,28 @@ TEST(MainWindowUiTest, MemberListToggleButtonShowsAndHidesMemberListPanel) {
 
     toggleButton->click();
     EXPECT_FALSE(memberListPanel->isHidden());
+}
+
+TEST(MainWindowUiTest, FriendsButtonTogglesFriendsPanelOverlay) {
+    // issue #216: "Friends" в CommunitiesPanel — переключатель, а не
+    // однонаправленный переход в отдельный режим (issue #187, Фаза 3
+    // изначально заменяла ChannelsPanel в общей раскладке через
+    // sidebarListStack_ — убран этой задачей, FriendsPanel теперь
+    // всплывает поверх ChannelsPanel и сворачивается тем же кликом).
+    MainWindow window;
+
+    auto* friendsButton = window.findChild<QPushButton*>("friendsButton");
+    auto* friendsPanel = window.findChild<FriendsPanel*>();
+
+    ASSERT_NE(friendsButton, nullptr);
+    ASSERT_NE(friendsPanel, nullptr);
+    EXPECT_FALSE(friendsPanel->isOpen());
+
+    friendsButton->click();
+    EXPECT_TRUE(friendsPanel->isOpen());
+
+    friendsButton->click();
+    EXPECT_FALSE(friendsPanel->isOpen());
 }
 
 TEST(MainWindowUiTest, VideoToggleButtonExists) {
