@@ -463,6 +463,140 @@ TEST(HttpServerTest, SendFriendRequestRouteRejectsMissingTokenWith401) {
     EXPECT_EQ(result->status, 401);
 }
 
+// Issue #228 (покрытие тестами) — authenticate() возвращает
+// std::nullopt без сетевого обращения к auth-service, когда заголовок
+// Authorization вообще отсутствует/не в формате "Bearer <token>" (см.
+// HttpServer::authenticate()), так что этот сценарий для каждого
+// маршрута ниже проверяется без живого auth-service, в отличие от
+// самих round-trip тестов дальше в этом файле.
+TEST(HttpServerTest, UpdateOwnProfileRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Patch("/users/me", nlohmann::json{{"display_name", "Mallory"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, ListIncomingFriendRequestsRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/friends/requests");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, AcceptFriendRequestRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/friends/requests/1/accept", "", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, DeclineFriendRequestRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/friends/requests/1/decline", "", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, ListFriendsRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/friends");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, RemoveFriendRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Delete("/friends/anyone");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Issue #228 (покрытие тестами) — /internal/friendship не вызывает
+// authenticate() вообще (см. HttpServer::handleCheckFriendship()):
+// внутренний маршрут только для chat-service (см. README), а не для
+// клиентов напрямую — так что весь его функционал проверяется без
+// живого auth-service, в отличие от остальных маршрутов /friends/*.
+TEST(HttpServerTest, CheckFriendshipRouteRejectsMissingQueryParamsWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/internal/friendship?user_a=alice");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, CheckFriendshipRouteReturnsFalseThenTrueAfterBefriending) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    const std::string loginA = uniqueLogin("http-server-checkfriend-a");
+    const std::string loginB = uniqueLogin("http-server-checkfriend-b");
+    ASSERT_TRUE(userService.registerUser(loginA, "irrelevant-password"));
+    ASSERT_TRUE(userService.registerUser(loginB, "irrelevant-password"));
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result beforeResult =
+        client.Get("/internal/friendship?user_a=" + loginA + "&user_b=" + loginB);
+    ASSERT_TRUE(beforeResult);
+    ASSERT_EQ(beforeResult->status, 200);
+    EXPECT_FALSE(nlohmann::json::parse(beforeResult->body)["friends"].get<bool>());
+
+    ASSERT_EQ(userService.sendFriendRequest(loginA, loginB), SendFriendRequestResult::kSent);
+    const std::vector<FriendRequestInfo> incoming = userService.listIncomingFriendRequests(loginB);
+    ASSERT_FALSE(incoming.empty());
+    ASSERT_EQ(userService.respondToFriendRequest(incoming[0].id, loginB, /*accept=*/true),
+              RespondToFriendRequestResult::kAccepted);
+
+    const httplib::Result afterResult =
+        client.Get("/internal/friendship?user_a=" + loginA + "&user_b=" + loginB);
+    ASSERT_TRUE(afterResult);
+    ASSERT_EQ(afterResult->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(afterResult->body)["friends"].get<bool>());
+}
+
 // Остальные сценарии (400/201/incoming-list/accept/friends-list)
 // намеренно собраны в один тест на пару аккаунтов, а не разбиты по
 // одному сценарию на тест, как везде выше в этом файле, — каждая
