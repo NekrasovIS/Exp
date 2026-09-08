@@ -2,12 +2,28 @@
   "name": "@devicehub/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Placeholder for the thin React web client (issue #124/#220/#221) — reserves its place in the monorepo; no UI yet, only wiring to @devicehub/core to prove the workspace link resolves.",
+  "description": "Thin React web client for DeviceHub (issue #124/#214/#220) — app shell, session, and routing (issue #264); screens land in #265-#269.",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "test": "vitest run",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@devicehub/core": "workspace:*"
+    "@devicehub/core": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "jsdom": "^25.0.1",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.4"
   }
 }
