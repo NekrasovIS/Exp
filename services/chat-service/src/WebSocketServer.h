@@ -70,6 +70,19 @@ namespace chat_service {
  *     реальный результат/jsep-answer от Janus прилетит асинхронно как
  *     `{"janus_event": {...}}` через отдельный поток long-poll на эту
  *     сессию, запущенный в janus_attach).
+ *   - Presence (issue #309) — не отдельный клиентский кадр, а побочный
+ *     эффект самой подписки на канал: успешный hello на `channel_id`
+ *     отвечает `{"subscribed": true, "channel_id": N, "online_members":
+ *     [...]}` (логины остальных участников ТОГО ЖЕ сообщества, у кого
+ *     сейчас есть хоть одно активное подключение к любому его каналу —
+ *     не только к этому конкретному), затем рассылает остальным
+ *     `{"presence_changed": {"login": "<login>", "online": true}}`.
+ *     Отключение (Close/Error) даёт симметричный `{"online": false}`,
+ *     но только если у этого login не осталось других активных
+ *     подключений к каналам того же сообщества (две открытых вкладки —
+ *     не оффлайн, пока закрыта только одна). Эфемерно, как и typing
+ *     ниже — ничего не сохраняется, нет отдельного REST-эндпоинта для
+ *     истории присутствия.
  *   - `{"typing": true}` — issue #96: рассылает
  *     `{"user_typing": "<login>"}` каждому другому подписчику того же
  *     канала (никогда не отправителю обратно). Эфемерно, как и
@@ -123,6 +136,14 @@ private:
     struct Subscription {
         std::string login;
         std::int64_t channelId = 0;
+        /// Сообщество канала выше (issue #309) — обновление в handleHello()
+        /// вместе с channelId, а не отдельным lookup при каждой рассылке
+        /// присутствия: broadcastToCommunity()/расчёт online_members
+        /// сканируют subscriptions_ под локом и не могут звать
+        /// chatService_ (БД) изнутри критической секции (CP.22). Не
+        /// используется, когда isDirectMessage — диалоги не имеют
+        /// сообщества.
+        std::int64_t communityId = 0;
         /// True, когда эта подписка — на личный диалог (dmThreadId), а
         /// не на канал сообщества (channelId) — оба поля взаимно
         /// исключающие, различаются этим флагом, а не значением 0
@@ -186,6 +207,13 @@ private:
     /// уведомления о наборе текста передают сюда отправителя, чтобы он
     /// не видел эхо собственного "typing").
     void broadcastToChannel(std::int64_t channelId, const std::string& json, const ix::WebSocket* excludeSocket = nullptr);
+    /// Presence (issue #309) — рассылает @p json каждому сокету,
+    /// подписанному на ЛЮБОЙ канал сообщества @p communityId (не только
+    /// один конкретный, в отличие от broadcastToChannel), кроме
+    /// @p excludeSocket. Никогда не задевает подписки на личные диалоги
+    /// — у них нет communityId.
+    void broadcastToCommunity(std::int64_t communityId, const std::string& json,
+                               const ix::WebSocket* excludeSocket = nullptr);
     /// Аналог broadcastToChannel() для подписчиков личного диалога
     /// dmThreadId — их всегда ровно два (участники), включая
     /// отправителя (тот же принцип "рассылка всем, без локального
