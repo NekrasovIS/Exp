@@ -205,6 +205,94 @@ describe("ChatClient", () => {
 
       expect(onSignal).toHaveBeenCalledWith("bob", payload);
     });
+
+    it("emits 'sfuRoomAssigned' alongside 'callRoster' when sfu_room is present", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onRoster = vi.fn();
+      const onSfuRoom = vi.fn();
+      client.on("callRoster", onRoster);
+      client.on("sfuRoomAssigned", onSfuRoom);
+
+      socket.simulateMessage(JSON.stringify({ call_roster: ["bob"], sfu_room: "room-42" }));
+
+      expect(onRoster).toHaveBeenCalledWith(["bob"]);
+      expect(onSfuRoom).toHaveBeenCalledWith("room-42");
+    });
+
+    it("does not emit 'sfuRoomAssigned' when sfu_room is absent (Janus unavailable)", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onSfuRoom = vi.fn();
+      client.on("sfuRoomAssigned", onSfuRoom);
+
+      socket.simulateMessage(JSON.stringify({ call_roster: ["bob"] }));
+
+      expect(onSfuRoom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("SFU signaling proxy", () => {
+    it("emits 'janusAttached' with the new handle", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onAttached = vi.fn();
+      client.on("janusAttached", onAttached);
+
+      socket.simulateMessage(JSON.stringify({ janus_attached: { handle: 7 } }));
+
+      expect(onAttached).toHaveBeenCalledWith(7);
+    });
+
+    it("emits 'janusMessageAck' with the response object", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onAck = vi.fn();
+      client.on("janusMessageAck", onAck);
+
+      socket.simulateMessage(JSON.stringify({ janus_message_ack: { janus: "ack" } }));
+
+      expect(onAck).toHaveBeenCalledWith({ janus: "ack" });
+    });
+
+    it("emits 'janusEvent' with the event object untouched", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onEvent = vi.fn();
+      client.on("janusEvent", onEvent);
+      const event = { sender: 7, plugindata: { data: { videoroom: "joined" } } };
+
+      socket.simulateMessage(JSON.stringify({ janus_event: event }));
+
+      expect(onEvent).toHaveBeenCalledWith(event);
+    });
+
+    it("sendJanusAttach sends the expected frame", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendJanusAttach();
+
+      expect(socket.lastSentFrame()).toEqual({ janus_attach: true });
+    });
+
+    it("sendJanusMessage without jsep", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendJanusMessage(7, { request: "join", room: "room-42" });
+
+      expect(socket.lastSentFrame()).toEqual({
+        janus_message: { handle: 7, body: { request: "join", room: "room-42" } },
+      });
+    });
+
+    it("sendJanusMessage with jsep includes it", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+      const jsep = { type: "offer", sdp: "opaque-sdp" };
+
+      client.sendJanusMessage(7, { request: "configure" }, jsep);
+
+      expect(socket.lastSentFrame()).toEqual({
+        janus_message: { handle: 7, body: { request: "configure" }, jsep },
+      });
+    });
   });
 
   it("emits 'userTyping'", () => {

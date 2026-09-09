@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 
+import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { useSession } from "../session/SessionContext.js";
@@ -21,12 +22,23 @@ interface ChatViewContentProps {
 export function ChatViewContent({ channelId, communityId }: ChatViewContentProps) {
   const { currentLogin } = useSession();
   const isModerator = useIsModerator(communityId);
-  const { messages, editedIds, loading, error, hasMore, loadOlder, sendMessage, editMessage, deleteMessage } =
-    useMessages(channelId);
+  const {
+    messages,
+    editedIds,
+    loading,
+    error,
+    hasMore,
+    loadOlder,
+    sendMessage,
+    editMessage,
+    deleteMessage,
+    socket,
+  } = useMessages(channelId);
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
     <section className={styles.section}>
+      {currentLogin !== null && <CallPanel chatClient={socket} localLogin={currentLogin} />}
       <div className={styles.header}>
         <button type="button" onClick={() => setSearchOpen((open) => !open)}>
           {searchOpen ? "Close search" : "Search"}
