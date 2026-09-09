@@ -1131,6 +1131,19 @@ pnpm lint    # ESLint (flat config) по apps/*, packages/*
 pnpm format  # prettier --check по тем же путям
 ```
 
+E2E-тесты (issue #303, `apps/web/e2e/`, Playwright) — отдельно от
+`pnpm test` (Vitest+jsdom, логика компонентов/хуков): реальный Chromium
+против production-сборки (`vite preview`, поднимается автоматически
+конфигом Playwright), без живого backend'а — каждый тест сам мокает
+свои сетевые вызовы через `page.route()`. Первый прогон должен сначала
+скачать сам браузер:
+
+```bash
+cd apps/web
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
 `eslint.config.mjs`/`.prettierignore` намеренно ограничены путями
 JS/TS-монорепо — репозиторий также содержит C++/Qt-проект и
 vendored-зависимости vcpkg в `vcpkg/`, которые не должны попадать под
