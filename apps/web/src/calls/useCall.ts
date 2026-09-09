@@ -121,15 +121,13 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
       manager.disableScreenShare();
       setState((prev) => ({ ...prev, screenShareEnabled: false }));
     } else {
-      void manager
-        .enableScreenShare()
-        .then(() =>
-          setState((prev) => ({
-            ...prev,
-            screenShareEnabled: manager.screenShareEnabled(),
-            videoEnabled: false,
-          })),
-        );
+      void manager.enableScreenShare().then(() =>
+        setState((prev) => ({
+          ...prev,
+          screenShareEnabled: manager.screenShareEnabled(),
+          videoEnabled: false,
+        })),
+      );
     }
   }, [manager]);
 
