@@ -289,6 +289,135 @@ TEST(ChatClientIntegrationTest, MessageWithAttachmentIdRoundTripsAttachmentField
     EXPECT_EQ(receivedAttachmentFilename, QStringLiteral("photo.png"));
 }
 
+TEST(ChatClientIntegrationTest, PinThenUnpinMessageRoundTripsAgainstLiveStack) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const QString login = QStringLiteral("chat-pin-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClient(authUrl);
+    QString token;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClient, &AuthClient::tokenReceived, &loop, [&](const QString& receivedToken) {
+            token = receivedToken;
+            loop.quit();
+        });
+        QObject::connect(&authClient, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        authClient.requestToken(login, password);
+        loop.exec();
+    }
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(token, QStringLiteral("pin-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);  // "login" — владелец этого сообщества.
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    ChatClient chatClient(chatWsUrl);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        chatClient.connectToChannel(token, channelId);
+        loop.exec();
+    }
+
+    qint64 postedMessageId = -1;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
+                          [&](qint64 id, const QString&, const QString&, const QString&, qint64, const QString&) {
+                              postedMessageId = id;
+                              loop.quit();
+                          });
+        chatClient.sendMessage(QStringLiteral("pin me"));
+        loop.exec();
+    }
+    ASSERT_GE(postedMessageId, 0);
+
+    qint64 pinnedId = -1;
+    QString pinnedBy;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messagePinned, &loop,
+                          [&](qint64 id, const QString& by, const QString&) {
+                              pinnedId = id;
+                              pinnedBy = by;
+                              loop.quit();
+                          });
+        chatClient.sendPinMessage(postedMessageId);
+        loop.exec();
+    }
+    EXPECT_EQ(pinnedId, postedMessageId);
+    EXPECT_EQ(pinnedBy, login);
+
+    // REST-список отражает закрепление.
+    QList<PinnedMessageInfo> listedPinned;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::pinnedMessagesListed, &loop,
+                          [&](qint64, const QList<PinnedMessageInfo>& pinned) {
+                              listedPinned = pinned;
+                              loop.quit();
+                          });
+        chatRestClient.listPinnedMessages(token, channelId);
+        loop.exec();
+    }
+    ASSERT_EQ(listedPinned.size(), 1);
+    EXPECT_EQ(listedPinned[0].id, postedMessageId);
+    EXPECT_EQ(listedPinned[0].body, QStringLiteral("pin me"));
+
+    qint64 unpinnedId = -1;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageUnpinned, &loop, [&](qint64 id) {
+            unpinnedId = id;
+            loop.quit();
+        });
+        chatClient.sendUnpinMessage(postedMessageId);
+        loop.exec();
+    }
+    EXPECT_EQ(unpinnedId, postedMessageId);
+}
+
 TEST(ChatClientIntegrationTest, SearchMessagesFindsPostedMessageAgainstLiveStack) {
     const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
     const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));

@@ -55,6 +55,28 @@ QList<ChatMessageInfo> parseMessageList(const QByteArray& jsonBytes) {
     return messages;
 }
 
+QList<PinnedMessageInfo> parsePinnedMessageList(const QByteArray& jsonBytes) {
+    QList<PinnedMessageInfo> pinned;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBytes);
+    if (!document.isArray()) {
+        return pinned;
+    }
+    for (const QJsonValue& value : document.array()) {
+        const QJsonObject object = value.toObject();
+        const QJsonValue attachmentIdValue = object.value("attachment_id");
+        pinned.push_back(PinnedMessageInfo{
+            .id = object.value("id").toVariant().toLongLong(),
+            .author = object.value("author").toString(),
+            .body = object.value("body").toString(),
+            .sentAt = object.value("sent_at").toString(),
+            .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
+            .attachmentFilename = object.value("attachment_filename").toString(),
+            .pinnedBy = object.value("pinned_by").toString(),
+            .pinnedAt = object.value("pinned_at").toString()});
+    }
+    return pinned;
+}
+
 // chat-service сообщает настоящую причину сбоя (например, «нет такого
 // сообщества, или имя канала уже занято») в теле ответа — откат к одному
 // лишь reply->errorString() всегда показывает лишь общее «server replied:
@@ -245,6 +267,19 @@ void ChatRestClient::fetchLatestMessage(const QString& token, qint64 channelId) 
             return;
         }
         emit latestMessageFetched(channelId, parseMessageList(reply->readAll()));
+    });
+}
+
+void ChatRestClient::listPinnedMessages(const QString& token, qint64 channelId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/pinned-messages").arg(channelId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit pinnedMessagesListed(channelId, parsePinnedMessageList(reply->readAll()));
     });
 }
 

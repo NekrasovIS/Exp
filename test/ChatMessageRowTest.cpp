@@ -46,10 +46,12 @@ TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
     // Аватар (безымянный QLabel) + автор (свойство "chatAuthor") + время
-    // ("mutedDescription") + текст = 4 QLabel; у собственных сообщений
+    // ("mutedDescription") + индикатор "Pinned" (issue #338, всегда
+    // создаётся, просто скрыт — см. rebuildReactionChips-подобный приём
+    // у pinnedIndicatorLabel_) + текст = 5 QLabel; у собственных сообщений
     // никогда нет метки автора (см. NonOwnMessageWithHeader ниже) — именно
     // это отличает данный счётчик от случая собственного сообщения.
-    EXPECT_EQ(row.findChildren<QLabel*>().size(), 4);
+    EXPECT_EQ(row.findChildren<QLabel*>().size(), 5);
     int authorLabelCount = 0;
     for (const QLabel* label : row.findChildren<QLabel*>()) {
         if (label->property("chatAuthor").toBool()) {
@@ -62,17 +64,19 @@ TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
 TEST(ChatMessageRowTest, OwnMessageWithHeaderHasNoAuthorLabel) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
 
-    // Только время + текст — у собственных сообщений нет аватара и метки автора.
-    EXPECT_EQ(row.findChildren<QLabel*>().size(), 2);
+    // Время + индикатор "Pinned" (всегда создаётся, скрыт — issue #338)
+    // + текст — у собственных сообщений нет аватара и метки автора.
+    EXPECT_EQ(row.findChildren<QLabel*>().size(), 3);
     for (const QLabel* label : row.findChildren<QLabel*>()) {
         EXPECT_FALSE(label->property("chatAuthor").toBool());
     }
 }
 
-TEST(ChatMessageRowTest, GroupedMessageWithoutHeaderHasOnlyBodyLabel) {
+TEST(ChatMessageRowTest, GroupedMessageWithoutHeaderHasOnlyBodyAndPinnedIndicatorLabels) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/false, /*isOwnMessage=*/false);
 
-    EXPECT_EQ(row.findChildren<QLabel*>().size(), 1);
+    // Текст + индикатор "Pinned" (всегда создаётся, скрыт — issue #338).
+    EXPECT_EQ(row.findChildren<QLabel*>().size(), 2);
 }
 
 TEST(ChatMessageRowTest, MessageWithoutAttachmentHasNoDownloadButton) {
@@ -142,6 +146,109 @@ TEST(ChatMessageRowTest, OwnMessageContextMenuDeleteActionEmitsDeleteRequested) 
     deleteAction->trigger();
     ASSERT_EQ(spy.count(), 1);
     EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
+}
+
+TEST(ChatMessageRowTest, WithoutCanManageChannelNonOwnMessageHasNoContextMenuAndNoPinnedIndicator) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/false);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::DefaultContextMenu);
+    // isHidden(), не isVisible() — тест не показывает окно, а
+    // isVisible() учитывает всю цепочку предков (всегда false для
+    // непоказанного топ-левел виджета); isHidden() отражает только
+    // явный флаг видимости самого этого виджета.
+    EXPECT_TRUE(row.findChild<QLabel*>(QStringLiteral("chatMessagePinnedIndicator"))->isHidden());
+}
+
+TEST(ChatMessageRowTest, CanManageChannelShowsPinActionOnNonOwnMessageButNotEditOrDelete) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* pinAction = menu->findChild<QAction*>(QStringLiteral("pinMessageAction"));
+    ASSERT_NE(pinAction, nullptr);
+    EXPECT_EQ(pinAction->text(), QStringLiteral("Pin"));
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("editMessageAction")), nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("deleteMessageAction")), nullptr);
+}
+
+TEST(ChatMessageRowTest, PinActionOnAnUnpinnedMessageEmitsPinRequestedAndSetPinnedShowsTheIndicator) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* pinAction = menu->findChild<QAction*>(QStringLiteral("pinMessageAction"));
+    ASSERT_NE(pinAction, nullptr);
+    EXPECT_EQ(pinAction->text(), QStringLiteral("Pin"));
+
+    QSignalSpy pinSpy(&row, &ChatMessageRow::pinRequested);
+    pinAction->trigger();
+    ASSERT_EQ(pinSpy.count(), 1);
+    EXPECT_EQ(pinSpy.at(0).at(0).toLongLong(), row.messageId());
+
+    // setPinned() пришло бы от ChatView не раньше, чем сервер подтвердит
+    // это через ChatClient::messagePinned() — а не оптимистично сразу
+    // после клика (тот же принцип "без локального оптимистичного
+    // обновления", что и у edit/delete).
+    row.setPinned(true);
+    EXPECT_FALSE(row.findChild<QLabel*>(QStringLiteral("chatMessagePinnedIndicator"))->isHidden());
+}
+
+TEST(ChatMessageRowTest, PinActionOnAnAlreadyPinnedMessageShowsUnpinAndEmitsUnpinRequested) {
+    // Отдельная строка, а не повторный правый клик на той же (issue
+    // #150 уже установил стиль "новый QMenu на каждый клик, через
+    // popup(), не exec()") — в headless-тесте старое QMenu никогда
+    // реально не закрывается (popup() не блокирует, событие закрытия не
+    // приходит), поэтому второй правый клик на той же строке нашёл бы
+    // ещё живой ПЕРВЫЙ QMenu через findChild(), а не только что
+    // созданный.
+    ChatMessage message = sampleMessage();
+    message.isPinned = true;
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* unpinAction = menu->findChild<QAction*>(QStringLiteral("pinMessageAction"));
+    ASSERT_NE(unpinAction, nullptr);
+    EXPECT_EQ(unpinAction->text(), QStringLiteral("Unpin"));
+
+    QSignalSpy unpinSpy(&row, &ChatMessageRow::unpinRequested);
+    unpinAction->trigger();
+    ASSERT_EQ(unpinSpy.count(), 1);
+    EXPECT_EQ(unpinSpy.at(0).at(0).toLongLong(), row.messageId());
+}
+
+TEST(ChatMessageRowTest, MessageConstructedAlreadyPinnedShowsIndicatorImmediately) {
+    ChatMessage message = sampleMessage();
+    message.isPinned = true;
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+
+    EXPECT_FALSE(row.findChild<QLabel*>(QStringLiteral("chatMessagePinnedIndicator"))->isHidden());
+}
+
+TEST(ChatMessageRowTest, OwnMessageWithCanManageChannelHasEditPinAndDeleteAllTogether) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true, /*canManageChannel=*/true);
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_NE(menu->findChild<QAction*>(QStringLiteral("editMessageAction")), nullptr);
+    EXPECT_NE(menu->findChild<QAction*>(QStringLiteral("pinMessageAction")), nullptr);
+    EXPECT_NE(menu->findChild<QAction*>(QStringLiteral("deleteMessageAction")), nullptr);
 }
 
 TEST(ChatMessageRowTest, IsImageAttachmentRecognizesKnownImageExtensionsCaseInsensitively) {

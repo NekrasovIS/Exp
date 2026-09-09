@@ -44,6 +44,7 @@
 #include "ui/LoginWindow.h"
 #include "ui/MemberListPanel.h"
 #include "ui/ModeratorsDialog.h"
+#include "ui/PinnedMessagesDialog.h"
 #include "ui/ProfileDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SettingsDialog.h"
@@ -274,6 +275,49 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatClient_, &ChatClient::messageDeleted, this,
             [this](qint64 id) { chatView_->removeMessage(id); });
+    connect(&chatClient_, &ChatClient::messagePinned, this,
+            [this](qint64 id, const QString& pinnedBy, const QString& pinnedAt) {
+                chatView_->updatePinned(id, /*isPinned=*/true);
+                if (std::none_of(currentPinnedMessages_.cbegin(), currentPinnedMessages_.cend(),
+                                  [id](const PinnedMessageInfo& info) { return info.id == id; })) {
+                    // Полное содержимое сообщения для панели закреплённых
+                    // (issue #338) уже есть в самой строке ChatView — но
+                    // раз message_pinned не несёт body/author, надёжнее
+                    // просто перезапросить список целиком, чем собирать
+                    // его из уже показанной строки, которая может не
+                    // существовать (сообщение вне текущей страницы истории).
+                    chatRestClient_.listPinnedMessages(lastToken_, selectedChannelId_);
+                } else {
+                    // Уже в списке (это была идемпотентная повторная
+                    // закрепление тем же или другим модератором) — ничего
+                    // не меняется, перезапрос не нужен.
+                    pinnedMessagesDialog_->setPinnedMessages(currentPinnedMessages_);
+                }
+                Q_UNUSED(pinnedBy);
+                Q_UNUSED(pinnedAt);
+            });
+    connect(&chatClient_, &ChatClient::messageUnpinned, this, [this](qint64 id) {
+        chatView_->updatePinned(id, /*isPinned=*/false);
+        currentPinnedMessages_.removeIf([id](const PinnedMessageInfo& info) { return info.id == id; });
+        chatView_->setPinnedMessagesCount(currentPinnedMessages_.size());
+        pinnedMessagesDialog_->setPinnedMessages(currentPinnedMessages_);
+    });
+    connect(&chatRestClient_, &ChatRestClient::pinnedMessagesListed, this,
+            [this](qint64 channelId, const QList<PinnedMessageInfo>& pinned) {
+                if (channelId != selectedChannelId_) {
+                    return;
+                }
+                currentPinnedMessages_ = pinned;
+                chatView_->setPinnedMessagesCount(pinned.size());
+                pinnedMessagesDialog_->setPinnedMessages(pinned);
+            });
+    connect(chatView_, &ChatView::pinnedMessagesToggleRequested, this, [this]() {
+        pinnedMessagesDialog_->show();
+        pinnedMessagesDialog_->raise();
+        pinnedMessagesDialog_->activateWindow();
+    });
+    connect(pinnedMessagesDialog_, &PinnedMessagesDialog::messageActivated, this,
+            [this](qint64 messageId) { chatView_->scrollToMessage(messageId); });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
@@ -293,6 +337,9 @@ MainWindow::MainWindow(QWidget* parent)
             &MainWindow::onCallRestoreRequested);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
+    connect(chatView_, &ChatView::pinMessageRequested, this, [this](qint64 id) { chatClient_.sendPinMessage(id); });
+    connect(chatView_, &ChatView::unpinMessageRequested, this,
+            [this](qint64 id) { chatClient_.sendUnpinMessage(id); });
     connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
     connect(chatView_, &ChatView::downloadAttachmentRequested, this,
             [this](qint64 attachmentId, const QString& filename) {
@@ -416,6 +463,13 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
+        // Issue #338: нужно знать роль вошедшего пользователя в этом
+        // сообществе, чтобы решить, показывать ли Pin/Unpin, ещё до
+        // того, как он откроет конкретный канал — запрашивается здесь,
+        // а не в openChannel()/finishOpeningChannel(), с запасом по
+        // времени на сетевой round trip.
+        currentCommunityModeratorLogins_.clear();
+        chatRestClient_.listModerators(lastToken_, id);
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
@@ -577,6 +631,13 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QStringList& logins) {
                 if (id == moderatorsDialog_->communityId()) {
                     moderatorsDialog_->setModerators(logins);
+                }
+                // Issue #338: та же рассылка, но для роли вошедшего
+                // пользователя в открытом(-ываемом) канале — независимо
+                // от того, открыт ли ModeratorsDialog сейчас.
+                if (id == selectedCommunityId_) {
+                    currentCommunityModeratorLogins_ = logins;
+                    chatView_->setCanManageChannel(currentUserCanManageChannel());
                 }
             });
     connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 id) {
@@ -880,6 +941,7 @@ void MainWindow::buildUi() {
     profileDialog_ = new ProfileDialog(this);
     moderatorsDialog_ = new ModeratorsDialog(this);
     searchDialog_ = new SearchDialog(this);
+    pinnedMessagesDialog_ = new PinnedMessagesDialog(this);
     loginWindow_ = new LoginWindow(this);
 }
 
@@ -1190,6 +1252,16 @@ void MainWindow::refreshChannelsForSelectedCommunity() {
     chatRestClient_.listChannels(lastToken_, selectedCommunityId_);
 }
 
+bool MainWindow::currentUserCanManageChannel() const {
+    if (selectedCommunityId_ < 0 || currentUserLogin_.isEmpty()) {
+        return false;
+    }
+    const auto it = std::find_if(communities_.cbegin(), communities_.cend(),
+                                  [this](const ChatItem& item) { return item.id == selectedCommunityId_; });
+    const bool isOwner = it != communities_.cend() && it->ownerLogin == currentUserLogin_;
+    return isOwner || currentCommunityModeratorLogins_.contains(currentUserLogin_);
+}
+
 void MainWindow::openChannel(qint64 id, const QString& name) {
     // Звонок привязан к тому каналу, на который мы подписаны — выходим
     // из него перед переключением, а не оставляем PeerConnection
@@ -1201,6 +1273,10 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
     chatView_->clearLog();
+    // Issue #338: clearLog() выше уже сбросила это в false — выставляем
+    // заново из уже (скорее всего) известной роли в сообществе,
+    // запрошенной при его выборе (см. communitySelected()).
+    chatView_->setCanManageChannel(currentUserCanManageChannel());
     searchDialog_->clearResults();
 
     const auto it = std::find_if(channels_.cbegin(), channels_.cend(), [id](const ChatItem& item) { return item.id == id; });
@@ -1221,6 +1297,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
 void MainWindow::finishOpeningChannel(qint64 id) {
     chatClient_.connectToChannel(lastToken_, id);
     chatRestClient_.listMessages(lastToken_, id, kMessagePageSize);
+    chatRestClient_.listPinnedMessages(lastToken_, id);
 }
 
 void MainWindow::closeChatView() {
@@ -1235,6 +1312,9 @@ void MainWindow::closeChatView() {
     channelsPanel_->setOpenChannelId(-1);
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
+    // Issue #338 — принадлежали только что закрытому каналу.
+    currentPinnedMessages_.clear();
+    pinnedMessagesDialog_->setPinnedMessages({});
 }
 
 void MainWindow::wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64) {

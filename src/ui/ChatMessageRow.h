@@ -20,7 +20,9 @@ class ChatBubble;
 /// чтобы адресовать/подписать конкретное сообщение для редактирования/
 /// удаления; editedAt не задан для сообщения, которое никогда не
 /// редактировалось. attachmentId равен -1, а attachmentFilename пуст,
-/// когда у сообщения нет вложения (issue #116).
+/// когда у сообщения нет вложения (issue #116). isPinned (issue #338)
+/// отражает состояние на момент загрузки/получения — ChatMessageRow
+/// сама не резолвит его, только рисует то, что передано.
 struct ChatMessage {
     qint64 id = 0;
     QString author;
@@ -29,6 +31,7 @@ struct ChatMessage {
     std::optional<QString> editedAt;
     qint64 attachmentId = -1;
     QString attachmentFilename;
+    bool isPinned = false;
 };
 
 /// True, если @p filename оканчивается на одно из известных расширений
@@ -66,7 +69,14 @@ class ChatMessageRow : public QWidget {
     Q_OBJECT
 
 public:
-    ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, QWidget* parent = nullptr);
+    /// @p canManageChannel (issue #338) — владелец канала/сообщества
+    /// или модератор сообщества, владеющего каналом, куда идёт эта
+    /// строка; управляет только видимостью Pin/Unpin в контекстном
+    /// меню, не связано с @p isOwnMessage (закреплять/снимать может не
+    /// автор, а тот, у кого есть эта роль — см. doc-комментарий класса
+    /// ChatClient::sendPinMessage()).
+    ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, bool canManageChannel = false,
+                   QWidget* parent = nullptr);
 
     [[nodiscard]] qint64 messageId() const { return messageId_; }
 
@@ -75,6 +85,13 @@ public:
     /// показана (showHeader) — issue #107, вызывается, когда
     /// ChatClient::messageEdited() срабатывает для сообщения этой строки.
     void updateBody(const QString& newBody);
+
+    /// Обновляет закреплённость на месте (issue #338) — вызывается,
+    /// когда ChatClient::messagePinned()/messageUnpinned() срабатывает
+    /// для сообщения этой строки; переключает видимость значка
+    /// "📌 Pinned" и текст пункта меню Pin/Unpin при следующем открытии
+    /// контекстного меню.
+    void setPinned(bool isPinned);
 
     /// Заменяет плейсхолдер превью изображения-вложения на реально
     /// загруженный @p image (issue #188), масштабируя с сохранением
@@ -100,6 +117,13 @@ signals:
     /// сообщение, не только собственное).
     void downloadRequested(qint64 attachmentId, const QString& filename);
 
+    /// Выбор "Pin" в контекстном меню (issue #338, только когда
+    /// сконструировано с canManageChannel true).
+    void pinRequested(qint64 id);
+
+    /// Выбор "Unpin" — то же условие видимости, что и у pinRequested().
+    void unpinRequested(qint64 id);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
@@ -117,6 +141,15 @@ private:
     /// заменяет плейсхолдерный текст на реальную картинку, когда она
     /// загружена.
     QLabel* attachmentPreviewLabel_ = nullptr;
+    /// Issue #338 — управляет видимостью Pin/Unpin в контекстном меню,
+    /// построенном лениво при каждом правом клике (см. конструктор), а
+    /// не пересобираемом при setPinned().
+    bool canManageChannel_ = false;
+    bool isPinned_ = false;
+    /// Виден только пока isPinned_ true — null до первого раза, когда
+    /// это стало нужным, создаётся лениво в setPinned() ИЛИ в
+    /// конструкторе, если сообщение изначально уже закреплено.
+    QLabel* pinnedIndicatorLabel_ = nullptr;
 };
 
 }  // namespace devicehub

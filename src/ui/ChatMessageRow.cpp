@@ -57,8 +57,12 @@ bool isVideoAttachment(const QString& filename) {
     return hasAnyExtension(filename, {".mp4", ".mov", ".webm", ".mkv", ".avi"});
 }
 
-ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, QWidget* parent)
-    : QWidget(parent), messageId_(message.id) {
+ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, bool canManageChannel,
+                                QWidget* parent)
+    : QWidget(parent),
+      messageId_(message.id),
+      canManageChannel_(canManageChannel),
+      isPinned_(message.isPinned) {
     const qreal em = QFontMetricsF(font()).height();
     const int avatarSize = qRound(em * kAvatarEm);
     const int spacing = qRound(em * kSpacingEm);
@@ -115,6 +119,18 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         headerRow->addWidget(timeLabel_);
         bubbleLayout->addLayout(headerRow);
     }
+
+    // Issue #338 — виден только пока isPinned_ true; создаётся один раз
+    // здесь и дальше только показывается/скрывается через setPinned(),
+    // тот же приём, что и у reactionsRow_ (issue #334).
+    pinnedIndicatorLabel_ = new QLabel(tr("\U0001F4CC Pinned"), bubble_);
+    pinnedIndicatorLabel_->setObjectName(QStringLiteral("chatMessagePinnedIndicator"));
+    pinnedIndicatorLabel_->setVisible(isPinned_);
+    if (isOwnMessage) {
+        pinnedIndicatorLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+    }
+    bubbleLayout->addWidget(pinnedIndicatorLabel_);
+
     bubbleLayout->addWidget(bodyLabel_);
 
     if (message.attachmentId >= 0) {
@@ -159,39 +175,58 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         }
     }
 
-    if (isOwnMessage) {
+    if (isOwnMessage || canManageChannel_) {
         // Контекстное меню по правому клику вместо всегда видимых кнопок
-        // (issue #150) — доступно на каждой строке собственного сообщения
-        // независимо от showHeader, поскольку сгруппированные
-        // (последовательные) сообщения не повторяют заголовок, но
-        // каждому отдельному сообщению всё равно нужен свой способ
-        // адресации для редактирования/удаления (issue #107). Построено
-        // через popup() (неблокирующий), а не exec(), чтобы тест мог
-        // напрямую вызвать соответствующий QAction, не прокручивая
-        // модальный event loop.
+        // (issue #150) — доступно на каждой строке независимо от
+        // showHeader, поскольку сгруппированные (последовательные)
+        // сообщения не повторяют заголовок. Edit/Delete — только для
+        // собственных сообщений (issue #107); Pin/Unpin (issue #338) —
+        // только когда canManageChannel_ (владелец/модератор), независимо
+        // от того, чьё это сообщение — оба условия проверяются отдельно,
+        // строка может показывать и то, и другое сразу, если пользователь
+        // и модератор, и автор. Построено через popup() (неблокирующий),
+        // а не exec(), чтобы тест мог напрямую вызвать соответствующий
+        // QAction, не прокручивая модальный event loop.
         // bodyLabel_ включает Qt::TextBrowserInteraction (выше), из-за
         // чего QLabel сам обрабатывает правый клик и показывает
         // встроенное текстовое меню (Copy/Copy Link/Select All),
         // поглощая событие раньше, чем оно доходит до bubble_ — снаружи
-        // это выглядело так, будто кастомное меню Edit/Delete вообще не
-        // подключено. Отключаем контекстное меню у самого label'а, чтобы
-        // событие всплывало к bubble_.
+        // это выглядело так, будто кастомное меню вообще не подключено.
+        // Отключаем контекстное меню у самого label'а, чтобы событие
+        // всплывало к bubble_.
         bodyLabel_->setContextMenuPolicy(Qt::NoContextMenu);
         bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(bubble_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        connect(bubble_, &QWidget::customContextMenuRequested, this, [this, isOwnMessage](const QPoint& pos) {
             auto* menu = new QMenu(bubble_);
             menu->setAttribute(Qt::WA_DeleteOnClose);
             menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
-            QAction* editAction = menu->addAction(tr("Edit"));
-            editAction->setObjectName(QStringLiteral("editMessageAction"));
-            connect(editAction, &QAction::triggered, this,
-                    [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
-            QAction* deleteAction = menu->addAction(tr("Delete"));
-            deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
-            connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
+            if (isOwnMessage) {
+                QAction* editAction = menu->addAction(tr("Edit"));
+                editAction->setObjectName(QStringLiteral("editMessageAction"));
+                connect(editAction, &QAction::triggered, this,
+                        [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+            }
+            if (canManageChannel_) {
+                QAction* pinAction = menu->addAction(isPinned_ ? tr("Unpin") : tr("Pin"));
+                pinAction->setObjectName(QStringLiteral("pinMessageAction"));
+                connect(pinAction, &QAction::triggered, this, [this]() {
+                    if (isPinned_) {
+                        emit unpinRequested(messageId_);
+                    } else {
+                        emit pinRequested(messageId_);
+                    }
+                });
+            }
+            if (isOwnMessage) {
+                QAction* deleteAction = menu->addAction(tr("Delete"));
+                deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
+                connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
+            }
             menu->popup(bubble_->mapToGlobal(pos));
         });
+    }
 
+    if (isOwnMessage) {
         rootLayout->addStretch(1);
         rootLayout->addWidget(bubble_);
     } else {
@@ -214,6 +249,11 @@ void ChatMessageRow::updateBody(const QString& newBody) {
     if (timeLabel_ != nullptr) {
         timeLabel_->setText(formattedSentAt_ + QStringLiteral(" (edited)"));
     }
+}
+
+void ChatMessageRow::setPinned(bool isPinned) {
+    isPinned_ = isPinned;
+    pinnedIndicatorLabel_->setVisible(isPinned_);
 }
 
 void ChatMessageRow::setAttachmentPreview(const QImage& image) {
