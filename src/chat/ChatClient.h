@@ -68,7 +68,10 @@ namespace devicehub {
  * subscribed()/messageReceived() на ответ (DirectMessage не несёт
  * attachment_id/attachment_filename — messageReceived() получит для
  * них -1/пустую строку, как и для обычного сообщения без вложения).
- * Никаких кадров звонка/typing/edit_message/delete_message для диалога
+ * sendTyping()/userTyping() тоже работают для диалога (issue #313) —
+ * тот же кадр `{"typing"}`/`{"user_typing"}`, что и для канала, этот
+ * класс не различает их, разница только в маршрутизации на стороне
+ * chat-service. Кадры звонка/edit_message/delete_message для диалога
  * не отправлять — chat-service не обрабатывает их для подписки на
  * личный диалог. Использовать отдельный экземпляр ChatClient для
  * диалогов, не тот же самый, что подписан на канал (нужен независимый
@@ -127,8 +130,9 @@ public:
     void sendJanusMessage(qint64 handle, const QJsonObject& body, const QJsonObject& jsep = QJsonObject());
 
     /// Сообщает chat-service, что локальный пользователь печатает в
-    /// подписанном канале — вызывает userTyping() у всех остальных
-    /// подписчиков.
+    /// подписанном канале или диалоге (issue #313) — вызывает
+    /// userTyping() у остальных подписчиков (в диалоге — у второго
+    /// участника).
     void sendTyping();
 
     /// Запрашивает редактирование сообщения @p id (должно принадлежать
@@ -199,7 +203,7 @@ signals:
     /// через chat-service.
     void janusEventReceived(const QJsonObject& event);
 
-    /// Другой подписчик печатает в подписанном канале.
+    /// Другой подписчик печатает в подписанном канале или диалоге.
     void userTyping(const QString& login);
 
 private:
