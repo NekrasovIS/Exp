@@ -37,9 +37,20 @@ interface ChatClientEventMap {
   messageDeleted: [id: number];
   error: [message: string];
   callRoster: [participants: string[]];
+  // SFU room for the call (issue #221/#232) — same call_join response as
+  // callRoster, just its own event so callRoster's own signature (kept
+  // for wire-format parity with the C++ side) doesn't need to change.
+  // Not emitted if chat-service couldn't provision a room (Janus
+  // temporarily unavailable).
+  sfuRoomAssigned: [room: string];
   callPeerJoined: [login: string];
   callPeerLeft: [login: string];
   callSignal: [from: string, payload: unknown];
+  // SFU signaling proxy (issue #221/#232) — see sendJanusAttach()/
+  // sendJanusMessage()'s own doc comments for what each answers.
+  janusAttached: [handle: number];
+  janusMessageAck: [response: unknown];
+  janusEvent: [event: Record<string, unknown>];
   userTyping: [login: string];
 }
 
@@ -122,6 +133,29 @@ export class ChatClient {
     this.sendFrame({ call_signal: { to, payload } });
   }
 
+  /** SFU signaling proxy (issue #221/#232): attaches a new videoroom
+   * plugin handle on this connection's Janus session (chat-service
+   * creates the session itself on the first call over this
+   * connection's lifetime). Answered by a `janusAttached` event. */
+  sendJanusAttach(): void {
+    this.sendFrame({ janus_attach: true });
+  }
+
+  /** Relays @p body (plus @p jsep, if given) verbatim to the given
+   * Janus @p handle through chat-service — this method never inspects
+   * their contents ("join"/"configure"/"subscribe"/"start" etc., see
+   * the Janus videoroom protocol). The direct reply (may be just an
+   * ack — the real result arrives asynchronously) comes through
+   * `janusMessageAck`; async events on the same session (including a
+   * jsep answer from Janus) come through `janusEvent`. */
+  sendJanusMessage(handle: number, body: unknown, jsep?: unknown): void {
+    const inner: Record<string, unknown> = { handle, body };
+    if (jsep !== undefined) {
+      inner.jsep = jsep;
+    }
+    this.sendFrame({ janus_message: inner });
+  }
+
   /** Valid only in channel mode. Ephemeral — the server never echoes
    * this back to the sender. */
   sendTyping(): void {
@@ -198,6 +232,11 @@ export class ChatClient {
     }
     if (Array.isArray(body.call_roster)) {
       this.emit("callRoster", body.call_roster as string[]);
+      // Same call_join response as callRoster above, not a separate
+      // frame — see sfuRoomAssigned's own doc comment on the event map.
+      if (typeof body.sfu_room === "string") {
+        this.emit("sfuRoomAssigned", body.sfu_room);
+      }
       return;
     }
     if (typeof body.call_peer_joined === "string") {
@@ -214,6 +253,21 @@ export class ChatClient {
         this.emit("callSignal", signal.from, signal.payload);
         return;
       }
+    }
+    if (typeof body.janus_attached === "object" && body.janus_attached !== null) {
+      const attached = body.janus_attached as { handle?: unknown };
+      if (typeof attached.handle === "number") {
+        this.emit("janusAttached", attached.handle);
+        return;
+      }
+    }
+    if (typeof body.janus_message_ack === "object" && body.janus_message_ack !== null) {
+      this.emit("janusMessageAck", body.janus_message_ack);
+      return;
+    }
+    if (typeof body.janus_event === "object" && body.janus_event !== null) {
+      this.emit("janusEvent", body.janus_event as Record<string, unknown>);
+      return;
     }
     if (typeof body.user_typing === "string") {
       this.emit("userTyping", body.user_typing);

@@ -8,6 +8,7 @@
 import type { ChatMessageInfo } from "@devicehub/core";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
@@ -30,8 +31,18 @@ export function EncryptedChatViewContent({
 }: EncryptedChatViewContentProps) {
   const { currentLogin } = useSession();
   const isModerator = useIsModerator(communityId);
-  const { messages, editedIds, loading, error, hasMore, loadOlder, sendMessage, editMessage, deleteMessage } =
-    useMessages(channelId);
+  const {
+    messages,
+    editedIds,
+    loading,
+    error,
+    hasMore,
+    loadOlder,
+    sendMessage,
+    editMessage,
+    deleteMessage,
+    socket,
+  } = useMessages(channelId);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [body, setBody] = useState("");
 
@@ -77,6 +88,7 @@ export function EncryptedChatViewContent({
 
   return (
     <section className={styles.section}>
+      {currentLogin !== null && <CallPanel chatClient={socket} localLogin={currentLogin} />}
       <div className={styles.header}>
         <span className={styles.encryptedBadge}>🔒 Encrypted</span>
       </div>

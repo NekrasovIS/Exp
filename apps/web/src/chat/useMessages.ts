@@ -92,5 +92,21 @@ export function useMessages(channelId: number) {
   );
   const deleteMessage = useCallback((id: number) => socket.sendDeleteMessage(id), [socket]);
 
-  return { messages, editedIds, loading, error, hasMore, loadOlder, sendMessage, editMessage, deleteMessage };
+  // socket is also returned (issue #221) — the call feature rides the
+  // same WebSocket connection as message subscription (call_join is
+  // only valid once this connection's own `subscribed` has already
+  // fired), so useCall() needs this exact ChatClient instance, not a
+  // second independent connection to the same channel.
+  return {
+    messages,
+    editedIds,
+    loading,
+    error,
+    hasMore,
+    loadOlder,
+    sendMessage,
+    editMessage,
+    deleteMessage,
+    socket,
+  };
 }
