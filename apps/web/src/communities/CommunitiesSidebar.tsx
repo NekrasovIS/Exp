@@ -2,11 +2,21 @@
 // communities the caller has joined, selection, and joining a new one
 // by invite code. Doesn't know about channels or chat content — that's
 // ChannelsSidebar/#267's job.
+//
+// Invite-link block (issue #301): every member can copy the currently
+// selected community's invite link (mirrors DeviceHub's
+// CommunitiesPanel context menu — "Copy Invite Code" for any member),
+// only the owner can regenerate it (same "Regenerate Invite Code"
+// restriction, and the same server-side check — regenerateInviteCode()
+// 403s for a non-owner member, see ChatRestClient's own doc comment).
+// The link itself is just `${origin}/join/${code}` — JoinPage.tsx is
+// the other half of this feature.
 
 import { useState, type FormEvent } from "react";
 
 import { useCommunities } from "./useCommunities.js";
 import styles from "../pages/sidebarNav.module.css";
+import { useSession } from "../session/SessionContext.js";
 
 interface CommunitiesSidebarProps {
   selectedCommunityId: number | null;
@@ -14,10 +24,15 @@ interface CommunitiesSidebarProps {
 }
 
 export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: CommunitiesSidebarProps) {
-  const { communities, loading, error, joinByCode } = useCommunities();
+  const { currentLogin } = useSession();
+  const { communities, loading, error, joinByCode, regenerateInviteCode } = useCommunities();
   const [code, setCode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const selectedCommunity = communities.find((community) => community.id === selectedCommunityId) ?? null;
 
   async function handleJoin(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -33,6 +48,28 @@ export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: C
       setJoinError("That invite code doesn't match any community.");
     } finally {
       setJoining(false);
+    }
+  }
+
+  async function handleCopyInviteLink(): Promise<void> {
+    if (selectedCommunity?.inviteCode === undefined) {
+      return;
+    }
+    const link = `${window.location.origin}/join/${selectedCommunity.inviteCode}`;
+    await navigator.clipboard.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleRegenerate(): Promise<void> {
+    if (selectedCommunity === null) {
+      return;
+    }
+    setRegenerating(true);
+    try {
+      await regenerateInviteCode(selectedCommunity.id);
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -54,6 +91,27 @@ export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: C
           </li>
         ))}
       </ul>
+      {selectedCommunity?.inviteCode !== undefined && (
+        <div className={styles.inviteBlock}>
+          <p>Invite link</p>
+          <div className={styles.inviteRow}>
+            <input
+              className={styles.inviteLinkInput}
+              readOnly
+              value={`${window.location.origin}/join/${selectedCommunity.inviteCode}`}
+              aria-label="Invite link"
+            />
+            <button type="button" onClick={() => void handleCopyInviteLink()}>
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          {selectedCommunity.ownerLogin === currentLogin && (
+            <button type="button" onClick={() => void handleRegenerate()} disabled={regenerating}>
+              Regenerate
+            </button>
+          )}
+        </div>
+      )}
       <form onSubmit={handleJoin} className={styles.form}>
         <label htmlFor="community-invite-code">Invite code</label>
         <input id="community-invite-code" value={code} onChange={(event) => setCode(event.target.value)} />
