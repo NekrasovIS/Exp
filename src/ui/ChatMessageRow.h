@@ -112,6 +112,12 @@ private:
     QLabel* timeLabel_ = nullptr;
     QString formattedSentAt_;
     qint64 messageId_ = 0;
+    /// Тело сообщения ДО message_formatting::highlightMentions() (issue
+    /// #307) — editRequested() эмиттит это, а не bodyLabel_->text(),
+    /// иначе поле редактирования предзаполнилось бы уже обёрнутым в
+    /// **bold** markdown текстом, и повторное сохранение без изменений
+    /// зафиксировало бы эту обёртку в самом сообщении навсегда.
+    QString rawBody_;
     /// Плейсхолдер превью изображения-вложения (issue #188) — null, если
     /// у сообщения нет вложения-изображения. setAttachmentPreview()
     /// заменяет плейсхолдерный текст на реальную картинку, когда она
