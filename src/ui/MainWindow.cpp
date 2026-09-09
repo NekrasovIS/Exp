@@ -310,6 +310,16 @@ MainWindow::MainWindow(QWidget* parent)
                 currentPinnedMessages_ = pinned;
                 chatView_->setPinnedMessagesCount(pinned.size());
                 pinnedMessagesDialog_->setPinnedMessages(pinned);
+                // Issue #339 (найдено при переходе к веб-версии, #340):
+                // сообщения, уже закреплённые ДО открытия канала, иначе
+                // никогда не получают инлайн-значок "📌 Pinned" в самой
+                // ленте — GET .../messages не несёт is_pinned для каждого
+                // сообщения (это единственная работа этого отдельного
+                // REST-эндпоинта), а строки уже построены к этому моменту
+                // с ChatMessage::isPinned по умолчанию false.
+                for (const PinnedMessageInfo& info : pinned) {
+                    chatView_->updatePinned(info.id, /*isPinned=*/true);
+                }
             });
     connect(chatView_, &ChatView::pinnedMessagesToggleRequested, this, [this]() {
         pinnedMessagesDialog_->show();
