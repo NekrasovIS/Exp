@@ -28,7 +28,9 @@ export function ChatView({ channelId, communityId, isEncrypted }: ChatViewProps)
     return <p className={placeholderStyles.placeholder}>Loading…</p>;
   }
   if (channelKey === null) {
-    return <p className={placeholderStyles.placeholder}>You don't have access to this encrypted channel yet.</p>;
+    return (
+      <p className={placeholderStyles.placeholder}>You don't have access to this encrypted channel yet.</p>
+    );
   }
   return <EncryptedChatViewContent channelId={channelId} communityId={communityId} channelKey={channelKey} />;
 }
