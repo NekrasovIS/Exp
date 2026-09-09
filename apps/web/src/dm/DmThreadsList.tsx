@@ -2,6 +2,7 @@
 // rather than only via FriendsPanel's "Message" button each time.
 
 import { useDmThreads } from "./useDmThreads.js";
+import styles from "./DmThreadsList.module.css";
 
 interface DmThreadsListProps {
   selectedThreadId: number | null;
@@ -12,14 +13,15 @@ export function DmThreadsList({ selectedThreadId, onSelectThread }: DmThreadsLis
   const { threads, loading, error } = useDmThreads();
 
   return (
-    <nav aria-label="Conversations">
-      {loading && <p>Loading conversations…</p>}
+    <nav aria-label="Conversations" className={styles.nav}>
+      {loading && <p className={styles.mutedText}>Loading conversations…</p>}
       {error !== null && <p role="alert">{error}</p>}
-      <ul>
+      <ul className={styles.list}>
         {threads.map((thread) => (
           <li key={thread.id}>
             <button
               type="button"
+              className={styles.listItemButton}
               aria-current={thread.id === selectedThreadId}
               onClick={() => onSelectThread(thread.id, thread.otherLogin)}
             >
