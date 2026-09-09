@@ -33,6 +33,8 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
     editMessage,
     deleteMessage,
     socket,
+    typingUser,
+    sendTyping,
   } = useMessages(channelId);
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -63,7 +65,8 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
           onDelete={deleteMessage}
         />
       </div>
-      <MessageComposer channelId={channelId} onSend={sendMessage} />
+      {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
+      <MessageComposer channelId={channelId} onSend={sendMessage} onTyping={sendTyping} />
     </section>
   );
 }

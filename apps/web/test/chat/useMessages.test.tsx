@@ -158,4 +158,45 @@ describe("useMessages", () => {
       { delete_message: { id: 1 } },
     ]);
   });
+
+  // Issue #318 — mirrors useDirectMessages.test.tsx's own "typing"
+  // describe block; fake timers switched on only after the initial
+  // async load already settled under real timers.
+  describe("typing", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sendTyping sends a {typing:true} frame, throttled while called repeatedly", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const socket = FakeWebSocket.instances[0]!;
+
+      vi.useFakeTimers();
+      act(() => {
+        result.current.sendTyping();
+        result.current.sendTyping();
+      });
+      expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([{ typing: true }]);
+
+      act(() => vi.advanceTimersByTime(2000));
+      act(() => result.current.sendTyping());
+      expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([{ typing: true }, { typing: true }]);
+    });
+
+    it("a received user_typing sets typingUser, then auto-clears after the hide window", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const socket = FakeWebSocket.instances[0]!;
+
+      vi.useFakeTimers();
+      act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
+      expect(result.current.typingUser).toBe("bob");
+
+      act(() => vi.advanceTimersByTime(3000));
+      expect(result.current.typingUser).toBeNull();
+    });
+  });
 });

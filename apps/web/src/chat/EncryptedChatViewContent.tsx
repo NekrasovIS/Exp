@@ -42,6 +42,8 @@ export function EncryptedChatViewContent({
     editMessage,
     deleteMessage,
     socket,
+    typingUser,
+    sendTyping,
   } = useMessages(channelId);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [body, setBody] = useState("");
@@ -109,9 +111,17 @@ export function EncryptedChatViewContent({
           onDelete={deleteMessage}
         />
       </div>
+      {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
       <form onSubmit={handleSend} className={styles.simpleComposerForm}>
         <label htmlFor="encrypted-message-body">Message</label>
-        <input id="encrypted-message-body" value={body} onChange={(event) => setBody(event.target.value)} />
+        <input
+          id="encrypted-message-body"
+          value={body}
+          onChange={(event) => {
+            setBody(event.target.value);
+            sendTyping();
+          }}
+        />
         <button type="submit">Send</button>
       </form>
     </section>

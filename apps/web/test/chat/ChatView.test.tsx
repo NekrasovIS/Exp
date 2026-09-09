@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatView } from "../../src/chat/ChatView.js";
@@ -101,5 +102,64 @@ describe("ChatView", () => {
 
     expect(await screen.findByText("hello from a")).toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  // Issue #318 — same typing protocol channels always supported
+  // server-side (issue #96), now wired up on the web client too, for
+  // both the plain and encrypted composer.
+
+  it("typing in the (non-encrypted) composer sends a typing frame, and a received user_typing shows the indicator", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+
+    render(
+      <SessionProvider>
+        <ChatView channelId={7} communityId={1} isEncrypted={false} />
+      </SessionProvider>,
+    );
+    await screen.findByLabelText("Message");
+    const socket = FakeWebSocket.instances[0]!;
+
+    await userEvent.type(screen.getByLabelText("Message"), "h");
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({ typing: true });
+
+    expect(screen.queryByText("bob is typing…")).not.toBeInTheDocument();
+    act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
+    expect(screen.getByText("bob is typing…")).toBeInTheDocument();
+  });
+
+  it("typing in the encrypted composer sends a typing frame, and a received user_typing shows the indicator", async () => {
+    const sodium = await getSodium();
+    const identityKeyPair = sodium.crypto_box_keypair();
+    localStorage.setItem(
+      `devicehub.web.identityKeys.${kLogin}`,
+      JSON.stringify({
+        publicKey: sodium.to_base64(identityKeyPair.publicKey, sodium.base64_variants.ORIGINAL),
+        secretKey: sodium.to_base64(identityKeyPair.privateKey, sodium.base64_variants.ORIGINAL),
+      }),
+    );
+    const channelKey = await generateChannelKey();
+    const wrappedKey = await wrapKeyForRecipient(channelKey, identityKeyPair.publicKey);
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([
+        [/\/channels\/7\/keys\/me/, () => jsonResponse(200, { wrapped_key: wrappedKey })],
+        [/\/users\/me/, () => jsonResponse(200, { login: kLogin })],
+        [/\/channels\/7\/messages/, () => jsonResponse(200, [])],
+      ]),
+    );
+
+    render(
+      <SessionProvider>
+        <ChatView channelId={7} communityId={1} isEncrypted={true} />
+      </SessionProvider>,
+    );
+    await screen.findByLabelText("Message");
+    const socket = FakeWebSocket.instances[0]!;
+
+    await userEvent.type(screen.getByLabelText("Message"), "h");
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({ typing: true });
+
+    act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
+    expect(screen.getByText("bob is typing…")).toBeInTheDocument();
   });
 });
