@@ -123,6 +123,11 @@ std::vector<Message> ChatService::searchMessages(std::int64_t channelId, const s
     return repository_.searchMessages(channelId, query, limit);
 }
 
+ToggleReactionResult ChatService::toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                  const std::string& login, const std::string& emoji) {
+    return repository_.toggleReaction(messageId, channelId, login, emoji);
+}
+
 std::int64_t ChatService::findOrCreateThread(const std::string& loginA, const std::string& loginB) {
     return repository_.findOrCreateThread(loginA, loginB);
 }

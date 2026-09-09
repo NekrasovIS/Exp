@@ -35,6 +35,30 @@ bool isMemberOfCommunity(pqxx::work& transaction, std::int64_t communityId, cons
     return !rows.empty();
 }
 
+/// Реакции на сообщение @p messageId, сгруппированные по эмодзи (issue
+/// #333), в рамках уже открытой @p transaction — общая часть
+/// listRecentMessages()/searchMessages(); insertMessage() не вызывает
+/// это вовсе, поскольку у только что отправленного сообщения реакций
+/// заведомо ещё нет. Одна строка на результат SELECT, сортированного
+/// по (emoji, created_at) — переход на новый emoji в потоке строк
+/// начинает новую MessageReaction, а не отдельный агрегирующий запрос
+/// (GROUP BY/array_agg) — тот же выбор простоты, что и у поиска ниже
+/// (position() вместо полнотекстового индекса).
+std::vector<MessageReaction> reactionsForMessage(pqxx::work& transaction, std::int64_t messageId) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT emoji, login FROM message_reactions WHERE message_id = $1 ORDER BY emoji, created_at",
+        pqxx::params{messageId});
+    std::vector<MessageReaction> reactions;
+    for (const auto& row : rows) {
+        const std::string emoji = row[0].as<std::string>();
+        if (reactions.empty() || reactions.back().emoji != emoji) {
+            reactions.push_back(MessageReaction{.emoji = emoji});
+        }
+        reactions.back().logins.push_back(row[1].as<std::string>());
+    }
+    return reactions;
+}
+
 /// direct_message_threads хранит неупорядоченную пару в каноническом
 /// порядке (меньший login первым) — одна строка вместо двух, тот же
 /// приём, что и у friendships в user-service.
@@ -512,15 +536,17 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
     std::vector<Message> messages;
     messages.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
+        const std::int64_t messageId = row[0].as<std::int64_t>();
         messages.push_back(
-            Message{.id = row[0].as<std::int64_t>(),
+            Message{.id = messageId,
                     .authorLogin = row[1].as<std::string>(),
                     .body = row[2].as<std::string>(),
                     .sentAt = row[3].as<std::string>(),
                     .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
                     .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
                     .attachmentFilename =
-                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
+                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
+                    .reactions = reactionsForMessage(transaction, messageId)});
     }
     std::reverse(messages.begin(), messages.end());
     return messages;
@@ -572,6 +598,44 @@ MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_
     transaction.exec("DELETE FROM messages WHERE id = $1", pqxx::params{messageId});
     transaction.commit();
     return MutationResult::kSuccess;
+}
+
+ToggleReactionResult ChatRepository::toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                     const std::string& login, const std::string& emoji) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result messageRows =
+        transaction.exec("SELECT 1 FROM messages WHERE id = $1 AND channel_id = $2", pqxx::params{messageId, channelId});
+    if (messageRows.empty()) {
+        return ToggleReactionResult{.result = MutationResult::kNotFound};
+    }
+
+    const pqxx::result existing = transaction.exec(
+        "SELECT 1 FROM message_reactions WHERE message_id = $1 AND login = $2 AND emoji = $3",
+        pqxx::params{messageId, login, emoji});
+    if (existing.empty()) {
+        transaction.exec("INSERT INTO message_reactions (message_id, login, emoji) VALUES ($1, $2, $3)",
+                          pqxx::params{messageId, login, emoji});
+    } else {
+        // Повторный клик по своей же реакции снимает её (toggle), а не
+        // добавляет вторую строку — см. doc-комментарий уникального
+        // индекса в init.sql.
+        transaction.exec("DELETE FROM message_reactions WHERE message_id = $1 AND login = $2 AND emoji = $3",
+                          pqxx::params{messageId, login, emoji});
+    }
+
+    const pqxx::result loginsRows = transaction.exec(
+        "SELECT login FROM message_reactions WHERE message_id = $1 AND emoji = $2 ORDER BY created_at",
+        pqxx::params{messageId, emoji});
+    std::vector<std::string> logins;
+    logins.reserve(static_cast<std::size_t>(loginsRows.size()));
+    for (const auto& row : loginsRows) {
+        logins.push_back(row[0].as<std::string>());
+    }
+
+    transaction.commit();
+    return ToggleReactionResult{.result = MutationResult::kSuccess, .logins = std::move(logins)};
 }
 
 std::optional<AttachmentMetadata> ChatRepository::createAttachment(std::int64_t channelId,
@@ -629,15 +693,17 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
     std::vector<Message> messages;
     messages.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
+        const std::int64_t messageId = row[0].as<std::int64_t>();
         messages.push_back(
-            Message{.id = row[0].as<std::int64_t>(),
+            Message{.id = messageId,
                     .authorLogin = row[1].as<std::string>(),
                     .body = row[2].as<std::string>(),
                     .sentAt = row[3].as<std::string>(),
                     .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
                     .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
                     .attachmentFilename =
-                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
+                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
+                    .reactions = reactionsForMessage(transaction, messageId)});
     }
     return messages;
 }

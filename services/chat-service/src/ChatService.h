@@ -59,6 +59,10 @@ public:
                                                 const std::string& requesterLogin);
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
 
+    /// См. ChatRepository::toggleReaction() (issue #333).
+    [[nodiscard]] ToggleReactionResult toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                       const std::string& login, const std::string& emoji);
+
     [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
                                                                        const AttachmentUpload& upload);
     [[nodiscard]] std::optional<AttachmentData> findAttachmentData(std::int64_t attachmentId);

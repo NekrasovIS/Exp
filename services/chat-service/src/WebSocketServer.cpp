@@ -14,8 +14,20 @@ namespace chat_service {
 namespace {
 /// Issue #226 (pentest) — см. doc-комментарий у проверки в handleCallSignal().
 constexpr std::size_t kMaxCallSignalPayloadBytes = 64 * 1024;
+/// Issue #333 — тот же порядок величины, что и у ограничения полезной
+/// нагрузки call_signal выше, только применённый к одной emoji: не
+/// пропускать произвольно длинную строку под видом "emoji" в toggle_reaction.
+constexpr std::size_t kMaxReactionEmojiBytes = 64;
+
+nlohmann::json toJson(const MessageReaction& reaction) {
+    return nlohmann::json{{"emoji", reaction.emoji}, {"logins", reaction.logins}};
+}
 
 nlohmann::json toJson(const Message& message) {
+    nlohmann::json reactions = nlohmann::json::array();
+    for (const MessageReaction& reaction : message.reactions) {
+        reactions.push_back(toJson(reaction));
+    }
     return nlohmann::json{
         {"id", message.id},
         {"author", message.authorLogin},
@@ -25,7 +37,8 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_id",
          message.attachmentId.has_value() ? nlohmann::json(*message.attachmentId) : nlohmann::json(nullptr)},
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
-                                                                        : nlohmann::json(nullptr)}};
+                                                                        : nlohmann::json(nullptr)},
+        {"reactions", reactions}};
 }
 
 nlohmann::json toJson(const DirectMessage& message) {
@@ -199,6 +212,8 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleEditMessage(webSocket, subscription, body["edit_message"]);
     } else if (body.contains("delete_message")) {
         handleDeleteMessage(webSocket, subscription, body["delete_message"]);
+    } else if (body.contains("toggle_reaction")) {
+        handleToggleReaction(webSocket, subscription, body["toggle_reaction"]);
     } else {
         handleChatMessage(webSocket, subscription, body);
     }
@@ -311,6 +326,38 @@ void WebSocketServer::handleDeleteMessage(ix::WebSocket& webSocket, const Subscr
     }
 
     broadcastToChannel(subscription.channelId, nlohmann::json{{"message_deleted", {{"id", messageId}}}}.dump());
+}
+
+void WebSocketServer::handleToggleReaction(ix::WebSocket& webSocket, const Subscription& subscription,
+                                            const nlohmann::json& body) {
+    if (!body.contains("message_id") || !body["message_id"].is_number_integer() || !body.contains("emoji") ||
+        !body["emoji"].is_string()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"message_id\", \"emoji\"}"}}.dump());
+        return;
+    }
+    const std::string emoji = body["emoji"].get<std::string>();
+    if (emoji.empty() || emoji.size() > kMaxReactionEmojiBytes) {
+        webSocket.send(nlohmann::json{{"error", "invalid emoji"}}.dump());
+        return;
+    }
+
+    const auto messageId = body["message_id"].get<std::int64_t>();
+    const ToggleReactionResult result =
+        chatService_.toggleReaction(messageId, subscription.channelId, subscription.login, emoji);
+    // toggleReaction() only ever returns kNotFound/kSuccess (any channel
+    // member may react to any message, including their own — unlike
+    // edit/delete there's no kForbidden case), so a direct check reads
+    // clearer here than reusing respondIfMutationFailed()'s forbidden-
+    // message parameter for a branch that can't be reached.
+    if (result.result == MutationResult::kNotFound) {
+        webSocket.send(nlohmann::json{{"error", "no such message"}}.dump());
+        return;
+    }
+
+    broadcastToChannel(
+        subscription.channelId,
+        nlohmann::json{{"reaction_changed", {{"message_id", messageId}, {"emoji", emoji}, {"logins", result.logins}}}}
+            .dump());
 }
 
 void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription) {

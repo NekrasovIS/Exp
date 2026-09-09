@@ -810,6 +810,12 @@ TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
         nlohmann::json{{"body", "x"}, {"attachment_id", nlohmann::json::array()}},
         nlohmann::json{{"typing", nlohmann::json::object()}},
         nlohmann::json{{"typing", nullptr}},
+        nlohmann::json{{"toggle_reaction", "not an object"}},
+        nlohmann::json{{"toggle_reaction", {{"message_id", "not-a-number"}, {"emoji", "\U0001F44D"}}}},
+        nlohmann::json{{"toggle_reaction", {{"message_id", 1}, {"emoji", 12345}}}},
+        nlohmann::json{{"toggle_reaction", {{"message_id", 1}, {"emoji", ""}}}},
+        nlohmann::json{{"toggle_reaction", {{"message_id", 1}, {"emoji", std::string(1000, 'x')}}}},
+        nlohmann::json{{"toggle_reaction", {{"message_id", 9223372036854775808ULL}, {"emoji", "\U0001F44D"}}}},
     };
     for (const nlohmann::json& frame : adversarialFrames) {
         client.send(frame);
@@ -1077,6 +1083,117 @@ TEST(WebSocketServerTest, ChatMessageWithAttachmentIdBroadcastsAttachmentFields)
     ASSERT_TRUE(received.has_value());
     EXPECT_EQ((*received)["attachment_id"].get<std::int64_t>(), attachment->id);
     EXPECT_EQ((*received)["attachment_filename"].get<std::string>(), "photo.png");
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, ToggleReactionBroadcastsLoginsAndTogglingAgainRemovesIt) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18100"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-reaction-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-reaction-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, owner);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"body", "react to me"}});
+    const std::optional<nlohmann::json> posted =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("body"); });
+    ASSERT_TRUE(posted.has_value());
+    // Только что отправленное сообщение ещё не имело реакций.
+    EXPECT_TRUE((*posted)["reactions"].empty());
+    const auto messageId = (*posted)["id"].get<std::int64_t>();
+
+    client.send(nlohmann::json{{"toggle_reaction", {{"message_id", messageId}, {"emoji", "\U0001F44D"}}}});
+    const std::optional<nlohmann::json> added =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("reaction_changed"); });
+    ASSERT_TRUE(added.has_value());
+    EXPECT_EQ((*added)["reaction_changed"]["message_id"].get<std::int64_t>(), messageId);
+    EXPECT_EQ((*added)["reaction_changed"]["emoji"].get<std::string>(), "\U0001F44D");
+    ASSERT_EQ((*added)["reaction_changed"]["logins"].size(), 1);
+    EXPECT_EQ((*added)["reaction_changed"]["logins"][0].get<std::string>(), owner);
+
+    // Повторное переключение той же эмодзи тем же логином — снимает её.
+    client.send(nlohmann::json{{"toggle_reaction", {{"message_id", messageId}, {"emoji", "\U0001F44D"}}}});
+    const std::optional<nlohmann::json> removed =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("reaction_changed"); });
+    ASSERT_TRUE(removed.has_value());
+    EXPECT_TRUE((*removed)["reaction_changed"]["logins"].empty());
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, ToggleReactionOnANonexistentMessageReturnsError) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18101"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-reaction-404-test-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-reaction-404-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, owner);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"toggle_reaction", {{"message_id", 999999999}, {"emoji", "\U0001F44D"}}}});
+    const std::optional<nlohmann::json> error =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(error.has_value());
 
     server.stop();
 }

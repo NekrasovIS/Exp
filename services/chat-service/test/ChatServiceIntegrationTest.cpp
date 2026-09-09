@@ -603,6 +603,73 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     EXPECT_EQ(*messages[0].attachmentFilename, "greeting.txt");
 }
 
+TEST(ChatServiceIntegrationTest, ToggleReactionAggregatesMultipleUsersAndRoundTripsThroughRecentAndSearch) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "reaction-test-owner-" + suffix;
+    const std::string other = "reaction-test-other-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("reaction-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> posted = service.postMessage(*channelId, owner, "react to this please");
+    ASSERT_TRUE(posted.has_value());
+    EXPECT_TRUE(posted->reactions.empty());
+
+    // Несуществующее сообщение — kNotFound, а не тихий успех.
+    EXPECT_EQ(service.toggleReaction(999999999, *channelId, owner, "\U0001F44D").result, MutationResult::kNotFound);
+    // Правильное сообщение, но не тот channelId — тоже kNotFound (та же
+    // защита, что уже есть у editMessage()/deleteMessage()).
+    EXPECT_EQ(service.toggleReaction(posted->id, 999999999, owner, "\U0001F44D").result, MutationResult::kNotFound);
+
+    const ToggleReactionResult firstAdd = service.toggleReaction(posted->id, *channelId, owner, "\U0001F44D");
+    ASSERT_EQ(firstAdd.result, MutationResult::kSuccess);
+    ASSERT_EQ(firstAdd.logins.size(), 1U);
+    EXPECT_EQ(firstAdd.logins[0], owner);
+
+    // Второй пользователь ставит ту же эмодзи — оба теперь в списке.
+    const ToggleReactionResult secondAdd = service.toggleReaction(posted->id, *channelId, other, "\U0001F44D");
+    ASSERT_EQ(secondAdd.result, MutationResult::kSuccess);
+    ASSERT_EQ(secondAdd.logins.size(), 2U);
+    EXPECT_EQ(secondAdd.logins[0], owner);  // порядок по created_at — кто раньше, тот раньше
+    EXPECT_EQ(secondAdd.logins[1], other);
+
+    // Другая эмодзи от owner — отдельная агрегированная запись, не
+    // затирает первую.
+    const ToggleReactionResult secondEmoji = service.toggleReaction(posted->id, *channelId, owner, "\U0001F389");
+    ASSERT_EQ(secondEmoji.result, MutationResult::kSuccess);
+    ASSERT_EQ(secondEmoji.logins.size(), 1U);
+
+    // recentMessages()/searchMessages() оба видят агрегированный итог:
+    // 2 разные эмодзи, у первой — 2 логина, у второй — 1.
+    const std::vector<Message> recent = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(recent.size(), 1U);
+    ASSERT_EQ(recent[0].reactions.size(), 2U);
+    EXPECT_EQ(recent[0].reactions[0].emoji, "\U0001F389");  // сортировка по emoji в reactionsForMessage()
+    EXPECT_EQ(recent[0].reactions[1].emoji, "\U0001F44D");
+    EXPECT_EQ(recent[0].reactions[1].logins.size(), 2U);
+
+    const std::vector<Message> found = service.searchMessages(*channelId, "react to this", 10);
+    ASSERT_EQ(found.size(), 1U);
+    EXPECT_EQ(found[0].reactions.size(), 2U);
+
+    // owner снимает свой лайк — остаётся только other.
+    const ToggleReactionResult removed = service.toggleReaction(posted->id, *channelId, owner, "\U0001F44D");
+    ASSERT_EQ(removed.result, MutationResult::kSuccess);
+    ASSERT_EQ(removed.logins.size(), 1U);
+    EXPECT_EQ(removed.logins[0], other);
+}
+
 TEST(ChatServiceIntegrationTest, CreateChannelDefaultsToNotEncryptedAndFlagRoundTripsThroughListAndFind) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");

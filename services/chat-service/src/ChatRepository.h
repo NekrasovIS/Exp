@@ -44,6 +44,14 @@ enum class MutationResult {
     kConflict,  // например, переименование канала в имя, уже занятое в том же сообществе
 };
 
+/// Одна эмодзи-реакция на сообщение, агрегированная по всем, кто её
+/// поставил (issue #333) — @p logins в порядке created_at (кто поставил
+/// раньше — раньше в списке), не в алфавитном/произвольном порядке.
+struct MessageReaction {
+    std::string emoji;
+    std::vector<std::string> logins;
+};
+
 struct Message {
     std::int64_t id = 0;
     std::string authorLogin;
@@ -52,6 +60,21 @@ struct Message {
     std::optional<std::string> editedAt;  // не установлено, если сообщение никогда не редактировалось (issue #107)
     std::optional<std::int64_t> attachmentId;    // не установлено для обычного текстового сообщения (issue #116)
     std::optional<std::string> attachmentFilename;  // установлено тогда и только тогда, когда установлен attachmentId
+    /// Пусто для только что отправленного сообщения и для любого, на
+    /// которое пока никто не поставил реакцию (issue #333) — по одной
+    /// записи на каждую использованную эмодзи, не по одной на каждого
+    /// проголосовавшего.
+    std::vector<MessageReaction> reactions;
+};
+
+/// Результат toggleReaction() (issue #333) — kNotFound, если messageId
+/// не принадлежит переданному channelId; при kSuccess @p logins — все,
+/// кто сейчас (после применения переключения) поставил именно этот
+/// emoji на это сообщение, включая пустой список, если это был
+/// последний голос и он же снялся.
+struct ToggleReactionResult {
+    MutationResult result = MutationResult::kNotFound;
+    std::vector<std::string> logins;
 };
 
 /// Метаданные о сохранённом вложении (issue #116) — всё, кроме сырых
@@ -303,6 +326,18 @@ public:
     /// модерацией; переписывание его — нет.
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
+
+    /// Переключает реакцию @p emoji от @p login на сообщении @p messageId
+    /// (issue #333) — повторный вызов с тем же @p emoji снимает её, а не
+    /// дублирует строку (уникальный индекс (message_id, login, emoji) в
+    /// message_reactions). Не проверяет, что @p login состоит в канале —
+    /// WebSocketServer уже гарантирует это через свою подписку
+    /// (subscription.channelId), прежде чем вызвать это; @p channelId
+    /// здесь — только чтобы отличить "messageId не существует" от
+    /// "существует, но принадлежит другому каналу", тот же приём, что
+    /// уже используют editMessage()/deleteMessage().
+    [[nodiscard]] ToggleReactionResult toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                       const std::string& login, const std::string& emoji);
 
     /// Регистронезависимый поиск подстроки по телам сообщений
     /// @p channelId (issue #118), сначала самые новые совпадения,

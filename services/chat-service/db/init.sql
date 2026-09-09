@@ -86,6 +86,23 @@ CREATE TABLE IF NOT EXISTS messages (
     attachment_id BIGINT REFERENCES attachments(id) ON DELETE SET NULL
 );
 
+-- Emoji reactions on a message (issue #333) — unlike attachment_id
+-- above, this DOES cascade with its message: a reaction has no meaning
+-- once the message it's attached to is gone, so ON DELETE CASCADE
+-- (not SET NULL) is correct here. The unique index doubles as the
+-- toggle mechanism: ChatRepository::toggleReaction() inserts a row if
+-- none exists for (message_id, login, emoji) yet, deletes it if one
+-- does — a second click on the same emoji removes the reaction rather
+-- than duplicating it.
+CREATE TABLE IF NOT EXISTS message_reactions (
+    id BIGSERIAL PRIMARY KEY,
+    message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    login TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (message_id, login, emoji)
+);
+
 -- ADD COLUMN IF NOT EXISTS rather than relying solely on the CREATE
 -- TABLE above: this script only runs on a container's first startup
 -- (postgres docker-entrypoint-initdb.d), so an already-initialized
