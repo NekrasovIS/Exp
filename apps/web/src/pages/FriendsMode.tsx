@@ -11,6 +11,7 @@ import { DirectMessageView } from "../dm/DirectMessageView.js";
 import { DmThreadsList } from "../dm/DmThreadsList.js";
 import { useDmThreads } from "../dm/useDmThreads.js";
 import { FriendsPanel } from "../friends/FriendsPanel.js";
+import styles from "./pageLayout.module.css";
 
 export function FriendsMode() {
   const { openThreadWith } = useDmThreads();
@@ -24,19 +25,23 @@ export function FriendsMode() {
   }
 
   return (
-    <>
-      <FriendsPanel onOpenThreadWith={(login) => void handleOpenThreadWith(login)} />
-      <DmThreadsList
-        selectedThreadId={selectedThread?.id ?? null}
-        onSelectThread={(id, otherLogin) => setSelectedThread({ id, otherLogin })}
-      />
-      <main>
+    <div className={styles.row}>
+      <div className={styles.sidebarColumn}>
+        <FriendsPanel onOpenThreadWith={(login) => void handleOpenThreadWith(login)} />
+      </div>
+      <div className={styles.sidebarColumn}>
+        <DmThreadsList
+          selectedThreadId={selectedThread?.id ?? null}
+          onSelectThread={(id, otherLogin) => setSelectedThread({ id, otherLogin })}
+        />
+      </div>
+      <main className={styles.mainColumn}>
         {selectedThread === null ? (
-          <p>Select a conversation to start chatting.</p>
+          <p className={styles.placeholder}>Select a conversation to start chatting.</p>
         ) : (
           <DirectMessageView threadId={selectedThread.id} otherLogin={selectedThread.otherLogin} />
         )}
       </main>
-    </>
+    </div>
   );
 }

@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 
+import styles from "./HomePage.module.css";
 import { CommunitiesMode } from "./CommunitiesMode.js";
 import { FriendsMode } from "./FriendsMode.js";
 
@@ -13,11 +14,14 @@ export function HomePage() {
   const [mode, setMode] = useState<Mode>("communities");
 
   return (
-    <div>
-      <button type="button" onClick={() => setMode(mode === "communities" ? "friends" : "communities")}>
-        {mode === "communities" ? "Friends" : "Back to communities"}
-      </button>
-      {mode === "communities" ? <CommunitiesMode /> : <FriendsMode />}
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <h1 className={styles.title}>DeviceHub</h1>
+        <button type="button" onClick={() => setMode(mode === "communities" ? "friends" : "communities")}>
+          {mode === "communities" ? "Friends" : "Back to communities"}
+        </button>
+      </header>
+      <div className={styles.body}>{mode === "communities" ? <CommunitiesMode /> : <FriendsMode />}</div>
     </div>
   );
 }

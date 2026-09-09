@@ -1,0 +1,35 @@
+/*
+ * Shared "two sidebars + main content" row layout (issue #281) — used
+ * by both CommunitiesMode and FriendsMode, which arrange the exact same
+ * three-column shape with different content. Kept here rather than
+ * duplicated in each, or inlined into HomePage.module.css: it's a
+ * layout concern of the mode screens themselves, not of HomePage (which
+ * only owns the header/mode toggle).
+ */
+
+.row {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.sidebarColumn {
+  flex: 0 0 240px;
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.mainColumn {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.placeholder {
+  margin: auto;
+  color: var(--color-text-muted);
+}

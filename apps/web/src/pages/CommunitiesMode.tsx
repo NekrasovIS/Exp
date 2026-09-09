@@ -8,6 +8,7 @@ import { ChatView } from "../chat/ChatView.js";
 import { ChannelsSidebar } from "../channels/ChannelsSidebar.js";
 import { useChannels } from "../channels/useChannels.js";
 import { CommunitiesSidebar } from "../communities/CommunitiesSidebar.js";
+import styles from "./pageLayout.module.css";
 
 export function CommunitiesMode() {
   const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
@@ -27,19 +28,23 @@ export function CommunitiesMode() {
   }
 
   return (
-    <>
-      <CommunitiesSidebar
-        selectedCommunityId={selectedCommunityId}
-        onSelectCommunity={handleSelectCommunity}
-      />
-      <ChannelsSidebar
-        communityId={selectedCommunityId}
-        selectedChannelId={selectedChannelId}
-        onSelectChannel={setSelectedChannelId}
-      />
-      <main>
+    <div className={styles.row}>
+      <div className={styles.sidebarColumn}>
+        <CommunitiesSidebar
+          selectedCommunityId={selectedCommunityId}
+          onSelectCommunity={handleSelectCommunity}
+        />
+      </div>
+      <div className={styles.sidebarColumn}>
+        <ChannelsSidebar
+          communityId={selectedCommunityId}
+          selectedChannelId={selectedChannelId}
+          onSelectChannel={setSelectedChannelId}
+        />
+      </div>
+      <main className={styles.mainColumn}>
         {selectedChannel === null || selectedCommunityId === null ? (
-          <p>Select a channel to start chatting.</p>
+          <p className={styles.placeholder}>Select a channel to start chatting.</p>
         ) : (
           <ChatView
             channelId={selectedChannel.id}
@@ -48,6 +53,6 @@ export function CommunitiesMode() {
           />
         )}
       </main>
-    </>
+    </div>
   );
 }
