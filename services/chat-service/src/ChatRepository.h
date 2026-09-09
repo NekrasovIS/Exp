@@ -52,6 +52,12 @@ struct Message {
     std::optional<std::string> editedAt;  // не установлено, если сообщение никогда не редактировалось (issue #107)
     std::optional<std::int64_t> attachmentId;    // не установлено для обычного текстового сообщения (issue #116)
     std::optional<std::string> attachmentFilename;  // установлено тогда и только тогда, когда установлен attachmentId
+    /// Id сообщения, на которое это отвечает (issue #306) — не FK на
+    /// уровне схемы (см. комментарий у ALTER TABLE в init.sql), поэтому
+    /// значение может указывать на уже удалённое сообщение; клиент сам
+    /// решает, что показать, если не находит этот id среди уже
+    /// загруженной истории.
+    std::optional<std::int64_t> replyToMessageId;
 };
 
 /// Метаданные о сохранённом вложении (issue #116) — всё, кроме сырых
@@ -263,9 +269,14 @@ public:
     ///         либо std::nullopt, если @p channelId не существует, либо
     ///         @p attachmentId установлен, но не существует/принадлежит
     ///         другому каналу.
+    /// @p replyToMessageId (issue #306) — ссылка на сообщение, на которое
+    /// отвечает это, если это ответ; не проверяется на существование
+    /// (см. doc-комментарий Message::replyToMessageId о том, почему
+    /// здесь нет FK).
     [[nodiscard]] std::optional<Message> insertMessage(std::int64_t channelId, const std::string& authorLogin,
                                                         const std::string& body,
-                                                        std::optional<std::int64_t> attachmentId = std::nullopt);
+                                                        std::optional<std::int64_t> attachmentId = std::nullopt,
+                                                        std::optional<std::int64_t> replyToMessageId = std::nullopt);
 
     /// Сохраняет @p upload дословно как новое вложение для @p channelId —
     /// см. doc-комментарий AttachmentUpload по её полям.

@@ -87,17 +87,22 @@ void ChatClient::onTextMessageReceived(const QString& message) {
         emit messageDeleted(object.value("message_deleted").toObject().value("id").toVariant().toLongLong());
     } else if (object.contains("author") && object.contains("body")) {
         const QJsonValue attachmentIdValue = object.value("attachment_id");
+        const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");
         emit messageReceived(object.value("id").toVariant().toLongLong(), object.value("author").toString(),
                               object.value("body").toString(), object.value("sent_at").toString(),
                               attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
-                              object.value("attachment_filename").toString());
+                              object.value("attachment_filename").toString(),
+                              replyToMessageIdValue.isNull() ? -1 : replyToMessageIdValue.toVariant().toLongLong());
     }
 }
 
-void ChatClient::sendMessage(const QString& body, qint64 attachmentId) {
+void ChatClient::sendMessage(const QString& body, qint64 attachmentId, qint64 replyToMessageId) {
     QJsonObject message{{"body", body}};
     if (attachmentId >= 0) {
         message.insert("attachment_id", attachmentId);
+    }
+    if (replyToMessageId >= 0) {
+        message.insert("reply_to_message_id", replyToMessageId);
     }
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }

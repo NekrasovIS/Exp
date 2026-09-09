@@ -91,8 +91,12 @@ public:
     /// Отправляет @p body в канал, на который подписан этот клиент,
     /// опционально ссылаясь на уже загруженный @p attachmentId
     /// (issue #116) — -1 (значение по умолчанию) означает отсутствие
-    /// вложения.
-    void sendMessage(const QString& body, qint64 attachmentId = -1);
+    /// вложения — и/или на сообщение @p replyToMessageId, на которое это
+    /// ответ (issue #306) — -1 означает "не ответ". chat-service не
+    /// проверяет, что replyToMessageId существует (см. doc-комментарий
+    /// у ALTER TABLE в init.sql chat-service) — это клиентская
+    /// ответственность резолвить цитату (см. ChatView::messagesById_).
+    void sendMessage(const QString& body, qint64 attachmentId = -1, qint64 replyToMessageId = -1);
 
     /// Закрывает соединение — независимо от того, был ли этот клиент
     /// подписан на канал или на личный диалог.
@@ -147,9 +151,12 @@ signals:
 
     /// Испускается для каждого сообщения, разосланного в подписанном
     /// канале. @p attachmentId равен -1, а @p attachmentFilename пуст,
-    /// когда у сообщения нет вложения (issue #116).
+    /// когда у сообщения нет вложения (issue #116). @p replyToMessageId
+    /// равен -1, когда это не ответ (issue #306) — сам этот сигнал не
+    /// несёт автора/текст оригинала, только его id; резолв — на стороне
+    /// подписчика (см. ChatView::messagesById_).
     void messageReceived(qint64 id, const QString& author, const QString& body, const QString& sentAt,
-                          qint64 attachmentId, const QString& attachmentFilename);
+                          qint64 attachmentId, const QString& attachmentFilename, qint64 replyToMessageId);
 
     /// Сообщение было отредактировано — @p editedAt — новая метка
     /// времени редактирования (сериализована Postgres, в том же

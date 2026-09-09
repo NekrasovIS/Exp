@@ -50,7 +50,8 @@ public:
 
     [[nodiscard]] std::optional<Message> postMessage(std::int64_t channelId, const std::string& authorLogin,
                                                        const std::string& body,
-                                                       std::optional<std::int64_t> attachmentId = std::nullopt);
+                                                       std::optional<std::int64_t> attachmentId = std::nullopt,
+                                                       std::optional<std::int64_t> replyToMessageId = std::nullopt);
     [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit,
                                                         std::optional<std::int64_t> beforeId = std::nullopt);
     [[nodiscard]] EditMessageResult editMessage(std::int64_t messageId, std::int64_t channelId,

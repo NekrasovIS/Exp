@@ -92,8 +92,9 @@ std::vector<std::string> ChatService::listModerators(std::int64_t communityId) {
 }
 
 std::optional<Message> ChatService::postMessage(std::int64_t channelId, const std::string& authorLogin,
-                                                  const std::string& body, std::optional<std::int64_t> attachmentId) {
-    return repository_.insertMessage(channelId, authorLogin, body, attachmentId);
+                                                  const std::string& body, std::optional<std::int64_t> attachmentId,
+                                                  std::optional<std::int64_t> replyToMessageId) {
+    return repository_.insertMessage(channelId, authorLogin, body, attachmentId, replyToMessageId);
 }
 
 std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int limit, std::optional<std::int64_t> beforeId) {
