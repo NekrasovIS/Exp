@@ -88,6 +88,14 @@ namespace chat_service {
  *     (issue #114): удалить сообщение может собственный автор сообщения,
  *     владелец канала/сообщества либо модератор сообщества. При успехе
  *     рассылает `{"message_deleted": {"id"}}`.
+ *   - `{"pin_message": {"id": N}}`/`{"unpin_message": {"id": N}}` (issue
+ *     #338) — доступно ТОЛЬКО владельцу канала/сообщества или
+ *     модератору сообщества, в отличие от delete_message — не автору
+ *     сообщения как таковому (закрепление — функция управления
+ *     каналом, не модерация конкретного сообщения). Идемпотентно в
+ *     обе стороны. При успехе рассылает `{"message_pinned": {"id",
+ *     "pinned_by", "pinned_at"}}`/`{"message_unpinned": {"id"}}` всем
+ *     подписчикам чата.
  *
 
  * REST (HttpServer) остаётся источником истины для истории/CRUD; этот
@@ -155,6 +163,10 @@ private:
     void handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"pin_message": {"id"}} (issue #338) — см. doc-комментарий класса.
+    void handlePinMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"unpin_message": {"id"}} (issue #338) — см. doc-комментарий класса.
+    void handleUnpinMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);

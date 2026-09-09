@@ -86,6 +86,19 @@ CREATE TABLE IF NOT EXISTS messages (
     attachment_id BIGINT REFERENCES attachments(id) ON DELETE SET NULL
 );
 
+-- Pinned messages (issue #338) — PRIMARY KEY doubles as the idempotency
+-- guard: pinning an already-pinned message is a silent no-op (same
+-- style as memberships/joinCommunity()), not a duplicate row or an
+-- error. ON DELETE CASCADE on both FKs — a pin has no meaning once
+-- either the message or the channel is gone.
+CREATE TABLE IF NOT EXISTS pinned_messages (
+    channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    pinned_by TEXT NOT NULL,
+    pinned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (channel_id, message_id)
+);
+
 -- ADD COLUMN IF NOT EXISTS rather than relying solely on the CREATE
 -- TABLE above: this script only runs on a container's first startup
 -- (postgres docker-entrypoint-initdb.d), so an already-initialized

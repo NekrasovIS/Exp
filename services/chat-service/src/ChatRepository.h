@@ -54,6 +54,32 @@ struct Message {
     std::optional<std::string> attachmentFilename;  // установлено тогда и только тогда, когда установлен attachmentId
 };
 
+/// Закреплённое сообщение канала, как его возвращает listPinnedMessages()
+/// (issue #338) — полное содержимое сообщения плюс метаданные самого
+/// закрепления, не просто message_id: панели закреплённых сообщений
+/// нужен и текст/автор, а не только ссылка на что-то, что клиенту
+/// пришлось бы резолвить самому (в отличие от reply/quote, issue #306,
+/// где резолв сознательно оставлен клиенту — здесь сервер и так уже
+/// делает JOIN за один запрос, дублировать эту логику на клиенте не
+/// нужно).
+struct PinnedMessage {
+    Message message;
+    std::string pinnedByLogin;
+    std::string pinnedAt;
+};
+
+/// Результат pinMessage() (issue #338) — при kSuccess несёт
+/// pinnedByLogin/pinnedAt, нужные WebSocketServer для рассылки
+/// message_pinned; при повторном закреплении уже закреплённого
+/// сообщения (идемпотентно, см. PRIMARY KEY у pinned_messages в
+/// init.sql) возвращает ПЕРВОНАЧАЛЬНОГО закрепившего и время первого
+/// закрепления, не переписывает их.
+struct PinMessageResult {
+    MutationResult result = MutationResult::kNotFound;
+    std::string pinnedByLogin;
+    std::string pinnedAt;
+};
+
 /// Метаданные о сохранённом вложении (issue #116) — всё, кроме сырых
 /// байтов, которые findAttachmentData() получает отдельно, чтобы
 /// маршрут, которому нужны только метаданные (например, отрисовка
@@ -303,6 +329,28 @@ public:
     /// модерацией; переписывание его — нет.
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
+
+    /// Закрепляет сообщение @p messageId канала @p channelId (issue
+    /// #338) — в отличие от deleteMessage(), доступно ТОЛЬКО владельцу
+    /// канала/сообщества или модератору сообщества, не автору как
+    /// таковому (закрепление — функция управления каналом, а не
+    /// модерация конкретного сообщения). Идемпотентно: повторное
+    /// закрепление уже закреплённого сообщения — успех без изменений
+    /// (см. doc-комментарий PinMessageResult).
+    [[nodiscard]] PinMessageResult pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin);
+
+    /// То же правило полномочий, что и у pinMessage(). Идемпотентно:
+    /// снятие с сообщения, которое не было закреплено — успех без
+    /// эффекта (тот же стиль, что и у demoteModerator()).
+    [[nodiscard]] MutationResult unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin);
+
+    /// Закреплённые сообщения @p channelId, самые новые закрепления
+    /// первыми — пусто (не ошибка) для канала без закреплённых
+    /// сообщений или несуществующего канала, тот же стиль, что и у
+    /// listChannels()/listCommunities().
+    [[nodiscard]] std::vector<PinnedMessage> listPinnedMessages(std::int64_t channelId);
 
     /// Регистронезависимый поиск подстроки по телам сообщений
     /// @p channelId (issue #118), сначала самые новые совпадения,

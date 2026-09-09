@@ -535,6 +535,64 @@ TEST(ChatServiceIntegrationTest, ModeratorsCanDeleteMessagesAndManageChannelsBut
     EXPECT_EQ(service.deleteChannel(*channelId, moderator), MutationResult::kSuccess);
 }
 
+TEST(ChatServiceIntegrationTest, PinMessageIsOwnerModeratorOnlyNotAuthorAndIsIdempotentBothWays) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "pin-test-owner-" + suffix;
+    const std::string moderator = "pin-test-mod-" + suffix;
+    const std::string author = "pin-test-author-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("pin-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_EQ(service.promoteModerator(community.id, moderator, owner), MutationResult::kSuccess);
+    ASSERT_TRUE(service.joinCommunity(community.id, author));
+
+    const std::optional<Message> posted = service.postMessage(*channelId, author, "pin me");
+    ASSERT_TRUE(posted.has_value());
+
+    // Автор сообщения, не являющийся владельцем/модератором, не может
+    // закрепить даже собственное сообщение — в отличие от deleteMessage().
+    EXPECT_EQ(service.pinMessage(posted->id, *channelId, author).result, MutationResult::kForbidden);
+
+    const PinMessageResult firstPin = service.pinMessage(posted->id, *channelId, owner);
+    ASSERT_EQ(firstPin.result, MutationResult::kSuccess);
+    EXPECT_EQ(firstPin.pinnedByLogin, owner);
+    EXPECT_FALSE(firstPin.pinnedAt.empty());
+
+    // Повторный pin другим (модератором) — идемпотентно, сохраняет
+    // ПЕРВОНАЧАЛЬНОГО закрепившего/время, не переписывает их.
+    const PinMessageResult secondPin = service.pinMessage(posted->id, *channelId, moderator);
+    ASSERT_EQ(secondPin.result, MutationResult::kSuccess);
+    EXPECT_EQ(secondPin.pinnedByLogin, owner);
+    EXPECT_EQ(secondPin.pinnedAt, firstPin.pinnedAt);
+
+    const std::vector<PinnedMessage> pinned = service.listPinnedMessages(*channelId);
+    ASSERT_EQ(pinned.size(), 1U);
+    EXPECT_EQ(pinned[0].message.id, posted->id);
+    EXPECT_EQ(pinned[0].message.body, "pin me");
+    EXPECT_EQ(pinned[0].pinnedByLogin, owner);
+
+    // Несуществующее сообщение/чужой channelId — kNotFound.
+    EXPECT_EQ(service.pinMessage(999999999, *channelId, owner).result, MutationResult::kNotFound);
+    EXPECT_EQ(service.pinMessage(posted->id, 999999999, owner).result, MutationResult::kNotFound);
+
+    // unpin — автор не может, модератор может; повторный unpin — идемпотентно.
+    EXPECT_EQ(service.unpinMessage(posted->id, *channelId, author), MutationResult::kForbidden);
+    EXPECT_EQ(service.unpinMessage(posted->id, *channelId, moderator), MutationResult::kSuccess);
+    EXPECT_TRUE(service.listPinnedMessages(*channelId).empty());
+    EXPECT_EQ(service.unpinMessage(posted->id, *channelId, moderator), MutationResult::kSuccess);
+}
+
 TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
