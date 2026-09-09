@@ -30,7 +30,9 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm preview -- --port 4173 --strictPort",
+    // host/port/strictPort live in vite.config.ts's own `preview`
+    // option, not CLI flags here — see that file's doc comment on why.
+    command: "pnpm preview",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

@@ -11,6 +11,21 @@ import { configDefaults } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  // Issue #303 — `vite preview`'s own host/port, not CLI flags passed
+  // through `pnpm preview -- ...` from playwright.config.ts: that
+  // config's `webServer` step timed out in CI with zero output from
+  // the preview process, most likely because pnpm's own "--" separator
+  // reached vite literally as a positional argument instead of being
+  // stripped, so none of `--port`/`--strictPort` actually applied.
+  // Explicit `host: "127.0.0.1"` also sidesteps the separate, unrelated
+  // gotcha where a bare "localhost" default resolves to the IPv6
+  // loopback first on some Node/CI setups, which the IPv4 URL
+  // playwright.config.ts polls would then never reach either.
+  preview: {
+    host: "127.0.0.1",
+    port: 4173,
+    strictPort: true,
+  },
   resolve: {
     alias: {
       // libsodium-wrappers@0.7.16's ESM build (dist/modules-esm/libsodium-wrappers.mjs)
