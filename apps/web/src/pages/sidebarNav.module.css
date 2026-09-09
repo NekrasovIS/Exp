@@ -69,3 +69,31 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
+
+/* Invite-link block (issue #301) — CommunitiesSidebar only. */
+.inviteBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.inviteBlock p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.inviteRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.inviteLinkInput {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
