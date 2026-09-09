@@ -205,6 +205,58 @@ TEST(CallWindowTest, ClickingMinimizeButtonEmitsMinimizeRequested) {
     EXPECT_EQ(spy.count(), 1);
 }
 
+// Issue #312 — a fixed set of reaction buttons, each emitting
+// reactionRequested() with exactly its own emoji, plus a transient
+// feed label for incoming reactions.
+
+TEST(CallWindowTest, HasAFixedNonEmptySetOfReactionButtons) {
+    CallWindow window;
+
+    EXPECT_GT(window.reactionButtons().size(), 0);
+    for (QPushButton* button : window.reactionButtons()) {
+        EXPECT_FALSE(button->text().isEmpty());
+    }
+}
+
+TEST(CallWindowTest, ClickingAReactionButtonEmitsReactionRequestedWithItsOwnEmoji) {
+    CallWindow window;
+    QSignalSpy spy(&window, &CallWindow::reactionRequested);
+    QPushButton* firstButton = window.reactionButtons().first();
+    const QString expectedEmoji = firstButton->text();
+
+    emit firstButton->clicked();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toString(), expectedEmoji);
+}
+
+TEST(CallWindowTest, ClickingASecondReactionButtonEmitsItsOwnDifferentEmoji) {
+    CallWindow window;
+    ASSERT_GT(window.reactionButtons().size(), 1);
+    QSignalSpy spy(&window, &CallWindow::reactionRequested);
+    QPushButton* secondButton = window.reactionButtons().at(1);
+    const QString expectedEmoji = secondButton->text();
+
+    emit secondButton->clicked();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toString(), expectedEmoji);
+    EXPECT_NE(expectedEmoji, window.reactionButtons().first()->text());
+}
+
+TEST(CallWindowTest, ShowReactionMakesTheFeedLabelVisibleWithLoginAndEmoji) {
+    CallWindow window;
+    window.show();
+
+    EXPECT_FALSE(window.reactionFeedLabel()->isVisible());
+
+    window.showReaction(QStringLiteral("bob"), QStringLiteral("\U0001F389"));
+
+    EXPECT_TRUE(window.reactionFeedLabel()->isVisible());
+    EXPECT_TRUE(window.reactionFeedLabel()->text().contains(QStringLiteral("bob")));
+    EXPECT_TRUE(window.reactionFeedLabel()->text().contains(QStringLiteral("\U0001F389")));
+}
+
 TEST(CallWindowTest, ClosingTheWindowEmitsMinimizeRequestedInsteadOfClosing) {
     // issue #215: closeEvent() перенаправляет на то же самое, что и клик
     // "Minimize" — окно не закрывается само по себе (event->ignore()), а

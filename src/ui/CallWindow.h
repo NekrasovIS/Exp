@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QPoint>
 #include <QStringList>
 #include <QWidget>
@@ -9,6 +10,7 @@ class QCloseEvent;
 class QImage;
 class QLabel;
 class QPushButton;
+class QTimer;
 class QVideoWidget;
 
 namespace devicehub {
@@ -80,6 +82,12 @@ public:
     /// вышел из звонка.
     void removeRemoteVideo(const QString& peerLogin, bool isScreenShare);
 
+    /// Показывает лёгкую эмодзи-реакцию @p login (issue #312) на
+    /// несколько секунд, затем автоматически скрывает — тот же паттерн,
+    /// что ChatView::showTypingUser() уже использует для индикатора
+    /// набора текста.
+    void showReaction(const QString& login, const QString& emoji);
+
     /// Сбрасывает состояние окна к «звонка нет» — вызывается
     /// MainWindow-ом при выходе из звонка, перед скрытием окна: снимает
     /// все плитки удалённого видео и подпись участников, чтобы
@@ -106,6 +114,12 @@ public:
     [[nodiscard]] QPushButton* minimizeButton() const { return minimizeButton_; }
     [[nodiscard]] QPushButton* leaveCallButton() const { return leaveCallButton_; }
     [[nodiscard]] QLabel* callParticipantsLabel() const { return callParticipantsLabel_; }
+    /// Кнопки быстрых реакций (issue #312) — фиксированный набор, объект
+    /// хранится по самой эмодзи-строке в качестве значения свойства
+    /// "reactionEmoji", а не по objectName (эмодзи неудобны как
+    /// идентификатор виджета в тестах/QSS).
+    [[nodiscard]] QList<QPushButton*> reactionButtons() const { return reactionButtons_; }
+    [[nodiscard]] QLabel* reactionFeedLabel() const { return reactionFeedLabel_; }
     [[nodiscard]] QVideoWidget* localVideoWidget() const { return localVideoWidget_; }
     /// Отдельное превью демонстрации экрана (issue #185) — не то же
     /// самое, что localVideoWidget() (камера): оба могут быть видны
@@ -134,6 +148,11 @@ signals:
     /// MainWindow вызывает detachTilesTo() с canvas() своего
     /// FloatingCallTilesOverlay и показывает его вместо этого окна.
     void minimizeRequested();
+    /// Клик по одной из reactionButtons() (issue #312) — @p emoji ровно
+    /// та строка, что нарисована на кнопке. MainWindow вызывает
+    /// ChatClient::sendCallReaction(emoji); сама CallWindow сеть не
+    /// трогает.
+    void reactionRequested(const QString& emoji);
 
 protected:
     /// Закрытие окна сворачивает звонок в мини-панели вместо того, чтобы
@@ -171,6 +190,11 @@ private:
     void relocateAllTiles();
 
     QLabel* callParticipantsLabel_ = nullptr;
+    /// Issue #312 — фиксированный набор быстрых реакций, в порядке
+    /// добавления в reactionsRow.
+    QList<QPushButton*> reactionButtons_;
+    QLabel* reactionFeedLabel_ = nullptr;
+    QTimer* reactionFeedHideTimer_ = nullptr;
     QPushButton* muteToggleButton_ = nullptr;
     QPushButton* videoToggleButton_ = nullptr;
     QPushButton* screenShareToggleButton_ = nullptr;

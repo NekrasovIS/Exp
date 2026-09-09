@@ -54,6 +54,14 @@ namespace chat_service {
  *     класс никогда не заглядывает внутрь `payload`. Отвечает
  *     `{"error": "peer not in call"}` отправителю, если `to` не является
  *     текущим участником звонка.
+ *   - `{"call_reaction": "<emoji>"}` (issue #312) — лёгкая эмодзи-реакция
+ *     во время звонка, не влияющая на аудио/видео треки; рассылается
+ *     остальным участникам звонка как `{"call_reaction": {"login":
+ *     "<login>", "emoji": "<emoji>"}}` (никогда отправителю обратно —
+ *     тот же принцип, что и у typing ниже). Отвечает `{"error": "not in
+ *     a call"}` отправителю, если он сам сейчас не участник звонка
+ *     подписанного канала (call_join ещё не вызван, или уже вызван
+ *     call_leave). Эфемерно — ничего не сохраняется.
  *   - `{"janus_attach": true}` (issue #232) — прокси-сигналинг SFU:
  *     attach'ит новый handle плагина videoroom к Janus-сессии этого
  *     WS-подключения (создаёт сессию при самом первом вызове; живёт до
@@ -158,6 +166,10 @@ private:
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// issue #312: рассылает лёгкую эмодзи-реакцию остальным участникам
+    /// звонка подписанного канала — отвечает отправителю ошибкой, если
+    /// он сам сейчас не в этом звонке (см. doc-комментарий класса).
+    void handleCallReaction(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     /// issue #232: attach новый videoroom-handle на Janus-сессию этого
     /// подключения, создавая саму сессию (и запуская pumpJanusEvents())
     /// при первом обращении.

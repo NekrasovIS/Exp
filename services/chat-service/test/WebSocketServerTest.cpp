@@ -237,6 +237,131 @@ TEST(WebSocketServerTest, CallJoinRosterSignalAndLeave) {
     server.stop();
 }
 
+TEST(WebSocketServerTest, CallReactionIsBroadcastToOtherCallParticipantsOnlyNotTheSender) {
+    // Issue #312.
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18103"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-reaction-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-reaction-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string loginA = "ws-reaction-a-" + suffix;
+    const std::string loginB = "ws-reaction-b-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, loginA));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginB));
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    if (!tokenA.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    ASSERT_TRUE(tokenB.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient clientA(wsUrl);
+    WsTestClient clientB(wsUrl);
+    ASSERT_TRUE(clientA.waitConnected());
+    ASSERT_TRUE(clientB.waitConnected());
+
+    clientA.send(nlohmann::json{{"token", *tokenA}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    clientB.send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    clientA.send(nlohmann::json{{"call_join", true}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
+    clientB.send(nlohmann::json{{"call_join", true}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_peer_joined"); }).has_value());
+
+    clientA.send(nlohmann::json{{"call_reaction", "🎉"}});
+
+    const std::optional<nlohmann::json> reactionOnB =
+        clientB.waitFor([](const nlohmann::json& m) { return m.contains("call_reaction"); });
+    ASSERT_TRUE(reactionOnB.has_value());
+    EXPECT_EQ((*reactionOnB)["call_reaction"]["login"].get<std::string>(), loginA);
+    EXPECT_EQ((*reactionOnB)["call_reaction"]["emoji"].get<std::string>(), "🎉");
+
+    // The sender never sees its own reaction echoed back.
+    const std::optional<nlohmann::json> echoOnA =
+        clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_reaction"); }, /*timeoutMs=*/300);
+    EXPECT_FALSE(echoOnA.has_value());
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, CallReactionRejectsASenderNotCurrentlyInTheCall) {
+    // Issue #312 — subscribed to the channel's chat, but never called
+    // call_join (or already called call_leave).
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18104"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-reaction-notincall-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-reaction-notincall-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string login = "ws-reaction-notincall-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, login));
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, login);
+    if (!token.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient client("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"call_reaction", "🎉"}});
+
+    const std::optional<nlohmann::json> error =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(error.has_value());
+    EXPECT_EQ((*error)["error"].get<std::string>(), "not in a call");
+
+    server.stop();
+}
+
 // issue #231: janus_room_id вычисляется детерминированно от channelId, а
 // JanusClient::ensureRoomExists() проверяет "exists" перед "create" —
 // повторный call_join на тот же канал должен всегда получать одну и ту же
@@ -810,6 +935,14 @@ TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
         nlohmann::json{{"body", "x"}, {"attachment_id", nlohmann::json::array()}},
         nlohmann::json{{"typing", nlohmann::json::object()}},
         nlohmann::json{{"typing", nullptr}},
+        // Issue #312 — not in a call is the expected (non-crashing)
+        // rejection for all of these, but a non-string/empty/oversized
+        // emoji must be rejected before that check even runs.
+        nlohmann::json{{"call_reaction", nullptr}},
+        nlohmann::json{{"call_reaction", 12345}},
+        nlohmann::json{{"call_reaction", nlohmann::json::array()}},
+        nlohmann::json{{"call_reaction", ""}},
+        nlohmann::json{{"call_reaction", std::string(1000, 'x')}},
     };
     for (const nlohmann::json& frame : adversarialFrames) {
         client.send(frame);

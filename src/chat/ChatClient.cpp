@@ -71,6 +71,9 @@ void ChatClient::onTextMessageReceived(const QString& message) {
     } else if (object.contains("call_signal")) {
         const QJsonObject signal = object.value("call_signal").toObject();
         emit callSignalReceived(signal.value("from").toString(), signal.value("payload").toObject());
+    } else if (object.contains("call_reaction") && object.value("call_reaction").isObject()) {
+        const QJsonObject reaction = object.value("call_reaction").toObject();
+        emit callReactionReceived(reaction.value("login").toString(), reaction.value("emoji").toString());
     } else if (object.contains("janus_attached")) {
         emit janusAttached(object.value("janus_attached").toObject().value("handle").toVariant().toLongLong());
     } else if (object.contains("janus_message_ack")) {
@@ -118,6 +121,11 @@ void ChatClient::leaveCall() {
 
 void ChatClient::sendCallSignal(const QString& to, const QJsonObject& payload) {
     const QJsonObject message{{"call_signal", QJsonObject{{"to", to}, {"payload", payload}}}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendCallReaction(const QString& emoji) {
+    const QJsonObject message{{"call_reaction", emoji}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
