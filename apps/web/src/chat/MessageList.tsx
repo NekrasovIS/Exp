@@ -56,7 +56,11 @@ export function MessageList({
                     onChange={(event) => setDraft(event.target.value)}
                   />
                   <div className={styles.actions}>
-                    <button type="button" className={styles.actionButton} onClick={() => commitEdit(message.id)}>
+                    <button
+                      type="button"
+                      className={styles.actionButton}
+                      onClick={() => commitEdit(message.id)}
+                    >
                       Save
                     </button>
                     <button type="button" className={styles.actionButton} onClick={() => setEditingId(null)}>
@@ -79,11 +83,19 @@ export function MessageList({
                   {(isOwn || isModerator) && (
                     <div className={styles.actions}>
                       {isOwn && (
-                        <button type="button" className={styles.actionButton} onClick={() => startEditing(message)}>
+                        <button
+                          type="button"
+                          className={styles.actionButton}
+                          onClick={() => startEditing(message)}
+                        >
                           Edit
                         </button>
                       )}
-                      <button type="button" className={styles.actionButton} onClick={() => onDelete(message.id)}>
+                      <button
+                        type="button"
+                        className={styles.actionButton}
+                        onClick={() => onDelete(message.id)}
+                      >
                         Delete
                       </button>
                     </div>
