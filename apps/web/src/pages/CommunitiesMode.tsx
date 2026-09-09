@@ -30,7 +30,10 @@ export function CommunitiesMode() {
   return (
     <div className={styles.row}>
       <div className={styles.sidebarColumn}>
-        <CommunitiesSidebar selectedCommunityId={selectedCommunityId} onSelectCommunity={handleSelectCommunity} />
+        <CommunitiesSidebar
+          selectedCommunityId={selectedCommunityId}
+          onSelectCommunity={handleSelectCommunity}
+        />
       </div>
       <div className={styles.sidebarColumn}>
         <ChannelsSidebar
