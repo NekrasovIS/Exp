@@ -1,0 +1,70 @@
+/*
+ * Shared chat-content shell (issue #284) — ChatViewContent and
+ * EncryptedChatViewContent are the same shape (header row, scrolling
+ * message list, composer pinned at the bottom), just with/without
+ * search and encryption bookkeeping around it.
+ */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.encryptedBadge {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.scrollArea {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+}
+
+.loadOlderButton {
+  display: block;
+  margin: 0 auto var(--space-3);
+}
+
+.statusText {
+  color: var(--color-text-muted);
+}
+
+/* Simple form (encrypted composer's own inline form, distinct from
+   MessageComposer.module.css's richer layout) */
+.simpleComposerForm {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.simpleComposerForm input {
+  flex: 1;
+}
+
+.simpleComposerForm label {
+  /* Visually hidden but still accessible — the composer's placement
+     next to Send already communicates its purpose. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
