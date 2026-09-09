@@ -45,7 +45,10 @@ test("switches to the password form and back", async ({ page }) => {
   await page.goto("/login");
 
   await page.getByRole("button", { name: "Sign in with password instead" }).click();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  // exact: true — otherwise this also matches "Sign in with a one-time
+  // code instead"'s own accessible name (getByRole's name matching is
+  // substring-based by default).
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Sign in with a one-time code instead" }).click();
   await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
