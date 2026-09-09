@@ -11,12 +11,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useChatSocket } from "./useChatSocket.js";
 import { chatServiceRestUrl } from "../config.js";
+import { shouldNotify, showMessageNotification } from "../notifications/browserNotifications.js";
 import { useSession } from "../session/SessionContext.js";
 
 const kPageSize = 50;
 
 export function useMessages(channelId: number) {
-  const { getAccessToken } = useSession();
+  const { getAccessToken, currentLogin } = useSession();
   const restClient = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
   const socket = useChatSocket({ channelId });
 
@@ -52,6 +53,12 @@ export function useMessages(channelId: number) {
   useEffect(() => {
     const offMessage = socket.on("message", (message) => {
       setMessages((prev) => [...prev, message]);
+      // Issue #311 — web analog of DesktopNotifier: only while this tab
+      // isn't the one being looked at, never for the caller's own
+      // message, same as notification_policy::shouldNotify().
+      if (shouldNotify(document.hidden, message.author, currentLogin)) {
+        showMessageNotification(message.author, message.body);
+      }
     });
     const offEdited = socket.on("messageEdited", (id, newBody) => {
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, body: newBody } : m)));
@@ -65,7 +72,7 @@ export function useMessages(channelId: number) {
       offEdited();
       offDeleted();
     };
-  }, [socket]);
+  }, [socket, currentLogin]);
 
   const loadOlder = useCallback(async () => {
     const token = getAccessToken();
