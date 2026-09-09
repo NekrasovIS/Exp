@@ -102,4 +102,36 @@ describe("ChatView", () => {
     expect(await screen.findByText("hello from a")).toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  // Issue #322 — ChatView forwards presence from whichever channel
+  // socket is actually subscribed up to its caller (CommunitiesMode
+  // owns the aggregated state; MembersSidebar is a sibling, not a
+  // descendant, of ChatView).
+  it("forwards onlineMembers/presenceChanged from the socket to the given callbacks", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+    const onOnlineMembers = vi.fn();
+    const onPresenceChanged = vi.fn();
+
+    render(
+      <SessionProvider>
+        <ChatView
+          channelId={7}
+          communityId={1}
+          isEncrypted={false}
+          onOnlineMembers={onOnlineMembers}
+          onPresenceChanged={onPresenceChanged}
+        />
+      </SessionProvider>,
+    );
+    await screen.findByRole("button", { name: "Send" });
+    const socket = FakeWebSocket.instances[0]!;
+
+    socket.onmessage?.({
+      data: JSON.stringify({ subscribed: true, channel_id: 7, online_members: ["bob"] }),
+    });
+    expect(onOnlineMembers).toHaveBeenCalledWith(["bob"]);
+
+    socket.onmessage?.({ data: JSON.stringify({ presence_changed: { login: "carol", online: true } }) });
+    expect(onPresenceChanged).toHaveBeenCalledWith("carol", true);
+  });
 });
