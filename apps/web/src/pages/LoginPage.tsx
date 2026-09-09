@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 
+import styles from "./LoginPage.module.css";
 import { OtpLoginForm } from "../auth/OtpLoginForm.js";
 import { PasswordAuthForm } from "../auth/PasswordAuthForm.js";
 import { useSession } from "../session/SessionContext.js";
@@ -21,23 +22,25 @@ export function LoginPage() {
   }
 
   return (
-    <main>
-      <h1>DeviceHub</h1>
-      {view === "otp" ? (
-        <>
-          <OtpLoginForm />
-          <button type="button" onClick={() => setView("password")}>
-            Sign in with password instead
-          </button>
-        </>
-      ) : (
-        <>
-          <PasswordAuthForm />
-          <button type="button" onClick={() => setView("otp")}>
-            Sign in with a one-time code instead
-          </button>
-        </>
-      )}
+    <main className={styles.page}>
+      <div className={styles.card}>
+        <h1 className={styles.title}>DeviceHub</h1>
+        {view === "otp" ? (
+          <>
+            <OtpLoginForm />
+            <button type="button" className={styles.switchViewButton} onClick={() => setView("password")}>
+              Sign in with password instead
+            </button>
+          </>
+        ) : (
+          <>
+            <PasswordAuthForm />
+            <button type="button" className={styles.switchViewButton} onClick={() => setView("otp")}>
+              Sign in with a one-time code instead
+            </button>
+          </>
+        )}
+      </div>
     </main>
   );
 }
