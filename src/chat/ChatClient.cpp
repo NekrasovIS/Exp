@@ -85,6 +85,16 @@ void ChatClient::onTextMessageReceived(const QString& message) {
                             edited.value("edited_at").toString());
     } else if (object.contains("message_deleted")) {
         emit messageDeleted(object.value("message_deleted").toObject().value("id").toVariant().toLongLong());
+    } else if (object.contains("reaction_changed")) {
+        const QJsonObject changed = object.value("reaction_changed").toObject();
+        QStringList logins;
+        const QJsonArray loginsArray = changed.value("logins").toArray();
+        logins.reserve(loginsArray.size());
+        for (const QJsonValue& login : loginsArray) {
+            logins.append(login.toString());
+        }
+        emit reactionChanged(changed.value("message_id").toVariant().toLongLong(), changed.value("emoji").toString(),
+                              logins);
     } else if (object.contains("author") && object.contains("body")) {
         const QJsonValue attachmentIdValue = object.value("attachment_id");
         emit messageReceived(object.value("id").toVariant().toLongLong(), object.value("author").toString(),
@@ -99,6 +109,11 @@ void ChatClient::sendMessage(const QString& body, qint64 attachmentId) {
     if (attachmentId >= 0) {
         message.insert("attachment_id", attachmentId);
     }
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendToggleReaction(qint64 id, const QString& emoji) {
+    const QJsonObject message{{"toggle_reaction", QJsonObject{{"message_id", id}, {"emoji", emoji}}}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 

@@ -257,5 +257,50 @@ TEST(ChatViewTest, SetAttachmentPreviewAfterClearLogDoesNotCrash) {
     view.setAttachmentPreview(7, image);  // must not crash, must not dereference a dangling row
 }
 
+TEST(ChatViewTest, AppendedMessageWithReactionsShowsAChip) {
+    ChatView view;
+    view.appendMessage(ChatMessage{
+        .author = "alice",
+        .body = "hi",
+        .sentAt = "2026-08-05 09:00:00",
+        .reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}}}});
+
+    EXPECT_EQ(view.findChildren<QPushButton*>(QStringLiteral("reactionChip")).size(), 1);
+}
+
+TEST(ChatViewTest, UpdateReactionsReachesTheRowThatOwnsThatMessageId) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 9, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    ASSERT_TRUE(view.findChildren<QPushButton*>(QStringLiteral("reactionChip")).isEmpty());
+
+    view.updateReactions(9, "\U0001F44D", {"bob"});
+
+    EXPECT_EQ(view.findChildren<QPushButton*>(QStringLiteral("reactionChip")).size(), 1);
+}
+
+TEST(ChatViewTest, UpdateReactionsForAMessageNotCurrentlyShownDoesNotCrash) {
+    ChatView view;
+
+    view.updateReactions(999, "\U0001F44D", {"bob"});  // must not crash, must not dereference a dangling row
+}
+
+TEST(ChatViewTest, ClickingAReactionChipEmitsReactionToggleRequestedFromTheView) {
+    ChatView view;
+    view.appendMessage(ChatMessage{
+        .id = 9,
+        .author = "alice",
+        .body = "hi",
+        .sentAt = "2026-08-05 09:00:00",
+        .reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}}}});
+    auto* chip = view.findChild<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_NE(chip, nullptr);
+
+    QSignalSpy spy(&view, &ChatView::reactionToggleRequested);
+    chip->click();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 9);
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("\U0001F44D"));
+}
+
 }  // namespace
 }  // namespace devicehub

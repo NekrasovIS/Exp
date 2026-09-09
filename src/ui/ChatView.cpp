@@ -282,7 +282,7 @@ void ChatView::appendMessage(const ChatMessage& message) {
     }
     const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
-    auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
+    auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, currentUserLogin_, messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     requestPreviewIfImageAttachment(message, row);
@@ -317,7 +317,7 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
             messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(message.sentAt));
         }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
-        auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
+        auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, currentUserLogin_, messagesContainer_);
         messagesLayout_->insertWidget(insertIndex++, row);
         requestPreviewIfImageAttachment(message, row);
         previousInBatch = message;
@@ -359,6 +359,7 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+    connect(row, &ChatMessageRow::reactionToggleRequested, this, &ChatView::reactionToggleRequested);
 }
 
 void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
@@ -399,6 +400,12 @@ QLabel* ChatView::buildDateSeparatorLabel(const QString& sentAt) {
 void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
     if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
         row->updateBody(newBody);
+    }
+}
+
+void ChatView::updateReactions(qint64 id, const QString& emoji, const QStringList& logins) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->applyReactionChange(emoji, logins);
     }
 }
 
