@@ -206,6 +206,16 @@ describe("ChatClient", () => {
       expect(onSignal).toHaveBeenCalledWith("bob", payload);
     });
 
+    it("emits 'callReaction' with the login and emoji", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onReaction = vi.fn();
+      client.on("callReaction", onReaction);
+
+      socket.simulateMessage(JSON.stringify({ call_reaction: { login: "bob", emoji: "👍" } }));
+
+      expect(onReaction).toHaveBeenCalledWith("bob", "👍");
+    });
+
     it("emits 'sfuRoomAssigned' alongside 'callRoster' when sfu_room is present", () => {
       const { client, socket } = makeClientAndSocket();
       const onRoster = vi.fn();
@@ -355,6 +365,15 @@ describe("ChatClient", () => {
       client.sendCallSignal("bob", payload);
 
       expect(socket.lastSentFrame()).toEqual({ call_signal: { to: "bob", payload } });
+    });
+
+    it("sendCallReaction sends the emoji as a bare string", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendCallReaction("👍");
+
+      expect(socket.lastSentFrame()).toEqual({ call_reaction: "👍" });
     });
 
     it("sendTyping/sendEditMessage/sendDeleteMessage send the expected frames", () => {

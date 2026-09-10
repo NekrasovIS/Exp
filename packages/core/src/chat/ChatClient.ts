@@ -46,6 +46,10 @@ interface ChatClientEventMap {
   callPeerJoined: [login: string];
   callPeerLeft: [login: string];
   callSignal: [from: string, payload: unknown];
+  // Lightweight emoji reaction during a call (issue #312/#328) —
+  // broadcast to every OTHER call participant, never echoed back to
+  // the sender (mirrors DeviceHub's CallManager::reactionReceived()).
+  callReaction: [login: string, emoji: string];
   // SFU signaling proxy (issue #221/#232) — see sendJanusAttach()/
   // sendJanusMessage()'s own doc comments for what each answers.
   janusAttached: [handle: number];
@@ -131,6 +135,15 @@ export class ChatClient {
    * never inspected here — just relayed by chat-service. */
   sendCallSignal(to: string, payload: unknown): void {
     this.sendFrame({ call_signal: { to, payload } });
+  }
+
+  /** Valid only in channel mode, and only while actually in a call —
+   * chat-service rejects it with an `error` otherwise (issue #312/#328,
+   * mirrors DeviceHub's CallManager::sendReaction()'s own guard). Sent
+   * as a bare string, unlike the object the server broadcasts back to
+   * every OTHER participant on `callReaction`. */
+  sendCallReaction(emoji: string): void {
+    this.sendFrame({ call_reaction: emoji });
   }
 
   /** SFU signaling proxy (issue #221/#232): attaches a new videoroom
@@ -251,6 +264,13 @@ export class ChatClient {
       const signal = body.call_signal as { from?: unknown; payload?: unknown };
       if (typeof signal.from === "string") {
         this.emit("callSignal", signal.from, signal.payload);
+        return;
+      }
+    }
+    if (typeof body.call_reaction === "object" && body.call_reaction !== null) {
+      const reaction = body.call_reaction as { login?: unknown; emoji?: unknown };
+      if (typeof reaction.login === "string" && typeof reaction.emoji === "string") {
+        this.emit("callReaction", reaction.login, reaction.emoji);
         return;
       }
     }
