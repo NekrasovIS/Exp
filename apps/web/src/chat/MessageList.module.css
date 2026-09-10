@@ -75,3 +75,45 @@
 .editInput {
   width: 100%;
 }
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.reactionChip {
+  font-size: var(--font-size-sm);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-md);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: inherit;
+}
+
+.bubbleOwn .reactionChip {
+  background: rgb(255 255 255 / 0.15);
+  border-color: transparent;
+}
+
+.reactionChip:hover {
+  opacity: 0.8;
+}
+
+.reactPicker {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.reactPickerEmoji {
+  font-size: var(--font-size-base);
+  padding: 0 var(--space-1);
+  border-color: transparent;
+  background: transparent;
+}
+
+.reactPickerEmoji:hover {
+  background: rgb(0 0 0 / 0.08);
+}

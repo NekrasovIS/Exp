@@ -12,7 +12,13 @@ import {
 } from "../http.js";
 import type { FetchLike } from "../http.js";
 import { toBase64 } from "./base64.js";
-import type { ChatItem, ChatMessageInfo, DirectMessageInfo, DirectMessageThreadInfo } from "./types.js";
+import type {
+  ChatItem,
+  ChatMessageInfo,
+  DirectMessageInfo,
+  DirectMessageThreadInfo,
+  MessageReactionInfo,
+} from "./types.js";
 
 interface ChatItemBody {
   id: number;
@@ -22,6 +28,11 @@ interface ChatItemBody {
   invite_code?: string;
 }
 
+interface MessageReactionBody {
+  emoji: string;
+  logins: string[];
+}
+
 interface MessageBody {
   id: number;
   author: string;
@@ -29,6 +40,7 @@ interface MessageBody {
   sent_at: string;
   attachment_id?: number | null;
   attachment_filename?: string | null;
+  reactions?: MessageReactionBody[];
 }
 
 interface DirectMessageThreadBody {
@@ -59,12 +71,17 @@ function toChatItem(body: ChatItemBody): ChatItem {
   return item;
 }
 
+function toMessageReactionInfo(body: MessageReactionBody): MessageReactionInfo {
+  return { emoji: body.emoji, logins: body.logins };
+}
+
 function toChatMessageInfo(body: MessageBody): ChatMessageInfo {
   const message: ChatMessageInfo = {
     id: body.id,
     author: body.author,
     body: body.body,
     sentAt: body.sent_at,
+    reactions: (body.reactions ?? []).map(toMessageReactionInfo),
   };
   if (body.attachment_id != null) message.attachmentId = body.attachment_id;
   if (body.attachment_filename != null) message.attachmentFilename = body.attachment_filename;

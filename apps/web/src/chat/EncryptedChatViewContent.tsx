@@ -41,6 +41,7 @@ export function EncryptedChatViewContent({
     sendMessage,
     editMessage,
     deleteMessage,
+    toggleReaction,
     socket,
   } = useMessages(channelId);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
@@ -66,7 +67,10 @@ export function EncryptedChatViewContent({
 
   // MessageList prefills its edit draft straight from message.body, so
   // it needs the decrypted text, not the raw ciphertext this hook
-  // otherwise carries.
+  // otherwise carries. `reactions` needs no such pass — emoji/logins
+  // are plaintext on the wire even for an encrypted channel (chat-service
+  // never sees a message's plaintext either way, so there's nothing
+  // reaction data could leak that it doesn't already).
   const decryptedMessages: ChatMessageInfo[] = messages.map((message) => ({
     ...message,
     body: decrypted.get(message.id) ?? "…",
@@ -107,6 +111,7 @@ export function EncryptedChatViewContent({
           isModerator={isModerator}
           onEdit={handleEdit}
           onDelete={deleteMessage}
+          onToggleReaction={toggleReaction}
         />
       </div>
       <form onSubmit={handleSend} className={styles.simpleComposerForm}>

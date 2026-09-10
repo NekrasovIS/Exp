@@ -159,6 +159,26 @@ describe("ChatRestClient", () => {
 
       expect(messages[0]?.attachmentId).toBeUndefined();
       expect(messages[0]).not.toHaveProperty("attachmentFilename");
+      expect(messages[0]?.reactions).toEqual([]);
+    });
+
+    it("listMessages maps a message's aggregated reactions", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, [
+          {
+            id: 1,
+            author: "alice",
+            body: "hi",
+            sent_at: "2026-01-01T00:00:00Z",
+            reactions: [{ emoji: "👍", logins: ["bob", "carol"] }],
+          },
+        ]),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      const messages = await client.listMessages(kToken, 1, 20);
+
+      expect(messages[0]?.reactions).toEqual([{ emoji: "👍", logins: ["bob", "carol"] }]);
     });
 
     it("fetchLatestMessage silently resolves to [] on error instead of rejecting", async () => {

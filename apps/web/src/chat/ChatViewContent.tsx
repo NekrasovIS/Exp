@@ -32,6 +32,7 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
     sendMessage,
     editMessage,
     deleteMessage,
+    toggleReaction,
     socket,
   } = useMessages(channelId);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -61,6 +62,7 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
           isModerator={isModerator}
           onEdit={editMessage}
           onDelete={deleteMessage}
+          onToggleReaction={toggleReaction}
         />
       </div>
       <MessageComposer channelId={channelId} onSend={sendMessage} />

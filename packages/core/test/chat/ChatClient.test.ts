@@ -117,7 +117,28 @@ describe("ChatClient", () => {
       author: "alice",
       body: "hi",
       sentAt: "2026-01-01T00:00:00Z",
+      reactions: [],
     });
+  });
+
+  it("emits 'message' with the reactions the frame carries", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onMessage = vi.fn();
+    client.on("message", onMessage);
+
+    socket.simulateMessage(
+      JSON.stringify({
+        id: 1,
+        author: "alice",
+        body: "hi",
+        sent_at: "2026-01-01T00:00:00Z",
+        reactions: [{ emoji: "👍", logins: ["bob"] }],
+      }),
+    );
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ reactions: [{ emoji: "👍", logins: ["bob"] }] }),
+    );
   });
 
   it("emits 'messageEdited'", () => {
@@ -138,6 +159,18 @@ describe("ChatClient", () => {
     socket.simulateMessage(JSON.stringify({ message_deleted: { id: 1 } }));
 
     expect(onDeleted).toHaveBeenCalledWith(1);
+  });
+
+  it("emits 'reactionChanged' with the full logins list for that emoji", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onChanged = vi.fn();
+    client.on("reactionChanged", onChanged);
+
+    socket.simulateMessage(
+      JSON.stringify({ reaction_changed: { message_id: 1, emoji: "👍", logins: ["alice", "bob"] } }),
+    );
+
+    expect(onChanged).toHaveBeenCalledWith(1, "👍", ["alice", "bob"]);
   });
 
   it("emits 'error' for a protocol-level {error} frame", () => {
@@ -357,7 +390,7 @@ describe("ChatClient", () => {
       expect(socket.lastSentFrame()).toEqual({ call_signal: { to: "bob", payload } });
     });
 
-    it("sendTyping/sendEditMessage/sendDeleteMessage send the expected frames", () => {
+    it("sendTyping/sendEditMessage/sendDeleteMessage/sendToggleReaction send the expected frames", () => {
       const { client, socket } = makeClientAndSocket();
       client.connectToChannel("t1", 1);
 
@@ -369,6 +402,9 @@ describe("ChatClient", () => {
 
       client.sendDeleteMessage(1);
       expect(socket.lastSentFrame()).toEqual({ delete_message: { id: 1 } });
+
+      client.sendToggleReaction(1, "👍");
+      expect(socket.lastSentFrame()).toEqual({ toggle_reaction: { message_id: 1, emoji: "👍" } });
     });
 
     it("throws when sending before a connection is established", () => {

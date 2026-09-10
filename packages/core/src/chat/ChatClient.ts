@@ -35,6 +35,10 @@ interface ChatClientEventMap {
   message: [message: IncomingChatMessage];
   messageEdited: [id: number, newBody: string, editedAt: string];
   messageDeleted: [id: number];
+  // issue #305/#333/#335 — logins is the FULL list of who reacted with
+  // this emoji after the toggle, never a delta the listener has to
+  // merge (mirrors chat-service's own reaction_changed broadcast).
+  reactionChanged: [messageId: number, emoji: string, logins: string[]];
   error: [message: string];
   callRoster: [participants: string[]];
   // SFU room for the call (issue #221/#232) — same call_join response as
@@ -172,6 +176,14 @@ export class ChatClient {
     this.sendFrame({ delete_message: { id } });
   }
 
+  /** Toggles @param emoji on message @param id — adds it if the caller
+   * hasn't reacted with it yet, removes it otherwise. Valid only in
+   * channel mode; available on any message, not just the sender's own
+   * (unlike sendEditMessage()/sendDeleteMessage()). */
+  sendToggleReaction(id: number, emoji: string): void {
+    this.sendFrame({ toggle_reaction: { message_id: id, emoji } });
+  }
+
   private open(): void {
     const socket = this.wsFactory(this.url);
     this.socket = socket;
@@ -291,12 +303,24 @@ export class ChatClient {
         return;
       }
     }
+    if (typeof body.reaction_changed === "object" && body.reaction_changed !== null) {
+      const changed = body.reaction_changed as { message_id?: unknown; emoji?: unknown; logins?: unknown };
+      if (
+        typeof changed.message_id === "number" &&
+        typeof changed.emoji === "string" &&
+        Array.isArray(changed.logins)
+      ) {
+        this.emit("reactionChanged", changed.message_id, changed.emoji, changed.logins as string[]);
+        return;
+      }
+    }
     if (typeof body.author === "string" && typeof body.body === "string") {
       const message: IncomingChatMessage = {
         id: typeof body.id === "number" ? body.id : 0,
         author: body.author,
         body: body.body,
         sentAt: typeof body.sent_at === "string" ? body.sent_at : "",
+        reactions: Array.isArray(body.reactions) ? (body.reactions as IncomingChatMessage["reactions"]) : [],
       };
       if (typeof body.attachment_id === "number") {
         message.attachmentId = body.attachment_id;

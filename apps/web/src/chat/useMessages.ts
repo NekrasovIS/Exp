@@ -60,10 +60,26 @@ export function useMessages(channelId: number) {
     const offDeleted = socket.on("messageDeleted", (id) => {
       setMessages((prev) => prev.filter((m) => m.id !== id));
     });
+    // logins is the FULL list for this emoji after the toggle (never a
+    // delta) — an empty list means nobody has this emoji any more, so
+    // the chip is dropped instead of rendering "emoji 0" (issue #305/
+    // #333/#335, mirrors DeviceHub's own applyReactionChange()).
+    const offReaction = socket.on("reactionChanged", (messageId, emoji, logins) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== messageId) {
+            return m;
+          }
+          const withoutEmoji = m.reactions.filter((r) => r.emoji !== emoji);
+          return { ...m, reactions: logins.length > 0 ? [...withoutEmoji, { emoji, logins }] : withoutEmoji };
+        }),
+      );
+    });
     return () => {
       offMessage();
       offEdited();
       offDeleted();
+      offReaction();
     };
   }, [socket]);
 
@@ -91,6 +107,10 @@ export function useMessages(channelId: number) {
     [socket],
   );
   const deleteMessage = useCallback((id: number) => socket.sendDeleteMessage(id), [socket]);
+  const toggleReaction = useCallback(
+    (id: number, emoji: string) => socket.sendToggleReaction(id, emoji),
+    [socket],
+  );
 
   // socket is also returned (issue #221) — the call feature rides the
   // same WebSocket connection as message subscription (call_join is
@@ -107,6 +127,7 @@ export function useMessages(channelId: number) {
     sendMessage,
     editMessage,
     deleteMessage,
+    toggleReaction,
     socket,
   };
 }
