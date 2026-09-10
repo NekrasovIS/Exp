@@ -1,10 +1,13 @@
 #include "ui/ChatView.h"
 
+#include <QAbstractItemView>
 #include <QColor>
+#include <QCompleter>
 #include <QDate>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -14,6 +17,7 @@
 #include <QScrollBar>
 #include <QSize>
 #include <QStackedWidget>
+#include <QStringListModel>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -206,6 +210,38 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
         typingThrottleTimer_->start();
         emit typingRequested();
     });
+    connect(messageEdit_, &QLineEdit::textEdited, this, &ChatView::updateMentionAutocomplete);
+
+    // Автокомплит @упоминаний (issue #326) — mentionCompleter_ намеренно
+    // НЕ подключён через QLineEdit::setCompleter() (это заставило бы
+    // Qt считать ПОЛНЫЙ текст поля объектом автодополнения и заменять
+    // его целиком, что не подходит для "@упоминания" в середине более
+    // длинного сообщения). Вместо этого — только setWidget() плюс
+    // ручной вызов complete() из updateMentionAutocomplete(), тот же
+    // приём, что в официальном примере Qt Custom Completer; сама
+    // модель (mentionModel_) обновляется на месте setChannelMemberLogins(),
+    // а не пересоздаётся.
+    mentionModel_ = new QStringListModel(this);
+    mentionCompleter_ = new QCompleter(mentionModel_, this);
+    mentionCompleter_->setWidget(messageEdit_);
+    mentionCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
+    mentionCompleter_->setCompletionMode(QCompleter::PopupCompletion);
+    // QCompleter::activated() has both a QString and a QModelIndex
+    // overload — QOverload<>::of() disambiguates for the pointer-to-
+    // member connect syntax.
+    connect(mentionCompleter_, QOverload<const QString&>::of(&QCompleter::activated), this,
+            &ChatView::insertMentionCompletion);
+    // Ловит Enter/Tab/Escape поверх встроенной обработки QCompleter,
+    // пока попап открыт — иначе Enter одновременно и подставлял бы
+    // подсказку, и триггерил returnPressed()->sendButton_->click()
+    // (то соединение — несколькими строками выше), отправляя
+    // наполовину набранное сообщение. installEventFilter() позже, чем
+    // setWidget() выше (который сам ставит свой фильтр на messageEdit_)
+    // — Qt вызывает фильтры от последнего установленного к первому,
+    // так что именно этот код первым решает, что делать с Enter/Tab/
+    // Escape, пока попап виден; Up/Down ниже не перехватываются и
+    // проходят дальше — их обрабатывает уже сам QCompleter.
+    messageEdit_->installEventFilter(this);
 
     attachButton_ = new QPushButton(composer);
     attachButton_->setObjectName(QStringLiteral("attachFileButton"));
@@ -445,6 +481,82 @@ void ChatView::showTypingUser(const QString& login) {
     typingIndicatorLabel_->setText(tr("%1 is typing…").arg(login));
     typingIndicatorLabel_->setVisible(true);
     typingIndicatorHideTimer_->start();
+}
+
+void ChatView::setChannelMemberLogins(const QStringList& logins) {
+    channelMemberLogins_ = logins;
+    mentionModel_->setStringList(logins);
+}
+
+void ChatView::updateMentionAutocomplete() {
+    const QString textBeforeCursor = messageEdit_->text().left(messageEdit_->cursorPosition());
+    const int atPos = textBeforeCursor.lastIndexOf(QLatin1Char('@'));
+    if (atPos < 0) {
+        mentionTriggerPos_ = -1;
+        mentionCompleter_->popup()->hide();
+        return;
+    }
+    // "@" должен начинать слово (начало строки либо после пробела) —
+    // иначе "user@example.com" запускал бы автокомплит на каждой
+    // букве после "@", как и в regex подсветки упоминаний (issue #307).
+    const bool startsWord = atPos == 0 || textBeforeCursor.at(atPos - 1).isSpace();
+    const QString prefix = textBeforeCursor.mid(atPos + 1);
+    if (!startsWord || prefix.contains(QLatin1Char(' '))) {
+        mentionTriggerPos_ = -1;
+        mentionCompleter_->popup()->hide();
+        return;
+    }
+    mentionCompleter_->setCompletionPrefix(prefix);
+    if (mentionCompleter_->completionCount() == 0) {
+        mentionTriggerPos_ = -1;
+        mentionCompleter_->popup()->hide();
+        return;
+    }
+    mentionTriggerPos_ = atPos;
+    mentionCompleter_->complete();
+    // Подсвечивает первую подсказку сразу, а не оставляет попап без
+    // выделения — иначе Enter/Tab (см. eventFilter()) не имели бы, что
+    // подставить, пока пользователь ни разу не нажал стрелку вниз.
+    mentionCompleter_->popup()->setCurrentIndex(mentionCompleter_->completionModel()->index(0, 0));
+}
+
+void ChatView::insertMentionCompletion(const QString& login) {
+    if (mentionTriggerPos_ < 0) {
+        return;
+    }
+    const QString text = messageEdit_->text();
+    const int cursorPos = messageEdit_->cursorPosition();
+    const QString newText =
+        text.left(mentionTriggerPos_) + QLatin1Char('@') + login + QLatin1Char(' ') + text.mid(cursorPos);
+    messageEdit_->setText(newText);
+    messageEdit_->setCursorPosition(mentionTriggerPos_ + 1 + login.size() + 1);
+    mentionTriggerPos_ = -1;
+    mentionCompleter_->popup()->hide();
+}
+
+bool ChatView::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == messageEdit_ && event->type() == QEvent::KeyPress && mentionCompleter_->popup()->isVisible()) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        switch (keyEvent->key()) {
+        case Qt::Key_Enter:
+        case Qt::Key_Return:
+        case Qt::Key_Tab: {
+            const QModelIndex current = mentionCompleter_->popup()->currentIndex();
+            if (current.isValid()) {
+                insertMentionCompletion(current.data().toString());
+            } else {
+                mentionCompleter_->popup()->hide();
+            }
+            return true;
+        }
+        case Qt::Key_Escape:
+            mentionCompleter_->popup()->hide();
+            return true;
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void ChatView::clearLog() {

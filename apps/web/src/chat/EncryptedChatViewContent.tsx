@@ -6,14 +6,16 @@
 // #138's ChannelCrypto has no story for attachment bytes at all).
 
 import type { ChatMessageInfo } from "@devicehub/core";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
 import { useSession } from "../session/SessionContext.js";
+import { MentionSuggestions } from "./MentionSuggestions.js";
 import { MessageList } from "./MessageList.js";
+import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
 import { useMessages } from "./useMessages.js";
 
 interface EncryptedChatViewContentProps {
@@ -45,6 +47,10 @@ export function EncryptedChatViewContent({
   } = useMessages(channelId);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [body, setBody] = useState("");
+  // Issue #326 — mentions are typed/matched against the plaintext body
+  // before encryptMessage() ever runs on it in handleSend() below.
+  const mention = useMentionAutocomplete(communityId);
+  const bodyInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +92,41 @@ export function EncryptedChatViewContent({
     void encryptMessage(newBody, channelKey).then((ciphertext) => editMessage(id, ciphertext));
   }
 
+  function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
+    setBody(event.target.value);
+    mention.handleTextChange(event.target.value, event.target.selectionStart ?? event.target.value.length);
+  }
+
+  function selectMention(login: string): void {
+    const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
+    const result = mention.applySuggestion(body, cursorPos, login);
+    setBody(result.text);
+    requestAnimationFrame(() => bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos));
+  }
+
+  function handleBodyKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (mention.suggestions.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      mention.moveActive(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      mention.moveActive(-1);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
+      const result = mention.applyActive(body, cursorPos);
+      setBody(result.text);
+      requestAnimationFrame(() =>
+        bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos),
+      );
+    } else if (event.key === "Escape") {
+      mention.dismiss();
+    }
+  }
+
   return (
     <section className={styles.section}>
       {currentLogin !== null && <CallPanel chatClient={socket} localLogin={currentLogin} />}
@@ -111,7 +152,18 @@ export function EncryptedChatViewContent({
       </div>
       <form onSubmit={handleSend} className={styles.simpleComposerForm}>
         <label htmlFor="encrypted-message-body">Message</label>
-        <input id="encrypted-message-body" value={body} onChange={(event) => setBody(event.target.value)} />
+        <input
+          id="encrypted-message-body"
+          ref={bodyInputRef}
+          value={body}
+          onChange={handleBodyChange}
+          onKeyDown={handleBodyKeyDown}
+        />
+        <MentionSuggestions
+          suggestions={mention.suggestions}
+          activeIndex={mention.activeIndex}
+          onSelect={selectMention}
+        />
         <button type="submit">Send</button>
       </form>
     </section>

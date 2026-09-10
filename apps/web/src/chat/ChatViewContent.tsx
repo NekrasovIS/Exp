@@ -63,7 +63,7 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
           onDelete={deleteMessage}
         />
       </div>
-      <MessageComposer channelId={channelId} onSend={sendMessage} />
+      <MessageComposer channelId={channelId} communityId={communityId} onSend={sendMessage} />
     </section>
   );
 }

@@ -617,6 +617,10 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 communityId, const QStringList& logins) {
                 if (communityId == selectedCommunityId_) {
                     memberListPanel_->setMembers(logins);
+                    // Issue #326: тот же список, что уже пришёл для
+                    // MemberListPanel, без отдельного REST-запроса
+                    // специально под автокомплит @упоминаний.
+                    chatView_->setChannelMemberLogins(logins);
                 }
                 if (!pendingEncryptedSetup_.has_value()) {
                     return;  // Не связано с текущим созданием зашифрованного канала.

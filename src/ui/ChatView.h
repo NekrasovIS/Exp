@@ -7,12 +7,14 @@
 
 #include "ui/ChatMessageRow.h"
 
+class QCompleter;
 class QImage;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QStackedWidget;
+class QStringListModel;
 class QTimer;
 class QVBoxLayout;
 
@@ -130,6 +132,15 @@ public:
     /// отслеживать набор одновременно печатающих).
     void showTypingUser(const QString& login);
 
+    /// Список логинов участников текущего сообщества (issue #326) —
+    /// MainWindow передаёт то же самое, что уже приходит из
+    /// ChatRestClient::listMembers() для MemberListPanel, без
+    /// отдельного REST-запроса специально под автокомплит. Используется
+    /// только для фильтрации подсказок @упоминания в поле сообщения;
+    /// подсветка самих упоминаний (issue #307) в этот список не смотрит
+    /// вообще.
+    void setChannelMemberLogins(const QStringList& logins);
+
     [[nodiscard]] QWidget* messagesContainer() const { return messagesContainer_; }
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
@@ -143,6 +154,12 @@ public:
     /// поэтому только сигнализирует запрос, а не хранит состояние
     /// открыт/свёрнут самостоятельно.
     [[nodiscard]] QPushButton* memberListToggleButton() const { return memberListToggleButton_; }
+    /// Автокомплит @упоминаний (issue #326) — тесты проверяют через это
+    /// содержимое всплывающего списка/текущий префикс фильтрации, а не
+    /// через реальное открытие всплывающего окна (как и везде в этом
+    /// проекте, взаимодействие с настоящим модальным/всплывающим окном
+    /// не эмулируется в юнит-тестах).
+    [[nodiscard]] QCompleter* mentionCompleter() const { return mentionCompleter_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -197,6 +214,14 @@ signals:
     /// использует для настоящих кликов по "Download".
     void previewAttachmentRequested(qint64 attachmentId);
 
+protected:
+    /// Перехватывает Enter/Tab/Escape у messageEdit_, пока всплывающий
+    /// список автокомплита (issue #326) открыт, чтобы они выбирали
+    /// подсказку вместо того, чтобы одновременно ещё и отправлять
+    /// сообщение (returnPressed уже подключён к sendButton_->click()) —
+    /// тот же приём, что в официальном примере Qt Custom Completer.
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     /// Подключает editRequested()/deleteRequested() свежесозданной
     /// строки к собственному состоянию режима редактирования этого
@@ -219,6 +244,20 @@ private:
     /// — используется совместно showChannel() и setEncrypted(), так что
     /// любой из них можно вызвать первым, не затерев эффект другого.
     void updateChannelTitleLabel();
+
+    /// Пересчитывает подсказки автокомплита (issue #326) по текущему
+    /// тексту/позиции курсора messageEdit_ — вызывается на каждое
+    /// textEdited(). Находит "@", перед которым начинается слово
+    /// (начало строки либо пробел), фильтрует channelMemberLogins_ по
+    /// набранному после "@" префиксу и, если что-то нашлось,
+    /// запоминает позицию "@" в mentionTriggerPos_ и открывает
+    /// mentionCompleter_ рядом с курсором; иначе скрывает его попап.
+    void updateMentionAutocomplete();
+
+    /// Подставляет выбранную подсказку @p login на место "@<префикс>"
+    /// в messageEdit_ (используя mentionTriggerPos_) — общий обработчик
+    /// и для QCompleter::activated(), и (в тестах) для прямого вызова.
+    void insertMentionCompletion(const QString& login);
 
     QStackedWidget* stack_ = nullptr;
     QLabel* channelTitleLabel_ = nullptr;
@@ -261,6 +300,19 @@ private:
     /// может исчезнуть (переключение канала -> clearLog(), удаление
     /// сообщения) раньше, чем придёт ответ.
     QHash<qint64, QPointer<ChatMessageRow>> pendingImagePreviewRows_;
+    /// Логины участников текущего сообщества (issue #326) — только для
+    /// фильтрации автокомплита, см. setChannelMemberLogins().
+    QStringList channelMemberLogins_;
+    QCompleter* mentionCompleter_ = nullptr;
+    /// Живёт внутри mentionCompleter_ (тот же родитель) — обновляется
+    /// на месте через setStringList() в setChannelMemberLogins(),
+    /// вместо пересоздания модели/completer'а при каждом обновлении
+    /// списка участников.
+    QStringListModel* mentionModel_ = nullptr;
+    /// Позиция символа "@", с которого начинается сейчас набираемое
+    /// упоминание, в тексте messageEdit_ — -1, когда автокомплит не
+    /// активен. Используется insertMentionCompletion() при подстановке.
+    int mentionTriggerPos_ = -1;
 };
 
 }  // namespace devicehub
