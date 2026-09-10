@@ -151,11 +151,13 @@ describe("useMessages", () => {
     act(() => result.current.sendMessage("hello", 9));
     act(() => result.current.editMessage(1, "edited"));
     act(() => result.current.deleteMessage(1));
+    act(() => result.current.sendMessage("a reply", undefined, 1));
 
     expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
       { body: "hello", attachment_id: 9 },
       { edit_message: { id: 1, body: "edited" } },
       { delete_message: { id: 1 } },
+      { body: "a reply", reply_to_message_id: 1 },
     ]);
   });
 });

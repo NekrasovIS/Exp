@@ -83,7 +83,8 @@ export function useMessages(channelId: number) {
   }, [restClient, getAccessToken, channelId, messages, hasMore]);
 
   const sendMessage = useCallback(
-    (body: string, attachmentId?: number) => socket.sendMessage(body, attachmentId),
+    (body: string, attachmentId?: number, replyToMessageId?: number) =>
+      socket.sendMessage(body, attachmentId, replyToMessageId),
     [socket],
   );
   const editMessage = useCallback(

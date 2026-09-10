@@ -159,6 +159,20 @@ describe("ChatRestClient", () => {
 
       expect(messages[0]?.attachmentId).toBeUndefined();
       expect(messages[0]).not.toHaveProperty("attachmentFilename");
+      expect(messages[0]?.replyToMessageId).toBeUndefined();
+    });
+
+    it("listMessages maps a message's reply_to_message_id", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, [
+          { id: 2, author: "bob", body: "a reply", sent_at: "2026-01-01T00:00:00Z", reply_to_message_id: 1 },
+        ]),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      const messages = await client.listMessages(kToken, 1, 20);
+
+      expect(messages[0]?.replyToMessageId).toBe(1);
     });
 
     it("fetchLatestMessage silently resolves to [] on error instead of rejecting", async () => {
