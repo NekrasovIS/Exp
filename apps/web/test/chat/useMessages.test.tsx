@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMessages } from "../../src/chat/useMessages.js";
 import { SessionProvider } from "../../src/session/SessionContext.js";
-import { FakeWebSocket, jsonResponse } from "../testUtils.js";
+import { FakeWebSocket, jsonResponse, routedFetch } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
 
@@ -121,12 +121,20 @@ describe("useMessages", () => {
       body: `message ${i + 51}`,
       sent_at: "2026-01-01T00:00:00Z",
     }));
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(200, firstPage))
-      .mockResolvedValueOnce(
-        jsonResponse(200, [{ id: 50, author: "alice", body: "fifty", sent_at: "2026-01-01T00:00:00Z" }]),
-      );
+    // Routed by URL, not call order (issue #310/#350 added a fire-and-
+    // forget markChannelRead() call right after the initial page loads
+    // — a plain call-order mock would silently start answering
+    // loadOlder()'s request with whatever leftover response that extra
+    // call didn't consume).
+    const fetchSpy = routedFetch([
+      [
+        /before_id=51/,
+        () =>
+          jsonResponse(200, [{ id: 50, author: "alice", body: "fifty", sent_at: "2026-01-01T00:00:00Z" }]),
+      ],
+      [/\/channels\/7\/messages/, () => jsonResponse(200, firstPage)],
+      [/\/channels\/7\/read/, () => jsonResponse(200, {})],
+    ]);
     vi.stubGlobal("fetch", fetchSpy);
     const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -138,8 +146,6 @@ describe("useMessages", () => {
 
     expect(result.current.messages[0]?.id).toBe(50);
     expect(result.current.messages).toHaveLength(51);
-    const secondCallUrl = fetchSpy.mock.calls[1]![0] as string;
-    expect(secondCallUrl).toContain("before_id=51");
   });
 
   it("sendMessage/editMessage/deleteMessage send the expected frames over the socket", async () => {

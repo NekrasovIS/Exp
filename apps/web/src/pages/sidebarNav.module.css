@@ -26,6 +26,10 @@
 
 .listItemButton {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
   text-align: left;
   border-color: transparent;
   background: transparent;
@@ -41,6 +45,26 @@
 .listItemButton[aria-current="true"] {
   background: var(--color-accent);
   color: var(--color-text-on-accent);
+}
+
+/* Unread badge (issue #310/#350) — same red/warm choice as DeviceHub's
+   ui_theme::kBadgeBackground, deliberately not the accent color so it
+   doesn't blend into an already-selected (accent-background) row. */
+.unreadLabel {
+  font-weight: 600;
+}
+
+.unreadBadge {
+  flex-shrink: 0;
+  min-width: 1.25em;
+  padding: 0 0.375em;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .form {

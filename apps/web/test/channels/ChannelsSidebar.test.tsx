@@ -102,6 +102,33 @@ describe("ChannelsSidebar", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't create/i);
   });
 
+  it("renders an unread badge for a channel with a positive count, and none for a zero/absent one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, [
+          { id: 1, name: "general", owner: "alice" },
+          { id: 2, name: "random", owner: "alice" },
+        ]),
+      ),
+    );
+    render(
+      <SessionProvider>
+        <ChannelsSidebar
+          communityId={42}
+          selectedChannelId={null}
+          onSelectChannel={vi.fn()}
+          unreadCounts={new Map([[1, 5]])}
+        />
+      </SessionProvider>,
+    );
+
+    const generalButton = await screen.findByRole("button", { name: /#general/ });
+    expect(generalButton).toHaveTextContent("5");
+    const randomButton = screen.getByRole("button", { name: "#random" });
+    expect(randomButton.textContent).toBe("#random");
+  });
+
   it("sets up encryption for members with a published key and reports the rest as skipped", async () => {
     localStorage.setItem(
       kStorageKey,

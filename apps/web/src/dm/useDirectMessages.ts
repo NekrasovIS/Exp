@@ -41,6 +41,12 @@ export function useDirectMessages(threadId: number) {
       .then((page) => {
         setMessages(page);
         setHasMore(page.length === kPageSize);
+        // Issue #310/#350: freshest page (no beforeId) — last message
+        // is the newest in the thread, exactly what opening it just showed.
+        const latest = page[page.length - 1];
+        if (latest !== undefined) {
+          void restClient.markDmThreadRead(token, threadId, latest.id).catch(() => {});
+        }
       })
       .catch(() => setError("Couldn't load this conversation."))
       .finally(() => setLoading(false));
@@ -49,8 +55,14 @@ export function useDirectMessages(threadId: number) {
   useEffect(() => {
     return socket.on("message", (message) => {
       setMessages((prev) => [...prev, message]);
+      // Live delivery only happens while subscribed to this thread —
+      // i.e. it's open and being read right now (issue #310/#350).
+      const token = getAccessToken();
+      if (token !== null) {
+        void restClient.markDmThreadRead(token, threadId, message.id).catch(() => {});
+      }
     });
-  }, [socket]);
+  }, [socket, restClient, getAccessToken, threadId]);
 
   const loadOlder = useCallback(async () => {
     const token = getAccessToken();

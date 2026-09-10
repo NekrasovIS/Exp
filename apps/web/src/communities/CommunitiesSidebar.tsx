@@ -21,9 +21,19 @@ import { useSession } from "../session/SessionContext.js";
 interface CommunitiesSidebarProps {
   selectedCommunityId: number | null;
   onSelectCommunity: (communityId: number) => void;
+  /** Sum of unread messages across a community's channels (issue
+   * #310/#350), computed by the caller (CommunitiesMode) from the
+   * channel→community map it accumulates as communities get opened —
+   * a community never opened this session has no entry here yet, same
+   * scope cut as DeviceHub's own channelIdToCommunityId_. */
+  unreadCounts?: ReadonlyMap<number, number>;
 }
 
-export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: CommunitiesSidebarProps) {
+export function CommunitiesSidebar({
+  selectedCommunityId,
+  onSelectCommunity,
+  unreadCounts,
+}: CommunitiesSidebarProps) {
   const { currentLogin } = useSession();
   const { communities, loading, error, joinByCode, regenerateInviteCode } = useCommunities();
   const [code, setCode] = useState("");
@@ -78,18 +88,24 @@ export function CommunitiesSidebar({ selectedCommunityId, onSelectCommunity }: C
       {loading && <p className={styles.mutedText}>Loading communities…</p>}
       {error !== null && <p role="alert">{error}</p>}
       <ul className={styles.list}>
-        {communities.map((community) => (
-          <li key={community.id}>
-            <button
-              type="button"
-              className={styles.listItemButton}
-              aria-current={community.id === selectedCommunityId}
-              onClick={() => onSelectCommunity(community.id)}
-            >
-              {community.name}
-            </button>
-          </li>
-        ))}
+        {communities.map((community) => {
+          const unreadCount = unreadCounts?.get(community.id) ?? 0;
+          return (
+            <li key={community.id}>
+              <button
+                type="button"
+                className={styles.listItemButton}
+                aria-current={community.id === selectedCommunityId}
+                onClick={() => onSelectCommunity(community.id)}
+              >
+                <span className={unreadCount > 0 ? styles.unreadLabel : undefined}>{community.name}</span>
+                {unreadCount > 0 && (
+                  <span className={styles.unreadBadge}>{unreadCount > 99 ? "99+" : unreadCount}</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {selectedCommunity?.inviteCode !== undefined && (
         <div className={styles.inviteBlock}>
