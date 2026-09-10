@@ -63,6 +63,11 @@ constexpr int kToastTimeoutMs = 4000;
 /// использующее lastToken_, начнёт получать 401.
 constexpr qint64 kRefreshBufferSeconds = 60;
 constexpr int kMessagePageSize = 50;
+/// Интервал периодического опроса ChatRestClient::fetchUnreadCounts()
+/// (issue #310/#349) — тот же кандидат, что назван в самом тексте
+/// задачи ("раз в 30с"); отдельно от этого таймера бейджи также
+/// обновляются сразу при входе и при переключении сообщества.
+constexpr int kUnreadPollIntervalMs = 30 * 1000;
 /// Отражает kMaxAttachmentSizeBytes у chat-service (issue #116) —
 /// проверяется и на стороне клиента, чтобы слишком большой файл
 /// отклонялся немедленным toast, а не круговым походом на сервер лишь
@@ -102,6 +107,20 @@ MainWindow::MainWindow(QWidget* parent)
     connect(refreshTimer_, &QTimer::timeout, this, [this]() {
         if (!refreshToken_.isEmpty()) {
             authClient_.refreshAccessToken(refreshToken_);
+        }
+    });
+
+    // Issue #310/#349: без живой push-доставки обновлённых счётчиков
+    // непрочитанного (WebSocketServer ретранслирует только внутри уже
+    // подписанного канала — большинству каналов сайдбара сейчас никто
+    // не подписан) бейджи держатся актуальными периодическим REST-
+    // опросом, плюс точечными вызовами при входе/переключении
+    // сообщества/открытии канала (см. ниже).
+    unreadPollTimer_ = new QTimer(this);
+    unreadPollTimer_->setInterval(kUnreadPollIntervalMs);
+    connect(unreadPollTimer_, &QTimer::timeout, this, [this]() {
+        if (!lastToken_.isEmpty()) {
+            chatRestClient_.fetchUnreadCounts(lastToken_);
         }
     });
 
@@ -202,6 +221,8 @@ MainWindow::MainWindow(QWidget* parent)
             loginWindow_->hide();
             show();
             refreshCommunities();
+            chatRestClient_.fetchUnreadCounts(lastToken_);
+            unreadPollTimer_->start();
             // Заполняет отображаемое имя в подвале (до возврата этого
             // запроса используется просто логин выше) и заранее
             // заполняет ProfileDialog на случай клика по Edit Profile.
@@ -267,6 +288,12 @@ MainWindow::MainWindow(QWidget* parent)
                     selectedChannelId_, id,
                     currentChannelEncrypted_ ? tr("🔒 Encrypted message") : truncateForChannelPreview(displayBody),
                     chat_message_grouping::parseSentAt(sentAt));
+                // Issue #310/#349: живое сообщение приходит только по
+                // подписке ChatClient, а она держится ровно на открытом
+                // сейчас канале — значит, пользователь смотрит на него
+                // прямо сейчас, можно сразу отмечать прочитанным без
+                // отдельного отслеживания долистывания до конца.
+                chatRestClient_.markChannelRead(lastToken_, selectedChannelId_, id);
             });
     connect(&chatClient_, &ChatClient::messageEdited, this,
             [this](qint64 id, const QString& newBody, const QString& /*editedAt*/) {
@@ -416,6 +443,10 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
+        // Issue #310/#349: своя копия бейджей могла отстать от сервера
+        // за то время, что пользователь провёл в другом сообществе —
+        // не ждём следующего тика unreadPollTimer_.
+        chatRestClient_.fetchUnreadCounts(lastToken_);
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
@@ -489,12 +520,21 @@ MainWindow::MainWindow(QWidget* parent)
                     return;
                 }
                 directMessageView_->setMessages(messages);
+                if (!messages.isEmpty()) {
+                    // Issue #310/#349 — тот же приём, что и у
+                    // messagesListed() выше: самая свежая страница без
+                    // beforeId, последнее сообщение — самое новое.
+                    chatRestClient_.markDmThreadRead(lastToken_, threadId, messages.last().id);
+                }
             });
     connect(&dmChatClient_, &ChatClient::messageReceived, this,
             [this](qint64 id, const QString& author, const QString& body, const QString& sentAt, qint64 /*attachmentId*/,
                    const QString& /*attachmentFilename*/) {
                 directMessageView_->appendMessage(
                     DirectMessageInfo{.id = id, .author = author, .body = body, .sentAt = sentAt});
+                // Диалог живой доставки, как и у канала — подписаны на
+                // него только когда он открыт (issue #310/#349).
+                chatRestClient_.markDmThreadRead(lastToken_, openDmThreadId_, id);
             });
     connect(&dmChatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { showToast(message, ToastBanner::Variant::kError); });
@@ -653,6 +693,15 @@ MainWindow::MainWindow(QWidget* parent)
         // придёт ответ на его превью.
         for (const ChatItem& channel : channels_) {
             chatRestClient_.fetchLatestMessage(lastToken_, channel.id);
+            // Issue #310/#349: channelsListed() не сообщает, для какого
+            // сообщества он был запрошен — тот же неявный контракт, на
+            // котором уже строится весь остальной этот обработчик
+            // (channels_ трактуется как список ровно selectedCommunityId_
+            // без дополнительной проверки), поэтому безопасно
+            // использовать его и здесь: запросы listChannels() идут
+            // строго по одному, для того сообщества, что выбрано в
+            // момент вызова.
+            channelIdToCommunityId_[channel.id] = selectedCommunityId_;
         }
         if (pendingChannelSelection_ >= 0) {
             channelsPanel_->selectChannelId(pendingChannelSelection_);
@@ -726,6 +775,7 @@ MainWindow::MainWindow(QWidget* parent)
                 if (channelId != selectedChannelId_) {
                     return;  // Устаревший ответ для канала, который мы уже покинули.
                 }
+                const bool isInitialLoad = oldestMessageId_ < 0;
                 QList<ChatMessage> converted;
                 converted.reserve(messages.size());
                 for (const ChatMessageInfo& info : messages) {
@@ -736,13 +786,20 @@ MainWindow::MainWindow(QWidget* parent)
                                                   .attachmentId = info.attachmentId,
                                                   .attachmentFilename = info.attachmentFilename});
                 }
-                if (oldestMessageId_ < 0) {
+                if (isInitialLoad) {
                     // Первоначальная загрузка истории для этого канала —
                     // список был пуст, поэтому добавление в конец в
                     // хронологическом порядке (как пришло) выглядит так
                     // же, как и вставка в начало.
                     for (const ChatMessage& message : converted) {
                         chatView_->appendMessage(message);
+                    }
+                    if (!converted.isEmpty()) {
+                        // Issue #310/#349: это самая свежая страница
+                        // (без beforeId) — её последнее сообщение и есть
+                        // самое новое в канале, ровно то, что нужно
+                        // отметить прочитанным при открытии.
+                        chatRestClient_.markChannelRead(lastToken_, channelId, converted.last().id);
                     }
                 } else {
                     chatView_->prependMessages(converted);
@@ -760,6 +817,37 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::errorOccurred, this, [this](const QString& message) {
         showToast(tr("Error: %1").arg(message), ToastBanner::Variant::kError);
     });
+    connect(&chatRestClient_, &ChatRestClient::channelMarkedRead, this, [](qint64) {
+        // Fire-and-forget подтверждение (issue #310/#349) — локальный
+        // бейдж уже сброшен оптимистично (setOpenChannelId()/
+        // recordChannelActivity() выше), ничего дополнительно делать не
+        // нужно; тот же стиль, что и у channelKeySet().
+    });
+    connect(&chatRestClient_, &ChatRestClient::dmThreadMarkedRead, this, [](qint64) {});
+    connect(&chatRestClient_, &ChatRestClient::unreadCountsFetched, this,
+            [this](const QList<ChannelUnreadCount>& channelCounts, const QList<ThreadUnreadCount>& threadCounts) {
+                // Личные диалоги (issue #310/#349): markDmThreadRead()
+                // уже вызывается при открытии диалога/поступлении нового
+                // сообщения (см. dmThreadOpened()/dmChatClient_
+                // messageReceived ниже) для корректности данных на
+                // сервере — но самого списка диалогов ЛС в интерфейсе
+                // нет (друг открывается напрямую из FriendsPanel, не из
+                // списка тредов), поэтому этим счётчикам просто негде
+                // отрисоваться. Сознательное сокращение объёма для этой
+                // задачи, не забытый пункт.
+                Q_UNUSED(threadCounts);
+
+                QHash<qint64, qint64> communityUnreadSums;
+                for (const ChannelUnreadCount& entry : channelCounts) {
+                    channelsPanel_->setUnreadCount(entry.channelId, entry.unreadCount);
+                    if (const qint64 communityId = channelIdToCommunityId_.value(entry.channelId, -1); communityId >= 0) {
+                        communityUnreadSums[communityId] += entry.unreadCount;
+                    }
+                }
+                for (auto it = communityUnreadSums.cbegin(); it != communityUnreadSums.cend(); ++it) {
+                    communitiesPanel_->setUnreadCount(it.key(), it.value());
+                }
+            });
 
     connect(footerBar_->settingsButton(), &QPushButton::clicked, this, [this]() {
         settingsDialog_->show();
@@ -1143,6 +1231,8 @@ void MainWindow::onAccountSettingsClicked() {
 
 void MainWindow::signOut() {
     refreshTimer_->stop();
+    unreadPollTimer_->stop();
+    channelIdToCommunityId_.clear();
     lastToken_.clear();
     refreshToken_.clear();
     currentUserLogin_.clear();

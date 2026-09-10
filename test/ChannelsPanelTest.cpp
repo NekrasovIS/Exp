@@ -190,30 +190,49 @@ TEST(ChannelsPanelTest, MoreRecentActivitySortsAboveOlderActivity) {
     EXPECT_EQ(panel.listWidget()->item(1)->data(Qt::UserRole).toLongLong(), 10);
 }
 
-TEST(ChannelsPanelTest, RecordChannelActivityMarksTheRowBoldForAChannelThatIsNotOpen) {
+TEST(ChannelsPanelTest, RecordChannelActivityAloneNeverMarksARowBold) {
+    // Issue #310/#349: unread is now solely driven by setUnreadCount()
+    // (the real server-backed count) — recordChannelActivity() (preview
+    // text/sort order, issue #152) no longer has any unread side effect
+    // of its own, unlike the old client-only heuristic it replaces.
     ChannelsPanel panel;
     panel.setChannels(sampleChannels());
     ASSERT_FALSE(panel.listWidget()->item(0)->font().bold());
 
     panel.recordChannelActivity(10, 1, QStringLiteral("new message"), QDateTime::currentDateTime());
 
-    EXPECT_TRUE(panel.listWidget()->item(0)->font().bold());
-}
-
-TEST(ChannelsPanelTest, ActivityForTheCurrentlyOpenChannelIsNeverMarkedUnread) {
-    ChannelsPanel panel;
-    panel.setChannels(sampleChannels());
-    panel.setOpenChannelId(10);
-
-    panel.recordChannelActivity(10, 1, QStringLiteral("I'm looking at this"), QDateTime::currentDateTime());
-
     EXPECT_FALSE(panel.listWidget()->item(0)->font().bold());
 }
 
-TEST(ChannelsPanelTest, OpeningAnAlreadyUnreadChannelClearsTheBoldIndicator) {
+TEST(ChannelsPanelTest, SetUnreadCountMarksTheRowBoldAndAppendsTheCount) {
     ChannelsPanel panel;
     panel.setChannels(sampleChannels());
-    panel.recordChannelActivity(10, 1, QStringLiteral("new message"), QDateTime::currentDateTime());
+    ASSERT_FALSE(panel.listWidget()->item(0)->font().bold());
+
+    panel.setUnreadCount(10, 3);
+
+    QListWidgetItem* item = panel.listWidget()->item(0);
+    EXPECT_TRUE(item->font().bold());
+    EXPECT_TRUE(item->text().contains(QStringLiteral("(3)")));
+}
+
+TEST(ChannelsPanelTest, SetUnreadCountToZeroClearsTheBoldIndicatorAndCount) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    panel.setUnreadCount(10, 3);
+    ASSERT_TRUE(panel.listWidget()->item(0)->font().bold());
+
+    panel.setUnreadCount(10, 0);
+
+    QListWidgetItem* item = panel.listWidget()->item(0);
+    EXPECT_FALSE(item->font().bold());
+    EXPECT_FALSE(item->text().contains(QStringLiteral("(")));
+}
+
+TEST(ChannelsPanelTest, OpeningAChannelOptimisticallyClearsItsUnreadBadge) {
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    panel.setUnreadCount(10, 3);
     ASSERT_TRUE(panel.listWidget()->item(0)->font().bold());
 
     panel.setOpenChannelId(10);
@@ -221,17 +240,34 @@ TEST(ChannelsPanelTest, OpeningAnAlreadyUnreadChannelClearsTheBoldIndicator) {
     EXPECT_FALSE(panel.listWidget()->item(0)->font().bold());
 }
 
-TEST(ChannelsPanelTest, ANewerMessageArrivingAfterTheChannelWasReadIsMarkedUnreadAgain) {
+TEST(ChannelsPanelTest, ANewCountArrivingAfterTheChannelWasOpenedStillShowsUpAsUnread) {
+    // The optimistic clear from setOpenChannelId() must not stick around
+    // and mask a genuinely fresh count the next fetchUnreadCounts()
+    // reports (e.g. a message that arrived on another device).
     ChannelsPanel panel;
     panel.setChannels(sampleChannels());
-    panel.recordChannelActivity(10, 1, QStringLiteral("first"), QDateTime::currentDateTime());
     panel.setOpenChannelId(10);
-    panel.setOpenChannelId(-1);  // Leave the channel — id 1 is now the "read" watermark.
     ASSERT_FALSE(panel.listWidget()->item(0)->font().bold());
 
-    panel.recordChannelActivity(10, 2, QStringLiteral("second"), QDateTime::currentDateTime());
+    panel.setUnreadCount(10, 1);
 
     EXPECT_TRUE(panel.listWidget()->item(0)->font().bold());
+}
+
+TEST(ChannelsPanelTest, SetUnreadCountPreservesTheCurrentSelection) {
+    // issue #310/#349: setUnreadCount() rebuilds the whole list (it also
+    // re-sorts by activity) — without preserving selection across that
+    // rebuild, a periodic unread-count refresh would keep dropping the
+    // highlighted channel.
+    ChannelsPanel panel;
+    panel.setChannels(sampleChannels());
+    panel.selectChannelId(11);
+    ASSERT_EQ(panel.listWidget()->currentItem()->data(Qt::UserRole).toLongLong(), 11);
+
+    panel.setUnreadCount(10, 2);
+
+    ASSERT_NE(panel.listWidget()->currentItem(), nullptr);
+    EXPECT_EQ(panel.listWidget()->currentItem()->data(Qt::UserRole).toLongLong(), 11);
 }
 
 }  // namespace

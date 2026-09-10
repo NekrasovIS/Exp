@@ -221,10 +221,28 @@ private:
     /// действия — пуст, когда вход не выполнен.
     QString refreshToken_;
     QTimer* refreshTimer_ = nullptr;
+    /// Issue #310/#349 — периодически (раз в 30с), плюс сразу при входе
+    /// и при переключении сообщества, вызывает
+    /// ChatRestClient::fetchUnreadCounts() для обновления бейджей
+    /// непрочитанного в CommunitiesPanel/ChannelsPanel. Отдельный от
+    /// refreshTimer_ таймер — тот обменивает refresh-токен один раз
+    /// незадолго до истечения срока действия, не по регулярному циклу.
+    QTimer* unreadPollTimer_ = nullptr;
     QString currentUserLogin_;
     QList<QScreen*> screens_;
     QList<ChatItem> communities_;
     QList<ChatItem> channels_;
+    /// Issue #310/#349 — накапливается по мере того, как
+    /// channelsListed() возвращает канал для того сообщества, что было
+    /// выбрано на момент запроса (см. doc-комментарий в .cpp у
+    /// обработчика channelsListed) — используется, чтобы просуммировать
+    /// бейджи непрочитанного по каналам в один бейдж на сообщество.
+    /// Сообщество, которое пользователь ни разу не открывал в этой
+    /// сессии, здесь не появится — его бейдж останется неизвестным до
+    /// первого открытия (не отслеживается как отдельная задача — тот же
+    /// класс компромисса, что и REST-refetch вместо live push, см.
+    /// README).
+    QHash<qint64, qint64> channelIdToCommunityId_;
     QStringList callParticipants_;
     qint64 selectedCommunityId_ = -1;
     qint64 selectedChannelId_ = -1;

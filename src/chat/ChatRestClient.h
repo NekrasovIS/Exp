@@ -55,6 +55,21 @@ struct DirectMessageInfo {
     QString sentAt;
 };
 
+/// Непрочитанные счётчики (issue #310/#349) — одна запись на канал
+/// (или диалог, см. ThreadUnreadCount), включая нулевые: клиент сам
+/// решает, скрывать ли бейдж при 0, а не различает "0 непрочитанных"
+/// от "ещё не знаю" по отсутствию записи в списке (см. doc-комментарий
+/// той же пары структур на стороне chat-service, issue #348).
+struct ChannelUnreadCount {
+    qint64 channelId = 0;
+    qint64 unreadCount = 0;
+};
+
+struct ThreadUnreadCount {
+    qint64 threadId = 0;
+    qint64 unreadCount = 0;
+};
+
 /**
  * @brief REST-клиент для управления сообществами/каналами chat-service:
  *        создание/список сообществ, вступление, создание/список каналов.
@@ -171,6 +186,21 @@ public:
     /// Тот же постраничный контракт, что и у listMessages().
     void listDirectMessages(const QString& token, qint64 threadId, int limit, qint64 beforeId = -1);
 
+    /// Отмечает канал прочитанным по @p messageId (issue #310/#349) —
+    /// идемпотентно на сервере, никогда не двигает отметку назад (см.
+    /// doc-комментарий ChatRepository::markChannelRead() на стороне
+    /// chat-service), поэтому можно звать безусловно при открытии
+    /// канала/долистывании до конца, без предварительной проверки.
+    void markChannelRead(const QString& token, qint64 channelId, qint64 messageId);
+
+    /// То же самое для личного диалога.
+    void markDmThreadRead(const QString& token, qint64 threadId, qint64 messageId);
+
+    /// Непрочитанные счётчики по всем каналам/диалогам вызывающего —
+    /// одним запросом (issue #310/#349), для отрисовки всех бейджей
+    /// сайдбара без N+1 запросов. Вызывает unreadCountsFetched().
+    void fetchUnreadCounts(const QString& token);
+
 signals:
     /// @p inviteCode (issue #186) — создатель сразу видит код, который
     /// предстоит раздавать, без отдельного запроса.
@@ -225,6 +255,13 @@ signals:
     /// Ответ на listDirectMessages() — тот же хронологический порядок,
     /// что и у messagesListed().
     void directMessagesListed(qint64 threadId, const QList<DirectMessageInfo>& messages);
+
+    /// Ответ на markChannelRead()/markDmThreadRead().
+    void channelMarkedRead(qint64 channelId);
+    void dmThreadMarkedRead(qint64 threadId);
+
+    /// Ответ на fetchUnreadCounts().
+    void unreadCountsFetched(const QList<ChannelUnreadCount>& channels, const QList<ThreadUnreadCount>& threads);
 
     void errorOccurred(const QString& message);
 

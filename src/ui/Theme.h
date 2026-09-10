@@ -29,6 +29,11 @@ constexpr const char* kBubbleOtherBackground = "#2a2d31";
 /// QLabel[sectionTitle="true"]/mutedDescription в QSS ниже, вместо своего
 /// hex-литерала.
 constexpr const char* kMutedForeground = "#8b939c";
+/// Бейдж непрочитанных (issue #310/#349) — намеренно красный/тёплый, не
+/// зелёный акцент приложения: аватар сообщества уже красит себя тем же
+/// зелёным градиентом (communityAvatarIcon()), поэтому бейджу того же
+/// цвета не с чем контрастировать поверх собственного фона.
+constexpr const char* kBadgeBackground = "#ef4444";
 
 /// Таблица стилей Qt (QSS), реализующая тёмную тему с зелёным
 /// градиентным акцентом на основных действиях: три слоя тёмных фонов,

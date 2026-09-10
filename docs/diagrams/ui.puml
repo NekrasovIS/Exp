@@ -76,12 +76,14 @@ class CommunitiesPanel {
   +setCommunities(communities: QList<ChatItem>)
   +selectCommunityId(id: int64)
   +setCurrentUserLogin(login: QString)
+  +setUnreadCount(communityId: int64, unreadCount: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +friendsButton() : QPushButton*
   +connectDialog() : CommunityConnectDialog*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
+  -rebuildList()
   .. signals ..
   +createRequested(name: QString)
   +renameRequested(id: int64, newName: QString)
@@ -92,6 +94,18 @@ class CommunitiesPanel {
   +manageModeratorsRequested(id: int64, name: QString)
   +friendsRequested()
 }
+note right of CommunitiesPanel
+  Issue #310/#349: setUnreadCount() — сумма
+  непрочитанного по каналам этого сообщества,
+  посчитанная в MainWindow (эта панель не
+  знает про каналы вообще) — перерисовывает
+  аватар communityAvatarIcon() с бейджем и
+  дополняет tooltip "(N unread)".
+  rebuildList() (общая часть setCommunities()/
+  setUnreadCount()) сохраняет текущую
+  выделенную строку по тем же причинам, что и
+  у ChannelsPanel::rebuildList().
+end note
 
 class CommunityConnectDialog {
   +inviteCodeEdit() : QLineEdit*
@@ -182,6 +196,7 @@ class ChannelsPanel {
   +setCurrentUserLogin(login: QString)
   +recordChannelActivity(channelId: int64, messageId: int64, previewText: QString, activityAt: QDateTime)
   +setOpenChannelId(channelId: int64)
+  +setUnreadCount(channelId: int64, unreadCount: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +filterEdit() : QLineEdit*
@@ -215,18 +230,26 @@ note right of ChannelsPanel
 
   rebuildList() сортирует по activity_
   (последняя активность — выше) и
-  накладывает превью второй строкой +
-  жирный/акцентный шрифт для
-  непрочитанного. "Прочитано" — id
-  последнего сообщения канала на момент
-  setOpenChannelId(); recordChannelActivity()
-  для открытого канала прямо сейчас
-  всегда продвигает эту метку вместе с
-  activity_, а не только в момент
-  открытия — иначе сообщение, реально
-  увиденное, зажигало бы непрочитанное
-  задним числом после переключения на
-  другой канал.
+  накладывает превью второй строкой;
+  сохраняет выбранную строку через
+  собственный rebuild (иначе периодическое
+  setUnreadCount() из MainWindow каждый
+  раз сбрасывало бы выделение).
+
+  Issue #310/#349: непрочитанное больше не
+  собственная эвристика панели — жирный
+  шрифт + "(N)" в тексте строки управляются
+  только setUnreadCount(), которую MainWindow
+  вызывает по ответу ChatRestClient::
+  fetchUnreadCounts() (сервер — источник
+  истины, там же "никогда не двигать метку
+  назад" при удалении последнего прочитанного
+  сообщения). recordChannelActivity() теперь
+  только про previewText/сортировку, своего
+  unread-побочного эффекта не имеет.
+  setOpenChannelId() оптимистично сбрасывает
+  бейдж локально (до следующего ответа
+  fetchUnreadCounts()), не дожидаясь его.
 end note
 
 class MemberListPanel {
@@ -688,12 +711,21 @@ DesktopNotifier ..> NotificationPolicy : shouldNotify() >
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
-    +communityAvatarIcon(label: QString) : QIcon
+    +communityAvatarIcon(label: QString, unreadCount: int64 = 0) : QIcon
     +sendIcon(fillColor: QColor) : QIcon
     +settingsIcon(fillColor: QColor) : QIcon
     +membersIcon(fillColor: QColor) : QIcon
   }
 }
+note right of IconFactory
+  Issue #310/#349: communityAvatarIcon()'s
+  unreadCount (default 0, F.51 — не отдельная
+  перегрузка) рисует поверх обычного круга
+  маленький красный (ui_theme::kBadgeBackground,
+  не зелёный акцент — иначе бейдж слился бы с
+  фоном самого аватара) кружок с числом,
+  "99+" при переполнении.
+end note
 
 package "src/devices" {
   class DeviceEnumerator

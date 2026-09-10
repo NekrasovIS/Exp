@@ -29,7 +29,7 @@ QIcon plusIcon(const QColor& strokeColor) {
     return QIcon(pixmap);
 }
 
-QIcon communityAvatarIcon(const QString& label) {
+QIcon communityAvatarIcon(const QString& label, qint64 unreadCount) {
     constexpr int kSize = 40;
     constexpr qreal kDevicePixelRatio = 2.0;
 
@@ -54,6 +54,26 @@ QIcon communityAvatarIcon(const QString& label) {
     painter.setFont(font);
     painter.setPen(Qt::white);
     painter.drawText(QRectF(0, 0, kSize, kSize), Qt::AlignCenter, label);
+
+    if (unreadCount > 0) {
+        // Issue #310/#349: сумма непрочитанных по каналам сообщества —
+        // маленький красный круг в правом верхнем углу, поверх основного
+        // круга-аватара, с белой обводкой, чтобы отделиться от него на
+        // любом фоне. "99+" вместо трёхзначных чисел — тот же приём,
+        // что и у мессенджеров, чтобы бейдж не разрастался бесконечно.
+        constexpr qreal kBadgeDiameter = kSize * 0.46;
+        const QRectF badgeRect(kSize - kBadgeDiameter * 0.8, -kBadgeDiameter * 0.2, kBadgeDiameter, kBadgeDiameter);
+        painter.setPen(QPen(Qt::white, 1.5));
+        painter.setBrush(QColor(devicehub::ui_theme::kBadgeBackground));
+        painter.drawEllipse(badgeRect);
+
+        QFont badgeFont = painter.font();
+        badgeFont.setPointSizeF(unreadCount > 99 ? 7.5 : 9.0);
+        painter.setFont(badgeFont);
+        painter.setPen(Qt::white);
+        painter.drawText(badgeRect, Qt::AlignCenter, unreadCount > 99 ? QStringLiteral("99+")
+                                                                       : QString::number(unreadCount));
+    }
 
     return QIcon(pixmap);
 }
