@@ -140,6 +140,28 @@ describe("ChatClient", () => {
     expect(onDeleted).toHaveBeenCalledWith(1);
   });
 
+  it("emits 'messagePinned'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onPinned = vi.fn();
+    client.on("messagePinned", onPinned);
+
+    socket.simulateMessage(
+      JSON.stringify({ message_pinned: { id: 1, pinned_by: "alice", pinned_at: "now" } }),
+    );
+
+    expect(onPinned).toHaveBeenCalledWith(1, "alice", "now");
+  });
+
+  it("emits 'messageUnpinned'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onUnpinned = vi.fn();
+    client.on("messageUnpinned", onUnpinned);
+
+    socket.simulateMessage(JSON.stringify({ message_unpinned: { id: 1 } }));
+
+    expect(onUnpinned).toHaveBeenCalledWith(1);
+  });
+
   it("emits 'error' for a protocol-level {error} frame", () => {
     const { client, socket } = makeClientAndSocket();
     const onError = vi.fn();
@@ -369,6 +391,17 @@ describe("ChatClient", () => {
 
       client.sendDeleteMessage(1);
       expect(socket.lastSentFrame()).toEqual({ delete_message: { id: 1 } });
+    });
+
+    it("sendPinMessage/sendUnpinMessage send the expected frames", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendPinMessage(1);
+      expect(socket.lastSentFrame()).toEqual({ pin_message: { id: 1 } });
+
+      client.sendUnpinMessage(1);
+      expect(socket.lastSentFrame()).toEqual({ unpin_message: { id: 1 } });
     });
 
     it("throws when sending before a connection is established", () => {

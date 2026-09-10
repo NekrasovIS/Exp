@@ -35,6 +35,12 @@ interface ChatClientEventMap {
   message: [message: IncomingChatMessage];
   messageEdited: [id: number, newBody: string, editedAt: string];
   messageDeleted: [id: number];
+  // issue #308/#338/#340 — pinnedBy/pinnedAt belong to the ORIGINAL pin
+  // even if this particular event was triggered by a second,
+  // idempotent pin_message from someone else (see chat-service's own
+  // PinMessageResult doc comment).
+  messagePinned: [id: number, pinnedBy: string, pinnedAt: string];
+  messageUnpinned: [id: number];
   error: [message: string];
   callRoster: [participants: string[]];
   // SFU room for the call (issue #221/#232) — same call_join response as
@@ -172,6 +178,21 @@ export class ChatClient {
     this.sendFrame({ delete_message: { id } });
   }
 
+  /** Valid only in channel mode. Unlike sendEditMessage()/
+   * sendDeleteMessage(), the server restricts this to the channel/
+   * community owner or a moderator — never the message's own author
+   * as such (pinning is a channel-management action, not message
+   * moderation). Idempotent — pinning an already-pinned message is a
+   * no-op that still answers with a `messagePinned` event. */
+  sendPinMessage(id: number): void {
+    this.sendFrame({ pin_message: { id } });
+  }
+
+  /** Same authorization rule as sendPinMessage(); idempotent. */
+  sendUnpinMessage(id: number): void {
+    this.sendFrame({ unpin_message: { id } });
+  }
+
   private open(): void {
     const socket = this.wsFactory(this.url);
     this.socket = socket;
@@ -288,6 +309,24 @@ export class ChatClient {
       const deleted = body.message_deleted as { id?: unknown };
       if (typeof deleted.id === "number") {
         this.emit("messageDeleted", deleted.id);
+        return;
+      }
+    }
+    if (typeof body.message_pinned === "object" && body.message_pinned !== null) {
+      const pinned = body.message_pinned as { id?: unknown; pinned_by?: unknown; pinned_at?: unknown };
+      if (
+        typeof pinned.id === "number" &&
+        typeof pinned.pinned_by === "string" &&
+        typeof pinned.pinned_at === "string"
+      ) {
+        this.emit("messagePinned", pinned.id, pinned.pinned_by, pinned.pinned_at);
+        return;
+      }
+    }
+    if (typeof body.message_unpinned === "object" && body.message_unpinned !== null) {
+      const unpinned = body.message_unpinned as { id?: unknown };
+      if (typeof unpinned.id === "number") {
+        this.emit("messageUnpinned", unpinned.id);
         return;
       }
     }

@@ -161,6 +161,44 @@ describe("ChatRestClient", () => {
       expect(messages[0]).not.toHaveProperty("attachmentFilename");
     });
 
+    it("listPinnedMessages resolves with mapped pinned messages", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, [
+          {
+            id: 1,
+            author: "alice",
+            body: "pin me",
+            sent_at: "2026-01-01T00:00:00Z",
+            attachment_id: null,
+            pinned_by: "bob",
+            pinned_at: "2026-01-01T00:05:00Z",
+          },
+        ]),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      const pinned = await client.listPinnedMessages(kToken, 1);
+
+      expect(pinned).toEqual([
+        {
+          id: 1,
+          author: "alice",
+          body: "pin me",
+          sentAt: "2026-01-01T00:00:00Z",
+          pinnedBy: "bob",
+          pinnedAt: "2026-01-01T00:05:00Z",
+        },
+      ]);
+      expect(fetchImpl).toHaveBeenCalledWith(`${kBaseUrl}/channels/1/pinned-messages`, expect.anything());
+    });
+
+    it("listPinnedMessages rejects with an ApiError on failure", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(404, { error: "no such channel" }));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.listPinnedMessages(kToken, 1)).rejects.toBeInstanceOf(ApiError);
+    });
+
     it("fetchLatestMessage silently resolves to [] on error instead of rejecting", async () => {
       const fetchImpl = fakeFetch(jsonResponse(500, { error: "boom" }));
       const client = new ChatRestClient(kBaseUrl, fetchImpl);

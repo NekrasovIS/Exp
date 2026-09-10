@@ -5,7 +5,7 @@
 // same restrictions DeviceHub's own encrypted-channel UI has (issue
 // #138's ChannelCrypto has no story for attachment bytes at all).
 
-import type { ChatMessageInfo } from "@devicehub/core";
+import type { ChatMessageInfo, PinnedMessageInfo } from "@devicehub/core";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
@@ -14,7 +14,9 @@ import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
 import { useSession } from "../session/SessionContext.js";
 import { MessageList } from "./MessageList.js";
+import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMessages } from "./useMessages.js";
+import { usePinnedMessages } from "./usePinnedMessages.js";
 
 interface EncryptedChatViewContentProps {
   channelId: number;
@@ -43,8 +45,11 @@ export function EncryptedChatViewContent({
     deleteMessage,
     socket,
   } = useMessages(channelId);
+  const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
+  const [decryptedPinned, setDecryptedPinned] = useState<PinnedMessageInfo[]>([]);
   const [body, setBody] = useState("");
+  const [pinnedOpen, setPinnedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +77,30 @@ export function EncryptedChatViewContent({
     body: decrypted.get(message.id) ?? "…",
   }));
 
+  // Pinned messages carry the same ciphertext body as the regular
+  // history (chat-service stores/relays it verbatim either way) — the
+  // panel needs its own decrypt pass, separate from `decrypted` above,
+  // since a pinned message may not currently be in `messages` at all
+  // (e.g. pinned long before this page loaded the most recent window
+  // of history).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(
+        pinned.map(async (message): Promise<PinnedMessageInfo> => ({
+          ...message,
+          body: (await decryptMessage(message.body, channelKey)) ?? kUndecryptable,
+        })),
+      );
+      if (!cancelled) {
+        setDecryptedPinned(entries);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pinned, channelKey]);
+
   function handleSend(event: FormEvent): void {
     event.preventDefault();
     const toSend = body.trim();
@@ -91,7 +120,13 @@ export function EncryptedChatViewContent({
       {currentLogin !== null && <CallPanel chatClient={socket} localLogin={currentLogin} />}
       <div className={styles.header}>
         <span className={styles.encryptedBadge}>🔒 Encrypted</span>
+        {pinned.length > 0 && (
+          <button type="button" onClick={() => setPinnedOpen((open) => !open)}>
+            📌 {pinned.length}
+          </button>
+        )}
       </div>
+      {pinnedOpen && <PinnedMessagesPanel pinned={decryptedPinned} />}
       <div className={styles.scrollArea}>
         {loading && <p className={styles.statusText}>Loading messages…</p>}
         {error !== null && <p role="alert">{error}</p>}
@@ -103,10 +138,13 @@ export function EncryptedChatViewContent({
         <MessageList
           messages={decryptedMessages}
           editedIds={editedIds}
+          pinnedIds={pinnedIds}
           currentLogin={currentLogin}
           isModerator={isModerator}
           onEdit={handleEdit}
           onDelete={deleteMessage}
+          onPin={pin}
+          onUnpin={unpin}
         />
       </div>
       <form onSubmit={handleSend} className={styles.simpleComposerForm}>
