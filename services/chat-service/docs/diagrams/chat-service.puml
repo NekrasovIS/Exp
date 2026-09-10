@@ -75,6 +75,14 @@ note bottom of DirectMessage
   редактирования/удаления в этой фазе,
   в отличие от Message.
 end note
+class ChannelUnreadCount {
+  +channelId : int64
+  +unreadCount : int64
+}
+class ThreadUnreadCount {
+  +threadId : int64
+  +unreadCount : int64
+}
 
 package "chat_service::base64" <<Rectangle>> {
   class Base64 << (N,orchid) namespace >> {
@@ -114,6 +122,10 @@ class ChatRepository {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +insertDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
+  +markChannelRead(channelId: int64, login: string, messageId: int64)
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
+  +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> RegenerateInviteCodeResult : returns
@@ -125,7 +137,28 @@ ChatRepository ..> AttachmentData : reads
 ChatRepository ..> MutationResult : returns
 ChatRepository ..> DirectMessageThread : returns
 ChatRepository ..> DirectMessage : returns
+ChatRepository ..> ChannelUnreadCount : returns
+ChatRepository ..> ThreadUnreadCount : returns
 ChatRepository ..> PqxxConnection : opens per call
+note right of ChatRepository
+  Issue #310/#348: last_read_message_id
+  (channel_read_state/dm_thread_read_state,
+  db/init.sql) — обычный BIGINT БЕЗ FK на
+  messages/direct_messages, той же причине,
+  что и reply_to_message_id (issue #306):
+  FK с ON DELETE SET NULL сбросил бы отметку
+  "прочитано" при удалении именно того
+  сообщения, на которое она указывает, и
+  заново показал бы более старые сообщения
+  непрочитанными. markChannelRead()/
+  markDmThreadRead() — идемпотентный upsert
+  с GREATEST(), никогда не двигает отметку
+  назад (устаревший вызов от гонки между
+  несколькими открытыми окнами — no-op).
+  listUnreadChannelCounts()/
+  listUnreadThreadCounts() — одним запросом
+  по всем каналам/диалогам логина, без N+1.
+end note
 
 class ChatService {
   +createCommunity(name: string, ownerLogin: string) : Community
@@ -159,6 +192,10 @@ class ChatService {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +postDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
+  +markChannelRead(channelId: int64, login: string, messageId: int64)
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
+  +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
 }
 note bottom of ChatService
   issue #187, Фаза 2: ChatService не
@@ -219,6 +256,9 @@ class HttpServer {
   -handleListMyThreads(request, response)
   -handlePostDirectMessage(request, response)
   -handleListDirectMessages(request, response)
+  -handleMarkChannelRead(request, response)
+  -handleMarkDmThreadRead(request, response)
+  -handleGetUnreadCounts(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }

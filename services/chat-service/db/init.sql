@@ -134,6 +134,29 @@ CREATE TABLE IF NOT EXISTS direct_messages (
 
 CREATE INDEX IF NOT EXISTS direct_messages_thread_id_sent_at_idx ON direct_messages (thread_id, sent_at);
 
+-- Отметки "прочитано" (issue #310/#348) — по одной строке на (канал,
+-- логин)/(диалог, логин). last_read_message_id — обычный nullable
+-- BIGINT БЕЗ FK на messages/direct_messages: FK с ON DELETE SET NULL
+-- сбросил бы отметку на "ничего не прочитано" при удалении уже
+-- прочитанного сообщения (issue #150) и заново показал бы более
+-- старые сообщения непрочитанными — та же причина, что уже
+-- обосновывает отсутствие FK у messages.reply_to_message_id (issue
+-- #306). NULL означает "участник никогда явно не отмечал канал/диалог
+-- прочитанным" — непрочитанным считается вообще всё.
+CREATE TABLE IF NOT EXISTS channel_read_state (
+    channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    login TEXT NOT NULL,
+    last_read_message_id BIGINT,
+    PRIMARY KEY (channel_id, login)
+);
+
+CREATE TABLE IF NOT EXISTS dm_thread_read_state (
+    thread_id BIGINT NOT NULL REFERENCES direct_message_threads(id) ON DELETE CASCADE,
+    login TEXT NOT NULL,
+    last_read_message_id BIGINT,
+    PRIMARY KEY (thread_id, login)
+);
+
 -- SFU-инфраструктура для групповых звонков (issue #123/#231) — сопоставление
 -- канала с videoroom-комнатой в Janus (services/janus/). janus_room_id
 -- сейчас всегда вычисляется детерминированно ("channel-<id>",

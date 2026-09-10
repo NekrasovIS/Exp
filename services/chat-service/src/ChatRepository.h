@@ -124,6 +124,21 @@ struct DirectMessage {
     std::string sentAt;
 };
 
+/// Непрочитанные счётчики (issue #310/#348) — одна строка на канал
+/// (или диалог, см. ThreadUnreadCount), для КАЖДОГО канала/диалога
+/// вызывающего логина, включая нулевые — клиент сам решает, прятать
+/// ли бейдж при 0, а не различает "0 непрочитанных" от "ещё не знаю"
+/// по отсутствию записи в списке.
+struct ChannelUnreadCount {
+    std::int64_t channelId = 0;
+    std::int64_t unreadCount = 0;
+};
+
+struct ThreadUnreadCount {
+    std::int64_t threadId = 0;
+    std::int64_t unreadCount = 0;
+};
+
 /// Результат regenerateInviteCode() (issue #186) — тот же приём, что и
 /// у EditMessageResult: одного MutationResult недостаточно, чтобы
 /// передать вызывающей стороне новый код.
@@ -379,6 +394,25 @@ public:
     /// таблицы channel_janus_rooms в db/init.sql о том, почему это учёт,
     /// а не источник истины для самого id.
     void recordJanusRoom(std::int64_t channelId, const std::string& janusRoomId);
+
+    /// Идемпотентно отмечает @p channelId прочитанным для @p login по
+    /// @p messageId (issue #310/#348) — не проверяет членство (HttpServer
+    /// уже это делает). Никогда не двигает отметку назад: если текущий
+    /// last_read_message_id уже >= @p messageId, вызов не имеет эффекта
+    /// — клиент вполне может прислать устаревший id (например, гонка
+    /// между несколькими открытыми окнами одного пользователя).
+    void markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId);
+
+    /// То же самое для личного диалога.
+    void markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
+
+    /// Непрочитанные счётчики по всем каналам сообществ, в которых
+    /// состоит @p login — одним запросом (без N+1 по каждому каналу
+    /// отдельно), включая каналы с 0 непрочитанных.
+    [[nodiscard]] std::vector<ChannelUnreadCount> listUnreadChannelCounts(const std::string& login);
+
+    /// То же самое для личных диалогов @p login.
+    [[nodiscard]] std::vector<ThreadUnreadCount> listUnreadThreadCounts(const std::string& login);
 
 private:
     std::string connectionString_;
