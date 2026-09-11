@@ -76,6 +76,11 @@ private:
     void handleRenameChannel(const httplib::Request& request, httplib::Response& response);
     void handleDeleteChannel(const httplib::Request& request, httplib::Response& response);
     void handleListMessages(const httplib::Request& request, httplib::Response& response);
+    /// GET /channels/{id}/pinned-messages (issue #338) — доступно любому
+    /// участнику сообщества (не только владельцу/модератору — читать
+    /// список закреплённых может кто угодно, закреплять/снимать —
+    /// только они, см. ChatRepository::pinMessage()).
+    void handleListPinnedMessages(const httplib::Request& request, httplib::Response& response);
     void handleUploadAttachment(const httplib::Request& request, httplib::Response& response);
     void handleDownloadAttachment(const httplib::Request& request, httplib::Response& response);
     void handleSearchMessages(const httplib::Request& request, httplib::Response& response);

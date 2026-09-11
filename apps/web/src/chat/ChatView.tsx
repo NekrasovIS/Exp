@@ -15,14 +15,34 @@ interface ChatViewProps {
   channelId: number;
   communityId: number;
   isEncrypted: boolean;
+  /** Presence (issue #322) — forwarded from whichever channel socket is
+   * actually subscribed right now (ChatViewContent's or
+   * EncryptedChatViewContent's own useMessages()); the caller
+   * (CommunitiesMode) owns the aggregated online-logins state since
+   * MembersSidebar is a sibling of this component, not a descendant. */
+  onOnlineMembers?: (logins: string[]) => void;
+  onPresenceChanged?: (login: string, online: boolean) => void;
 }
 
-export function ChatView({ channelId, communityId, isEncrypted }: ChatViewProps) {
+export function ChatView({
+  channelId,
+  communityId,
+  isEncrypted,
+  onOnlineMembers,
+  onPresenceChanged,
+}: ChatViewProps) {
   const identityKeys = useIdentityKeys();
   const { loading, channelKey } = useChannelKey(channelId, isEncrypted ? identityKeys : null);
 
   if (!isEncrypted) {
-    return <ChatViewContent channelId={channelId} communityId={communityId} />;
+    return (
+      <ChatViewContent
+        channelId={channelId}
+        communityId={communityId}
+        onOnlineMembers={onOnlineMembers}
+        onPresenceChanged={onPresenceChanged}
+      />
+    );
   }
   if (loading) {
     return <p className={placeholderStyles.placeholder}>Loading…</p>;
@@ -32,5 +52,13 @@ export function ChatView({ channelId, communityId, isEncrypted }: ChatViewProps)
       <p className={placeholderStyles.placeholder}>You don't have access to this encrypted channel yet.</p>
     );
   }
-  return <EncryptedChatViewContent channelId={channelId} communityId={communityId} channelKey={channelKey} />;
+  return (
+    <EncryptedChatViewContent
+      channelId={channelId}
+      communityId={communityId}
+      channelKey={channelKey}
+      onOnlineMembers={onOnlineMembers}
+      onPresenceChanged={onPresenceChanged}
+    />
+  );
 }

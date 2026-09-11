@@ -92,8 +92,9 @@ std::vector<std::string> ChatService::listModerators(std::int64_t communityId) {
 }
 
 std::optional<Message> ChatService::postMessage(std::int64_t channelId, const std::string& authorLogin,
-                                                  const std::string& body, std::optional<std::int64_t> attachmentId) {
-    return repository_.insertMessage(channelId, authorLogin, body, attachmentId);
+                                                  const std::string& body, std::optional<std::int64_t> attachmentId,
+                                                  std::optional<std::int64_t> replyToMessageId) {
+    return repository_.insertMessage(channelId, authorLogin, body, attachmentId, replyToMessageId);
 }
 
 std::vector<Message> ChatService::recentMessages(std::int64_t channelId, int limit, std::optional<std::int64_t> beforeId) {
@@ -110,6 +111,20 @@ MutationResult ChatService::deleteMessage(std::int64_t messageId, std::int64_t c
     return repository_.deleteMessage(messageId, channelId, requesterLogin);
 }
 
+PinMessageResult ChatService::pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                          const std::string& requesterLogin) {
+    return repository_.pinMessage(messageId, channelId, requesterLogin);
+}
+
+MutationResult ChatService::unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                          const std::string& requesterLogin) {
+    return repository_.unpinMessage(messageId, channelId, requesterLogin);
+}
+
+std::vector<PinnedMessage> ChatService::listPinnedMessages(std::int64_t channelId) {
+    return repository_.listPinnedMessages(channelId);
+}
+
 std::optional<AttachmentMetadata> ChatService::createAttachment(std::int64_t channelId,
                                                                    const AttachmentUpload& upload) {
     return repository_.createAttachment(channelId, upload);
@@ -121,6 +136,11 @@ std::optional<AttachmentData> ChatService::findAttachmentData(std::int64_t attac
 
 std::vector<Message> ChatService::searchMessages(std::int64_t channelId, const std::string& query, int limit) {
     return repository_.searchMessages(channelId, query, limit);
+}
+
+ToggleReactionResult ChatService::toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                  const std::string& login, const std::string& emoji) {
+    return repository_.toggleReaction(messageId, channelId, login, emoji);
 }
 
 std::int64_t ChatService::findOrCreateThread(const std::string& loginA, const std::string& loginB) {

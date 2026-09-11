@@ -1,5 +1,5 @@
 import { ChatClient } from "@devicehub/core";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,5 +69,46 @@ describe("CallPanel", () => {
 
     expect(socket?.sent.map((frame) => JSON.parse(frame))).toContainEqual({ call_leave: true });
     expect(screen.getByRole("button", { name: "Join call" })).toBeInTheDocument();
+  });
+
+  it("clicking a reaction button sends call_reaction with that emoji", async () => {
+    const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+    client.connectToChannel("t1", 7);
+    const socket = FakeWebSocket.instances[0];
+
+    render(<CallPanel chatClient={client} localLogin="alice" />);
+    await userEvent.click(screen.getByRole("button", { name: "Join call" }));
+    await userEvent.click(await screen.findByRole("button", { name: "👍" }));
+
+    expect(socket?.sent.map((frame) => JSON.parse(frame))).toContainEqual({ call_reaction: "👍" });
+  });
+
+  it("shows another participant's reaction, then auto-hides it after 2.5s", async () => {
+    const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+    client.connectToChannel("t1", 7);
+    const socket = FakeWebSocket.instances[0];
+
+    render(<CallPanel chatClient={client} localLogin="alice" />);
+    // Real timers for the join itself (its promise chain needs to
+    // actually resolve) — fake timers only start once we're already
+    // in the call, so the reaction's own setTimeout is the only one
+    // vi.advanceTimersByTime() below needs to account for.
+    await userEvent.click(screen.getByRole("button", { name: "Join call" }));
+    await screen.findByRole("button", { name: "Mute" });
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        socket?.onmessage?.({ data: JSON.stringify({ call_reaction: { login: "bob", emoji: "🎉" } }) });
+      });
+      expect(screen.getByText("bob 🎉")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2500);
+      });
+      expect(screen.queryByText("bob 🎉")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

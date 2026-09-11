@@ -311,6 +311,34 @@ describe("CallManager", () => {
     expect(onScreen).toHaveBeenLastCalledWith(expect.anything());
   });
 
+  it("emits 'reactionReceived' when the server broadcasts another participant's call_reaction", async () => {
+    const { socket, manager } = setup();
+    const onReaction = vi.fn();
+    manager.on("reactionReceived", onReaction);
+    await manager.joinCall();
+
+    socket.simulateMessage(JSON.stringify({ call_reaction: { login: "bob", emoji: "👍" } }));
+
+    expect(onReaction).toHaveBeenCalledWith("bob", "👍");
+  });
+
+  it("sendReaction() sends call_reaction while in a call", async () => {
+    const { socket, manager } = setup();
+    await manager.joinCall();
+
+    manager.sendReaction("👍");
+
+    expect(socket.lastSentFrame()).toEqual({ call_reaction: "👍" });
+  });
+
+  it("sendReaction() is a no-op before joining a call", () => {
+    const { socket, manager } = setup();
+
+    manager.sendReaction("👍");
+
+    expect(socket.sent).toHaveLength(0);
+  });
+
   it("disableVideo()/disableScreenShare() only stop the matching kind", async () => {
     const { manager } = setup();
     await manager.joinCall();

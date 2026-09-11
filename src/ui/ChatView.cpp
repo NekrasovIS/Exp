@@ -1,10 +1,13 @@
 #include "ui/ChatView.h"
 
+#include <QAbstractItemView>
 #include <QColor>
+#include <QCompleter>
 #include <QDate>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -14,6 +17,7 @@
 #include <QScrollBar>
 #include <QSize>
 #include <QStackedWidget>
+#include <QStringListModel>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -35,6 +39,17 @@ constexpr int kComposerIconGlyphSize = 18;
 /// максимального значения, которое округление layout'а может промахнуть
 /// на пиксель-другой.
 constexpr int kStickToBottomThresholdPx = 4;
+/// Максимальная длина фрагмента текста оригинала в цитате-ответе (issue
+/// #306) — длиннее обрезается с "…", чтобы длинное цитируемое сообщение
+/// не растягивало чужую строку сильнее, чем сам ответ.
+constexpr int kReplySnippetMaxChars = 60;
+
+QString truncatedReplySnippet(const QString& body) {
+    if (body.size() <= kReplySnippetMaxChars) {
+        return body;
+    }
+    return body.left(kReplySnippetMaxChars) + QStringLiteral("…");
+}
 
 /// Линейный перебор в поисках ChatMessageRow, показывающего @p id — не
 /// каждый виджет в messagesLayout_ им является (appendSystemLine()
@@ -116,9 +131,19 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     memberListToggleButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(memberListToggleButton_, &QPushButton::clicked, this, &ChatView::memberListToggleRequested);
 
+    // Кнопка "📌 N" (issue #338) — обычная текстовая кнопка, как
+    // callToggleButton_/searchButton_ рядом (не плоская иконка, как
+    // memberListToggleButton_ — счётчику нужен текст). Скрыта, пока в
+    // канале нет закреплённых сообщений (setPinnedMessagesCount()).
+    pinnedMessagesButton_ = new QPushButton(channelPage);
+    pinnedMessagesButton_->setObjectName(QStringLiteral("pinnedMessagesButton"));
+    pinnedMessagesButton_->setVisible(false);
+    connect(pinnedMessagesButton_, &QPushButton::clicked, this, &ChatView::pinnedMessagesToggleRequested);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
+    headerRow->addWidget(pinnedMessagesButton_);
     headerRow->addWidget(callToggleButton_);
     headerRow->addWidget(searchButton_);
     headerRow->addWidget(memberListToggleButton_);
@@ -182,6 +207,22 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     editingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
     editingIndicatorLabel_->setVisible(false);
 
+    // Полоса "Replying to ..." (issue #306) — видна только пока есть
+    // цель ответа (setReplyTarget()); кнопка "Cancel" рядом с ней просто
+    // снимает цель, ничего не отправляя.
+    replyBar_ = new QWidget(channelPage);
+    replyBar_->setVisible(false);
+    auto* replyBarLayout = new QHBoxLayout(replyBar_);
+    replyBarLayout->setContentsMargins(0, 0, 0, 0);
+    replyBarLayout->setSpacing(ui_theme::kSpacingSm);
+    replyBarLabel_ = new QLabel(replyBar_);
+    replyBarLabel_->setObjectName(QStringLiteral("chatReplyBarLabel"));
+    replyBarLayout->addWidget(replyBarLabel_, /*stretch=*/1);
+    auto* replyBarCancelButton = new QPushButton(tr("Cancel"), replyBar_);
+    replyBarCancelButton->setObjectName(QStringLiteral("chatReplyBarCancelButton"));
+    connect(replyBarCancelButton, &QPushButton::clicked, this, &ChatView::clearReplyTarget);
+    replyBarLayout->addWidget(replyBarCancelButton);
+
     // Композер как единая "таблетка" (issue #182) —
     // messageEdit_/attachButton_/sendButton_ рисуются
     // без собственного фона/рамки (см. Theme.cpp) и сливаются в один
@@ -206,6 +247,38 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
         typingThrottleTimer_->start();
         emit typingRequested();
     });
+    connect(messageEdit_, &QLineEdit::textEdited, this, &ChatView::updateMentionAutocomplete);
+
+    // Автокомплит @упоминаний (issue #326) — mentionCompleter_ намеренно
+    // НЕ подключён через QLineEdit::setCompleter() (это заставило бы
+    // Qt считать ПОЛНЫЙ текст поля объектом автодополнения и заменять
+    // его целиком, что не подходит для "@упоминания" в середине более
+    // длинного сообщения). Вместо этого — только setWidget() плюс
+    // ручной вызов complete() из updateMentionAutocomplete(), тот же
+    // приём, что в официальном примере Qt Custom Completer; сама
+    // модель (mentionModel_) обновляется на месте setChannelMemberLogins(),
+    // а не пересоздаётся.
+    mentionModel_ = new QStringListModel(this);
+    mentionCompleter_ = new QCompleter(mentionModel_, this);
+    mentionCompleter_->setWidget(messageEdit_);
+    mentionCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
+    mentionCompleter_->setCompletionMode(QCompleter::PopupCompletion);
+    // QCompleter::activated() has both a QString and a QModelIndex
+    // overload — QOverload<>::of() disambiguates for the pointer-to-
+    // member connect syntax.
+    connect(mentionCompleter_, QOverload<const QString&>::of(&QCompleter::activated), this,
+            &ChatView::insertMentionCompletion);
+    // Ловит Enter/Tab/Escape поверх встроенной обработки QCompleter,
+    // пока попап открыт — иначе Enter одновременно и подставлял бы
+    // подсказку, и триггерил returnPressed()->sendButton_->click()
+    // (то соединение — несколькими строками выше), отправляя
+    // наполовину набранное сообщение. installEventFilter() позже, чем
+    // setWidget() выше (который сам ставит свой фильтр на messageEdit_)
+    // — Qt вызывает фильтры от последнего установленного к первому,
+    // так что именно этот код первым решает, что делать с Enter/Tab/
+    // Escape, пока попап виден; Up/Down ниже не перехватываются и
+    // проходят дальше — их обрабатывает уже сам QCompleter.
+    messageEdit_->installEventFilter(this);
 
     attachButton_ = new QPushButton(composer);
     attachButton_->setObjectName(QStringLiteral("attachFileButton"));
@@ -234,6 +307,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     channelLayout->addWidget(scrollArea_, /*stretch=*/1);
     channelLayout->addWidget(typingIndicatorLabel_);
     channelLayout->addWidget(editingIndicatorLabel_);
+    channelLayout->addWidget(replyBar_);
     channelLayout->addWidget(composer);
 
     stack_->insertWidget(kPlaceholderPageIndex, placeholderPage);
@@ -276,17 +350,37 @@ void ChatView::setCurrentUserLogin(const QString& login) {
     currentUserLogin_ = login;
 }
 
-void ChatView::appendMessage(const ChatMessage& message) {
-    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, message)) {
-        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(message.sentAt));
+void ChatView::setCanManageChannel(bool canManage) {
+    canManageChannel_ = canManage;
+}
+
+ChatMessage ChatView::resolveReplyPreview(const ChatMessage& message) const {
+    if (message.replyToMessageId < 0) {
+        return message;
     }
-    const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
-    const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
-    auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
+    ChatMessage resolved = message;
+    if (const auto it = messagesById_.constFind(resolved.replyToMessageId); it != messagesById_.constEnd()) {
+        resolved.replyToAuthor = it->author;
+        resolved.replyToBodySnippet = truncatedReplySnippet(it->body);
+    }
+    return resolved;
+}
+
+void ChatView::appendMessage(const ChatMessage& message) {
+    const ChatMessage resolvedMessage = resolveReplyPreview(message);
+    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, resolvedMessage)) {
+        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(resolvedMessage.sentAt));
+    }
+    const bool showHeader =
+        !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, resolvedMessage);
+    const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
+    auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
+                                    messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
-    requestPreviewIfImageAttachment(message, row);
-    lastMessage_ = message;
+    requestPreviewIfImageAttachment(resolvedMessage, row);
+    messagesById_.insert(resolvedMessage.id, resolvedMessage);
+    lastMessage_ = resolvedMessage;
     hasLastMessage_ = true;
 }
 
@@ -311,16 +405,25 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
     ChatMessage previousInBatch{};
     int insertIndex = 0;
     for (const ChatMessage& message : messages) {
-        const bool showHeader =
-            showHeaderForNext || !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, message);
-        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, message)) {
-            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(message.sentAt));
+        const ChatMessage resolvedMessage = resolveReplyPreview(message);
+        const bool showHeader = showHeaderForNext ||
+                                 !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, resolvedMessage);
+        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, resolvedMessage)) {
+            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(resolvedMessage.sentAt));
         }
-        const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
-        auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, messagesContainer_);
+        const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
+        auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
+                                        messagesContainer_);
+        // Issue #330: подгруженные через "Load older messages" строки
+        // раньше не подключались вообще — Edit/Delete/Download на них
+        // молча ничего не делали. Обнаружено при добавлении Reply,
+        // которому та же проводка нужна для старых сообщений точно так
+        // же, как и для новых; исправлено заодно с остальными тремя.
+        connectMessageRow(row);
         messagesLayout_->insertWidget(insertIndex++, row);
-        requestPreviewIfImageAttachment(message, row);
-        previousInBatch = message;
+        requestPreviewIfImageAttachment(resolvedMessage, row);
+        messagesById_.insert(resolvedMessage.id, resolvedMessage);
+        previousInBatch = resolvedMessage;
         showHeaderForNext = false;
     }
 
@@ -352,6 +455,7 @@ void ChatView::setLoadOlderVisible(bool visible) {
 
 void ChatView::connectMessageRow(ChatMessageRow* row) {
     connect(row, &ChatMessageRow::editRequested, this, [this](qint64 id, const QString& currentBody) {
+        clearReplyTarget();
         editingMessageId_ = id;
         messageEdit_->setText(currentBody);
         messageEdit_->setFocus();
@@ -359,6 +463,10 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+    connect(row, &ChatMessageRow::pinRequested, this, &ChatView::pinMessageRequested);
+    connect(row, &ChatMessageRow::unpinRequested, this, &ChatView::unpinMessageRequested);
+    connect(row, &ChatMessageRow::reactionToggleRequested, this, &ChatView::reactionToggleRequested);
+    connect(row, &ChatMessageRow::replyRequested, this, &ChatView::setReplyTarget);
 }
 
 void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
@@ -400,6 +508,29 @@ void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
     if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
         row->updateBody(newBody);
     }
+    // Кэш сообщений для резолва цитат-ответов (issue #306) должен
+    // отражать редактирование — иначе будущий ответ на это сообщение
+    // процитировал бы уже неактуальный текст.
+    if (const auto it = messagesById_.find(id); it != messagesById_.end()) {
+        it->body = newBody;
+    }
+}
+
+void ChatView::updateReactions(qint64 id, const QString& emoji, const QStringList& logins) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->applyReactionChange(emoji, logins);
+    }
+}
+
+void ChatView::updatePinned(qint64 id, bool isPinned) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->setPinned(isPinned);
+    }
+}
+
+void ChatView::setPinnedMessagesCount(int count) {
+    pinnedMessagesButton_->setText(tr("\U0001F4CC %1").arg(count));
+    pinnedMessagesButton_->setVisible(count > 0);
 }
 
 bool ChatView::scrollToMessage(qint64 id) {
@@ -419,13 +550,43 @@ void ChatView::removeMessage(qint64 id) {
         // больше не существует.
         cancelEditingMessage();
     }
+    if (id == replyTargetId_) {
+        // То же самое для цели ответа (issue #306) — не отправлять
+        // reply_to_message_id, указывающий на только что удалённое
+        // сообщение.
+        clearReplyTarget();
+    }
     delete findMessageRow(messagesLayout_, id);
+    messagesById_.remove(id);
 }
 
 void ChatView::cancelEditingMessage() {
     editingMessageId_ = -1;
     messageEdit_->clear();
     editingIndicatorLabel_->setVisible(false);
+}
+
+void ChatView::setReplyTarget(qint64 id) {
+    const auto it = messagesById_.constFind(id);
+    if (it == messagesById_.constEnd()) {
+        return;
+    }
+    cancelEditingMessage();
+    replyTargetId_ = id;
+    replyBarLabel_->setText(tr("Replying to %1: %2").arg(it->author, truncatedReplySnippet(it->body)));
+    replyBar_->setVisible(true);
+    messageEdit_->setFocus();
+}
+
+void ChatView::clearReplyTarget() {
+    replyTargetId_ = -1;
+    replyBar_->setVisible(false);
+}
+
+qint64 ChatView::consumeReplyTarget() {
+    const qint64 id = replyTargetId_;
+    clearReplyTarget();
+    return id;
 }
 
 void ChatView::appendSystemLine(const QString& text) {
@@ -447,6 +608,82 @@ void ChatView::showTypingUser(const QString& login) {
     typingIndicatorHideTimer_->start();
 }
 
+void ChatView::setChannelMemberLogins(const QStringList& logins) {
+    channelMemberLogins_ = logins;
+    mentionModel_->setStringList(logins);
+}
+
+void ChatView::updateMentionAutocomplete() {
+    const QString textBeforeCursor = messageEdit_->text().left(messageEdit_->cursorPosition());
+    const int atPos = textBeforeCursor.lastIndexOf(QLatin1Char('@'));
+    if (atPos < 0) {
+        mentionTriggerPos_ = -1;
+        mentionCompleter_->popup()->hide();
+        return;
+    }
+    // "@" должен начинать слово (начало строки либо после пробела) —
+    // иначе "user@example.com" запускал бы автокомплит на каждой
+    // букве после "@", как и в regex подсветки упоминаний (issue #307).
+    const bool startsWord = atPos == 0 || textBeforeCursor.at(atPos - 1).isSpace();
+    const QString prefix = textBeforeCursor.mid(atPos + 1);
+    if (!startsWord || prefix.contains(QLatin1Char(' '))) {
+        mentionTriggerPos_ = -1;
+        mentionCompleter_->popup()->hide();
+        return;
+    }
+    mentionCompleter_->setCompletionPrefix(prefix);
+    if (mentionCompleter_->completionCount() == 0) {
+        mentionTriggerPos_ = -1;
+        mentionCompleter_->popup()->hide();
+        return;
+    }
+    mentionTriggerPos_ = atPos;
+    mentionCompleter_->complete();
+    // Подсвечивает первую подсказку сразу, а не оставляет попап без
+    // выделения — иначе Enter/Tab (см. eventFilter()) не имели бы, что
+    // подставить, пока пользователь ни разу не нажал стрелку вниз.
+    mentionCompleter_->popup()->setCurrentIndex(mentionCompleter_->completionModel()->index(0, 0));
+}
+
+void ChatView::insertMentionCompletion(const QString& login) {
+    if (mentionTriggerPos_ < 0) {
+        return;
+    }
+    const QString text = messageEdit_->text();
+    const int cursorPos = messageEdit_->cursorPosition();
+    const QString newText =
+        text.left(mentionTriggerPos_) + QLatin1Char('@') + login + QLatin1Char(' ') + text.mid(cursorPos);
+    messageEdit_->setText(newText);
+    messageEdit_->setCursorPosition(mentionTriggerPos_ + 1 + login.size() + 1);
+    mentionTriggerPos_ = -1;
+    mentionCompleter_->popup()->hide();
+}
+
+bool ChatView::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == messageEdit_ && event->type() == QEvent::KeyPress && mentionCompleter_->popup()->isVisible()) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        switch (keyEvent->key()) {
+        case Qt::Key_Enter:
+        case Qt::Key_Return:
+        case Qt::Key_Tab: {
+            const QModelIndex current = mentionCompleter_->popup()->currentIndex();
+            if (current.isValid()) {
+                insertMentionCompletion(current.data().toString());
+            } else {
+                mentionCompleter_->popup()->hide();
+            }
+            return true;
+        }
+        case Qt::Key_Escape:
+            mentionCompleter_->popup()->hide();
+            return true;
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void ChatView::clearLog() {
     while (messagesLayout_->count() > 1) {
         QLayoutItem* item = messagesLayout_->takeAt(0);
@@ -460,10 +697,21 @@ void ChatView::clearLog() {
     // из другого канала), как только загрузятся сообщения нового
     // канала.
     cancelEditingMessage();
+    // Цель ответа (issue #306) принадлежала тому же старому каналу — по
+    // той же причине, что и cancelEditingMessage() выше.
+    clearReplyTarget();
     // Строки, на которые эти записи ссылались, только что удалены выше
     // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
     // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
     pendingImagePreviewRows_.clear();
+    // Роль/закреплённые сообщения принадлежали каналу, который только
+    // что очистили (issue #338) — MainWindow заново вызовет
+    // setCanManageChannel()/setPinnedMessagesCount() для нового канала,
+    // но до этого момента новые строки не должны наследовать роль
+    // предыдущего.
+    canManageChannel_ = false;
+    setPinnedMessagesCount(0);
+    messagesById_.clear();
 }
 
 }  // namespace devicehub

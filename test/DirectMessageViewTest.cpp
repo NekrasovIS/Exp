@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
@@ -95,6 +96,45 @@ TEST(DirectMessageViewTest, PressingEnterInMessageEditEmitsSendMessageRequested)
     emit view.messageEdit()->returnPressed();
 
     EXPECT_EQ(spy.count(), 1);
+}
+
+// Issue #313 — same three cases as ChatViewTypingIndicatorTest.cpp,
+// mirrored here now that DM threads support the same typing protocol.
+
+TEST(DirectMessageViewTest, ShowTypingUserMakesLabelVisible) {
+    DirectMessageView view;
+    view.show();
+    view.showThread("bob");
+
+    EXPECT_FALSE(view.typingIndicatorLabel()->isVisible());
+
+    view.showTypingUser(QStringLiteral("bob"));
+    EXPECT_TRUE(view.typingIndicatorLabel()->isVisible());
+    EXPECT_EQ(view.typingIndicatorLabel()->text(), QStringLiteral("bob is typing…"));
+}
+
+TEST(DirectMessageViewTest, SwitchingThreadHidesStaleIndicator) {
+    DirectMessageView view;
+    view.show();
+    view.showThread("bob");
+    view.showTypingUser(QStringLiteral("bob"));
+    ASSERT_TRUE(view.typingIndicatorLabel()->isVisible());
+
+    view.showThread("carol");
+    EXPECT_FALSE(view.typingIndicatorLabel()->isVisible());
+}
+
+TEST(DirectMessageViewTest, EditingMessageBoxEmitsTypingRequestedOnceThenThrottles) {
+    DirectMessageView view;
+    view.showThread("bob");
+
+    int emitCount = 0;
+    QObject::connect(&view, &DirectMessageView::typingRequested, [&]() { ++emitCount; });
+
+    emit view.messageEdit()->textEdited(QStringLiteral("h"));
+    emit view.messageEdit()->textEdited(QStringLiteral("hi"));
+    emit view.messageEdit()->textEdited(QStringLiteral("hi "));
+    EXPECT_EQ(emitCount, 1);
 }
 
 }  // namespace
