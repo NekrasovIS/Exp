@@ -20,6 +20,11 @@ interface EncryptedChatViewContentProps {
   channelId: number;
   communityId: number;
   channelKey: Uint8Array;
+  // See ChatViewContent.tsx's own copy of this comment — `| undefined`
+  // explicit because ChatView forwards its own possibly-undefined prop
+  // verbatim, under exactOptionalPropertyTypes.
+  onOnlineMembers?: ((logins: string[]) => void) | undefined;
+  onPresenceChanged?: ((login: string, online: boolean) => void) | undefined;
 }
 
 const kUndecryptable = "[unable to decrypt]";
@@ -28,6 +33,8 @@ export function EncryptedChatViewContent({
   channelId,
   communityId,
   channelKey,
+  onOnlineMembers,
+  onPresenceChanged,
 }: EncryptedChatViewContentProps) {
   const { currentLogin } = useSession();
   const isModerator = useIsModerator(communityId);
@@ -42,9 +49,23 @@ export function EncryptedChatViewContent({
     editMessage,
     deleteMessage,
     socket,
+    typingUser,
+    sendTyping,
   } = useMessages(channelId);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [body, setBody] = useState("");
+
+  // Issue #322 — same forwarding as ChatViewContent's own copy of this
+  // effect (presence is never encrypted, just relayed as-is).
+  useEffect(() => {
+    const offOnline = onOnlineMembers !== undefined ? socket.on("onlineMembers", onOnlineMembers) : undefined;
+    const offPresence =
+      onPresenceChanged !== undefined ? socket.on("presenceChanged", onPresenceChanged) : undefined;
+    return () => {
+      offOnline?.();
+      offPresence?.();
+    };
+  }, [socket, onOnlineMembers, onPresenceChanged]);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,9 +130,17 @@ export function EncryptedChatViewContent({
           onDelete={deleteMessage}
         />
       </div>
+      {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
       <form onSubmit={handleSend} className={styles.simpleComposerForm}>
         <label htmlFor="encrypted-message-body">Message</label>
-        <input id="encrypted-message-body" value={body} onChange={(event) => setBody(event.target.value)} />
+        <input
+          id="encrypted-message-body"
+          value={body}
+          onChange={(event) => {
+            setBody(event.target.value);
+            sendTyping();
+          }}
+        />
         <button type="submit">Send</button>
       </form>
     </section>

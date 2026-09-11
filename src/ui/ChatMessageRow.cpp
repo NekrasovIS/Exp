@@ -12,9 +12,12 @@
 #include <QResizeEvent>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 #include "ui/ChatBubble.h"
 #include "ui/ChatMessageGrouping.h"
 #include "ui/IconFactory.h"
+#include "ui/MessageFormatting.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -47,6 +50,22 @@ bool hasAnyExtension(const QString& filename, std::initializer_list<const char*>
     return false;
 }
 
+/// Фиксированный набор эмодзи, предлагаемых в подменю "React" (issue
+/// #334) — не настраиваемый пользователем список в этой версии, тот же
+/// подход, что и у пятёрки реакций во время звонка (issue #312,
+/// CallWindow). Независимая копия, не общий источник с CallWindow —
+/// два разных модуля (текстовые сообщения / звонок), объединять рано.
+const QList<QString>& reactionEmojis() {
+    static const QList<QString> emojis = {
+        QStringLiteral("\U0001F44D"),  // 👍
+        QStringLiteral("❤️"),
+        QStringLiteral("\U0001F602"),  // 😂
+        QStringLiteral("\U0001F389"),  // 🎉
+        QStringLiteral("\U0001F44F"),  // 👏
+    };
+    return emojis;
+}
+
 }  // namespace
 
 bool isImageAttachment(const QString& filename) {
@@ -57,12 +76,14 @@ bool isVideoAttachment(const QString& filename) {
     return hasAnyExtension(filename, {".mp4", ".mov", ".webm", ".mkv", ".avi"});
 }
 
-ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, bool canManageChannel,
-                                QWidget* parent)
+ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,
+                                const QString& currentUserLogin, bool canManageChannel, QWidget* parent)
     : QWidget(parent),
       messageId_(message.id),
       canManageChannel_(canManageChannel),
-      isPinned_(message.isPinned) {
+      isPinned_(message.isPinned),
+      reactions_(message.reactions),
+      currentUserLogin_(currentUserLogin) {
     const qreal em = QFontMetricsF(font()).height();
     const int avatarSize = qRound(em * kAvatarEm);
     const int spacing = qRound(em * kSpacingEm);
@@ -81,7 +102,12 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
 
-    bodyLabel_ = new QLabel(message.body, bubble_);
+    rawBody_ = message.body;
+    // Issue #307: @упоминания оборачиваются в **bold** до того, как
+    // попадают в Qt::MarkdownText ниже — тот же приём, что и у обычного
+    // markdown в issue #94, никакого отдельного rich-text прохода не
+    // требуется.
+    bodyLabel_ = new QLabel(message_formatting::highlightMentions(message.body), bubble_);
     bodyLabel_->setObjectName(QStringLiteral("chatMessageBody"));
     bodyLabel_->setWordWrap(true);
     // Issue #94: рендерим **bold**/*italic*/`code`/ссылки/списки через
@@ -131,6 +157,24 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
     bubbleLayout->addWidget(pinnedIndicatorLabel_);
 
+    if (message.replyToMessageId >= 0) {
+        // Цитата над телом сообщения (issue #306) — replyToAuthor/
+        // replyToBodySnippet заполнены ChatView из её собственного кэша
+        // уже показанных сообщений; пустой replyToAuthor при
+        // replyToMessageId >= 0 означает, что ChatView не нашла
+        // оригинал в этом кэше (удалён либо ещё не подгружен), и здесь
+        // показывается заглушка вместо реального автора/текста.
+        const QString quoteText = message.replyToAuthor.isEmpty()
+                                       ? tr("Message unavailable")
+                                       : message.replyToAuthor + QStringLiteral(": ") + message.replyToBodySnippet;
+        auto* quoteLabel = new QLabel(quoteText, bubble_);
+        quoteLabel->setObjectName(QStringLiteral("chatMessageReplyQuote"));
+        quoteLabel->setWordWrap(true);
+        if (isOwnMessage) {
+            quoteLabel->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        }
+        bubbleLayout->addWidget(quoteLabel);
+    }
     bubbleLayout->addWidget(bodyLabel_);
 
     if (message.attachmentId >= 0) {
@@ -175,56 +219,79 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         }
     }
 
-    if (isOwnMessage || canManageChannel_) {
-        // Контекстное меню по правому клику вместо всегда видимых кнопок
-        // (issue #150) — доступно на каждой строке независимо от
-        // showHeader, поскольку сгруппированные (последовательные)
-        // сообщения не повторяют заголовок. Edit/Delete — только для
-        // собственных сообщений (issue #107); Pin/Unpin (issue #338) —
-        // только когда canManageChannel_ (владелец/модератор), независимо
-        // от того, чьё это сообщение — оба условия проверяются отдельно,
-        // строка может показывать и то, и другое сразу, если пользователь
-        // и модератор, и автор. Построено через popup() (неблокирующий),
-        // а не exec(), чтобы тест мог напрямую вызвать соответствующий
-        // QAction, не прокручивая модальный event loop.
-        // bodyLabel_ включает Qt::TextBrowserInteraction (выше), из-за
-        // чего QLabel сам обрабатывает правый клик и показывает
-        // встроенное текстовое меню (Copy/Copy Link/Select All),
-        // поглощая событие раньше, чем оно доходит до bubble_ — снаружи
-        // это выглядело так, будто кастомное меню вообще не подключено.
-        // Отключаем контекстное меню у самого label'а, чтобы событие
-        // всплывало к bubble_.
-        bodyLabel_->setContextMenuPolicy(Qt::NoContextMenu);
-        bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(bubble_, &QWidget::customContextMenuRequested, this, [this, isOwnMessage](const QPoint& pos) {
-            auto* menu = new QMenu(bubble_);
-            menu->setAttribute(Qt::WA_DeleteOnClose);
-            menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
-            if (isOwnMessage) {
-                QAction* editAction = menu->addAction(tr("Edit"));
-                editAction->setObjectName(QStringLiteral("editMessageAction"));
-                connect(editAction, &QAction::triggered, this,
-                        [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
-            }
-            if (canManageChannel_) {
-                QAction* pinAction = menu->addAction(isPinned_ ? tr("Unpin") : tr("Pin"));
-                pinAction->setObjectName(QStringLiteral("pinMessageAction"));
-                connect(pinAction, &QAction::triggered, this, [this]() {
-                    if (isPinned_) {
-                        emit unpinRequested(messageId_);
-                    } else {
-                        emit pinRequested(messageId_);
-                    }
-                });
-            }
-            if (isOwnMessage) {
-                QAction* deleteAction = menu->addAction(tr("Delete"));
-                deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
-                connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
-            }
-            menu->popup(bubble_->mapToGlobal(pos));
-        });
-    }
+    // Ряд чипов-реакций под остальным содержимым бабла (issue #334) —
+    // создаётся один раз и просто скрывается/показывается дальше;
+    // содержимое строится rebuildReactionChips() из reactions_,
+    // заполненного выше из message.reactions.
+    reactionsRow_ = new QWidget(bubble_);
+    reactionsRow_->setObjectName(QStringLiteral("chatMessageReactionsRow"));
+    auto* reactionsLayout = new QHBoxLayout(reactionsRow_);
+    reactionsLayout->setContentsMargins(0, 0, 0, 0);
+    reactionsLayout->setSpacing(bubbleInnerSpacing);
+    bubbleLayout->addWidget(reactionsRow_);
+    rebuildReactionChips();
+
+    // Контекстное меню по правому клику вместо всегда видимых кнопок
+    // (issue #150) — доступно на каждой строке независимо от showHeader,
+    // поскольку сгруппированные (последовательные) сообщения не
+    // повторяют заголовок, но каждому отдельному сообщению всё равно
+    // нужен свой способ адресации. Всегда строится (не только для
+    // isOwnMessage/canManageChannel_), поскольку "React" (issue #334) и
+    // Reply (issue #306) доступны на любом сообщении; Edit/Delete —
+    // только для собственных (issue #107), Pin/Unpin (issue #338) —
+    // только когда canManageChannel_ (владелец/модератор), независимо от
+    // того, чьё это сообщение — оба условия проверяются отдельно, строка
+    // может показывать сразу оба, если пользователь и модератор, и
+    // автор. Построено через popup() (неблокирующий), а не exec(), чтобы
+    // тест мог напрямую вызвать соответствующий QAction, не прокручивая
+    // модальный event loop.
+    // bodyLabel_ включает Qt::TextBrowserInteraction (выше), из-за чего
+    // QLabel сам обрабатывает правый клик и показывает встроенное
+    // текстовое меню (Copy/Copy Link/Select All), поглощая событие
+    // раньше, чем оно доходит до bubble_ — снаружи это выглядело так,
+    // будто кастомное меню вообще не подключено. Отключаем контекстное
+    // меню у самого label'а, чтобы событие всплывало к bubble_.
+    bodyLabel_->setContextMenuPolicy(Qt::NoContextMenu);
+    bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(bubble_, &QWidget::customContextMenuRequested, this, [this, isOwnMessage](const QPoint& pos) {
+        auto* menu = new QMenu(bubble_);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
+        if (isOwnMessage) {
+            QAction* editAction = menu->addAction(tr("Edit"));
+            editAction->setObjectName(QStringLiteral("editMessageAction"));
+            connect(editAction, &QAction::triggered, this,
+                    [this]() { emit editRequested(messageId_, rawBody_); });
+        }
+        if (canManageChannel_) {
+            QAction* pinAction = menu->addAction(isPinned_ ? tr("Unpin") : tr("Pin"));
+            pinAction->setObjectName(QStringLiteral("pinMessageAction"));
+            connect(pinAction, &QAction::triggered, this, [this]() {
+                if (isPinned_) {
+                    emit unpinRequested(messageId_);
+                } else {
+                    emit pinRequested(messageId_);
+                }
+            });
+        }
+        QMenu* reactMenu = menu->addMenu(tr("React"));
+        reactMenu->setObjectName(QStringLiteral("reactMessageMenu"));
+        for (const QString& emoji : reactionEmojis()) {
+            QAction* reactionAction = reactMenu->addAction(emoji);
+            reactionAction->setObjectName(QStringLiteral("reactionMenuAction"));
+            connect(reactionAction, &QAction::triggered, this,
+                    [this, emoji]() { emit reactionToggleRequested(messageId_, emoji); });
+        }
+        QAction* replyAction = menu->addAction(tr("Reply"));
+        replyAction->setObjectName(QStringLiteral("replyMessageAction"));
+        connect(replyAction, &QAction::triggered, this, [this]() { emit replyRequested(messageId_); });
+        if (isOwnMessage) {
+            QAction* deleteAction = menu->addAction(tr("Delete"));
+            deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
+            connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
+        }
+        menu->popup(bubble_->mapToGlobal(pos));
+    });
 
     if (isOwnMessage) {
         rootLayout->addStretch(1);
@@ -245,7 +312,8 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
 }
 
 void ChatMessageRow::updateBody(const QString& newBody) {
-    bodyLabel_->setText(newBody);
+    rawBody_ = newBody;
+    bodyLabel_->setText(message_formatting::highlightMentions(newBody));
     if (timeLabel_ != nullptr) {
         timeLabel_->setText(formattedSentAt_ + QStringLiteral(" (edited)"));
     }
@@ -268,6 +336,48 @@ void ChatMessageRow::setAttachmentPreview(const QImage& image) {
         kAttachmentPreviewMaxWidth, kAttachmentPreviewMaxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     attachmentPreviewLabel_->setText(QString());
     attachmentPreviewLabel_->setPixmap(scaled);
+}
+
+void ChatMessageRow::applyReactionChange(const QString& emoji, const QStringList& logins) {
+    const auto it = std::find_if(reactions_.begin(), reactions_.end(),
+                                  [&emoji](const MessageReactionSummary& reaction) { return reaction.emoji == emoji; });
+    if (logins.isEmpty()) {
+        // Это была последняя реакция этой эмодзи, и её только что сняли —
+        // убираем чип целиком, а не показываем "emoji 0".
+        if (it != reactions_.end()) {
+            reactions_.erase(it);
+        }
+    } else if (it != reactions_.end()) {
+        it->logins = logins;
+    } else {
+        reactions_.push_back(MessageReactionSummary{.emoji = emoji, .logins = logins});
+    }
+    rebuildReactionChips();
+}
+
+void ChatMessageRow::rebuildReactionChips() {
+    QLayout* layout = reactionsRow_->layout();
+    while (QLayoutItem* item = layout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    for (const MessageReactionSummary& reaction : reactions_) {
+        auto* chip = new QPushButton(QStringLiteral("%1 %2").arg(reaction.emoji).arg(reaction.logins.size()),
+                                      reactionsRow_);
+        chip->setObjectName(QStringLiteral("reactionChip"));
+        // Свойство, а не собственный стиль здесь — конкретное визуальное
+        // выделение "моей" реакции (например, акцентная рамка) остаётся
+        // за Theme.cpp/QSS, этот класс только сообщает факт через Qt-
+        // property, как это уже делают другие компоненты UI ("accent" и
+        // т.п.).
+        chip->setProperty("ownReaction",
+                           !currentUserLogin_.isEmpty() && reaction.logins.contains(currentUserLogin_));
+        chip->setToolTip(reaction.logins.join(QStringLiteral(", ")));
+        const QString emoji = reaction.emoji;
+        connect(chip, &QPushButton::clicked, this, [this, emoji]() { emit reactionToggleRequested(messageId_, emoji); });
+        layout->addWidget(chip);
+    }
+    reactionsRow_->setVisible(!reactions_.isEmpty());
 }
 
 void ChatMessageRow::resizeEvent(QResizeEvent* event) {

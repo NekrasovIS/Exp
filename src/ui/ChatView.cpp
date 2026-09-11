@@ -35,6 +35,17 @@ constexpr int kComposerIconGlyphSize = 18;
 /// максимального значения, которое округление layout'а может промахнуть
 /// на пиксель-другой.
 constexpr int kStickToBottomThresholdPx = 4;
+/// Максимальная длина фрагмента текста оригинала в цитате-ответе (issue
+/// #306) — длиннее обрезается с "…", чтобы длинное цитируемое сообщение
+/// не растягивало чужую строку сильнее, чем сам ответ.
+constexpr int kReplySnippetMaxChars = 60;
+
+QString truncatedReplySnippet(const QString& body) {
+    if (body.size() <= kReplySnippetMaxChars) {
+        return body;
+    }
+    return body.left(kReplySnippetMaxChars) + QStringLiteral("…");
+}
 
 /// Линейный перебор в поисках ChatMessageRow, показывающего @p id — не
 /// каждый виджет в messagesLayout_ им является (appendSystemLine()
@@ -192,6 +203,22 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     editingIndicatorLabel_->setObjectName(QStringLiteral("mutedDescription"));
     editingIndicatorLabel_->setVisible(false);
 
+    // Полоса "Replying to ..." (issue #306) — видна только пока есть
+    // цель ответа (setReplyTarget()); кнопка "Cancel" рядом с ней просто
+    // снимает цель, ничего не отправляя.
+    replyBar_ = new QWidget(channelPage);
+    replyBar_->setVisible(false);
+    auto* replyBarLayout = new QHBoxLayout(replyBar_);
+    replyBarLayout->setContentsMargins(0, 0, 0, 0);
+    replyBarLayout->setSpacing(ui_theme::kSpacingSm);
+    replyBarLabel_ = new QLabel(replyBar_);
+    replyBarLabel_->setObjectName(QStringLiteral("chatReplyBarLabel"));
+    replyBarLayout->addWidget(replyBarLabel_, /*stretch=*/1);
+    auto* replyBarCancelButton = new QPushButton(tr("Cancel"), replyBar_);
+    replyBarCancelButton->setObjectName(QStringLiteral("chatReplyBarCancelButton"));
+    connect(replyBarCancelButton, &QPushButton::clicked, this, &ChatView::clearReplyTarget);
+    replyBarLayout->addWidget(replyBarCancelButton);
+
     // Композер как единая "таблетка" (issue #182) —
     // messageEdit_/attachButton_/sendButton_ рисуются
     // без собственного фона/рамки (см. Theme.cpp) и сливаются в один
@@ -244,6 +271,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     channelLayout->addWidget(scrollArea_, /*stretch=*/1);
     channelLayout->addWidget(typingIndicatorLabel_);
     channelLayout->addWidget(editingIndicatorLabel_);
+    channelLayout->addWidget(replyBar_);
     channelLayout->addWidget(composer);
 
     stack_->insertWidget(kPlaceholderPageIndex, placeholderPage);
@@ -290,17 +318,33 @@ void ChatView::setCanManageChannel(bool canManage) {
     canManageChannel_ = canManage;
 }
 
-void ChatView::appendMessage(const ChatMessage& message) {
-    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, message)) {
-        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(message.sentAt));
+ChatMessage ChatView::resolveReplyPreview(const ChatMessage& message) const {
+    if (message.replyToMessageId < 0) {
+        return message;
     }
-    const bool showHeader = !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, message);
-    const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
-    auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, canManageChannel_, messagesContainer_);
+    ChatMessage resolved = message;
+    if (const auto it = messagesById_.constFind(resolved.replyToMessageId); it != messagesById_.constEnd()) {
+        resolved.replyToAuthor = it->author;
+        resolved.replyToBodySnippet = truncatedReplySnippet(it->body);
+    }
+    return resolved;
+}
+
+void ChatView::appendMessage(const ChatMessage& message) {
+    const ChatMessage resolvedMessage = resolveReplyPreview(message);
+    if (!hasLastMessage_ || chat_message_grouping::isDifferentCalendarDay(lastMessage_, resolvedMessage)) {
+        messagesLayout_->insertWidget(messagesLayout_->count() - 1, buildDateSeparatorLabel(resolvedMessage.sentAt));
+    }
+    const bool showHeader =
+        !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, resolvedMessage);
+    const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
+    auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
+                                    messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
-    requestPreviewIfImageAttachment(message, row);
-    lastMessage_ = message;
+    requestPreviewIfImageAttachment(resolvedMessage, row);
+    messagesById_.insert(resolvedMessage.id, resolvedMessage);
+    lastMessage_ = resolvedMessage;
     hasLastMessage_ = true;
 }
 
@@ -325,16 +369,25 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
     ChatMessage previousInBatch{};
     int insertIndex = 0;
     for (const ChatMessage& message : messages) {
-        const bool showHeader =
-            showHeaderForNext || !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, message);
-        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, message)) {
-            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(message.sentAt));
+        const ChatMessage resolvedMessage = resolveReplyPreview(message);
+        const bool showHeader = showHeaderForNext ||
+                                 !chat_message_grouping::shouldGroupWithPrevious(previousInBatch, resolvedMessage);
+        if (chat_message_grouping::isDifferentCalendarDay(previousInBatch, resolvedMessage)) {
+            messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(resolvedMessage.sentAt));
         }
-        const bool isOwnMessage = !currentUserLogin_.isEmpty() && message.author == currentUserLogin_;
-        auto* row = new ChatMessageRow(message, showHeader, isOwnMessage, canManageChannel_, messagesContainer_);
+        const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
+        auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
+                                        messagesContainer_);
+        // Issue #330: подгруженные через "Load older messages" строки
+        // раньше не подключались вообще — Edit/Delete/Download на них
+        // молча ничего не делали. Обнаружено при добавлении Reply,
+        // которому та же проводка нужна для старых сообщений точно так
+        // же, как и для новых; исправлено заодно с остальными тремя.
+        connectMessageRow(row);
         messagesLayout_->insertWidget(insertIndex++, row);
-        requestPreviewIfImageAttachment(message, row);
-        previousInBatch = message;
+        requestPreviewIfImageAttachment(resolvedMessage, row);
+        messagesById_.insert(resolvedMessage.id, resolvedMessage);
+        previousInBatch = resolvedMessage;
         showHeaderForNext = false;
     }
 
@@ -366,6 +419,7 @@ void ChatView::setLoadOlderVisible(bool visible) {
 
 void ChatView::connectMessageRow(ChatMessageRow* row) {
     connect(row, &ChatMessageRow::editRequested, this, [this](qint64 id, const QString& currentBody) {
+        clearReplyTarget();
         editingMessageId_ = id;
         messageEdit_->setText(currentBody);
         messageEdit_->setFocus();
@@ -375,6 +429,8 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
     connect(row, &ChatMessageRow::pinRequested, this, &ChatView::pinMessageRequested);
     connect(row, &ChatMessageRow::unpinRequested, this, &ChatView::unpinMessageRequested);
+    connect(row, &ChatMessageRow::reactionToggleRequested, this, &ChatView::reactionToggleRequested);
+    connect(row, &ChatMessageRow::replyRequested, this, &ChatView::setReplyTarget);
 }
 
 void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
@@ -416,6 +472,18 @@ void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
     if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
         row->updateBody(newBody);
     }
+    // Кэш сообщений для резолва цитат-ответов (issue #306) должен
+    // отражать редактирование — иначе будущий ответ на это сообщение
+    // процитировал бы уже неактуальный текст.
+    if (const auto it = messagesById_.find(id); it != messagesById_.end()) {
+        it->body = newBody;
+    }
+}
+
+void ChatView::updateReactions(qint64 id, const QString& emoji, const QStringList& logins) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->applyReactionChange(emoji, logins);
+    }
 }
 
 void ChatView::updatePinned(qint64 id, bool isPinned) {
@@ -446,13 +514,43 @@ void ChatView::removeMessage(qint64 id) {
         // больше не существует.
         cancelEditingMessage();
     }
+    if (id == replyTargetId_) {
+        // То же самое для цели ответа (issue #306) — не отправлять
+        // reply_to_message_id, указывающий на только что удалённое
+        // сообщение.
+        clearReplyTarget();
+    }
     delete findMessageRow(messagesLayout_, id);
+    messagesById_.remove(id);
 }
 
 void ChatView::cancelEditingMessage() {
     editingMessageId_ = -1;
     messageEdit_->clear();
     editingIndicatorLabel_->setVisible(false);
+}
+
+void ChatView::setReplyTarget(qint64 id) {
+    const auto it = messagesById_.constFind(id);
+    if (it == messagesById_.constEnd()) {
+        return;
+    }
+    cancelEditingMessage();
+    replyTargetId_ = id;
+    replyBarLabel_->setText(tr("Replying to %1: %2").arg(it->author, truncatedReplySnippet(it->body)));
+    replyBar_->setVisible(true);
+    messageEdit_->setFocus();
+}
+
+void ChatView::clearReplyTarget() {
+    replyTargetId_ = -1;
+    replyBar_->setVisible(false);
+}
+
+qint64 ChatView::consumeReplyTarget() {
+    const qint64 id = replyTargetId_;
+    clearReplyTarget();
+    return id;
 }
 
 void ChatView::appendSystemLine(const QString& text) {
@@ -487,6 +585,9 @@ void ChatView::clearLog() {
     // из другого канала), как только загрузятся сообщения нового
     // канала.
     cancelEditingMessage();
+    // Цель ответа (issue #306) принадлежала тому же старому каналу — по
+    // той же причине, что и cancelEditingMessage() выше.
+    clearReplyTarget();
     // Строки, на которые эти записи ссылались, только что удалены выше
     // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
     // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
@@ -498,6 +599,7 @@ void ChatView::clearLog() {
     // предыдущего.
     canManageChannel_ = false;
     setPinnedMessagesCount(0);
+    messagesById_.clear();
 }
 
 }  // namespace devicehub

@@ -13,9 +13,14 @@ import { useSession } from "../session/SessionContext.js";
 interface MessageComposerProps {
   channelId: number;
   onSend: (body: string, attachmentId?: number) => void;
+  /** Called on every keystroke (issue #318) — the hook (useMessages) is
+   * the one that throttles this down to a real WebSocket frame, this
+   * component just reports every edit. Optional so existing callers/tests
+   * that don't care about typing don't need to pass a no-op. */
+  onTyping?: () => void;
 }
 
-export function MessageComposer({ channelId, onSend }: MessageComposerProps) {
+export function MessageComposer({ channelId, onSend, onTyping }: MessageComposerProps) {
   const { getAccessToken } = useSession();
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
 
@@ -85,7 +90,10 @@ export function MessageComposer({ channelId, onSend }: MessageComposerProps) {
           id="message-body"
           className={styles.bodyInput}
           value={body}
-          onChange={(event) => setBody(event.target.value)}
+          onChange={(event) => {
+            setBody(event.target.value);
+            onTyping?.();
+          }}
         />
         <button type="submit" disabled={uploading}>
           Send

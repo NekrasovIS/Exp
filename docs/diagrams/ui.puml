@@ -279,10 +279,14 @@ class ChatView {
   +removeMessage(id: qint64)
   +updatePinned(id: qint64, isPinned: bool)
   +setPinnedMessagesCount(count: int)
+  +updateReactions(id: qint64, emoji: QString, logins: QStringList)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
+  +setReplyTarget(id: qint64)
+  +clearReplyTarget()
+  +consumeReplyTarget() : qint64
   +appendSystemLine(text: QString)
   +clearLog()
   +setCallState(inCall: bool)
@@ -299,6 +303,7 @@ class ChatView {
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
+  -resolveReplyPreview(message: ChatMessage) : ChatMessage
   -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   .. signals ..
   +createChannelRequested()
@@ -314,6 +319,7 @@ class ChatView {
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
   +previewAttachmentRequested(attachmentId: qint64)
+  +reactionToggleRequested(id: qint64, emoji: QString)
 }
 note right of ChatView
   Issue #185: mute/видео/демонстрация экрана/
@@ -366,6 +372,30 @@ note right of ChatView
   голого указателя, поскольку строка может
   исчезнуть (переключение канала, удаление
   сообщения) раньше, чем придёт ответ.
+
+  Issue #330 (найдено при реализации #306):
+  prependMessages() ("Load older messages")
+  раньше вообще не вызывала
+  connectMessageRow() для своих строк — клик
+  по Edit/Delete/Download/Reply на подгруженном
+  старом сообщении молча ничего не делал;
+  исправлено вместе с добавлением Reply, той же
+  проводкой, что и appendMessage().
+
+  Issue #306 (reply/quote): messagesById_ —
+  QHash<qint64, ChatMessage>, кэш уже показанных
+  сообщений (заполняется в appendMessage()/
+  prependMessages(), очищается в clearLog()) —
+  используется resolveReplyPreview() для
+  заполнения цитаты у новых сообщений и
+  setReplyTarget() для строки "Replying to ...".
+  editRequested()/replyRequested() взаимно
+  отменяют друг друга — это два
+  взаимоисключающих режима композера (то же
+  общее поле messageEdit_, что и раньше).
+  consumeReplyTarget() — вызывается ровно один
+  раз при фактической отправке (MainWindow),
+  возвращает текущую цель и сразу её снимает.
 end note
 
 class CallWindow {
@@ -503,6 +533,10 @@ note right of FloatingCallTilesOverlay
   окон обратно.
 end note
 
+struct MessageReactionSummary {
+  +emoji: QString
+  +logins: QStringList
+}
 struct ChatMessage {
   +author: QString
   +body: QString
@@ -510,7 +544,12 @@ struct ChatMessage {
   +attachmentId: qint64 = -1
   +attachmentFilename: QString
   +isPinned: bool = false
+  +reactions: QList<MessageReactionSummary>
+  +replyToMessageId: qint64 = -1
+  +replyToAuthor: QString
+  +replyToBodySnippet: QString
 }
+ChatMessage "1" *-- "0..*" MessageReactionSummary : one per used emoji (issue #333/#334)
 
 class SearchDialog {
   +queryEdit() : QLineEdit*
@@ -575,18 +614,22 @@ end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
 class ChatMessageRow {
-  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    canManageChannel: bool = false)
+  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "", canManageChannel: bool = false)
   +messageId() : qint64
   +updateBody(newBody: QString)
   +setPinned(isPinned: bool)
+  +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
+  -rebuildReactionChips()
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
   +deleteRequested(id: qint64)
   +pinRequested(id: qint64)
   +unpinRequested(id: qint64)
   +downloadRequested(attachmentId: qint64, filename: QString)
+  +reactionToggleRequested(id: qint64, emoji: QString)
+  +replyRequested(id: qint64)
 }
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
@@ -608,7 +651,38 @@ note right of ChatMessageRow
   can manage the channel — sees it once
   setPinned(true) is called from ChatView, in
   response to ChatClient::messagePinned() for
-  this row's id.
+  this row's id. "React" and Reply (issue #306)
+  are also in that same menu for ANY message, own
+  or not — unlike Edit/Delete.
+
+  "React" (issue #305/#333/#334) — a fixed set
+  of 5 emoji, each an action that emits
+  reactionToggleRequested(). A chip per used
+  emoji ("emoji count") also renders below the
+  body — clicking it is the same toggle as
+  picking that emoji from the menu; hovering
+  shows the logins via tooltip.
+  applyReactionChange(emoji, logins) applies ONE
+  changed emoji's full login list (as
+  ChatClient::reactionChanged() delivers it, not
+  a delta) against reactions_ and rebuilds the
+  chip row from scratch (rebuildReactionChips())
+  — simpler than patching one QPushButton in
+  place, and reactions per message are always few.
+
+  Issue #306: replyToMessageId >= 0 shows a
+  quote block above the body — replyToAuthor/
+  replyToBodySnippet are filled in by ChatView
+  (resolveReplyPreview(), from its own
+  messagesById_ cache) before this row is even
+  constructed; ChatMessageRow itself never
+  resolves anything, only renders what it was
+  given. Empty replyToAuthor at
+  replyToMessageId >= 0 renders as "Message
+  unavailable" — the original is either
+  deleted or simply not loaded into this
+  client's cache yet, the two cases are
+  deliberately not distinguished.
 
   Issue #188: isImageAttachment()/isVideoAttachment()
   — свободные функции в namespace devicehub (по
@@ -786,7 +860,7 @@ MainWindow *-- ChatRestClient : owns
 
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
-MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
+MainWindow ..> ChatClient : subscribed()\nmessageReceived() (incl. replyToMessageId,\nissue #306 — resolved by ChatView) >
 MainWindow ..> ChatClient : dmChatClient_ subscribed()\nmessageReceived() -> DirectMessageView::appendMessage()\n(issue #187, Phase 2b) >
 MainWindow ..> DesktopNotifier : notifyMessage() (from\nmessageReceived() handler) >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
@@ -847,7 +921,7 @@ FloatingCallTilesOverlay ..> MainWindow : restoreRequested() (issue #215) >
 ChatView ..> MainWindow : memberListToggleRequested() (issue #184) >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
-ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested() >
+ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested()/replyRequested() (issue #306) >
 ChatView ..> MainWindow : attachFileRequested()\ndownloadAttachmentRequested() (issue #116) >
 MainWindow ..> ChatRestClient : uploadAttachment()/downloadAttachment()\n(issue #116) >
 ChatRestClient ..> MainWindow : attachmentUploaded() -> ChatClient::sendMessage()\nattachmentDownloaded() -> QFileDialog save (issue #116) >

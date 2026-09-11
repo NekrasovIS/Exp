@@ -51,8 +51,16 @@ export class SessionManager {
     private readonly options: SessionManagerOptions = {},
   ) {
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
-    this.scheduleTimeoutFn = options.scheduleTimeout ?? setTimeout;
-    this.clearTimeoutFn = options.clearTimeout ?? clearTimeout;
+    // Wrapped in arrow functions, not the bare `setTimeout`/`clearTimeout`
+    // references themselves: those are called below as `this.scheduleTimeoutFn(...)`/
+    // `this.clearTimeoutFn(...)`, a *method* call that binds `this` to this
+    // SessionManager instance — browsers' native setTimeout/clearTimeout
+    // throw "TypeError: Illegal invocation" when invoked with a receiver
+    // that isn't the window/global they expect. Wrapping keeps the actual
+    // call to the native function a plain (unbound-`this`) call expression.
+    this.scheduleTimeoutFn =
+      options.scheduleTimeout ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+    this.clearTimeoutFn = options.clearTimeout ?? ((handle) => clearTimeout(handle));
   }
 
   getAccessToken(): string | null {

@@ -78,6 +78,51 @@ TEST(MemberListPanelTest, ContextMenuEmitsNothingWhenChannelIsNotEncrypted) {
     EXPECT_EQ(spy.count(), 0);
 }
 
+// Issue #309 — setOnlineLogins()/setLoginOnline() only change which icon
+// is drawn (memberAvatarIcon(..., online)), never the item's text() —
+// showContextMenu() above and the sorting tests below both depend on
+// text() staying exactly the login.
+
+TEST(MemberListPanelTest, SetOnlineLoginsSurvivesAFollowingSetMembersCall) {
+    MemberListPanel panel;
+    panel.setMembers({QStringLiteral("alice"), QStringLiteral("bob")});
+    panel.setOnlineLogins({QStringLiteral("alice")});
+
+    // A REST refresh of the member list (setMembers()) shouldn't blank
+    // out presence state that arrived separately over the WebSocket.
+    panel.setMembers({QStringLiteral("alice"), QStringLiteral("bob"), QStringLiteral("carol")});
+
+    ASSERT_EQ(panel.listWidget()->count(), 3);
+    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("alice"));
+}
+
+TEST(MemberListPanelTest, SetLoginOnlineTogglesWithoutChangingItemText) {
+    MemberListPanel panel;
+    panel.setMembers({QStringLiteral("alice"), QStringLiteral("bob")});
+
+    panel.setLoginOnline(QStringLiteral("bob"), true);
+    ASSERT_EQ(panel.listWidget()->count(), 2);
+    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("bob"));
+
+    panel.setLoginOnline(QStringLiteral("bob"), false);
+    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("bob"));
+}
+
+TEST(MemberListPanelTest, SetOnlineLoginsReplacesThePreviousSetEntirely) {
+    MemberListPanel panel;
+    panel.setMembers({QStringLiteral("alice"), QStringLiteral("bob")});
+    panel.setOnlineLogins({QStringLiteral("alice")});
+
+    panel.setOnlineLogins({QStringLiteral("bob")});
+
+    // Nothing observable from outside except that it doesn't crash and
+    // item text is untouched — the icon itself isn't asserted on
+    // (QIcon has no equality worth comparing), same limitation as the
+    // rest of this file's icon-drawing methods.
+    EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("alice"));
+    EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("bob"));
+}
+
 TEST(MemberListPanelTest, ContextMenuEmitsNothingForTheCurrentUsersOwnRow) {
     MemberListPanel panel;
     panel.setCurrentUserLogin(QStringLiteral("alice"));

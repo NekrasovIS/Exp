@@ -35,6 +35,28 @@ QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
     return items;
 }
 
+/// Разбирает поле "reactions" ответа chat-service (issue #333/#334) —
+/// общая часть parseMessageList()/поиска сообщений ниже. Отсутствующее
+/// поле (например, ответ от версии сервера до #333) трактуется как
+/// пустой список, а не ошибка — тот же принцип терпимости к
+/// отсутствующим необязательным полям, что и у attachment_id.
+QList<MessageReactionInfo> parseReactions(const QJsonObject& messageObject) {
+    QList<MessageReactionInfo> reactions;
+    const QJsonArray reactionsArray = messageObject.value("reactions").toArray();
+    reactions.reserve(reactionsArray.size());
+    for (const QJsonValue& reactionValue : reactionsArray) {
+        const QJsonObject reactionObject = reactionValue.toObject();
+        QStringList logins;
+        const QJsonArray loginsArray = reactionObject.value("logins").toArray();
+        logins.reserve(loginsArray.size());
+        for (const QJsonValue& login : loginsArray) {
+            logins.append(login.toString());
+        }
+        reactions.push_back(MessageReactionInfo{.emoji = reactionObject.value("emoji").toString(), .logins = logins});
+    }
+    return reactions;
+}
+
 QList<ChatMessageInfo> parseMessageList(const QByteArray& jsonBytes) {
     QList<ChatMessageInfo> messages;
     const QJsonDocument document = QJsonDocument::fromJson(jsonBytes);
@@ -44,13 +66,16 @@ QList<ChatMessageInfo> parseMessageList(const QByteArray& jsonBytes) {
     for (const QJsonValue& value : document.array()) {
         const QJsonObject object = value.toObject();
         const QJsonValue attachmentIdValue = object.value("attachment_id");
+        const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");
         messages.push_back(ChatMessageInfo{
             .id = object.value("id").toVariant().toLongLong(),
             .author = object.value("author").toString(),
             .body = object.value("body").toString(),
             .sentAt = object.value("sent_at").toString(),
             .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
-            .attachmentFilename = object.value("attachment_filename").toString()});
+            .attachmentFilename = object.value("attachment_filename").toString(),
+            .reactions = parseReactions(object),
+            .replyToMessageId = replyToMessageIdValue.isNull() ? -1 : replyToMessageIdValue.toVariant().toLongLong()});
     }
     return messages;
 }
@@ -334,13 +359,17 @@ void ChatRestClient::searchMessages(const QString& token, qint64 channelId, cons
             for (const QJsonValue& value : document.array()) {
                 const QJsonObject object = value.toObject();
                 const QJsonValue attachmentIdValue = object.value("attachment_id");
+                const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");
                 matches.push_back(ChatMessageInfo{
                     .id = object.value("id").toVariant().toLongLong(),
                     .author = object.value("author").toString(),
                     .body = object.value("body").toString(),
                     .sentAt = object.value("sent_at").toString(),
                     .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
-                    .attachmentFilename = object.value("attachment_filename").toString()});
+                    .attachmentFilename = object.value("attachment_filename").toString(),
+                    .reactions = parseReactions(object),
+                    .replyToMessageId =
+                        replyToMessageIdValue.isNull() ? -1 : replyToMessageIdValue.toVariant().toLongLong()});
             }
         }
         emit messagesFound(channelId, query, matches);
