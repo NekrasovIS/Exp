@@ -2,26 +2,47 @@
 // out of HomePage.tsx when issue #268 added a second top-level mode
 // (friends/DMs) alongside it.
 
-import { useEffect, useMemo, useState } from "react";
+import type { ChatItem } from "@devicehub/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ChatView } from "../chat/ChatView.js";
 import { useUnreadCounts } from "../chat/useUnreadCounts.js";
 import { ChannelsSidebar } from "../channels/ChannelsSidebar.js";
 import { useChannels } from "../channels/useChannels.js";
 import { CommunitiesSidebar } from "../communities/CommunitiesSidebar.js";
+import { MembersSidebar } from "../members/MembersSidebar.js";
 import styles from "./pageLayout.module.css";
 
 export function CommunitiesMode() {
   const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
-  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
+  const [selectedChannel, setSelectedChannel] = useState<ChatItem | null>(null);
+  // Issue #322 — owned here, not by MembersSidebar itself: it's a
+  // sibling of ChatView, not a descendant, but presence only arrives
+  // over whichever channel socket ChatView happens to have open.
+  const [onlineLogins, setOnlineLogins] = useState<ReadonlySet<string>>(new Set());
 
-  // ChannelsSidebar loads its own copy of this same list to render
-  // itself — this second call (deduped by nothing, deliberately kept
-  // simple) is only to read the selected channel's isEncrypted flag,
-  // which ChatView needs and ChannelsSidebar's onSelectChannel(id)
-  // contract (already shipped in #266) doesn't carry.
+  const handleOnlineMembers = useCallback((logins: string[]) => {
+    setOnlineLogins(new Set(logins));
+  }, []);
+  const handlePresenceChanged = useCallback((login: string, online: boolean) => {
+    setOnlineLogins((prev) => {
+      const next = new Set(prev);
+      if (online) {
+        next.add(login);
+      } else {
+        next.delete(login);
+      }
+      return next;
+    });
+  }, []);
+
+  // Issue #310/#350 — only used to build channelIdToCommunityId below
+  // (a channel→community lookup for summing badges per community);
+  // selectedChannel itself comes straight from ChannelsSidebar's
+  // onSelectChannel(channel) below, not derived from this list, so it
+  // never goes stale the way issue #303 found (a second copy of the
+  // channels list that missed a just-created channel).
   const { channels } = useChannels(selectedCommunityId);
-  const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? null;
 
   const { channelCounts, refresh: refreshUnreadCounts, clearChannelLocally } = useUnreadCounts();
 
@@ -59,15 +80,18 @@ export function CommunitiesMode() {
 
   function handleSelectCommunity(communityId: number): void {
     setSelectedCommunityId(communityId);
-    setSelectedChannelId(null);
+    setSelectedChannel(null);
     // Own badges may have drifted while looking at a different
     // community — don't wait for the next poll tick (issue #310/#350).
     void refreshUnreadCounts();
+    // Presence for the previous community doesn't apply here — same
+    // reset DeviceHub's MainWindow does on community switch.
+    setOnlineLogins(new Set());
   }
 
-  function handleSelectChannel(channelId: number): void {
-    setSelectedChannelId(channelId);
-    clearChannelLocally(channelId);
+  function handleSelectChannel(channel: ChatItem): void {
+    setSelectedChannel(channel);
+    clearChannelLocally(channel.id);
   }
 
   return (
@@ -82,7 +106,7 @@ export function CommunitiesMode() {
       <div className={styles.sidebarColumn}>
         <ChannelsSidebar
           communityId={selectedCommunityId}
-          selectedChannelId={selectedChannelId}
+          selectedChannelId={selectedChannel?.id ?? null}
           onSelectChannel={handleSelectChannel}
           unreadCounts={channelCounts}
         />
@@ -95,9 +119,14 @@ export function CommunitiesMode() {
             channelId={selectedChannel.id}
             communityId={selectedCommunityId}
             isEncrypted={selectedChannel.isEncrypted}
+            onOnlineMembers={handleOnlineMembers}
+            onPresenceChanged={handlePresenceChanged}
           />
         )}
       </main>
+      <div className={styles.sidebarColumn}>
+        <MembersSidebar communityId={selectedCommunityId} onlineLogins={onlineLogins} />
+      </div>
     </div>
   );
 }

@@ -29,6 +29,13 @@ on:
       - "pnpm-*.yaml"
       - "package.json"
       - "**.md"
+      # issue #303: неполный список выше пропустил .gitignore и сам
+      # web-clients.yml — правка любого из них (например, добавление
+      # Playwright-паттернов в .gitignore, или нового job'а в
+      # web-clients.yml) всё равно запускала полную C++/Qt-сборку здесь,
+      # хотя оба файла касаются исключительно TS-монорепо.
+      - ".gitignore"
+      - ".github/workflows/web-clients.yml"
   pull_request:
     paths-ignore: *tsMonorepoPaths
 

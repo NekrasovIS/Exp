@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QHash>
+#include <QList>
 #include <QWidget>
 
 #include "chat/ChatRestClient.h"
@@ -57,6 +59,14 @@ public:
     /// для элемента.
     void setCurrentUserLogin(const QString& login);
 
+    /// Устанавливает бейдж непрочитанного на аватар @p communityId
+    /// (issue #310/#349) — сумма непрочитанных по каналам этого
+    /// сообщества, которую MainWindow сам считает из ответа
+    /// ChatRestClient::fetchUnreadCounts() (эта панель ничего не знает
+    /// про то, какие каналы принадлежат какому сообществу). 0 убирает
+    /// бейдж и возвращает обычную иконку без него.
+    void setUnreadCount(qint64 communityId, qint64 unreadCount);
+
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
     [[nodiscard]] QPushButton* friendsButton() const { return friendsButton_; }
@@ -86,10 +96,19 @@ signals:
 private:
     void showAddDialog();
     void showContextMenu(const QPoint& pos);
+    /// Пересобирает listWidget_ из communities_, накладывая бейджи
+    /// unreadCounts_ на аватар каждого элемента (issue #310/#349) —
+    /// общая часть setCommunities()/setUnreadCount().
+    void rebuildList();
 
     QListWidget* listWidget_ = nullptr;
     QPushButton* addButton_ = nullptr;
     QPushButton* friendsButton_ = nullptr;
+    QList<ChatItem> communities_;
+    /// Issue #310/#349 — заполняется MainWindow из
+    /// ChatRestClient::fetchUnreadCounts() (сумма по каналам
+    /// сообщества, посчитанная там же).
+    QHash<qint64, qint64> unreadCounts_;
     CommunityConnectDialog* connectDialog_ = nullptr;
     QString currentUserLogin_;
 };

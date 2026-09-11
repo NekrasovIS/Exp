@@ -80,6 +80,10 @@ interface CallManagerEventMap {
   remoteStreamRemoved: [peerLogin: string];
   localCameraStream: [stream: MediaStream | null];
   localScreenShareStream: [stream: MediaStream | null];
+  /** Another participant reacted (issue #312/#328) — never fires for
+   * this client's own sendReaction(), same as chat-service never
+   * echoes it back to the sender. */
+  reactionReceived: [login: string, emoji: string];
   error: [message: string];
 }
 
@@ -150,6 +154,7 @@ export class CallManager {
       chatClient.on("callPeerLeft", (login) => this.onCallPeerLeft(login)),
       chatClient.on("janusAttached", (handle) => this.onJanusAttached(handle)),
       chatClient.on("janusEvent", (event) => this.onJanusEvent(event)),
+      chatClient.on("callReaction", (login, emoji) => this.emit("reactionReceived", login, emoji)),
     );
   }
 
@@ -226,6 +231,16 @@ export class CallManager {
   setMuted(muted: boolean): void {
     if (this.localAudioTrack) {
       this.localAudioTrack.enabled = !muted;
+    }
+  }
+
+  /** No-op while not in a call (issue #312/#328, mirrors DeviceHub's
+   * own CallManager::sendReaction() guard) rather than letting
+   * chat-service reject it with an error the caller has nowhere
+   * meaningful to surface. */
+  sendReaction(emoji: string): void {
+    if (this.inCallState) {
+      this.chatClient.sendCallReaction(emoji);
     }
   }
 

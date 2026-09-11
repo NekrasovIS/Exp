@@ -50,14 +50,27 @@ public:
 
     [[nodiscard]] std::optional<Message> postMessage(std::int64_t channelId, const std::string& authorLogin,
                                                        const std::string& body,
-                                                       std::optional<std::int64_t> attachmentId = std::nullopt);
+                                                       std::optional<std::int64_t> attachmentId = std::nullopt,
+                                                       std::optional<std::int64_t> replyToMessageId = std::nullopt);
     [[nodiscard]] std::vector<Message> recentMessages(std::int64_t channelId, int limit,
                                                         std::optional<std::int64_t> beforeId = std::nullopt);
     [[nodiscard]] EditMessageResult editMessage(std::int64_t messageId, std::int64_t channelId,
                                                  const std::string& requesterLogin, const std::string& newBody);
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
+
+    /// См. ChatRepository::pinMessage()/unpinMessage()/listPinnedMessages() (issue #338).
+    [[nodiscard]] PinMessageResult pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin);
+    [[nodiscard]] MutationResult unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin);
+    [[nodiscard]] std::vector<PinnedMessage> listPinnedMessages(std::int64_t channelId);
+
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
+
+    /// См. ChatRepository::toggleReaction() (issue #333).
+    [[nodiscard]] ToggleReactionResult toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                       const std::string& login, const std::string& emoji);
 
     [[nodiscard]] std::optional<AttachmentMetadata> createAttachment(std::int64_t channelId,
                                                                        const AttachmentUpload& upload);
@@ -85,6 +98,13 @@ public:
     /// (владеющий JanusClient) убедился, что комната реально существует в
     /// Janus; см. doc-комментарий ChatRepository::recordJanusRoom().
     void recordCallRoom(std::int64_t channelId, const std::string& janusRoomId);
+
+    /// Issue #310/#348 — см. doc-комментарии соответствующих методов
+    /// ChatRepository.
+    void markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId);
+    void markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
+    [[nodiscard]] std::vector<ChannelUnreadCount> listUnreadChannelCounts(const std::string& login);
+    [[nodiscard]] std::vector<ThreadUnreadCount> listUnreadThreadCounts(const std::string& login);
 
 private:
     ChatRepository& repository_;

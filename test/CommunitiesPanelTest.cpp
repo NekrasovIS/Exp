@@ -105,5 +105,44 @@ TEST(CommunitiesPanelTest, CreatingThroughTheConnectDialogEmitsCreateRequested) 
     EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("New Community"));
 }
 
+TEST(CommunitiesPanelTest, SetUnreadCountAddsItToTheTooltip) {
+    CommunitiesPanel panel;
+    panel.setCommunities(sampleCommunities());
+    ASSERT_EQ(panel.listWidget()->item(0)->toolTip(), QStringLiteral("Alpha"));
+
+    panel.setUnreadCount(1, 3);
+
+    EXPECT_EQ(panel.listWidget()->item(0)->toolTip(), QStringLiteral("Alpha (3 unread)"));
+    // The other community is untouched.
+    EXPECT_EQ(panel.listWidget()->item(1)->toolTip(), QStringLiteral("Beta"));
+}
+
+TEST(CommunitiesPanelTest, SetUnreadCountToZeroRestoresThePlainTooltip) {
+    CommunitiesPanel panel;
+    panel.setCommunities(sampleCommunities());
+    panel.setUnreadCount(1, 3);
+    ASSERT_NE(panel.listWidget()->item(0)->toolTip(), QStringLiteral("Alpha"));
+
+    panel.setUnreadCount(1, 0);
+
+    EXPECT_EQ(panel.listWidget()->item(0)->toolTip(), QStringLiteral("Alpha"));
+}
+
+TEST(CommunitiesPanelTest, SetUnreadCountPreservesTheCurrentSelection) {
+    // issue #310/#349: setUnreadCount() rebuilds the whole list (badges
+    // are drawn into the icon itself) — without preserving the
+    // selection across that rebuild, a periodic unread-count refresh
+    // would keep dropping the highlighted community.
+    CommunitiesPanel panel;
+    panel.setCommunities(sampleCommunities());
+    panel.selectCommunityId(2);
+    ASSERT_EQ(panel.listWidget()->currentItem()->data(Qt::UserRole).toLongLong(), 2);
+
+    panel.setUnreadCount(1, 1);
+
+    ASSERT_NE(panel.listWidget()->currentItem(), nullptr);
+    EXPECT_EQ(panel.listWidget()->currentItem()->data(Qt::UserRole).toLongLong(), 2);
+}
+
 }  // namespace
 }  // namespace devicehub

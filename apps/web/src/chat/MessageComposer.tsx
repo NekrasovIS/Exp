@@ -2,22 +2,55 @@
 // text field, an attach button (uploads immediately on file selection,
 // then the file rides along as attachment_id on the next Send), and
 // Send.
+//
+// @mention autocomplete (issue #326) is layered onto the same <input>
+// via useMentionAutocomplete() — see that hook's own doc comment for
+// why it doesn't (yet) reuse #322's useMembers().
 
 import { ChatRestClient } from "@devicehub/core";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import styles from "./MessageComposer.module.css";
+import { MentionSuggestions } from "./MentionSuggestions.js";
+import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
-interface MessageComposerProps {
-  channelId: number;
-  onSend: (body: string, attachmentId?: number) => void;
+/** Bare minimum ChatViewContent needs to resolve/display the current
+ * reply target (issue #306/#331) — mirrors DeviceHub's ChatView, which
+ * resolves the same author/snippet from its own already-loaded
+ * history before ever handing it to the composer. */
+interface ReplyTarget {
+  id: number;
+  author: string;
+  snippet: string;
 }
 
-export function MessageComposer({ channelId, onSend }: MessageComposerProps) {
+interface MessageComposerProps {
+  channelId: number;
+  communityId: number;
+  onSend: (body: string, attachmentId?: number) => void;
+  replyTarget?: ReplyTarget | null;
+  onCancelReply?: () => void;
+  /** Called on every keystroke (issue #318) — the hook (useMessages) is
+   * the one that throttles this down to a real WebSocket frame, this
+   * component just reports every edit. Optional so existing callers/tests
+   * that don't care about typing don't need to pass a no-op. */
+  onTyping?: () => void;
+}
+
+export function MessageComposer({
+  channelId,
+  communityId,
+  onSend,
+  replyTarget,
+  onCancelReply,
+  onTyping,
+}: MessageComposerProps) {
   const { getAccessToken } = useSession();
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
+  const mention = useMentionAutocomplete(communityId);
+  const bodyInputRef = useRef<HTMLInputElement>(null);
 
   const [body, setBody] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<{ id: number; filename: string } | null>(null);
@@ -55,11 +88,56 @@ export function MessageComposer({ channelId, onSend }: MessageComposerProps) {
     onSend(body.trim(), pendingAttachment?.id);
     setBody("");
     setPendingAttachment(null);
+    onCancelReply?.();
+  }
+
+  function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
+    setBody(event.target.value);
+    onTyping?.();
+    mention.handleTextChange(event.target.value, event.target.selectionStart ?? event.target.value.length);
+  }
+
+  function selectMention(login: string): void {
+    const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
+    const result = mention.applySuggestion(body, cursorPos, login);
+    setBody(result.text);
+    requestAnimationFrame(() => bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos));
+  }
+
+  function handleBodyKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (mention.suggestions.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      mention.moveActive(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      mention.moveActive(-1);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
+      const result = mention.applyActive(body, cursorPos);
+      setBody(result.text);
+      requestAnimationFrame(() =>
+        bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos),
+      );
+    } else if (event.key === "Escape") {
+      mention.dismiss();
+    }
   }
 
   return (
     <>
       {error !== null && <p role="alert">{error}</p>}
+      {replyTarget != null && (
+        <p className={styles.replyBar}>
+          Replying to <strong>{replyTarget.author}</strong>: {replyTarget.snippet}{" "}
+          <button type="button" onClick={onCancelReply}>
+            Cancel
+          </button>
+        </p>
+      )}
       {pendingAttachment !== null && (
         <p className={styles.pendingAttachment}>
           Attached: {pendingAttachment.filename}{" "}
@@ -83,9 +161,16 @@ export function MessageComposer({ channelId, onSend }: MessageComposerProps) {
         </label>
         <input
           id="message-body"
+          ref={bodyInputRef}
           className={styles.bodyInput}
           value={body}
-          onChange={(event) => setBody(event.target.value)}
+          onChange={handleBodyChange}
+          onKeyDown={handleBodyKeyDown}
+        />
+        <MentionSuggestions
+          suggestions={mention.suggestions}
+          activeIndex={mention.activeIndex}
+          onSelect={selectMention}
         />
         <button type="submit" disabled={uploading}>
           Send

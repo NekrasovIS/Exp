@@ -535,6 +535,64 @@ TEST(ChatServiceIntegrationTest, ModeratorsCanDeleteMessagesAndManageChannelsBut
     EXPECT_EQ(service.deleteChannel(*channelId, moderator), MutationResult::kSuccess);
 }
 
+TEST(ChatServiceIntegrationTest, PinMessageIsOwnerModeratorOnlyNotAuthorAndIsIdempotentBothWays) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "pin-test-owner-" + suffix;
+    const std::string moderator = "pin-test-mod-" + suffix;
+    const std::string author = "pin-test-author-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("pin-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_EQ(service.promoteModerator(community.id, moderator, owner), MutationResult::kSuccess);
+    ASSERT_TRUE(service.joinCommunity(community.id, author));
+
+    const std::optional<Message> posted = service.postMessage(*channelId, author, "pin me");
+    ASSERT_TRUE(posted.has_value());
+
+    // Автор сообщения, не являющийся владельцем/модератором, не может
+    // закрепить даже собственное сообщение — в отличие от deleteMessage().
+    EXPECT_EQ(service.pinMessage(posted->id, *channelId, author).result, MutationResult::kForbidden);
+
+    const PinMessageResult firstPin = service.pinMessage(posted->id, *channelId, owner);
+    ASSERT_EQ(firstPin.result, MutationResult::kSuccess);
+    EXPECT_EQ(firstPin.pinnedByLogin, owner);
+    EXPECT_FALSE(firstPin.pinnedAt.empty());
+
+    // Повторный pin другим (модератором) — идемпотентно, сохраняет
+    // ПЕРВОНАЧАЛЬНОГО закрепившего/время, не переписывает их.
+    const PinMessageResult secondPin = service.pinMessage(posted->id, *channelId, moderator);
+    ASSERT_EQ(secondPin.result, MutationResult::kSuccess);
+    EXPECT_EQ(secondPin.pinnedByLogin, owner);
+    EXPECT_EQ(secondPin.pinnedAt, firstPin.pinnedAt);
+
+    const std::vector<PinnedMessage> pinned = service.listPinnedMessages(*channelId);
+    ASSERT_EQ(pinned.size(), 1U);
+    EXPECT_EQ(pinned[0].message.id, posted->id);
+    EXPECT_EQ(pinned[0].message.body, "pin me");
+    EXPECT_EQ(pinned[0].pinnedByLogin, owner);
+
+    // Несуществующее сообщение/чужой channelId — kNotFound.
+    EXPECT_EQ(service.pinMessage(999999999, *channelId, owner).result, MutationResult::kNotFound);
+    EXPECT_EQ(service.pinMessage(posted->id, 999999999, owner).result, MutationResult::kNotFound);
+
+    // unpin — автор не может, модератор может; повторный unpin — идемпотентно.
+    EXPECT_EQ(service.unpinMessage(posted->id, *channelId, author), MutationResult::kForbidden);
+    EXPECT_EQ(service.unpinMessage(posted->id, *channelId, moderator), MutationResult::kSuccess);
+    EXPECT_TRUE(service.listPinnedMessages(*channelId).empty());
+    EXPECT_EQ(service.unpinMessage(posted->id, *channelId, moderator), MutationResult::kSuccess);
+}
+
 TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
@@ -601,6 +659,129 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     EXPECT_EQ(*messages[0].attachmentId, attachment->id);
     ASSERT_TRUE(messages[0].attachmentFilename.has_value());
     EXPECT_EQ(*messages[0].attachmentFilename, "greeting.txt");
+}
+
+TEST(ChatServiceIntegrationTest, ToggleReactionAggregatesMultipleUsersAndRoundTripsThroughRecentAndSearch) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "reaction-test-owner-" + suffix;
+    const std::string other = "reaction-test-other-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("reaction-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> posted = service.postMessage(*channelId, owner, "react to this please");
+    ASSERT_TRUE(posted.has_value());
+    EXPECT_TRUE(posted->reactions.empty());
+
+    // Несуществующее сообщение — kNotFound, а не тихий успех.
+    EXPECT_EQ(service.toggleReaction(999999999, *channelId, owner, "\U0001F44D").result, MutationResult::kNotFound);
+    // Правильное сообщение, но не тот channelId — тоже kNotFound (та же
+    // защита, что уже есть у editMessage()/deleteMessage()).
+    EXPECT_EQ(service.toggleReaction(posted->id, 999999999, owner, "\U0001F44D").result, MutationResult::kNotFound);
+
+    const ToggleReactionResult firstAdd = service.toggleReaction(posted->id, *channelId, owner, "\U0001F44D");
+    ASSERT_EQ(firstAdd.result, MutationResult::kSuccess);
+    ASSERT_EQ(firstAdd.logins.size(), 1U);
+    EXPECT_EQ(firstAdd.logins[0], owner);
+
+    // Второй пользователь ставит ту же эмодзи — оба теперь в списке.
+    const ToggleReactionResult secondAdd = service.toggleReaction(posted->id, *channelId, other, "\U0001F44D");
+    ASSERT_EQ(secondAdd.result, MutationResult::kSuccess);
+    ASSERT_EQ(secondAdd.logins.size(), 2U);
+    EXPECT_EQ(secondAdd.logins[0], owner);  // порядок по created_at — кто раньше, тот раньше
+    EXPECT_EQ(secondAdd.logins[1], other);
+
+    // Другая эмодзи от owner — отдельная агрегированная запись, не
+    // затирает первую.
+    const ToggleReactionResult secondEmoji = service.toggleReaction(posted->id, *channelId, owner, "\U0001F389");
+    ASSERT_EQ(secondEmoji.result, MutationResult::kSuccess);
+    ASSERT_EQ(secondEmoji.logins.size(), 1U);
+
+    // recentMessages()/searchMessages() оба видят агрегированный итог:
+    // 2 разные эмодзи, у первой — 2 логина, у второй — 1.
+    const std::vector<Message> recent = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(recent.size(), 1U);
+    ASSERT_EQ(recent[0].reactions.size(), 2U);
+    EXPECT_EQ(recent[0].reactions[0].emoji, "\U0001F389");  // сортировка по emoji в reactionsForMessage()
+    EXPECT_EQ(recent[0].reactions[1].emoji, "\U0001F44D");
+    EXPECT_EQ(recent[0].reactions[1].logins.size(), 2U);
+
+    const std::vector<Message> found = service.searchMessages(*channelId, "react to this", 10);
+    ASSERT_EQ(found.size(), 1U);
+    EXPECT_EQ(found[0].reactions.size(), 2U);
+
+    // owner снимает свой лайк — остаётся только other.
+    const ToggleReactionResult removed = service.toggleReaction(posted->id, *channelId, owner, "\U0001F44D");
+    ASSERT_EQ(removed.result, MutationResult::kSuccess);
+    ASSERT_EQ(removed.logins.size(), 1U);
+    EXPECT_EQ(removed.logins[0], other);
+}
+
+TEST(ChatServiceIntegrationTest, ReplyToMessageIdRoundTripsThroughPostRecentAndSearch) {
+    // Issue #306 — no FK on this column (see its doc comment), so unlike
+    // attachment_id above, an id that doesn't correspond to any real
+    // message is accepted rather than rejected: the client, not the
+    // server, decides what to show when it can't resolve it.
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-reply-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-reply-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> original = service.postMessage(*channelId, owner, "original searchable text");
+    ASSERT_TRUE(original.has_value());
+    EXPECT_FALSE(original->replyToMessageId.has_value());
+
+    const std::optional<Message> reply =
+        service.postMessage(*channelId, owner, "a reply", /*attachmentId=*/std::nullopt, original->id);
+    ASSERT_TRUE(reply.has_value());
+    ASSERT_TRUE(reply->replyToMessageId.has_value());
+    EXPECT_EQ(*reply->replyToMessageId, original->id);
+
+    // An id that doesn't correspond to any message is accepted, not
+    // rejected — see the doc comment above.
+    const std::optional<Message> danglingReply =
+        service.postMessage(*channelId, owner, "reply to nothing", /*attachmentId=*/std::nullopt, 999999999);
+    ASSERT_TRUE(danglingReply.has_value());
+    ASSERT_TRUE(danglingReply->replyToMessageId.has_value());
+    EXPECT_EQ(*danglingReply->replyToMessageId, 999999999);
+
+    const std::vector<Message> recent = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(recent.size(), 3U);
+    const auto recentReply =
+        std::find_if(recent.begin(), recent.end(), [&](const Message& m) { return m.id == reply->id; });
+    ASSERT_NE(recentReply, recent.end());
+    ASSERT_TRUE(recentReply->replyToMessageId.has_value());
+    EXPECT_EQ(*recentReply->replyToMessageId, original->id);
+
+    // searchMessages() (issue #118) has its own SELECT — must carry the
+    // same field, not just recentMessages()'s.
+    const std::vector<Message> searched = service.searchMessages(*channelId, "a reply", 10);
+    ASSERT_EQ(searched.size(), 1U);
+    ASSERT_TRUE(searched[0].replyToMessageId.has_value());
+    EXPECT_EQ(*searched[0].replyToMessageId, original->id);
 }
 
 TEST(ChatServiceIntegrationTest, CreateChannelDefaultsToNotEncryptedAndFlagRoundTripsThroughListAndFind) {
@@ -885,6 +1066,187 @@ TEST(ChatServiceIntegrationTest, PostDirectMessageAndListDirectMessagesRoundTrip
     EXPECT_EQ(messages[1].body, "hi back");
 
     EXPECT_FALSE(service.postDirectMessage(-1, loginA, "into the void").has_value());
+}
+
+TEST(ChatServiceIntegrationTest, UnreadChannelCountGrowsWithNewMessagesAndDropsToZeroAfterMarkingRead) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "unread-test-owner-" + suffix;
+    const std::string reader = "unread-test-reader-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("unread-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, reader));
+
+    // Never marked read at all yet — every message so far is unread.
+    const std::optional<Message> first = service.postMessage(*channelId, owner, "one");
+    const std::optional<Message> second = service.postMessage(*channelId, owner, "two");
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    auto findChannelCount = [&](const std::string& login) -> std::optional<std::int64_t> {
+        for (const ChannelUnreadCount& count : service.listUnreadChannelCounts(login)) {
+            if (count.channelId == *channelId) {
+                return count.unreadCount;
+            }
+        }
+        return std::nullopt;
+    };
+
+    ASSERT_TRUE(findChannelCount(reader).has_value());
+    EXPECT_EQ(*findChannelCount(reader), 2);
+    // The owner never explicitly marked read either, but posting a
+    // message doesn't itself mark it read on the poster's behalf —
+    // same "everything unread until told otherwise" rule applies.
+    ASSERT_TRUE(findChannelCount(owner).has_value());
+    EXPECT_EQ(*findChannelCount(owner), 2);
+
+    service.markChannelRead(*channelId, reader, second->id);
+    EXPECT_EQ(*findChannelCount(reader), 0);
+
+    const std::optional<Message> third = service.postMessage(*channelId, owner, "three");
+    ASSERT_TRUE(third.has_value());
+    EXPECT_EQ(*findChannelCount(reader), 1);
+}
+
+TEST(ChatServiceIntegrationTest, MarkChannelReadNeverMovesTheMarkerBackward) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "unread-test-backward-owner-" + suffix;
+    const std::string reader = "unread-test-backward-reader-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("unread-test-backward-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, reader));
+
+    const std::optional<Message> first = service.postMessage(*channelId, owner, "one");
+    const std::optional<Message> second = service.postMessage(*channelId, owner, "two");
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    auto findChannelCount = [&]() -> std::int64_t {
+        for (const ChannelUnreadCount& count : service.listUnreadChannelCounts(reader)) {
+            if (count.channelId == *channelId) {
+                return count.unreadCount;
+            }
+        }
+        return -1;
+    };
+
+    // Mark read up to the newest message first (e.g. a client that
+    // scrolled to the bottom), then a stale/late call for an older id
+    // (e.g. a race between two open windows) must not resurrect
+    // messages that are already marked read.
+    service.markChannelRead(*channelId, reader, second->id);
+    ASSERT_EQ(findChannelCount(), 0);
+
+    service.markChannelRead(*channelId, reader, first->id);
+    EXPECT_EQ(findChannelCount(), 0);
+}
+
+TEST(ChatServiceIntegrationTest, DeletingTheLastReadMessageDoesNotResurrectOlderMessagesAsUnread) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "unread-test-delete-owner-" + suffix;
+    const std::string reader = "unread-test-delete-reader-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("unread-test-delete-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, reader));
+
+    const std::optional<Message> lastRead = service.postMessage(*channelId, owner, "will be read then deleted");
+    ASSERT_TRUE(lastRead.has_value());
+    service.markChannelRead(*channelId, reader, lastRead->id);
+
+    // Deleting the very message the read marker points at (issue
+    // #310/#348's whole reason last_read_message_id carries no FK —
+    // see the schema comment) must not make everything before it
+    // unread again.
+    ASSERT_EQ(service.deleteMessage(lastRead->id, *channelId, owner), MutationResult::kSuccess);
+
+    for (const ChannelUnreadCount& count : service.listUnreadChannelCounts(reader)) {
+        if (count.channelId == *channelId) {
+            EXPECT_EQ(count.unreadCount, 0);
+            return;
+        }
+    }
+    FAIL() << "channel not found in listUnreadChannelCounts()";
+}
+
+TEST(ChatServiceIntegrationTest, UnreadThreadCountGrowsWithNewMessagesAndDropsToZeroAfterMarkingRead) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "unread-test-dm-a-" + suffix;
+    const std::string loginB = "unread-test-dm-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::optional<DirectMessage> first = service.postDirectMessage(threadId, loginA, "hi");
+    const std::optional<DirectMessage> second = service.postDirectMessage(threadId, loginA, "there");
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    auto findThreadCount = [&]() -> std::optional<std::int64_t> {
+        for (const ThreadUnreadCount& count : service.listUnreadThreadCounts(loginB)) {
+            if (count.threadId == threadId) {
+                return count.unreadCount;
+            }
+        }
+        return std::nullopt;
+    };
+
+    ASSERT_TRUE(findThreadCount().has_value());
+    EXPECT_EQ(*findThreadCount(), 2);
+
+    service.markDmThreadRead(threadId, loginB, second->id);
+    EXPECT_EQ(*findThreadCount(), 0);
+
+    const std::optional<DirectMessage> third = service.postDirectMessage(threadId, loginA, "you there?");
+    ASSERT_TRUE(third.has_value());
+    EXPECT_EQ(*findThreadCount(), 1);
 }
 
 }  // namespace

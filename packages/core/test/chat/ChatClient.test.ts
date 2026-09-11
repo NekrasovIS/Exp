@@ -95,6 +95,52 @@ describe("ChatClient", () => {
 
       expect(onSubscribed).toHaveBeenCalledWith(7);
     });
+
+    // Issue #322 (chat-service's own #309) — same "second event on the
+    // same response" shape as sfuRoomAssigned's own tests below.
+    it("also emits 'onlineMembers' when online_members is present", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onOnlineMembers = vi.fn();
+      client.on("onlineMembers", onOnlineMembers);
+
+      socket.simulateMessage(
+        JSON.stringify({ subscribed: true, channel_id: 42, online_members: ["alice", "bob"] }),
+      );
+
+      expect(onOnlineMembers).toHaveBeenCalledWith(["alice", "bob"]);
+    });
+
+    it("does not emit 'onlineMembers' when online_members is absent (a DM subscription)", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onOnlineMembers = vi.fn();
+      client.on("onlineMembers", onOnlineMembers);
+
+      socket.simulateMessage(JSON.stringify({ subscribed: true, dm_thread_id: 7 }));
+
+      expect(onOnlineMembers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("presenceChanged", () => {
+    it("emits login and online for a presence_changed frame", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onPresenceChanged = vi.fn();
+      client.on("presenceChanged", onPresenceChanged);
+
+      socket.simulateMessage(JSON.stringify({ presence_changed: { login: "bob", online: true } }));
+
+      expect(onPresenceChanged).toHaveBeenCalledWith("bob", true);
+    });
+
+    it("emits online:false the same way", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onPresenceChanged = vi.fn();
+      client.on("presenceChanged", onPresenceChanged);
+
+      socket.simulateMessage(JSON.stringify({ presence_changed: { login: "bob", online: false } }));
+
+      expect(onPresenceChanged).toHaveBeenCalledWith("bob", false);
+    });
   });
 
   it("emits 'message' for an incoming chat message, with a null attachment_id becoming undefined", () => {
@@ -117,7 +163,46 @@ describe("ChatClient", () => {
       author: "alice",
       body: "hi",
       sentAt: "2026-01-01T00:00:00Z",
+      reactions: [],
     });
+  });
+
+  it("emits 'message' with replyToMessageId when the frame carries reply_to_message_id", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onMessage = vi.fn();
+    client.on("message", onMessage);
+
+    socket.simulateMessage(
+      JSON.stringify({
+        id: 2,
+        author: "alice",
+        body: "a reply",
+        sent_at: "2026-01-01T00:00:00Z",
+        reply_to_message_id: 1,
+      }),
+    );
+
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ replyToMessageId: 1 }));
+  });
+
+  it("emits 'message' with the reactions the frame carries", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onMessage = vi.fn();
+    client.on("message", onMessage);
+
+    socket.simulateMessage(
+      JSON.stringify({
+        id: 1,
+        author: "alice",
+        body: "hi",
+        sent_at: "2026-01-01T00:00:00Z",
+        reactions: [{ emoji: "👍", logins: ["bob"] }],
+      }),
+    );
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ reactions: [{ emoji: "👍", logins: ["bob"] }] }),
+    );
   });
 
   it("emits 'messageEdited'", () => {
@@ -138,6 +223,40 @@ describe("ChatClient", () => {
     socket.simulateMessage(JSON.stringify({ message_deleted: { id: 1 } }));
 
     expect(onDeleted).toHaveBeenCalledWith(1);
+  });
+
+  it("emits 'reactionChanged' with the full logins list for that emoji", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onChanged = vi.fn();
+    client.on("reactionChanged", onChanged);
+
+    socket.simulateMessage(
+      JSON.stringify({ reaction_changed: { message_id: 1, emoji: "👍", logins: ["alice", "bob"] } }),
+    );
+
+    expect(onChanged).toHaveBeenCalledWith(1, "👍", ["alice", "bob"]);
+  });
+
+  it("emits 'messagePinned'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onPinned = vi.fn();
+    client.on("messagePinned", onPinned);
+
+    socket.simulateMessage(
+      JSON.stringify({ message_pinned: { id: 1, pinned_by: "alice", pinned_at: "now" } }),
+    );
+
+    expect(onPinned).toHaveBeenCalledWith(1, "alice", "now");
+  });
+
+  it("emits 'messageUnpinned'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onUnpinned = vi.fn();
+    client.on("messageUnpinned", onUnpinned);
+
+    socket.simulateMessage(JSON.stringify({ message_unpinned: { id: 1 } }));
+
+    expect(onUnpinned).toHaveBeenCalledWith(1);
   });
 
   it("emits 'error' for a protocol-level {error} frame", () => {
@@ -204,6 +323,16 @@ describe("ChatClient", () => {
       socket.simulateMessage(JSON.stringify({ call_signal: { from: "bob", payload } }));
 
       expect(onSignal).toHaveBeenCalledWith("bob", payload);
+    });
+
+    it("emits 'callReaction' with the login and emoji", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onReaction = vi.fn();
+      client.on("callReaction", onReaction);
+
+      socket.simulateMessage(JSON.stringify({ call_reaction: { login: "bob", emoji: "👍" } }));
+
+      expect(onReaction).toHaveBeenCalledWith("bob", "👍");
     });
 
     it("emits 'sfuRoomAssigned' alongside 'callRoster' when sfu_room is present", () => {
@@ -336,6 +465,15 @@ describe("ChatClient", () => {
       expect(socket.lastSentFrame()).toEqual({ body: "see attached", attachment_id: 5 });
     });
 
+    it("sendMessage with a replyToMessageId includes reply_to_message_id", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendMessage("a reply", undefined, 3);
+
+      expect(socket.lastSentFrame()).toEqual({ body: "a reply", reply_to_message_id: 3 });
+    });
+
     it("joinCall/leaveCall send the expected frames", () => {
       const { client, socket } = makeClientAndSocket();
       client.connectToChannel("t1", 1);
@@ -357,7 +495,16 @@ describe("ChatClient", () => {
       expect(socket.lastSentFrame()).toEqual({ call_signal: { to: "bob", payload } });
     });
 
-    it("sendTyping/sendEditMessage/sendDeleteMessage send the expected frames", () => {
+    it("sendCallReaction sends the emoji as a bare string", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendCallReaction("👍");
+
+      expect(socket.lastSentFrame()).toEqual({ call_reaction: "👍" });
+    });
+
+    it("sendTyping/sendEditMessage/sendDeleteMessage/sendToggleReaction send the expected frames", () => {
       const { client, socket } = makeClientAndSocket();
       client.connectToChannel("t1", 1);
 
@@ -369,6 +516,20 @@ describe("ChatClient", () => {
 
       client.sendDeleteMessage(1);
       expect(socket.lastSentFrame()).toEqual({ delete_message: { id: 1 } });
+
+      client.sendToggleReaction(1, "👍");
+      expect(socket.lastSentFrame()).toEqual({ toggle_reaction: { message_id: 1, emoji: "👍" } });
+    });
+
+    it("sendPinMessage/sendUnpinMessage send the expected frames", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendPinMessage(1);
+      expect(socket.lastSentFrame()).toEqual({ pin_message: { id: 1 } });
+
+      client.sendUnpinMessage(1);
+      expect(socket.lastSentFrame()).toEqual({ unpin_message: { id: 1 } });
     });
 
     it("throws when sending before a connection is established", () => {

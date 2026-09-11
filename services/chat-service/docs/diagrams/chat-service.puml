@@ -30,13 +30,30 @@ class Message {
   +sentAt : string
   +attachmentId : optional<int64>
   +attachmentFilename : optional<string>
+  +reactions : vector<MessageReaction>
 }
+class MessageReaction {
+  +emoji : string
+  +logins : vector<string>
+}
+Message "1" *-- "0..*" MessageReaction : one per used emoji (issue #333)
 enum MutationResult {
   kSuccess
   kNotFound
   kForbidden
   kConflict
 }
+class ToggleReactionResult {
+  +result : MutationResult
+  +logins : vector<string>
+}
+note bottom of ToggleReactionResult
+  issue #333: logins — the FULL list for
+  that one emoji on that one message
+  after the toggle is applied (possibly
+  empty, if this was the last vote and it
+  just got removed), not a delta.
+end note
 class RegenerateInviteCodeResult {
   +result : MutationResult
   +inviteCode : string
@@ -59,6 +76,23 @@ class AttachmentData {
   +contentType : string
   +data : string
 }
+class PinnedMessage {
+  +message : Message
+  +pinnedByLogin : string
+  +pinnedAt : string
+}
+class PinMessageResult {
+  +result : MutationResult
+  +pinnedByLogin : string
+  +pinnedAt : string
+}
+note bottom of PinMessageResult
+  issue #338: idempotent — re-pinning an
+  already-pinned message returns the
+  ORIGINAL pinnedByLogin/pinnedAt, not the
+  second caller's.
+end note
+
 class DirectMessageThread {
   +id : int64
   +otherLogin : string
@@ -75,6 +109,14 @@ note bottom of DirectMessage
   редактирования/удаления в этой фазе,
   в отличие от Message.
 end note
+class ChannelUnreadCount {
+  +channelId : int64
+  +unreadCount : int64
+}
+class ThreadUnreadCount {
+  +threadId : int64
+  +unreadCount : int64
+}
 
 package "chat_service::base64" <<Rectangle>> {
   class Base64 << (N,orchid) namespace >> {
@@ -106,6 +148,10 @@ class ChatRepository {
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +pinMessage(messageId: int64, channelId: int64, requesterLogin: string) : PinMessageResult
+  +unpinMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
+  +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
   +findChannelKey(channelId: int64, login: string) : optional<string>
@@ -114,18 +160,46 @@ class ChatRepository {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +insertDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
+  +markChannelRead(channelId: int64, login: string, messageId: int64)
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
+  +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> RegenerateInviteCodeResult : returns
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
+ChatRepository ..> PinnedMessage : returns
+ChatRepository ..> PinMessageResult : returns
 ChatRepository ..> AttachmentMetadata : creates
 ChatRepository ..> AttachmentUpload : reads
 ChatRepository ..> AttachmentData : reads
 ChatRepository ..> MutationResult : returns
+ChatRepository ..> ToggleReactionResult : returns
 ChatRepository ..> DirectMessageThread : returns
 ChatRepository ..> DirectMessage : returns
+ChatRepository ..> ChannelUnreadCount : returns
+ChatRepository ..> ThreadUnreadCount : returns
 ChatRepository ..> PqxxConnection : opens per call
+note right of ChatRepository
+  Issue #310/#348: last_read_message_id
+  (channel_read_state/dm_thread_read_state,
+  db/init.sql) — обычный BIGINT БЕЗ FK на
+  messages/direct_messages, той же причине,
+  что и reply_to_message_id (issue #306):
+  FK с ON DELETE SET NULL сбросил бы отметку
+  "прочитано" при удалении именно того
+  сообщения, на которое она указывает, и
+  заново показал бы более старые сообщения
+  непрочитанными. markChannelRead()/
+  markDmThreadRead() — идемпотентный upsert
+  с GREATEST(), никогда не двигает отметку
+  назад (устаревший вызов от гонки между
+  несколькими открытыми окнами — no-op).
+  listUnreadChannelCounts()/
+  listUnreadThreadCounts() — одним запросом
+  по всем каналам/диалогам логина, без N+1.
+end note
 
 class ChatService {
   +createCommunity(name: string, ownerLogin: string) : Community
@@ -153,12 +227,20 @@ class ChatService {
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +pinMessage(messageId: int64, channelId: int64, requesterLogin: string) : PinMessageResult
+  +unpinMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
+  +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +findOrCreateThread(loginA: string, loginB: string) : int64
   +listMyThreads(login: string) : vector<DirectMessageThread>
   +isThreadParticipant(threadId: int64, login: string) : bool
   +postDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
+  +markChannelRead(channelId: int64, login: string, messageId: int64)
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
+  +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
 }
 note bottom of ChatService
   issue #187, Фаза 2: ChatService не
@@ -209,6 +291,7 @@ class HttpServer {
   -handleRenameChannel(request, response)
   -handleDeleteChannel(request, response)
   -handleListMessages(request, response)
+  -handleListPinnedMessages(request, response)
   -handleUploadAttachment(request, response)
   -handleDownloadAttachment(request, response)
   -handleSearchMessages(request, response)
@@ -219,6 +302,9 @@ class HttpServer {
   -handleListMyThreads(request, response)
   -handlePostDirectMessage(request, response)
   -handleListDirectMessages(request, response)
+  -handleMarkChannelRead(request, response)
+  -handleMarkDmThreadRead(request, response)
+  -handleGetUnreadCounts(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }
@@ -245,6 +331,9 @@ class WebSocketServer {
   -handleDirectMessage(webSocket, subscription, body)
   -handleEditMessage(webSocket, subscription, body)
   -handleDeleteMessage(webSocket, subscription, body)
+  -handlePinMessage(webSocket, subscription, body)
+  -handleUnpinMessage(webSocket, subscription, body)
+  -handleToggleReaction(webSocket, subscription, body)
   -handleCallJoin(webSocket, subscription)
   -handleCallLeave(webSocket, subscription)
   -handleCallSignal(webSocket, subscription, body)
@@ -285,6 +374,15 @@ note right of HttpServer
                               owner, or community moderator)
   DELETE /channels/{id}      (same authority as PATCH)
   GET    /channels/{id}/messages
+                             (each message includes
+                             aggregated "reactions" —
+                             issue #333; add/remove itself
+                             is WS toggle_reaction, not a
+                             REST route — see WebSocketServer)
+  GET    /channels/{id}/pinned-messages
+                             (issue #338, any member; pin/unpin
+                             itself is WS pin_message/unpin_message,
+                             owner/moderator only — see WebSocketServer)
   POST   /channels/{id}/attachments
   GET    /attachments/{id}
   GET    /channels/{id}/messages/search

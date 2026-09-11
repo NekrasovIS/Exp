@@ -38,10 +38,11 @@ constexpr char kScreenShareTrackId[] = "call-screenshare-video0";
 
 /// Условная "метка пира" для publishConnection_ (issue #232) — тот же
 /// набор generic-хелперов (negotiateLocal()/handleLocalDescriptionSet()/
-/// PeerObserver и т.п.), что уже обслуживает mesh-пиров в peers_ по их
-/// логину, обслуживает и единственное publish-соединение по этой
-/// зарезервированной строке; реальным логином она стать не может (login
-/// не может быть пустым/содержать эти символы на стороне auth-service).
+/// PeerObserver и т.п.), что уже обслуживает subscribe-записи в peers_ по
+/// логину чужого участника, обслуживает и единственное publish-соединение
+/// по этой зарезервированной строке; реальным логином она стать не может
+/// (login не может быть пустым/содержать эти символы на стороне
+/// auth-service).
 QString publishConnectionLabel() {
     return QStringLiteral("__sfu_publish__");
 }
@@ -60,13 +61,13 @@ public:
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState /*newState*/) override {}
     void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface> /*dataChannel*/) override {}
 
-    // SFU-соединения (issue #232) не трикклят ICE-кандидаты по одному —
-    // у прокси-протокола chat-service нет отдельного запроса Janus
-    // "trickle" (не-trickle сигналинг: кандидаты едут внутри самого SDP),
-    // поэтому offer/answer им уходит только здесь, после полного сбора,
-    // а не сразу после SetLocalDescription. Для mesh-пиров (обычный
-    // trickle через OnIceCandidate ниже) это просто no-op — см.
-    // doc-комментарий CallManager::handleIceGatheringComplete().
+    // SFU-соединения (issue #232/#233 — единственный путь этого класса
+    // теперь) не трикклят ICE-кандидаты по одному — у прокси-протокола
+    // chat-service нет отдельного запроса Janus "trickle" (не-trickle
+    // сигналинг: кандидаты едут внутри самого SDP), поэтому offer/answer
+    // им уходит только здесь, после полного сбора, а не сразу после
+    // SetLocalDescription — см. doc-комментарий
+    // CallManager::handleIceGatheringComplete().
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState newState) override {
         if (newState != webrtc::PeerConnectionInterface::kIceGatheringComplete) {
             return;
@@ -80,27 +81,22 @@ public:
     // OnRenegotiationNeeded() намеренно оставлен унаследованным no-op:
     // CallManager всегда точно знает, когда он изменил треки
     // соединения (это именно он вызывает AddTrack()), поэтому вместо
-    // этого он согласовывает явно прямо там же — см. enableVideo().
-    // Реакция ещё и на это уведомление создавала гонку с этим явным
-    // вызовом для самого первого AddTrack() в ensurePeerConnection()
-    // (оба попадают в negotiateLocal() для одного и того же пира с
-    // разницей в мгновения), накладывая второй offer поверх первого и
-    // повреждая обмен — обнаружено живым тестированием, а не просто
-    // предполагалось теоретически.
+    // этого он согласовывает явно там, где для этого есть подходящий
+    // момент — см. enableVideo()/enableScreenShare() для добавления
+    // видео на лету и ветку "joined" в onJanusEvent() для самого первого
+    // AddTrack() аудио в ensurePublishConnection(). Реакция ещё и на это
+    // уведомление создавала гонку с явным вызовом negotiateLocal() для
+    // того же самого изменения трека с разницей в мгновения, накладывая
+    // второй offer поверх первого и повреждая обмен — обнаружено живым
+    // тестированием ещё в mesh-версии этого класса (issue #46), а не
+    // просто предполагалось теоретически; тот же риск остаётся и здесь.
 
-    void OnIceCandidate(const webrtc::IceCandidate* candidate) override {
-        const QJsonObject payload{
-            {"kind", QStringLiteral("ice")},
-            {"candidate", QString::fromStdString(candidate->ToString())},
-            {"sdpMid", QString::fromStdString(candidate->sdp_mid())},
-            {"sdpMLineIndex", candidate->sdp_mline_index()},
-        };
-        CallManager* manager = &manager_;
-        const QString peerLogin = peerLogin_;
-        QMetaObject::invokeMethod(
-            manager, [manager, peerLogin, payload] { manager->handleLocalIceCandidate(peerLogin, payload); },
-            Qt::QueuedConnection);
-    }
+    // SFU-соединения (issue #232/#233 — единственный путь этого класса
+    // теперь) не трикклят кандидаты по одному — см. doc-комментарий
+    // OnIceGatheringChange() выше: полный набор уходит единым SDP, после
+    // завершения сбора. Обязательный override интерфейса
+    // webrtc::PeerConnectionObserver, но намеренно ничего не делает.
+    void OnIceCandidate(const webrtc::IceCandidate* /*candidate*/) override {}
 
     // Срабатывает, когда к этому соединению добавляется удалённый трек
     // (аудио или видео) — issue #91 интересует только видео,
@@ -204,10 +200,13 @@ CallManager::CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, A
       audioOutput_(audioOutput),
       camera_(camera),
       screenCapture_(screenCapture) {
-    connect(&chatClient_, &ChatClient::callRosterReceived, this, &CallManager::onCallRosterReceived);
     connect(&chatClient_, &ChatClient::callPeerJoined, this, &CallManager::onCallPeerJoined);
     connect(&chatClient_, &ChatClient::callPeerLeft, this, &CallManager::onCallPeerLeft);
-    connect(&chatClient_, &ChatClient::callSignalReceived, this, &CallManager::onCallSignalReceived);
+    // Issue #312 — pure passthrough, no side effects to manage (unlike
+    // onCallPeerJoined()/onCallPeerLeft(), which set up/tear down peer
+    // connections), so a lambda re-emit is enough here.
+    connect(&chatClient_, &ChatClient::callReactionReceived, this,
+            [this](const QString& login, const QString& emoji) { emit reactionReceived(login, emoji); });
     connect(&chatClient_, &ChatClient::sfuRoomAssigned, this, &CallManager::onSfuRoomAssigned);
     connect(&chatClient_, &ChatClient::janusAttached, this, &CallManager::onJanusAttached);
     connect(&chatClient_, &ChatClient::janusEventReceived, this, &CallManager::onJanusEvent);
@@ -237,7 +236,7 @@ void CallManager::joinCall(const QAudioDevice& inputDevice, const QAudioDevice& 
     // каналов 0 в аудио-конвейер WebRTC там приводит к жёсткому крашу
     // (фатальный CHECK), а не к плавному отказу, поэтому это нужно
     // отловить здесь заранее. Звонок при этом всё равно продолжается
-    // без локального воспроизведения аудио — mesh-сигналинг от него не
+    // без локального воспроизведения аудио — SFU-сигналинг от него не
     // зависит.
     if (outputDevice.isNull()) {
         emit callError(tr("No audio output device selected — call will be silent"));
@@ -296,6 +295,18 @@ void CallManager::setMuted(bool muted) {
     }
 }
 
+void CallManager::sendReaction(const QString& emoji) {
+    // Issue #312 — no-op, not queued, if not currently in a call:
+    // chatClient_ would reject it with an error anyway (see
+    // WebSocketServer::handleCallReaction()'s "not in a call" check),
+    // and there is no meaningful "reaction the moment I join" semantics
+    // to preserve by queuing it.
+    if (!inCall_) {
+        return;
+    }
+    chatClient_.sendCallReaction(emoji);
+}
+
 void CallManager::ensureLocalCameraTrack() {
     ensureFactory();
     if (localCameraTrack_) {
@@ -305,13 +316,13 @@ void CallManager::ensureLocalCameraTrack() {
     localCameraTrack_ = peerConnectionFactory_->CreateVideoTrack(cameraTrackSource_, kCameraTrackId);
     // Самый первый вызов enableVideo(): подключаем (новый) трек ко всем
     // уже существующим соединениям с пирами и явно согласовываем это
-    // изменение прямо здесь (тот же паттерн, что уже используют
-    // ensurePeerConnection()/onCallRosterReceived() для изначального
-    // аудиотрека — почему это остаётся явным, а не реакцией на
+    // изменение прямо здесь (тот же паттерн, что уже использует ветка
+    // "joined" в onJanusEvent() для изначального аудиотрека publish-
+    // соединения — почему это остаётся явным, а не реакцией на
     // собственное уведомление WebRTC OnRenegotiationNeeded(), см.
     // doc-комментарий класса). Любое соединение, созданное после этого
     // момента, вместо этого подхватывает трек как часть своего
-    // собственного изначального offer/answer (см. ensurePeerConnection()).
+    // собственного изначального offer/answer (см. attachCameraTrack()).
     //
     // Последующие переключения просто дёргают set_enabled() ниже,
     // намеренно никогда больше не удаляя трек — RemoveTrackOrError()
@@ -458,42 +469,6 @@ webrtc::scoped_refptr<webrtc::PeerConnectionInterface> CallManager::createPeerCo
     return result.value();
 }
 
-CallManager::PeerConnectionEntry* CallManager::ensurePeerConnection(const QString& peerLogin) {
-    const std::string key = peerLogin.toStdString();
-    if (const auto it = peers_.find(key); it != peers_.end()) {
-        return &it->second;
-    }
-
-    std::unique_ptr<PeerObserver> observer;
-    const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection = createPeerConnection(peerLogin, observer);
-    if (!connection) {
-        return nullptr;
-    }
-
-    PeerConnectionEntry entry;
-    entry.connection = connection;
-    entry.observer = std::move(observer);
-
-    if (localAudioTrack_) {
-        const webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpSenderInterface>> addTrackResult =
-            entry.connection->AddTrack(localAudioTrack_, std::vector<std::string>{"call-stream"});
-        if (!addTrackResult.ok()) {
-            emit callError(QStringLiteral("Failed to attach local audio to %1: %2")
-                               .arg(peerLogin, QString::fromUtf8(addTrackResult.error().message())));
-        }
-    }
-
-    PeerConnectionEntry& insertedEntry = peers_.emplace(key, std::move(entry)).first->second;
-    // Часть изначального offer/answer этого соединения, а не отдельная
-    // renegotiation — если один или оба видеотрека уже существуют (даже
-    // сейчас выключенные), соединение нового пира включает их с самого
-    // начала. Каждый attach*Track() — no-op, если соответствующий трек
-    // ещё не создан (см. их doc-комментарии).
-    attachCameraTrack(insertedEntry);
-    attachScreenShareTrack(insertedEntry);
-    return &insertedEntry;
-}
-
 void CallManager::closePeerConnection(const QString& peerLogin) {
     const auto it = peers_.find(peerLogin.toStdString());
     if (it == peers_.end()) {
@@ -531,8 +506,8 @@ void CallManager::negotiateLocal(const QString& peerLogin) {
     // этой функции уже в полёте (например, AddTrack() вызывает
     // PeerObserver::OnRenegotiationNeeded(), пока явный вызов
     // negotiateLocal() для того же изменения уже выполняется, как
-    // происходит для самого первого AddTrack() в
-    // ensurePeerConnection()) — повторный вызов SetLocalDescription()
+    // происходит для самого первого AddTrack() аудио в
+    // ensurePublishConnection()) — повторный вызов SetLocalDescription()
     // поверх него накладывает второй offer и повреждает обмен, что и
     // обнаружило живое тестирование.
     const webrtc::PeerConnectionInterface::SignalingState state = entry->connection->signaling_state();
@@ -548,38 +523,13 @@ void CallManager::negotiateLocal(const QString& peerLogin) {
 void CallManager::handleLocalDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage) {
     if (!ok) {
         emit callError(QStringLiteral("Local description failed for %1: %2").arg(peerLogin, errorMessage));
-        return;
     }
-    PeerConnectionEntry* entry = (peerLogin == publishConnectionLabel()) ? &publishConnection_ : nullptr;
-    if (entry == nullptr) {
-        const auto it = peers_.find(peerLogin.toStdString());
-        if (it == peers_.end() || !it->second.connection) {
-            return;
-        }
-        entry = &it->second;
-    }
-    if (!entry->connection) {
-        return;
-    }
-    // SFU-соединения (issue #232, janusHandle >= 0) не шлют offer/answer
-    // сразу отсюда — у этого прокси нет отдельного запроса Janus
-    // "trickle" (см. doc-комментарий PeerObserver::OnIceGatheringChange()),
-    // поэтому ждут полного сбора ICE-кандидатов и уходят из
-    // handleIceGatheringComplete() со всеми кандидатами уже внутри SDP.
-    // Mesh (janusHandle == -1, как и по умолчанию) отправляет сразу и
-    // трикклит кандидаты по одному через handleLocalIceCandidate(), как
-    // и раньше.
-    if (entry->janusHandle >= 0) {
-        return;
-    }
-    const webrtc::SessionDescriptionInterface* description = entry->connection->local_description();
-    if (description == nullptr) {
-        return;
-    }
-    const QString kind =
-        description->GetType() == webrtc::SdpType::kOffer ? QStringLiteral("offer") : QStringLiteral("answer");
-    const QJsonObject payload{{"kind", kind}, {"sdp", QString::fromStdString(description->ToString())}};
-    chatClient_.sendCallSignal(peerLogin, payload);
+    // SFU-соединения (issue #232/#233 — единственный путь этого класса
+    // теперь) не шлют offer/answer сразу отсюда — у Janus нет отдельного
+    // запроса "trickle" (см. doc-комментарий
+    // PeerObserver::OnIceGatheringChange()), поэтому ждут полного сбора
+    // ICE-кандидатов и уходят из handleIceGatheringComplete() со всеми
+    // кандидатами уже внутри SDP.
 }
 
 void CallManager::handleIceGatheringComplete(const QString& peerLogin) {
@@ -591,8 +541,9 @@ void CallManager::handleIceGatheringComplete(const QString& peerLogin) {
         }
         entry = &it->second;
     }
-    // janusHandle < 0 — mesh-соединение, для которого этот колбэк не
-    // используется (см. doc-комментарий PeerObserver::OnIceGatheringChange()).
+    // janusHandle < 0 — Janus ещё не назначил handle этой записи
+    // (onJanusAttached() не вызывался или ещё не завершился), рано
+    // отправлять что-либо.
     if (!entry->connection || entry->janusHandle < 0) {
         return;
     }
@@ -632,21 +583,6 @@ void CallManager::handleRemoteDescriptionSet(const QString& peerLogin, bool ok, 
     if (it->second.connection->signaling_state() == webrtc::PeerConnectionInterface::kHaveRemoteOffer) {
         negotiateLocal(peerLogin);
     }
-}
-
-void CallManager::handleLocalIceCandidate(const QString& peerLogin, const QJsonObject& payload) {
-    // SFU-соединения (issue #232) не трикклят — см. doc-комментарий
-    // PeerObserver::OnIceGatheringChange(). Без этой проверки кандидат от
-    // publishConnection_/subscribe-записи ушёл бы как mesh call_signal
-    // несуществующему "пиру" и просто получил бы в ответ бесполезную
-    // ошибку "peer not in call".
-    if (peerLogin == publishConnectionLabel()) {
-        return;
-    }
-    if (const auto it = peers_.find(peerLogin.toStdString()); it != peers_.end() && it->second.janusHandle >= 0) {
-        return;
-    }
-    chatClient_.sendCallSignal(peerLogin, payload);
 }
 
 void CallManager::handleRemoteTrack(const QString& peerLogin,
@@ -730,23 +666,11 @@ void CallManager::attachTrack(PeerConnectionEntry& entry, const webrtc::scoped_r
     sender = addTrackResult.value();
 }
 
-void CallManager::onCallRosterReceived(const QStringList& /*participants*/) {
-    // issue #232: mesh-правило «новый участник отправляет offer каждому
-    // уже присутствующему» (ensurePeerConnection()/negotiateLocal() на
-    // каждого из participants) больше не запускается отсюда — реальные
-    // соединения теперь SFU (publish/subscribe через Janus), их создание
-    // driven событиями Janus (onJanusEvent(), publishers в ответе на
-    // собственный join), а не этим mesh-ростером. Сам call_roster всё
-    // ещё нужен: это часть протокола call_join, которым chat-service
-    // сообщает назначенную SFU-комнату (см. onSfuRoomAssigned(),
-    // ChatClient::sfuRoomAssigned). Метод и mesh-код внизу (ensurePeerConnection()/
-    // negotiateLocal()/onCallSignalReceived()) намеренно ещё не удалены —
-    // полная зачистка mesh-пути в issue #233.
-}
-
 void CallManager::onCallPeerJoined(const QString& login) {
-    // Чисто информационно — новый участник инициирует сам, мы просто
-    // ждём его offer через onCallSignalReceived().
+    // Чисто информационно (issue #233) — реальное подключение к этому
+    // участнику полностью driven событиями Janus (onJanusEvent(),
+    // publishers в ответе на собственный join/событие комнаты), а не
+    // этим сигналом.
     emit participantJoined(login);
 }
 
@@ -758,56 +682,6 @@ void CallManager::onCallPeerLeft(const QString& login) {
     // ничего не сделает для неё.
     emit remoteVideoTrackRemoved(login, /*isScreenShare=*/false);
     emit remoteVideoTrackRemoved(login, /*isScreenShare=*/true);
-}
-
-void CallManager::onCallSignalReceived(const QString& from, const QJsonObject& payload) {
-    const QString kind = payload.value("kind").toString();
-    if (kind == QStringLiteral("offer")) {
-        PeerConnectionEntry* entry = ensurePeerConnection(from);
-        if (entry == nullptr) {
-            return;
-        }
-        std::unique_ptr<webrtc::SessionDescriptionInterface> description =
-            webrtc::CreateSessionDescription(webrtc::SdpType::kOffer, payload.value("sdp").toString().toStdString());
-        if (!description) {
-            emit callError(QStringLiteral("Malformed offer from %1").arg(from));
-            return;
-        }
-        const webrtc::scoped_refptr<RemoteDescriptionSetObserver> observer =
-            webrtc::make_ref_counted<RemoteDescriptionSetObserver>(*this, from);
-        entry->connection->SetRemoteDescription(std::move(description), observer);
-    } else if (kind == QStringLiteral("answer")) {
-        const auto it = peers_.find(from.toStdString());
-        if (it == peers_.end() || !it->second.connection) {
-            return;
-        }
-        std::unique_ptr<webrtc::SessionDescriptionInterface> description = webrtc::CreateSessionDescription(
-            webrtc::SdpType::kAnswer, payload.value("sdp").toString().toStdString());
-        if (!description) {
-            emit callError(QStringLiteral("Malformed answer from %1").arg(from));
-            return;
-        }
-        const webrtc::scoped_refptr<RemoteDescriptionSetObserver> observer =
-            webrtc::make_ref_counted<RemoteDescriptionSetObserver>(*this, from);
-        it->second.connection->SetRemoteDescription(std::move(description), observer);
-    } else if (kind == QStringLiteral("ice")) {
-        const auto it = peers_.find(from.toStdString());
-        if (it == peers_.end() || !it->second.connection) {
-            return;
-        }
-        webrtc::SdpParseError parseError;
-        const std::unique_ptr<webrtc::IceCandidate> candidate = webrtc::IceCandidate::Create(
-            payload.value("sdpMid").toString().toStdString(), payload.value("sdpMLineIndex").toInt(),
-            payload.value("candidate").toString().toStdString(), &parseError);
-        if (!candidate) {
-            emit callError(QStringLiteral("Malformed ICE candidate from %1: %2")
-                               .arg(from, QString::fromStdString(parseError.description)));
-            return;
-        }
-        if (!it->second.connection->AddIceCandidate(candidate.get())) {
-            emit callError(QStringLiteral("Failed to add ICE candidate from %1").arg(from));
-        }
-    }
 }
 
 void CallManager::onSfuRoomAssigned(const QString& room) {
@@ -838,8 +712,8 @@ void CallManager::ensurePublishConnection() {
                                .arg(QString::fromUtf8(addTrackResult.error().message())));
         }
     }
-    // Тот же attachCameraTrack()/attachScreenShareTrack(), что и у mesh —
-    // no-op, если соответствующий трек ещё не создан (enableVideo()/
+    // attachCameraTrack()/attachScreenShareTrack() — no-op, если
+    // соответствующий трек ещё не создан (enableVideo()/
     // enableScreenShare() ещё не вызывались).
     attachCameraTrack(publishConnection_);
     attachScreenShareTrack(publishConnection_);
@@ -967,8 +841,7 @@ void CallManager::onJanusEvent(const QJsonObject& event) {
         return;
     }
 
-    // Не publish — событие одной из подписок. peers_ теперь хранит
-    // subscribe-, а не mesh-соединения (issue #232) — ищем запись по
+    // Не publish — событие одной из подписок в peers_ — ищем запись по
     // тому, чей janusHandle совпал с отправителем события.
     if (!jsepValue.isObject()) {
         return;
@@ -979,8 +852,7 @@ void CallManager::onJanusEvent(const QJsonObject& event) {
         }
         // jsep-offer от Janus на нашу подписку ("attached") —
         // handleRemoteDescriptionSet() сам вызовет negotiateLocal() и
-        // создаст answer, ровно так же, как уже делает mesh-путь для
-        // входящего offer от пира.
+        // создаст answer.
         std::unique_ptr<webrtc::SessionDescriptionInterface> description = webrtc::CreateSessionDescription(
             webrtc::SdpType::kOffer, jsepValue.toObject().value(QStringLiteral("sdp")).toString().toStdString());
         if (description) {

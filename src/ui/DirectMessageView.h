@@ -8,6 +8,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QTimer;
 
 namespace devicehub {
 
@@ -46,17 +47,29 @@ public:
     /// Заменяет список сообщений целиком (первичная загрузка истории).
     void setMessages(const QList<DirectMessageInfo>& messages);
 
-    /// Добавляет одно новое сообщение в конец списка (поллинг новых
-    /// сообщений, issue #187 — Фаза 2 backend'а пока не поддерживает
-    /// живую доставку через WebSocket).
+    /// Добавляет одно новое сообщение в конец списка — issue #187,
+    /// Фаза 2b: живая доставка через dmChatClient_ (WebSocket), не
+    /// поллинг, несмотря на формулировку старого doc-комментария этого
+    /// метода в предыдущих версиях.
     void appendMessage(const DirectMessageInfo& message);
+
+    /// Показывает "<login> is typing…" на несколько секунд, затем
+    /// автоматически скрывает — тот же паттерн, что и
+    /// ChatView::showTypingUser() (issue #313: тот же кадр протокола,
+    /// теперь и для диалогов).
+    void showTypingUser(const QString& login);
 
     [[nodiscard]] QListWidget* messagesList() const { return messagesList_; }
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
+    [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
 
 signals:
     void sendMessageRequested(const QString& body);
+
+    /// Пользователь печатает в поле сообщения — та же частотная
+    /// throttle-логика, что и ChatView::typingRequested() (issue #313).
+    void typingRequested();
 
 private:
     void onSendClicked();
@@ -65,6 +78,9 @@ private:
     QListWidget* messagesList_ = nullptr;
     QLineEdit* messageEdit_ = nullptr;
     QPushButton* sendButton_ = nullptr;
+    QLabel* typingIndicatorLabel_ = nullptr;
+    QTimer* typingIndicatorHideTimer_ = nullptr;
+    QTimer* typingThrottleTimer_ = nullptr;
 };
 
 }  // namespace devicehub

@@ -48,22 +48,31 @@ public:
     /// списке, @p activityAt поднимает канал в сортировке по последней
     /// активности. @p previewText уже готов к показу как есть (для
     /// зашифрованных каналов вызывающий код передаёт плейсхолдер вместо
-    /// шифротекста — эта панель ничего не знает про шифрование).
-    /// @p messageId — id этого сообщения; индикатор непрочитанного
-    /// зажигается сам, если он больше, чем id последнего сообщения,
-    /// прочитанного в этом канале (см. setOpenChannelId()) — простое
-    /// клиентское состояние без нового серверного API, как и просит
-    /// issue #152.
+    /// шифротекста — эта панель ничего не знает про шифрование). @p
+    /// messageId сохраняется только для сортировки/превью — начиная с
+    /// issue #310/#349 бейдж непрочитанного больше не выводится из
+    /// него локальной эвристикой (старое клиентское приближение issue
+    /// #152), а приходит явно через setUnreadCount() из настоящего
+    /// серверного счётчика.
     void recordChannelActivity(qint64 channelId, qint64 messageId, const QString& previewText,
                                 const QDateTime& activityAt);
 
-    /// Отмечает @p channelId как открытый прямо сейчас — снимает его
-    /// индикатор непрочитанного и запоминает id последнего известного
-    /// сообщения как "прочитано", так что более поздние
-    /// recordChannelActivity() для этого канала не зажигают индикатор,
-    /// пока он остаётся открытым (issue #152). Передать -1, если сейчас
-    /// не открыт ни один канал.
+    /// Отмечает @p channelId как открытый прямо сейчас (issue #152) и
+    /// оптимистично обнуляет его локальный бейдж непрочитанного (issue
+    /// #310/#349), не дожидаясь ответа сервера на
+    /// MainWindow::markChannelRead() — тот всё равно вызывается сразу
+    /// же и в конце концов подтвердит 0 следующим fetchUnreadCounts().
+    /// Передать -1, если сейчас не открыт ни один канал.
     void setOpenChannelId(qint64 channelId);
+
+    /// Устанавливает бейдж непрочитанного для @p channelId (issue
+    /// #310/#349) — источник истины серверный
+    /// (ChatRestClient::fetchUnreadCounts()), эта панель только
+    /// отображает то, что ей передали: полностью заменяет прежнюю
+    /// клиентскую эвристику issue #152 (сравнение id последнего
+    /// прочитанного сообщения). 0 снимает и полужирный шрифт, и
+    /// числовой суффикс.
+    void setUnreadCount(qint64 channelId, qint64 unreadCount);
 
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
     [[nodiscard]] QPushButton* addButton() const { return addButton_; }
@@ -79,12 +88,13 @@ signals:
 
 private:
     /// Последнее известное сообщение и его активность для одного
-    /// канала — см. recordChannelActivity()/setOpenChannelId().
+    /// канала — см. recordChannelActivity(). Больше не хранит unread —
+    /// это отдельно (unreadCounts_), заполняется извне, а не выводится
+    /// отсюда (issue #310/#349).
     struct ChannelActivity {
         QString previewText;
         QDateTime activityAt;
         qint64 lastMessageId = -1;
-        bool unread = false;
     };
 
     void showAddDialog();
@@ -107,7 +117,10 @@ private:
     QString currentUserLogin_;
     QList<ChatItem> channels_;
     QHash<qint64, ChannelActivity> activity_;
-    QHash<qint64, qint64> lastReadMessageId_;
+    /// Issue #310/#349 — заполняется MainWindow из
+    /// ChatRestClient::fetchUnreadCounts(), заменяет прежнюю клиентскую
+    /// эвристику issue #152 (см. doc-комментарий ChannelActivity).
+    QHash<qint64, qint64> unreadCounts_;
     qint64 openChannelId_ = -1;
 };
 

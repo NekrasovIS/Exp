@@ -40,6 +40,7 @@ class MemberListPanel;
 class ModeratorsDialog;
 class ProfileDialog;
 class SearchDialog;
+class PinnedMessagesDialog;
 class SettingsDialog;
 
 /**
@@ -121,6 +122,13 @@ private:
     /// (ничего не делает, кроме сообщения в статус-баре, если сообщество
     /// не выбрано).
     void refreshChannelsForSelectedCommunity();
+    /// True, если вошедший пользователь — владелец selectedCommunityId_
+    /// (по communities_) или входит в currentCommunityModeratorLogins_
+    /// (issue #338) — пересчитывается по требованию, не кэшируется
+    /// отдельно, поскольку оба входа (communities_/
+    /// currentCommunityModeratorLogins_) уже сами кэшированы и меняются
+    /// нечасто.
+    [[nodiscard]] bool currentUserCanManageChannel() const;
     /// Переключает ChatView на @p id/@p name, (пере)подключая
     /// ChatClient. Для зашифрованного канала (issue #138), для которого
     /// ключ ещё не закэширован, сначала запрашивает/разворачивает ключ
@@ -221,10 +229,41 @@ private:
     /// действия — пуст, когда вход не выполнен.
     QString refreshToken_;
     QTimer* refreshTimer_ = nullptr;
+    /// Issue #310/#349 — периодически (раз в 30с), плюс сразу при входе
+    /// и при переключении сообщества, вызывает
+    /// ChatRestClient::fetchUnreadCounts() для обновления бейджей
+    /// непрочитанного в CommunitiesPanel/ChannelsPanel. Отдельный от
+    /// refreshTimer_ таймер — тот обменивает refresh-токен один раз
+    /// незадолго до истечения срока действия, не по регулярному циклу.
+    QTimer* unreadPollTimer_ = nullptr;
     QString currentUserLogin_;
     QList<QScreen*> screens_;
     QList<ChatItem> communities_;
     QList<ChatItem> channels_;
+    /// Issue #310/#349 — накапливается по мере того, как
+    /// channelsListed() возвращает канал для того сообщества, что было
+    /// выбрано на момент запроса (см. doc-комментарий в .cpp у
+    /// обработчика channelsListed) — используется, чтобы просуммировать
+    /// бейджи непрочитанного по каналам в один бейдж на сообщество.
+    /// Сообщество, которое пользователь ни разу не открывал в этой
+    /// сессии, здесь не появится — его бейдж останется неизвестным до
+    /// первого открытия (не отслеживается как отдельная задача — тот же
+    /// класс компромисса, что и REST-refetch вместо live push, см.
+    /// README).
+    QHash<qint64, qint64> channelIdToCommunityId_;
+    /// Модераторы сообщества, которому принадлежит открытый канал
+    /// (issue #338) — обновляется при выборе сообщества
+    /// (ChatRestClient::listModerators()), используется вместе с
+    /// communities_[...].ownerLogin, чтобы решить, показывать ли
+    /// Pin/Unpin (см. ChatView::setCanManageChannel()). Отдельно от
+    /// moderatorsDialog_, который показывает тот же список только
+    /// владельцу для управления ролями.
+    QStringList currentCommunityModeratorLogins_;
+    /// Закреплённые сообщения открытого канала (issue #338) — источник
+    /// для pinnedMessagesDialog_ и счётчика на pinnedMessagesButton();
+    /// обновляется целиком по ChatRestClient::listPinnedMessages() и
+    /// точечно по ChatClient::messagePinned()/messageUnpinned().
+    QList<PinnedMessageInfo> currentPinnedMessages_;
     QStringList callParticipants_;
     qint64 selectedCommunityId_ = -1;
     qint64 selectedChannelId_ = -1;
@@ -305,6 +344,7 @@ private:
     ModeratorsDialog* moderatorsDialog_ = nullptr;
     ProfileDialog* profileDialog_ = nullptr;
     SearchDialog* searchDialog_ = nullptr;
+    PinnedMessagesDialog* pinnedMessagesDialog_ = nullptr;
     LoginWindow* loginWindow_ = nullptr;
     ToastBanner* toastBanner_ = nullptr;
     DesktopNotifier* desktopNotifier_ = nullptr;

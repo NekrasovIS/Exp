@@ -5,6 +5,7 @@
 // when no community is selected — the caller decides what that gap
 // looks like.
 
+import type { ChatItem } from "@devicehub/core";
 import { useState, type FormEvent } from "react";
 
 import { useChannels } from "./useChannels.js";
@@ -15,7 +16,16 @@ import styles from "../pages/sidebarNav.module.css";
 interface ChannelsSidebarProps {
   communityId: number | null;
   selectedChannelId: number | null;
-  onSelectChannel: (channelId: number) => void;
+  // Passes the full ChatItem, not just its id — the caller (CommunitiesMode)
+  // needs isEncrypted for ChatView, and grabbing that from this component's
+  // own (already up to date, since it's what rendered the button) list
+  // avoids keeping a second, independently-fetched copy of the same
+  // channels list around just to look that flag up (issue #303: that
+  // second copy went stale right after creating a channel — the newly
+  // created channel was clickable here but the other copy never learned
+  // about it, so selecting it showed "Select a channel" instead of the
+  // chat view).
+  onSelectChannel: (channel: ChatItem) => void;
   /** Unread message count per channel id (issue #310/#350), from the
    * caller's useUnreadCounts() — this component doesn't fetch its own
    * copy, so a rebuild here never drops CommunitiesMode's shared poll
@@ -81,7 +91,7 @@ export function ChannelsSidebar({
                 type="button"
                 className={styles.listItemButton}
                 aria-current={channel.id === selectedChannelId}
-                onClick={() => onSelectChannel(channel.id)}
+                onClick={() => onSelectChannel(channel)}
               >
                 <span className={unreadCount > 0 ? styles.unreadLabel : undefined}>
                   {channel.isEncrypted ? "🔒 " : ""}#{channel.name}

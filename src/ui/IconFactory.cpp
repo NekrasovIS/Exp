@@ -29,7 +29,7 @@ QIcon plusIcon(const QColor& strokeColor) {
     return QIcon(pixmap);
 }
 
-QIcon communityAvatarIcon(const QString& label) {
+QIcon communityAvatarIcon(const QString& label, qint64 unreadCount) {
     constexpr int kSize = 40;
     constexpr qreal kDevicePixelRatio = 2.0;
 
@@ -54,6 +54,66 @@ QIcon communityAvatarIcon(const QString& label) {
     painter.setFont(font);
     painter.setPen(Qt::white);
     painter.drawText(QRectF(0, 0, kSize, kSize), Qt::AlignCenter, label);
+
+    if (unreadCount > 0) {
+        // Issue #310/#349: сумма непрочитанных по каналам сообщества —
+        // маленький красный круг в правом верхнем углу, поверх основного
+        // круга-аватара, с белой обводкой, чтобы отделиться от него на
+        // любом фоне. "99+" вместо трёхзначных чисел — тот же приём,
+        // что и у мессенджеров, чтобы бейдж не разрастался бесконечно.
+        constexpr qreal kBadgeDiameter = kSize * 0.46;
+        const QRectF badgeRect(kSize - kBadgeDiameter * 0.8, -kBadgeDiameter * 0.2, kBadgeDiameter, kBadgeDiameter);
+        painter.setPen(QPen(Qt::white, 1.5));
+        painter.setBrush(QColor(devicehub::ui_theme::kBadgeBackground));
+        painter.drawEllipse(badgeRect);
+
+        QFont badgeFont = painter.font();
+        badgeFont.setPointSizeF(unreadCount > 99 ? 7.5 : 9.0);
+        painter.setFont(badgeFont);
+        painter.setPen(Qt::white);
+        painter.drawText(badgeRect, Qt::AlignCenter, unreadCount > 99 ? QStringLiteral("99+")
+                                                                       : QString::number(unreadCount));
+    }
+
+    return QIcon(pixmap);
+}
+
+QIcon memberAvatarIcon(const QString& label, bool online) {
+    constexpr int kSize = 40;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    // Border-in-panel-background trick makes the dot read as "cut out
+    // of" the avatar rather than just stacked on top of it — same
+    // visual language most chat apps use for a presence dot.
+    constexpr qreal kDotDiameter = 13;
+    constexpr qreal kDotBorder = 2.5;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    QLinearGradient gradient(0, 0, kSize, kSize);
+    gradient.setColorAt(0, QColor(devicehub::ui_theme::kAccentGradientStart));
+    gradient.setColorAt(1, QColor(devicehub::ui_theme::kAccentGradientEnd));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(gradient);
+    painter.drawEllipse(QRectF(0, 0, kSize, kSize));
+
+    QFont font = painter.font();
+    font.setBold(true);
+    font.setPointSizeF(14.0);
+    painter.setFont(font);
+    painter.setPen(Qt::white);
+    painter.drawText(QRectF(0, 0, kSize, kSize), Qt::AlignCenter, label);
+
+    if (online) {
+        const QRectF dotRect(kSize - kDotDiameter - 1, kSize - kDotDiameter - 1, kDotDiameter, kDotDiameter);
+        painter.setPen(QPen(QColor(devicehub::ui_theme::kSidebarBackground), kDotBorder));
+        painter.setBrush(QColor(devicehub::ui_theme::kAccentGradientStart));
+        painter.drawEllipse(dotRect);
+    }
 
     return QIcon(pixmap);
 }

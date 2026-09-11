@@ -76,12 +76,14 @@ class CommunitiesPanel {
   +setCommunities(communities: QList<ChatItem>)
   +selectCommunityId(id: int64)
   +setCurrentUserLogin(login: QString)
+  +setUnreadCount(communityId: int64, unreadCount: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +friendsButton() : QPushButton*
   +connectDialog() : CommunityConnectDialog*
   -showAddDialog()
   -showContextMenu(pos: QPoint)
+  -rebuildList()
   .. signals ..
   +createRequested(name: QString)
   +renameRequested(id: int64, newName: QString)
@@ -92,6 +94,18 @@ class CommunitiesPanel {
   +manageModeratorsRequested(id: int64, name: QString)
   +friendsRequested()
 }
+note right of CommunitiesPanel
+  Issue #310/#349: setUnreadCount() — сумма
+  непрочитанного по каналам этого сообщества,
+  посчитанная в MainWindow (эта панель не
+  знает про каналы вообще) — перерисовывает
+  аватар communityAvatarIcon() с бейджем и
+  дополняет tooltip "(N unread)".
+  rebuildList() (общая часть setCommunities()/
+  setUnreadCount()) сохраняет текущую
+  выделенную строку по тем же причинам, что и
+  у ChannelsPanel::rebuildList().
+end note
 
 class CommunityConnectDialog {
   +inviteCodeEdit() : QLineEdit*
@@ -182,6 +196,7 @@ class ChannelsPanel {
   +setCurrentUserLogin(login: QString)
   +recordChannelActivity(channelId: int64, messageId: int64, previewText: QString, activityAt: QDateTime)
   +setOpenChannelId(channelId: int64)
+  +setUnreadCount(channelId: int64, unreadCount: int64)
   +listWidget() : QListWidget*
   +addButton() : QPushButton*
   +filterEdit() : QLineEdit*
@@ -215,18 +230,26 @@ note right of ChannelsPanel
 
   rebuildList() сортирует по activity_
   (последняя активность — выше) и
-  накладывает превью второй строкой +
-  жирный/акцентный шрифт для
-  непрочитанного. "Прочитано" — id
-  последнего сообщения канала на момент
-  setOpenChannelId(); recordChannelActivity()
-  для открытого канала прямо сейчас
-  всегда продвигает эту метку вместе с
-  activity_, а не только в момент
-  открытия — иначе сообщение, реально
-  увиденное, зажигало бы непрочитанное
-  задним числом после переключения на
-  другой канал.
+  накладывает превью второй строкой;
+  сохраняет выбранную строку через
+  собственный rebuild (иначе периодическое
+  setUnreadCount() из MainWindow каждый
+  раз сбрасывало бы выделение).
+
+  Issue #310/#349: непрочитанное больше не
+  собственная эвристика панели — жирный
+  шрифт + "(N)" в тексте строки управляются
+  только setUnreadCount(), которую MainWindow
+  вызывает по ответу ChatRestClient::
+  fetchUnreadCounts() (сервер — источник
+  истины, там же "никогда не двигать метку
+  назад" при удалении последнего прочитанного
+  сообщения). recordChannelActivity() теперь
+  только про previewText/сортировку, своего
+  unread-побочного эффекта не имеет.
+  setOpenChannelId() оптимистично сбрасывает
+  бейдж локально (до следующего ответа
+  fetchUnreadCounts()), не дожидаясь его.
 end note
 
 class MemberListPanel {
@@ -271,15 +294,22 @@ class ChatView {
   +showChannel(channelName: QString)
   +setEncrypted(encrypted: bool)
   +setCurrentUserLogin(login: QString)
+  +setCanManageChannel(canManage: bool)
   +appendMessage(message: ChatMessage)
   +prependMessages(messages: QList<ChatMessage>)
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +updatePinned(id: qint64, isPinned: bool)
+  +setPinnedMessagesCount(count: int)
+  +updateReactions(id: qint64, emoji: QString, logins: QStringList)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
+  +setReplyTarget(id: qint64)
+  +clearReplyTarget()
+  +consumeReplyTarget() : qint64
   +appendSystemLine(text: QString)
   +clearLog()
   +setCallState(inCall: bool)
@@ -292,10 +322,17 @@ class ChatView {
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
   +memberListToggleButton() : QPushButton*
+  +pinnedMessagesButton() : QPushButton*
   +showTypingUser(login: QString)
+  +setChannelMemberLogins(logins: QStringList)
+  +mentionCompleter() : QCompleter*
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
   -connectMessageRow(row: ChatMessageRow*)
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
+  -resolveReplyPreview(message: ChatMessage) : ChatMessage
   -buildDateSeparatorLabel(sentAt: QString) : QLabel*
+  -updateMentionAutocomplete()
+  -insertMentionCompletion(login: QString)
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -304,9 +341,13 @@ class ChatView {
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
+  +pinMessageRequested(id: qint64)
+  +unpinMessageRequested(id: qint64)
+  +pinnedMessagesToggleRequested()
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
   +previewAttachmentRequested(attachmentId: qint64)
+  +reactionToggleRequested(id: qint64, emoji: QString)
 }
 note right of ChatView
   Issue #185: mute/видео/демонстрация экрана/
@@ -343,6 +384,21 @@ note right of ChatView
   #187 — оба места переключают один и тот же флаг
   по независимым причинам).
 
+  Issue #326: mentionCompleter_ (QCompleter) —
+  подключён к messageEdit_ только через setWidget()
+  (не QLineEdit::setCompleter(), который заменял бы
+  ПОЛНЫЙ текст поля целиком). updateMentionAutocomplete()
+  на каждый textEdited() находит "@" на границе слова
+  перед курсором, фильтрует channelMemberLogins_ и
+  вызывает complete(); mentionModel_ (QStringListModel)
+  обновляется на месте setChannelMemberLogins(), а не
+  пересоздаётся. eventFilter() установлен на
+  messageEdit_ ПОСЛЕ setWidget() (Qt вызывает фильтры
+  от последнего установленного к первому) — перехватывает
+  Enter/Tab/Escape, пока попап открыт, чтобы Enter не
+  одновременно и подставлял подсказку, и триггерил
+  returnPressed()->sendButton_->click().
+
   Issue #188: appendMessage()/prependMessages()
   вставляют разделитель даты
   (buildDateSeparatorLabel()) перед любым
@@ -359,6 +415,30 @@ note right of ChatView
   голого указателя, поскольку строка может
   исчезнуть (переключение канала, удаление
   сообщения) раньше, чем придёт ответ.
+
+  Issue #330 (найдено при реализации #306):
+  prependMessages() ("Load older messages")
+  раньше вообще не вызывала
+  connectMessageRow() для своих строк — клик
+  по Edit/Delete/Download/Reply на подгруженном
+  старом сообщении молча ничего не делал;
+  исправлено вместе с добавлением Reply, той же
+  проводкой, что и appendMessage().
+
+  Issue #306 (reply/quote): messagesById_ —
+  QHash<qint64, ChatMessage>, кэш уже показанных
+  сообщений (заполняется в appendMessage()/
+  prependMessages(), очищается в clearLog()) —
+  используется resolveReplyPreview() для
+  заполнения цитаты у новых сообщений и
+  setReplyTarget() для строки "Replying to ...".
+  editRequested()/replyRequested() взаимно
+  отменяют друг друга — это два
+  взаимоисключающих режима композера (то же
+  общее поле messageEdit_, что и раньше).
+  consumeReplyTarget() — вызывается ровно один
+  раз при фактической отправке (MainWindow),
+  возвращает текущую цель и сразу её снимает.
 end note
 
 class CallWindow {
@@ -496,13 +576,23 @@ note right of FloatingCallTilesOverlay
   окон обратно.
 end note
 
+struct MessageReactionSummary {
+  +emoji: QString
+  +logins: QStringList
+}
 struct ChatMessage {
   +author: QString
   +body: QString
   +sentAt: QString
   +attachmentId: qint64 = -1
   +attachmentFilename: QString
+  +isPinned: bool = false
+  +reactions: QList<MessageReactionSummary>
+  +replyToMessageId: qint64 = -1
+  +replyToAuthor: QString
+  +replyToBodySnippet: QString
 }
+ChatMessage "1" *-- "0..*" MessageReactionSummary : one per used emoji (issue #333/#334)
 
 class SearchDialog {
   +queryEdit() : QLineEdit*
@@ -515,6 +605,23 @@ class SearchDialog {
   +resultActivated(messageId: qint64)
 }
 SearchDialog ..> ChatMessageInfo : renders
+
+class PinnedMessagesDialog {
+  +pinnedList() : QListWidget*
+  +setPinnedMessages(pinned: QList<PinnedMessageInfo>)
+  .. signals ..
+  +messageActivated(messageId: qint64)
+}
+PinnedMessagesDialog ..> PinnedMessageInfo : renders
+note right of PinnedMessagesDialog
+  Issue #338/#339 — тот же паттерн "чистое
+  представление", что и у SearchDialog, которую
+  этот класс сознательно копирует по форме:
+  MainWindow владеет ChatRestClient/ChatClient,
+  передаёт список через setPinnedMessages(),
+  клик по элементу — messageActivated() ->
+  MainWindow -> ChatView::scrollToMessage().
+end note
 
 class LoginWindow {
   +showCodeSent(identifier: QString)
@@ -550,15 +657,22 @@ end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
 class ChatMessageRow {
-  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
+  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "", canManageChannel: bool = false)
   +messageId() : qint64
   +updateBody(newBody: QString)
+  +setPinned(isPinned: bool)
+  +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
+  -rebuildReactionChips()
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
   +deleteRequested(id: qint64)
+  +pinRequested(id: qint64)
+  +unpinRequested(id: qint64)
   +downloadRequested(attachmentId: qint64, filename: QString)
+  +reactionToggleRequested(id: qint64, emoji: QString)
+  +replyRequested(id: qint64)
 }
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
@@ -570,7 +684,48 @@ ChatMessageRow *-- ChatBubble : owns (own messages: green\ngradient, right-align
 note right of ChatMessageRow
   Own messages: right-click the bubble for a
   context menu (Edit/Delete) instead of
-  always-visible buttons (issue #150).
+  always-visible buttons (issue #150). Pin/Unpin
+  (issue #308/#338/#339) is in that same menu
+  whenever canManageChannel is true, regardless
+  of isOwnMessage — the two conditions are
+  independent, a row can show all three at once.
+  A "📌 Pinned" label is always created (just
+  hidden) so ANY viewer — not only someone who
+  can manage the channel — sees it once
+  setPinned(true) is called from ChatView, in
+  response to ChatClient::messagePinned() for
+  this row's id. "React" and Reply (issue #306)
+  are also in that same menu for ANY message, own
+  or not — unlike Edit/Delete.
+
+  "React" (issue #305/#333/#334) — a fixed set
+  of 5 emoji, each an action that emits
+  reactionToggleRequested(). A chip per used
+  emoji ("emoji count") also renders below the
+  body — clicking it is the same toggle as
+  picking that emoji from the menu; hovering
+  shows the logins via tooltip.
+  applyReactionChange(emoji, logins) applies ONE
+  changed emoji's full login list (as
+  ChatClient::reactionChanged() delivers it, not
+  a delta) against reactions_ and rebuilds the
+  chip row from scratch (rebuildReactionChips())
+  — simpler than patching one QPushButton in
+  place, and reactions per message are always few.
+
+  Issue #306: replyToMessageId >= 0 shows a
+  quote block above the body — replyToAuthor/
+  replyToBodySnippet are filled in by ChatView
+  (resolveReplyPreview(), from its own
+  messagesById_ cache) before this row is even
+  constructed; ChatMessageRow itself never
+  resolves anything, only renders what it was
+  given. Empty replyToAuthor at
+  replyToMessageId >= 0 renders as "Message
+  unavailable" — the original is either
+  deleted or simply not loaded into this
+  client's cache yet, the two cases are
+  deliberately not distinguished.
 
   Issue #188: isImageAttachment()/isVideoAttachment()
   — свободные функции в namespace devicehub (по
@@ -688,12 +843,21 @@ DesktopNotifier ..> NotificationPolicy : shouldNotify() >
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
-    +communityAvatarIcon(label: QString) : QIcon
+    +communityAvatarIcon(label: QString, unreadCount: int64 = 0) : QIcon
     +sendIcon(fillColor: QColor) : QIcon
     +settingsIcon(fillColor: QColor) : QIcon
     +membersIcon(fillColor: QColor) : QIcon
   }
 }
+note right of IconFactory
+  Issue #310/#349: communityAvatarIcon()'s
+  unreadCount (default 0, F.51 — не отдельная
+  перегрузка) рисует поверх обычного круга
+  маленький красный (ui_theme::kBadgeBackground,
+  не зелёный акцент — иначе бейдж слился бы с
+  фоном самого аватара) кружок с числом,
+  "99+" при переполнении.
+end note
 
 package "src/devices" {
   class DeviceEnumerator
@@ -730,6 +894,7 @@ MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
 MainWindow *-- ModeratorsDialog : owns (opened from\nCommunitiesPanel, issue #114)
 MainWindow *-- SearchDialog : owns (opened from ChatView's\n"Search" button, issue #118)
+MainWindow *-- PinnedMessagesDialog : owns (opened from ChatView's\n"📌 N" button, issue #338/#339)
 MainWindow *-- FooterBar : owns (bottom)
 MainWindow *-- ToastBanner : owns (floats over ChatView)
 MainWindow *-- DesktopNotifier : owns (issue #92)
@@ -747,7 +912,7 @@ MainWindow *-- ChatRestClient : owns
 
 MainWindow ..> AuthClient : tokenReceived()\ntokenVerified() >
 MainWindow ..> AuthClient : errorOccurred() >
-MainWindow ..> ChatClient : subscribed()\nmessageReceived() >
+MainWindow ..> ChatClient : subscribed()\nmessageReceived() (incl. replyToMessageId,\nissue #306 — resolved by ChatView) >
 MainWindow ..> ChatClient : dmChatClient_ subscribed()\nmessageReceived() -> DirectMessageView::appendMessage()\n(issue #187, Phase 2b) >
 MainWindow ..> DesktopNotifier : notifyMessage() (from\nmessageReceived() handler) >
 MainWindow ..> ChatRestClient : communitiesListed()\nchannelsListed() >
@@ -794,6 +959,12 @@ ChatView ..> MainWindow : openSearchRequested() -> show()/raise()\nSearchDialog 
 MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
 ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
 SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::scrollToMessage() >
+ChatView ..> MainWindow : pinMessageRequested()/unpinMessageRequested()\n-> ChatClient::sendPinMessage()/sendUnpinMessage() (issue #338/#339) >
+ChatClient ..> MainWindow : messagePinned()/messageUnpinned()\n-> ChatView::updatePinned() (issue #338/#339) >
+ChatView ..> MainWindow : pinnedMessagesToggleRequested() -> show()/raise()\nPinnedMessagesDialog (issue #339) >
+MainWindow ..> ChatRestClient : listPinnedMessages() (issue #338/#339) >
+ChatRestClient ..> MainWindow : pinnedMessagesListed() -> ChatView::setPinnedMessagesCount()/\nPinnedMessagesDialog::setPinnedMessages() (issue #338/#339) >
+PinnedMessagesDialog ..> MainWindow : messageActivated() -> ChatView::scrollToMessage() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested() >
 CallWindow ..> MainWindow : muteToggleRequested()/videoToggleRequested()\nscreenShareToggleRequested()/leaveCallRequested() (issue #185) >
@@ -802,7 +973,7 @@ FloatingCallTilesOverlay ..> MainWindow : restoreRequested() (issue #215) >
 ChatView ..> MainWindow : memberListToggleRequested() (issue #184) >
 ChatView ..> MainWindow : loadOlderMessagesRequested() (issue #100) >
 ChatView ..> MainWindow : deleteMessageRequested() (issue #107) >
-ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested() >
+ChatMessageRow ..> ChatView : editRequested()/deleteRequested()\ndownloadRequested()/replyRequested() (issue #306) >
 ChatView ..> MainWindow : attachFileRequested()\ndownloadAttachmentRequested() (issue #116) >
 MainWindow ..> ChatRestClient : uploadAttachment()/downloadAttachment()\n(issue #116) >
 ChatRestClient ..> MainWindow : attachmentUploaded() -> ChatClient::sendMessage()\nattachmentDownloaded() -> QFileDialog save (issue #116) >
