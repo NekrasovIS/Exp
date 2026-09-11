@@ -3,6 +3,7 @@
 // component's encrypted-channel early return never mounts this (and so
 // never calls useMessages/useChatSocket) for one.
 
+import type { ChatMessageInfo } from "@devicehub/core";
 import { useEffect, useState } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
@@ -10,7 +11,7 @@ import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { useSession } from "../session/SessionContext.js";
 import { MessageComposer } from "./MessageComposer.js";
-import { MessageList } from "./MessageList.js";
+import { MessageList, truncatedSnippet } from "./MessageList.js";
 import { MessageSearch } from "./MessageSearch.js";
 import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMessages } from "./useMessages.js";
@@ -53,6 +54,21 @@ export function ChatViewContent({
   const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(false);
+  // Reply target (issue #306/#331) — resolved from `messages` itself,
+  // same client-side model as DeviceHub's ChatView; cleared once the
+  // composer actually sends (see MessageComposer's onCancelReply).
+  const [replyTarget, setReplyTarget] = useState<ChatMessageInfo | null>(null);
+
+  function handleSend(body: string, attachmentId?: number): void {
+    sendMessage(body, attachmentId, replyTarget?.id);
+  }
+
+  function handleReply(id: number): void {
+    const target = messages.find((m) => m.id === id);
+    if (target !== undefined) {
+      setReplyTarget(target);
+    }
+  }
 
   // Issue #322 — presence rides this channel's socket; just forwarded
   // up to the caller, which owns the aggregated state (MembersSidebar
@@ -99,13 +115,24 @@ export function ChatViewContent({
           isModerator={isModerator}
           onEdit={editMessage}
           onDelete={deleteMessage}
+          onReply={handleReply}
           onToggleReaction={toggleReaction}
           onPin={pin}
           onUnpin={unpin}
         />
       </div>
       {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
-      <MessageComposer channelId={channelId} onSend={sendMessage} onTyping={sendTyping} />
+      <MessageComposer
+        channelId={channelId}
+        onSend={handleSend}
+        replyTarget={
+          replyTarget !== null
+            ? { id: replyTarget.id, author: replyTarget.author, snippet: truncatedSnippet(replyTarget.body) }
+            : null
+        }
+        onCancelReply={() => setReplyTarget(null)}
+        onTyping={sendTyping}
+      />
     </section>
   );
 }

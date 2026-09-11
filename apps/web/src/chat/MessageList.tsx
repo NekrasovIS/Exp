@@ -2,6 +2,15 @@
 // delete is author-or-moderator (see README's chat-service section),
 // and a downloaded attachment (if any) as a plain link.
 //
+// Reply/quote (issue #306/#331) is available on ANY message, own or
+// not, same as Edit/Delete are not. The quote above a replying
+// message's body is resolved from `messages` itself — chat-service
+// never stores/sends a snapshot of the original author/body, only the
+// bare id, so a reply to something outside the currently loaded page
+// of history shows "Message unavailable" rather than fetching it
+// specially (same client-side resolution model as DeviceHub's
+// ChatView::messagesById_).
+//
 // Reactions (issue #305/#333/#335) are available on ANY message, own
 // or not — unlike Edit/Delete, gating is not by author/moderator at
 // all. The fixed 5-emoji set matches DeviceHub's own ChatMessageRow
@@ -15,13 +24,19 @@
 // shows just because the viewer happens to be the author.
 
 import type { ChatMessageInfo } from "@devicehub/core";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
 import { MessageBody } from "./MessageBody.js";
 
 const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
+
+const kReplySnippetMaxChars = 60;
+
+export function truncatedSnippet(body: string): string {
+  return body.length > kReplySnippetMaxChars ? `${body.slice(0, kReplySnippetMaxChars)}…` : body;
+}
 
 interface MessageListProps {
   messages: ChatMessageInfo[];
@@ -31,6 +46,7 @@ interface MessageListProps {
   isModerator: boolean;
   onEdit: (id: number, newBody: string) => void;
   onDelete: (id: number) => void;
+  onReply: (id: number) => void;
   onToggleReaction: (id: number, emoji: string) => void;
   onPin: (id: number) => void;
   onUnpin: (id: number) => void;
@@ -44,6 +60,7 @@ export function MessageList({
   isModerator,
   onEdit,
   onDelete,
+  onReply,
   onToggleReaction,
   onPin,
   onUnpin,
@@ -51,6 +68,7 @@ export function MessageList({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [reactingId, setReactingId] = useState<number | null>(null);
+  const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
 
   function pickReaction(id: number, emoji: string): void {
     onToggleReaction(id, emoji);
@@ -105,6 +123,21 @@ export function MessageList({
               ) : (
                 <>
                   {isPinned && <span className={styles.pinned}>📌 Pinned</span>}
+                  {message.replyToMessageId !== undefined &&
+                    (() => {
+                      const original = messagesById.get(message.replyToMessageId);
+                      return (
+                        <span className={styles.quote}>
+                          {original !== undefined ? (
+                            <>
+                              <strong>{original.author}</strong>: {truncatedSnippet(original.body)}
+                            </>
+                          ) : (
+                            <em>Message unavailable</em>
+                          )}
+                        </span>
+                      );
+                    })()}
                   <span>
                     <MessageBody text={message.body} />
                   </span>
@@ -152,26 +185,29 @@ export function MessageList({
                       </button>
                     )}
                   </div>
-                  {(isOwn || isModerator) && (
-                    <div className={styles.actions}>
-                      {isOwn && (
-                        <button
-                          type="button"
-                          className={styles.actionButton}
-                          onClick={() => startEditing(message)}
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {isModerator && (
-                        <button
-                          type="button"
-                          className={styles.actionButton}
-                          onClick={() => (isPinned ? onUnpin(message.id) : onPin(message.id))}
-                        >
-                          {isPinned ? "Unpin" : "Pin"}
-                        </button>
-                      )}
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.actionButton} onClick={() => onReply(message.id)}>
+                      Reply
+                    </button>
+                    {isOwn && (
+                      <button
+                        type="button"
+                        className={styles.actionButton}
+                        onClick={() => startEditing(message)}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {isModerator && (
+                      <button
+                        type="button"
+                        className={styles.actionButton}
+                        onClick={() => (isPinned ? onUnpin(message.id) : onPin(message.id))}
+                      >
+                        {isPinned ? "Unpin" : "Pin"}
+                      </button>
+                    )}
+                    {(isOwn || isModerator) && (
                       <button
                         type="button"
                         className={styles.actionButton}
@@ -179,8 +215,8 @@ export function MessageList({
                       >
                         Delete
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </>
               )}
             </div>

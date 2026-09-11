@@ -46,6 +46,15 @@
   margin-top: var(--space-1);
 }
 
+.quote {
+  display: block;
+  font-size: var(--font-size-sm);
+  opacity: 0.75;
+  border-left: 2px solid currentColor;
+  padding-left: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
 /* Issue #307 — same "bold, no separate color" treatment as DeviceHub's
    message_formatting::highlightMentions() (Qt::MarkdownText renders
    **bold** the same way there). */

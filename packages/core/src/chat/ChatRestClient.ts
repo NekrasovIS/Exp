@@ -41,6 +41,7 @@ interface MessageBody {
   sent_at: string;
   attachment_id?: number | null;
   attachment_filename?: string | null;
+  reply_to_message_id?: number | null;
   reactions?: MessageReactionBody[];
 }
 
@@ -91,6 +92,7 @@ function toChatMessageInfo(body: MessageBody): ChatMessageInfo {
   };
   if (body.attachment_id != null) message.attachmentId = body.attachment_id;
   if (body.attachment_filename != null) message.attachmentFilename = body.attachment_filename;
+  if (body.reply_to_message_id != null) message.replyToMessageId = body.reply_to_message_id;
   return message;
 }
 

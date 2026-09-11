@@ -13,7 +13,7 @@ import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
 import { useSession } from "../session/SessionContext.js";
-import { MessageList } from "./MessageList.js";
+import { MessageList, truncatedSnippet } from "./MessageList.js";
 import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMessages } from "./useMessages.js";
 import { usePinnedMessages } from "./usePinnedMessages.js";
@@ -59,6 +59,11 @@ export function EncryptedChatViewContent({
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [decryptedPinned, setDecryptedPinned] = useState<PinnedMessageInfo[]>([]);
   const [body, setBody] = useState("");
+  // Reply target (issue #306/#331) — resolved from decryptedMessages
+  // (below), not the raw ciphertext messages, so the "Replying to ..."
+  // bar shows readable text; the id sent over the wire is unaffected
+  // either way (chat-service only ever stores/relays the bare id).
+  const [replyTarget, setReplyTarget] = useState<ChatMessageInfo | null>(null);
   const [pinnedOpen, setPinnedOpen] = useState(false);
 
   // Issue #322 — same forwarding as ChatViewContent's own copy of this
@@ -133,11 +138,22 @@ export function EncryptedChatViewContent({
       return;
     }
     setBody("");
-    void encryptMessage(toSend, channelKey).then((ciphertext) => sendMessage(ciphertext));
+    const replyToMessageId = replyTarget?.id;
+    setReplyTarget(null);
+    void encryptMessage(toSend, channelKey).then((ciphertext) =>
+      sendMessage(ciphertext, undefined, replyToMessageId),
+    );
   }
 
   function handleEdit(id: number, newBody: string): void {
     void encryptMessage(newBody, channelKey).then((ciphertext) => editMessage(id, ciphertext));
+  }
+
+  function handleReply(id: number): void {
+    const target = decryptedMessages.find((m) => m.id === id);
+    if (target !== undefined) {
+      setReplyTarget(target);
+    }
   }
 
   return (
@@ -168,11 +184,20 @@ export function EncryptedChatViewContent({
           isModerator={isModerator}
           onEdit={handleEdit}
           onDelete={deleteMessage}
+          onReply={handleReply}
           onToggleReaction={toggleReaction}
           onPin={pin}
           onUnpin={unpin}
         />
       </div>
+      {replyTarget !== null && (
+        <p className={styles.statusText}>
+          Replying to <strong>{replyTarget.author}</strong>: {truncatedSnippet(replyTarget.body)}{" "}
+          <button type="button" onClick={() => setReplyTarget(null)}>
+            Cancel
+          </button>
+        </p>
+      )}
       {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
       <form onSubmit={handleSend} className={styles.simpleComposerForm}>
         <label htmlFor="encrypted-message-body">Message</label>

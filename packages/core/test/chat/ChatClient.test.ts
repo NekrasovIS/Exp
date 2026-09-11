@@ -167,6 +167,24 @@ describe("ChatClient", () => {
     });
   });
 
+  it("emits 'message' with replyToMessageId when the frame carries reply_to_message_id", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onMessage = vi.fn();
+    client.on("message", onMessage);
+
+    socket.simulateMessage(
+      JSON.stringify({
+        id: 2,
+        author: "alice",
+        body: "a reply",
+        sent_at: "2026-01-01T00:00:00Z",
+        reply_to_message_id: 1,
+      }),
+    );
+
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ replyToMessageId: 1 }));
+  });
+
   it("emits 'message' with the reactions the frame carries", () => {
     const { client, socket } = makeClientAndSocket();
     const onMessage = vi.fn();
@@ -435,6 +453,15 @@ describe("ChatClient", () => {
       client.sendMessage("see attached", 5);
 
       expect(socket.lastSentFrame()).toEqual({ body: "see attached", attachment_id: 5 });
+    });
+
+    it("sendMessage with a replyToMessageId includes reply_to_message_id", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendMessage("a reply", undefined, 3);
+
+      expect(socket.lastSentFrame()).toEqual({ body: "a reply", reply_to_message_id: 3 });
     });
 
     it("joinCall/leaveCall send the expected frames", () => {

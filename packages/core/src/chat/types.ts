@@ -26,6 +26,12 @@ export interface ChatMessageInfo {
   sentAt: string;
   attachmentId?: number;
   attachmentFilename?: string;
+  /** Id of the message this one replies to (issue #306/#331) — absent
+   * for a plain message. Deliberately just a bare id: chat-service
+   * never stores/sends a snapshot of the original author/body, so the
+   * client resolves it from whatever history it already has loaded
+   * (see MessageList's own quote-rendering), same as DeviceHub. */
+  replyToMessageId?: number;
   /** Always present (possibly empty), unlike attachmentId/attachmentFilename
    * — chat-service's own `toJson(Message)` always includes the
    * `reactions` field, even for a message with none. */

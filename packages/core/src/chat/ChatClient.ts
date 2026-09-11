@@ -128,10 +128,18 @@ export class ChatClient {
     this.socket = null;
   }
 
-  sendMessage(body: string, attachmentId?: number): void {
+  /** @param replyToMessageId (issue #306/#331) — id of the message this
+   * one replies to; chat-service does not verify it exists (a reply to
+   * a since-deleted or never-loaded message is accepted, same as
+   * DeviceHub — see the schema's own doc comment on why this column
+   * carries no foreign key). */
+  sendMessage(body: string, attachmentId?: number, replyToMessageId?: number): void {
     const frame: Record<string, unknown> = { body };
     if (attachmentId !== undefined) {
       frame.attachment_id = attachmentId;
+    }
+    if (replyToMessageId !== undefined) {
+      frame.reply_to_message_id = replyToMessageId;
     }
     this.sendFrame(frame);
   }
@@ -386,6 +394,9 @@ export class ChatClient {
       }
       if (typeof body.attachment_filename === "string") {
         message.attachmentFilename = body.attachment_filename;
+      }
+      if (typeof body.reply_to_message_id === "number") {
+        message.replyToMessageId = body.reply_to_message_id;
       }
       this.emit("message", message);
     }

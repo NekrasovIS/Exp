@@ -19,6 +19,7 @@ function renderList(overrides: Partial<Parameters<typeof MessageList>[0]> = {}) 
       isModerator={false}
       onEdit={vi.fn()}
       onDelete={vi.fn()}
+      onReply={vi.fn()}
       onToggleReaction={vi.fn()}
       onPin={vi.fn()}
       onUnpin={vi.fn()}
@@ -34,11 +35,11 @@ describe("MessageList", () => {
     const items = screen.getAllByRole("listitem");
     expect(items[0]).toHaveTextContent("hi from alice");
     const aliceButtonNames = Array.from(items[0]!.querySelectorAll("button")).map((b) => b.textContent);
-    expect(aliceButtonNames).toEqual(["React", "Edit", "Delete"]);
-    // bob's message: React is always available, but no Edit/Delete for
-    // alice (not the author, not a moderator).
+    expect(aliceButtonNames).toEqual(["React", "Reply", "Edit", "Delete"]);
+    // bob's message: React/Reply are always available, but no Edit/Delete
+    // for alice (not the author, not a moderator).
     const bobButtonNames = Array.from(items[1]!.querySelectorAll("button")).map((b) => b.textContent);
-    expect(bobButtonNames).toEqual(["React"]);
+    expect(bobButtonNames).toEqual(["React", "Reply"]);
   });
 
   it("shows Delete and Pin (but not Edit) on someone else's message for a moderator", () => {
@@ -47,7 +48,7 @@ describe("MessageList", () => {
     const bobItem = screen.getAllByRole("listitem")[1]!;
     expect(bobItem).toHaveTextContent("hi from bob");
     const buttonNames = Array.from(bobItem.querySelectorAll("button")).map((b) => b.textContent);
-    expect(buttonNames).toEqual(["React", "Pin", "Delete"]);
+    expect(buttonNames).toEqual(["React", "Reply", "Pin", "Delete"]);
   });
 
   it("marks an edited message and lets the author save a new body", async () => {
@@ -71,6 +72,60 @@ describe("MessageList", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onDelete).toHaveBeenCalledWith(1);
+  });
+
+  it("calls onReply with the message id for any message, including someone else's", async () => {
+    const onReply = vi.fn();
+    renderList({ onReply });
+
+    const bobItem = screen.getAllByRole("listitem")[1]!;
+    const bobReplyButton = Array.from(bobItem.querySelectorAll("button")).find(
+      (b) => b.textContent === "Reply",
+    )!;
+    await userEvent.click(bobReplyButton);
+
+    expect(onReply).toHaveBeenCalledWith(2);
+  });
+
+  it("renders no quote for a message with no replyToMessageId", () => {
+    renderList();
+
+    expect(screen.queryByText("Message unavailable")).not.toBeInTheDocument();
+  });
+
+  it("renders the resolved author/snippet quote for a reply whose original is loaded", () => {
+    renderList({
+      messages: [
+        ...kMessages,
+        { id: 3, author: "alice", body: "replying", sentAt: "t", replyToMessageId: 2, reactions: [] },
+      ],
+    });
+
+    const replyItem = screen.getAllByRole("listitem")[2]!;
+    expect(replyItem).toHaveTextContent("bob");
+    expect(replyItem).toHaveTextContent("hi from bob");
+  });
+
+  it("renders 'Message unavailable' for a reply whose original isn't in the currently loaded history", () => {
+    renderList({
+      messages: [{ id: 3, author: "alice", body: "replying", sentAt: "t", replyToMessageId: 999, reactions: [] }],
+    });
+
+    expect(screen.getByText("Message unavailable")).toBeInTheDocument();
+  });
+
+  it("truncates a long original body in the quote", () => {
+    const longBody = "x".repeat(80);
+    renderList({
+      messages: [
+        { id: 1, author: "alice", body: longBody, sentAt: "t", reactions: [] },
+        { id: 2, author: "bob", body: "replying", sentAt: "t", replyToMessageId: 1, reactions: [] },
+      ],
+    });
+
+    const replyItem = screen.getAllByRole("listitem")[1]!;
+    expect(replyItem).toHaveTextContent(`${"x".repeat(60)}…`);
+    expect(replyItem).not.toHaveTextContent(longBody);
   });
 
   it("renders no reaction chips for a message with none", () => {
@@ -158,6 +213,7 @@ describe("MessageList", () => {
         isModerator={false}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
+        onReply={vi.fn()}
         onToggleReaction={vi.fn()}
         onPin={vi.fn()}
         onUnpin={vi.fn()}

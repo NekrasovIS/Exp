@@ -10,9 +10,21 @@ import styles from "./MessageComposer.module.css";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
+/** Bare minimum ChatViewContent needs to resolve/display the current
+ * reply target (issue #306/#331) — mirrors DeviceHub's ChatView, which
+ * resolves the same author/snippet from its own already-loaded
+ * history before ever handing it to the composer. */
+interface ReplyTarget {
+  id: number;
+  author: string;
+  snippet: string;
+}
+
 interface MessageComposerProps {
   channelId: number;
   onSend: (body: string, attachmentId?: number) => void;
+  replyTarget?: ReplyTarget | null;
+  onCancelReply?: () => void;
   /** Called on every keystroke (issue #318) — the hook (useMessages) is
    * the one that throttles this down to a real WebSocket frame, this
    * component just reports every edit. Optional so existing callers/tests
@@ -20,7 +32,13 @@ interface MessageComposerProps {
   onTyping?: () => void;
 }
 
-export function MessageComposer({ channelId, onSend, onTyping }: MessageComposerProps) {
+export function MessageComposer({
+  channelId,
+  onSend,
+  replyTarget,
+  onCancelReply,
+  onTyping,
+}: MessageComposerProps) {
   const { getAccessToken } = useSession();
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
 
@@ -60,11 +78,20 @@ export function MessageComposer({ channelId, onSend, onTyping }: MessageComposer
     onSend(body.trim(), pendingAttachment?.id);
     setBody("");
     setPendingAttachment(null);
+    onCancelReply?.();
   }
 
   return (
     <>
       {error !== null && <p role="alert">{error}</p>}
+      {replyTarget != null && (
+        <p className={styles.replyBar}>
+          Replying to <strong>{replyTarget.author}</strong>: {replyTarget.snippet}{" "}
+          <button type="button" onClick={onCancelReply}>
+            Cancel
+          </button>
+        </p>
+      )}
       {pendingAttachment !== null && (
         <p className={styles.pendingAttachment}>
           Attached: {pendingAttachment.filename}{" "}
