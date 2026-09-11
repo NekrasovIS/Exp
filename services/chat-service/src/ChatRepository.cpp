@@ -482,15 +482,16 @@ std::vector<std::string> ChatRepository::listModerators(std::int64_t communityId
 
 std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, const std::string& authorLogin,
                                                        const std::string& body,
-                                                       std::optional<std::int64_t> attachmentId) {
+                                                       std::optional<std::int64_t> attachmentId,
+                                                       std::optional<std::int64_t> replyToMessageId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
     try {
         const pqxx::result rows = transaction.exec(
-            "INSERT INTO messages (channel_id, author_login, body, attachment_id) VALUES ($1, $2, $3, $4) "
-            "RETURNING id, sent_at",
-            pqxx::params{channelId, authorLogin, body, attachmentId});
+            "INSERT INTO messages (channel_id, author_login, body, attachment_id, reply_to_message_id) "
+            "VALUES ($1, $2, $3, $4, $5) RETURNING id, sent_at",
+            pqxx::params{channelId, authorLogin, body, attachmentId, replyToMessageId});
 
         std::optional<std::string> attachmentFilename;
         if (attachmentId.has_value()) {
@@ -507,9 +508,12 @@ std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, con
                         .body = body,
                         .sentAt = rows[0][1].as<std::string>(),
                         .attachmentId = attachmentId,
-                        .attachmentFilename = attachmentFilename};
+                        .attachmentFilename = attachmentFilename,
+                        .replyToMessageId = replyToMessageId};
     } catch (const pqxx::foreign_key_violation&) {
-        // Либо channelId, либо attachmentId (если установлен) не существует.
+        // channelId либо attachmentId (если установлен) не существует —
+        // reply_to_message_id нарочно без FK (см. её doc-комментарий),
+        // поэтому сам не может вызвать это исключение.
         return std::nullopt;
     }
 }
@@ -527,7 +531,8 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
     // сообщения старше этого id). id DESC как вторичный ключ сортировки
     // делает курсор однозначным, даже если у двух сообщений совпадает sent_at.
     const pqxx::result rows = transaction.exec(
-        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "m.reply_to_message_id "
         "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
         "WHERE m.channel_id = $1 AND ($3::bigint IS NULL OR m.id < $3) "
         "ORDER BY m.sent_at DESC, m.id DESC LIMIT $2",
@@ -546,7 +551,9 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
                     .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
                     .attachmentFilename =
                         row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
-                    .reactions = reactionsForMessage(transaction, messageId)});
+                    .reactions = reactionsForMessage(transaction, messageId),
+                    .replyToMessageId =
+                        row[7].is_null() ? std::nullopt : std::make_optional(row[7].as<std::int64_t>())});
     }
     std::reverse(messages.begin(), messages.end());
     return messages;
@@ -684,7 +691,8 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
     // проверка подстроки, поэтому символы вроде '%'/'_' в запросе
     // сопоставляются буквально, а не трактуются как SQL-подстановочные знаки.
     const pqxx::result rows = transaction.exec(
-        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "m.reply_to_message_id "
         "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
         "WHERE m.channel_id = $1 AND position(lower($2) in lower(m.body)) > 0 "
         "ORDER BY m.sent_at DESC, m.id DESC LIMIT $3",
@@ -703,7 +711,9 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
                     .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
                     .attachmentFilename =
                         row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
-                    .reactions = reactionsForMessage(transaction, messageId)});
+                    .reactions = reactionsForMessage(transaction, messageId),
+                    .replyToMessageId =
+                        row[7].is_null() ? std::nullopt : std::make_optional(row[7].as<std::int64_t>())});
     }
     return messages;
 }

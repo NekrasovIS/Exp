@@ -15,6 +15,7 @@
 #include "ui/ChatBubble.h"
 #include "ui/ChatMessageGrouping.h"
 #include "ui/IconFactory.h"
+#include "ui/MessageFormatting.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -77,7 +78,12 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
 
-    bodyLabel_ = new QLabel(message.body, bubble_);
+    rawBody_ = message.body;
+    // Issue #307: @упоминания оборачиваются в **bold** до того, как
+    // попадают в Qt::MarkdownText ниже — тот же приём, что и у обычного
+    // markdown в issue #94, никакого отдельного rich-text прохода не
+    // требуется.
+    bodyLabel_ = new QLabel(message_formatting::highlightMentions(message.body), bubble_);
     bodyLabel_->setObjectName(QStringLiteral("chatMessageBody"));
     bodyLabel_->setWordWrap(true);
     // Issue #94: рендерим **bold**/*italic*/`code`/ссылки/списки через
@@ -114,6 +120,24 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         }
         headerRow->addWidget(timeLabel_);
         bubbleLayout->addLayout(headerRow);
+    }
+    if (message.replyToMessageId >= 0) {
+        // Цитата над телом сообщения (issue #306) — replyToAuthor/
+        // replyToBodySnippet заполнены ChatView из её собственного кэша
+        // уже показанных сообщений; пустой replyToAuthor при
+        // replyToMessageId >= 0 означает, что ChatView не нашла
+        // оригинал в этом кэше (удалён либо ещё не подгружен), и здесь
+        // показывается заглушка вместо реального автора/текста.
+        const QString quoteText = message.replyToAuthor.isEmpty()
+                                       ? tr("Message unavailable")
+                                       : message.replyToAuthor + QStringLiteral(": ") + message.replyToBodySnippet;
+        auto* quoteLabel = new QLabel(quoteText, bubble_);
+        quoteLabel->setObjectName(QStringLiteral("chatMessageReplyQuote"));
+        quoteLabel->setWordWrap(true);
+        if (isOwnMessage) {
+            quoteLabel->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        }
+        bubbleLayout->addWidget(quoteLabel);
     }
     bubbleLayout->addWidget(bodyLabel_);
 
@@ -159,39 +183,46 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         }
     }
 
-    if (isOwnMessage) {
-        // Контекстное меню по правому клику вместо всегда видимых кнопок
-        // (issue #150) — доступно на каждой строке собственного сообщения
-        // независимо от showHeader, поскольку сгруппированные
-        // (последовательные) сообщения не повторяют заголовок, но
-        // каждому отдельному сообщению всё равно нужен свой способ
-        // адресации для редактирования/удаления (issue #107). Построено
-        // через popup() (неблокирующий), а не exec(), чтобы тест мог
-        // напрямую вызвать соответствующий QAction, не прокручивая
-        // модальный event loop.
-        // bodyLabel_ включает Qt::TextBrowserInteraction (выше), из-за
-        // чего QLabel сам обрабатывает правый клик и показывает
-        // встроенное текстовое меню (Copy/Copy Link/Select All),
-        // поглощая событие раньше, чем оно доходит до bubble_ — снаружи
-        // это выглядело так, будто кастомное меню Edit/Delete вообще не
-        // подключено. Отключаем контекстное меню у самого label'а, чтобы
-        // событие всплывало к bubble_.
-        bodyLabel_->setContextMenuPolicy(Qt::NoContextMenu);
-        bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(bubble_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-            auto* menu = new QMenu(bubble_);
-            menu->setAttribute(Qt::WA_DeleteOnClose);
-            menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
+    // Контекстное меню по правому клику вместо всегда видимых кнопок
+    // (issue #150) — доступно на каждой строке независимо от showHeader,
+    // поскольку сгруппированные (последовательные) сообщения не
+    // повторяют заголовок, но каждому отдельному сообщению всё равно
+    // нужен свой способ адресации. Edit/Delete — только для собственных
+    // сообщений (issue #107), Reply — для любых (issue #306), в том
+    // числе чужих: ответить можно на любое сообщение. Построено через
+    // popup() (неблокирующий), а не exec(), чтобы тест мог напрямую
+    // вызвать соответствующий QAction, не прокручивая модальный event
+    // loop.
+    // bodyLabel_ включает Qt::TextBrowserInteraction (выше), из-за чего
+    // QLabel сам обрабатывает правый клик и показывает встроенное
+    // текстовое меню (Copy/Copy Link/Select All), поглощая событие
+    // раньше, чем оно доходит до bubble_ — снаружи это выглядело так,
+    // будто кастомное меню вообще не подключено. Отключаем контекстное
+    // меню у самого label'а, чтобы событие всплывало к bubble_.
+    bodyLabel_->setContextMenuPolicy(Qt::NoContextMenu);
+    bubble_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(bubble_, &QWidget::customContextMenuRequested, this, [this, isOwnMessage](const QPoint& pos) {
+        auto* menu = new QMenu(bubble_);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->setObjectName(QStringLiteral("chatMessageContextMenu"));
+        if (isOwnMessage) {
             QAction* editAction = menu->addAction(tr("Edit"));
             editAction->setObjectName(QStringLiteral("editMessageAction"));
             connect(editAction, &QAction::triggered, this,
-                    [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+                    [this]() { emit editRequested(messageId_, rawBody_); });
+        }
+        QAction* replyAction = menu->addAction(tr("Reply"));
+        replyAction->setObjectName(QStringLiteral("replyMessageAction"));
+        connect(replyAction, &QAction::triggered, this, [this]() { emit replyRequested(messageId_); });
+        if (isOwnMessage) {
             QAction* deleteAction = menu->addAction(tr("Delete"));
             deleteAction->setObjectName(QStringLiteral("deleteMessageAction"));
             connect(deleteAction, &QAction::triggered, this, [this]() { emit deleteRequested(messageId_); });
-            menu->popup(bubble_->mapToGlobal(pos));
-        });
+        }
+        menu->popup(bubble_->mapToGlobal(pos));
+    });
 
+    if (isOwnMessage) {
         rootLayout->addStretch(1);
         rootLayout->addWidget(bubble_);
     } else {
@@ -210,7 +241,8 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
 }
 
 void ChatMessageRow::updateBody(const QString& newBody) {
-    bodyLabel_->setText(newBody);
+    rawBody_ = newBody;
+    bodyLabel_->setText(message_formatting::highlightMentions(newBody));
     if (timeLabel_ != nullptr) {
         timeLabel_->setText(formattedSentAt_ + QStringLiteral(" (edited)"));
     }

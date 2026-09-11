@@ -21,6 +21,17 @@ class ChatBubble;
 /// удаления; editedAt не задан для сообщения, которое никогда не
 /// редактировалось. attachmentId равен -1, а attachmentFilename пуст,
 /// когда у сообщения нет вложения (issue #116).
+///
+/// replyToMessageId равен -1, когда это не ответ (issue #306) — тот же
+/// стиль сентинела, что и у attachmentId. Когда >= 0, replyToAuthor/
+/// replyToBodySnippet заполняются ChatView из собственного кэша уже
+/// показанных сообщений (messagesById_) ПЕРЕД конструированием строки —
+/// сама эта структура и ChatMessageRow ничего не резолвят самостоятельно.
+/// Оба остаются пустыми, если ChatView не нашла это id в своём кэше
+/// (сообщение удалено, либо старше уже подгруженного окна истории) —
+/// ChatMessageRow показывает это как "message unavailable", отличая
+/// такой случай от "это не ответ вообще" по одному только
+/// replyToMessageId.
 struct ChatMessage {
     qint64 id = 0;
     QString author;
@@ -29,6 +40,9 @@ struct ChatMessage {
     std::optional<QString> editedAt;
     qint64 attachmentId = -1;
     QString attachmentFilename;
+    qint64 replyToMessageId = -1;
+    QString replyToAuthor;
+    QString replyToBodySnippet;
 };
 
 /// True, если @p filename оканчивается на одно из известных расширений
@@ -100,6 +114,13 @@ signals:
     /// сообщение, не только собственное).
     void downloadRequested(qint64 attachmentId, const QString& filename);
 
+    /// Выбор "Reply" в контекстном меню по правому клику (issue #306) —
+    /// доступно на любом сообщении, не только собственном, в отличие от
+    /// editRequested/deleteRequested. Слушатель (ChatView) сам решает,
+    /// что показать как "цитата" в поле ввода — эта строка передаёт
+    /// только id.
+    void replyRequested(qint64 id);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
@@ -112,6 +133,12 @@ private:
     QLabel* timeLabel_ = nullptr;
     QString formattedSentAt_;
     qint64 messageId_ = 0;
+    /// Тело сообщения ДО message_formatting::highlightMentions() (issue
+    /// #307) — editRequested() эмиттит это, а не bodyLabel_->text(),
+    /// иначе поле редактирования предзаполнилось бы уже обёрнутым в
+    /// **bold** markdown текстом, и повторное сохранение без изменений
+    /// зафиксировало бы эту обёртку в самом сообщении навсегда.
+    QString rawBody_;
     /// Плейсхолдер превью изображения-вложения (issue #188) — null, если
     /// у сообщения нет вложения-изображения. setAttachmentPreview()
     /// заменяет плейсхолдерный текст на реальную картинку, когда она

@@ -28,6 +28,13 @@ namespace devicehub {
  * callSignalReceived срабатывают для соответствующих серверных кадров.
  * Валидно только после того, как сработал subscribed().
  *
+ * sendCallReaction() (issue #312) отправляет `{"call_reaction":
+ * "<emoji>"}`; callReactionReceived() срабатывает на рассылку
+ * `{"call_reaction": {"login", "emoji"}}` от другого участника звонка
+ * (chat-service никогда не отправляет это эхом обратно отправителю, тот
+ * же принцип, что и у typing). Оба валидны только пока этот клиент сам
+ * сейчас в звонке (joinCall() уже вызван, leaveCall() ещё нет).
+ *
  * Прокси-сигналинг SFU (issue #232) — параллельный, более новый путь
  * поверх того же WebSocket: sendJanusAttach()/sendJanusMessage()
  * отправляют `{"janus_attach"}`/`{"janus_message": {"handle", "body",
@@ -37,6 +44,13 @@ namespace devicehub {
  * janusMessageAck()/janusEventReceived() — соответствующие ответы;
  * sfuRoomAssigned() — id комнаты Janus для звонка, отдельным сигналом
  * рядом с callRosterReceived() на тот же ответ joinCall().
+ *
+ * onlineMembersReceived()/presenceChanged() (issue #309) — presence is
+ * community-wide, not per-channel: the "subscribed" response to
+ * connectToChannel() carries "online_members" (who else in the same
+ * community is connected to any of its channels right now), and every
+ * later connect/disconnect elsewhere in that community fires
+ * presenceChanged(). Never fires for connectToDirectMessageThread().
  *
  * sendTyping() (issue #96) отправляет `{"typing": true}`; userTyping()
  * срабатывает на соответствующую рассылку `{"user_typing": "<login>"}`
@@ -68,7 +82,10 @@ namespace devicehub {
  * subscribed()/messageReceived() на ответ (DirectMessage не несёт
  * attachment_id/attachment_filename — messageReceived() получит для
  * них -1/пустую строку, как и для обычного сообщения без вложения).
- * Никаких кадров звонка/typing/edit_message/delete_message для диалога
+ * sendTyping()/userTyping() тоже работают для диалога (issue #313) —
+ * тот же кадр `{"typing"}`/`{"user_typing"}`, что и для канала, этот
+ * класс не различает их, разница только в маршрутизации на стороне
+ * chat-service. Кадры звонка/edit_message/delete_message для диалога
  * не отправлять — chat-service не обрабатывает их для подписки на
  * личный диалог. Использовать отдельный экземпляр ChatClient для
  * диалогов, не тот же самый, что подписан на канал (нужен независимый
@@ -91,8 +108,12 @@ public:
     /// Отправляет @p body в канал, на который подписан этот клиент,
     /// опционально ссылаясь на уже загруженный @p attachmentId
     /// (issue #116) — -1 (значение по умолчанию) означает отсутствие
-    /// вложения.
-    void sendMessage(const QString& body, qint64 attachmentId = -1);
+    /// вложения — и/или на сообщение @p replyToMessageId, на которое это
+    /// ответ (issue #306) — -1 означает "не ответ". chat-service не
+    /// проверяет, что replyToMessageId существует (см. doc-комментарий
+    /// у ALTER TABLE в init.sql chat-service) — это клиентская
+    /// ответственность резолвить цитату (см. ChatView::messagesById_).
+    void sendMessage(const QString& body, qint64 attachmentId = -1, qint64 replyToMessageId = -1);
 
     /// Закрывает соединение — независимо от того, был ли этот клиент
     /// подписан на канал или на личный диалог.
@@ -108,6 +129,12 @@ public:
     /// Ретранслирует непрозрачный сигналинговый @p payload (SDP
     /// offer/answer или ICE-кандидат) участнику звонка @p to.
     void sendCallSignal(const QString& to, const QJsonObject& payload);
+
+    /// Лёгкая эмодзи-реакция во время звонка (issue #312) — валидно
+    /// только пока joinCall() уже вызван и leaveCall() ещё нет; вызывает
+    /// errorOccurred(), если этот клиент сейчас не в звонке. Рассылает
+    /// callReactionReceived() остальным участникам, никогда себе.
+    void sendCallReaction(const QString& emoji);
 
     /// Прокси-сигналинг SFU (issue #232): attach'ит новый handle плагина
     /// videoroom на Janus-сессии этого WS-подключения (chat-service
@@ -127,8 +154,9 @@ public:
     void sendJanusMessage(qint64 handle, const QJsonObject& body, const QJsonObject& jsep = QJsonObject());
 
     /// Сообщает chat-service, что локальный пользователь печатает в
-    /// подписанном канале — вызывает userTyping() у всех остальных
-    /// подписчиков.
+    /// подписанном канале или диалоге (issue #313) — вызывает
+    /// userTyping() у остальных подписчиков (в диалоге — у второго
+    /// участника).
     void sendTyping();
 
     /// Запрашивает редактирование сообщения @p id (должно принадлежать
@@ -147,9 +175,12 @@ signals:
 
     /// Испускается для каждого сообщения, разосланного в подписанном
     /// канале. @p attachmentId равен -1, а @p attachmentFilename пуст,
-    /// когда у сообщения нет вложения (issue #116).
+    /// когда у сообщения нет вложения (issue #116). @p replyToMessageId
+    /// равен -1, когда это не ответ (issue #306) — сам этот сигнал не
+    /// несёт автора/текст оригинала, только его id; резолв — на стороне
+    /// подписчика (см. ChatView::messagesById_).
     void messageReceived(qint64 id, const QString& author, const QString& body, const QString& sentAt,
-                          qint64 attachmentId, const QString& attachmentFilename);
+                          qint64 attachmentId, const QString& attachmentFilename, qint64 replyToMessageId);
 
     /// Сообщение было отредактировано — @p editedAt — новая метка
     /// времени редактирования (сериализована Postgres, в том же
@@ -184,6 +215,9 @@ signals:
     /// звонка.
     void callSignalReceived(const QString& from, const QJsonObject& payload);
 
+    /// Другой участник звонка отправил эмодзи-реакцию (issue #312).
+    void callReactionReceived(const QString& login, const QString& emoji);
+
     /// Ответ на sendJanusAttach() — @p handle нового handle'а плагина
     /// videoroom.
     void janusAttached(qint64 handle);
@@ -199,8 +233,22 @@ signals:
     /// через chat-service.
     void janusEventReceived(const QJsonObject& event);
 
-    /// Другой подписчик печатает в подписанном канале.
+    /// Другой подписчик печатает в подписанном канале или диалоге.
     void userTyping(const QString& login);
+
+    /// Presence (issue #309) — снимок логинов, у кого сейчас есть хоть
+    /// одно активное подключение к любому каналу того же сообщества,
+    /// что и подписанный канал (не только к нему одному), не включая
+    /// себя. Тот же ответ на subscribed(), что и sfuRoomAssigned() выше
+    /// — отдельный сигнал, а не поле в subscribed(), по той же причине.
+    /// Никогда не испускается для подписки на личный диалог.
+    void onlineMembersReceived(const QStringList& logins);
+
+    /// Кто-то в том же сообществе подключился/отключился от любого
+    /// своего канала (issue #309) — @p online false только когда у
+    /// @p login не осталось вообще ни одного активного подключения к
+    /// сообществу.
+    void presenceChanged(const QString& login, bool online);
 
 private:
     void onConnected();

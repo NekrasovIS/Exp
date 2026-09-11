@@ -65,6 +65,12 @@ struct Message {
     /// записи на каждую использованную эмодзи, не по одной на каждого
     /// проголосовавшего.
     std::vector<MessageReaction> reactions;
+    /// Id сообщения, на которое это отвечает (issue #306) — не FK на
+    /// уровне схемы (см. комментарий у ALTER TABLE в init.sql), поэтому
+    /// значение может указывать на уже удалённое сообщение; клиент сам
+    /// решает, что показать, если не находит этот id среди уже
+    /// загруженной истории.
+    std::optional<std::int64_t> replyToMessageId;
 };
 
 /// Результат toggleReaction() (issue #333) — kNotFound, если messageId
@@ -286,9 +292,14 @@ public:
     ///         либо std::nullopt, если @p channelId не существует, либо
     ///         @p attachmentId установлен, но не существует/принадлежит
     ///         другому каналу.
+    /// @p replyToMessageId (issue #306) — ссылка на сообщение, на которое
+    /// отвечает это, если это ответ; не проверяется на существование
+    /// (см. doc-комментарий Message::replyToMessageId о том, почему
+    /// здесь нет FK).
     [[nodiscard]] std::optional<Message> insertMessage(std::int64_t channelId, const std::string& authorLogin,
                                                         const std::string& body,
-                                                        std::optional<std::int64_t> attachmentId = std::nullopt);
+                                                        std::optional<std::int64_t> attachmentId = std::nullopt,
+                                                        std::optional<std::int64_t> replyToMessageId = std::nullopt);
 
     /// Сохраняет @p upload дословно как новое вложение для @p channelId —
     /// см. doc-комментарий AttachmentUpload по её полям.

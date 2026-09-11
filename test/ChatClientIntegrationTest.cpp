@@ -289,6 +289,112 @@ TEST(ChatClientIntegrationTest, MessageWithAttachmentIdRoundTripsAttachmentField
     EXPECT_EQ(receivedAttachmentFilename, QStringLiteral("photo.png"));
 }
 
+TEST(ChatClientIntegrationTest, MessageWithReplyToMessageIdRoundTripsAgainstLiveStack) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const QString login = QStringLiteral("chat-reply-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClient(authUrl);
+    QString token;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClient, &AuthClient::tokenReceived, &loop, [&](const QString& receivedToken) {
+            token = receivedToken;
+            loop.quit();
+        });
+        QObject::connect(&authClient, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        authClient.requestToken(login, password);
+        loop.exec();
+    }
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(token, QStringLiteral("reply-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    ChatClient chatClient(chatWsUrl);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        chatClient.connectToChannel(token, channelId);
+        loop.exec();
+    }
+
+    qint64 originalMessageId = -1;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
+                          [&](qint64 id, const QString&, const QString&, const QString&, qint64, const QString&,
+                              qint64 msgReplyToMessageId) {
+                              originalMessageId = id;
+                              // Обычное сообщение — reply_to_message_id
+                              // должен прийти как -1, не как что-то
+                              // произвольное вроде 0.
+                              EXPECT_EQ(msgReplyToMessageId, -1);
+                              loop.quit();
+                          });
+        chatClient.sendMessage(QStringLiteral("the original"));
+        loop.exec();
+    }
+    ASSERT_GE(originalMessageId, 0);
+
+    qint64 receivedReplyToMessageId = -1;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClient, &ChatClient::messageReceived, &loop,
+                          [&](qint64, const QString&, const QString& msgBody, const QString&, qint64,
+                              const QString&, qint64 msgReplyToMessageId) {
+                              if (msgBody != QStringLiteral("the reply")) {
+                                  return;
+                              }
+                              receivedReplyToMessageId = msgReplyToMessageId;
+                              loop.quit();
+                          });
+        chatClient.sendMessage(QStringLiteral("the reply"), /*attachmentId=*/-1, originalMessageId);
+        loop.exec();
+    }
+
+    EXPECT_EQ(receivedReplyToMessageId, originalMessageId);
+}
+
 TEST(ChatClientIntegrationTest, SearchMessagesFindsPostedMessageAgainstLiveStack) {
     const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
     const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
@@ -689,6 +795,136 @@ TEST(ChatClientIntegrationTest, CallSignalingRoundTripBetweenTwoClientsDirectly)
     EXPECT_EQ(peerLeftOnA, loginB);
 }
 
+TEST(ChatClientIntegrationTest, CallReactionRoundTripBetweenTwoClientsDirectly) {
+    // Issue #312 — same "two ChatClient instances directly, no
+    // CallManager/WebRTC" shape as CallSignalingRoundTripBetweenTwoClientsDirectly
+    // above.
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const QString loginA = QStringLiteral("chat-reaction-test-a-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString loginB = QStringLiteral("chat-reaction-test-b-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) || !registerTestUser(manager, userUrl, loginB, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    QString tokenA;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClientA, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            tokenA = token;
+            loop.quit();
+        });
+        authClientA.requestToken(loginA, password);
+        loop.exec();
+    }
+    AuthClient authClientB(authUrl);
+    QString tokenB;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClientB, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            tokenB = token;
+            loop.quit();
+        });
+        authClientB.requestToken(loginB, password);
+        loop.exec();
+    }
+    if (tokenA.isEmpty() || tokenB.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(tokenA, QStringLiteral("reaction-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(tokenA, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityJoined, &loop, [&](qint64) { loop.quit(); });
+        chatRestClient.joinCommunity(tokenB, communityId);
+        loop.exec();
+    }
+
+    ChatClient chatClientA(chatWsUrl);
+    ChatClient chatClientB(chatWsUrl);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientA, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        chatClientA.connectToChannel(tokenA, channelId);
+        loop.exec();
+    }
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientB, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        chatClientB.connectToChannel(tokenB, channelId);
+        loop.exec();
+    }
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientA, &ChatClient::callRosterReceived, &loop, [&](const QStringList&) { loop.quit(); });
+        chatClientA.joinCall();
+        loop.exec();
+    }
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientB, &ChatClient::callRosterReceived, &loop, [&](const QStringList&) { loop.quit(); });
+        chatClientB.joinCall();
+        loop.exec();
+    }
+
+    QString reactionLoginOnB;
+    QString reactionEmojiOnB;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientB, &ChatClient::callReactionReceived, &loop,
+                          [&](const QString& login, const QString& emoji) {
+                              reactionLoginOnB = login;
+                              reactionEmojiOnB = emoji;
+                              loop.quit();
+                          });
+        chatClientA.sendCallReaction(QStringLiteral("\U0001F389"));
+        loop.exec();
+    }
+    EXPECT_EQ(reactionLoginOnB, loginA);
+    EXPECT_EQ(reactionEmojiOnB, QStringLiteral("\U0001F389"));
+}
+
 TEST(ChatClientIntegrationTest, DirectMessageThreadDeliversLiveViaWebSocket) {
     // issue #187, Фаза 2b: заменяет прежний REST-поллинг живой доставкой
     // через отдельную WS-подписку на dm_thread_id — тот же формат
@@ -814,6 +1050,158 @@ TEST(ChatClientIntegrationTest, DirectMessageThreadDeliversLiveViaWebSocket) {
 
     EXPECT_EQ(receivedAuthor, loginA);
     EXPECT_EQ(receivedBody, QStringLiteral("hello over websocket"));
+}
+
+TEST(ChatClientIntegrationTest, PresenceRoundTripBetweenTwoClientsOnDifferentChannelsOfSameCommunity) {
+    // Issue #309 — presence is community-wide: B subscribes to a
+    // DIFFERENT channel than A, in the same community, and should still
+    // see A in online_members; A should still see B's presenceChanged().
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const QString loginA = QStringLiteral("chat-presence-test-a-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString loginB = QStringLiteral("chat-presence-test-b-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) || !registerTestUser(manager, userUrl, loginB, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    QString tokenA;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClientA, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            tokenA = token;
+            loop.quit();
+        });
+        authClientA.requestToken(loginA, password);
+        loop.exec();
+    }
+    AuthClient authClientB(authUrl);
+    QString tokenB;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&authClientB, &AuthClient::tokenReceived, &loop, [&](const QString& token) {
+            tokenB = token;
+            loop.quit();
+        });
+        authClientB.requestToken(loginB, password);
+        loop.exec();
+    }
+    if (tokenA.isEmpty() || tokenB.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(tokenA, QStringLiteral("presence-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+    qint64 channel1Id = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channel1Id = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(tokenA, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channel1Id, 0);
+    qint64 channel2Id = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channel2Id = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(tokenA, communityId, QStringLiteral("random"));
+        loop.exec();
+    }
+    ASSERT_GT(channel2Id, 0);
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityJoined, &loop, [&](qint64) { loop.quit(); });
+        chatRestClient.joinCommunity(tokenB, communityId);
+        loop.exec();
+    }
+
+    ChatClient chatClientA(chatWsUrl);
+    ChatClient chatClientB(chatWsUrl);
+    QString presenceLoginOnA;
+    bool presenceOnlineOnA = false;
+    QObject::connect(&chatClientA, &ChatClient::presenceChanged, &chatClientA,
+                      [&](const QString& login, bool online) {
+                          presenceLoginOnA = login;
+                          presenceOnlineOnA = online;
+                      });
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientA, &ChatClient::subscribed, &loop, [&](qint64) { loop.quit(); });
+        chatClientA.connectToChannel(tokenA, channel1Id);
+        loop.exec();
+    }
+
+    QStringList onlineMembersOnB;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientB, &ChatClient::onlineMembersReceived, &loop,
+                          [&](const QStringList& logins) {
+                              onlineMembersOnB = logins;
+                              loop.quit();
+                          });
+        chatClientB.connectToChannel(tokenB, channel2Id);
+        loop.exec();
+    }
+    EXPECT_EQ(onlineMembersOnB, QStringList{loginA});
+
+    // presenceChanged on A for B's connect may have arrived before or
+    // after B's own onlineMembersReceived above (two independent
+    // sockets) — give the event loop one more short turn either way.
+    {
+        QEventLoop loop;
+        QTimer::singleShot(300, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+    EXPECT_EQ(presenceLoginOnA, loginB);
+    EXPECT_TRUE(presenceOnlineOnA);
+
+    // B disconnects entirely (not just leaves a call) — A should learn
+    // B went offline.
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatClientA, &ChatClient::presenceChanged, &loop,
+                          [&](const QString&, bool online) {
+                              if (!online) {
+                                  loop.quit();
+                              }
+                          });
+        chatClientB.disconnectFromChannel();
+        loop.exec();
+    }
+    EXPECT_EQ(presenceLoginOnA, loginB);
+    EXPECT_FALSE(presenceOnlineOnA);
 }
 
 }  // namespace
