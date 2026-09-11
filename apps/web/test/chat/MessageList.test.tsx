@@ -109,10 +109,13 @@ describe("MessageList", () => {
       <MessageList
         messages={messagesWithMention}
         editedIds={new Set()}
+        pinnedIds={new Set()}
         currentLogin="alice"
         isModerator={false}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
       />,
     );
 
