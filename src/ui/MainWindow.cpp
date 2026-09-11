@@ -264,14 +264,15 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](qint64 id, const QString& author, const QString& body, const QString& sentAt,
-                   qint64 attachmentId, const QString& attachmentFilename) {
+                   qint64 attachmentId, const QString& attachmentFilename, qint64 replyToMessageId) {
                 const QString displayBody = currentChannelEncrypted_ ? decryptForDisplay(body) : body;
                 chatView_->appendMessage(ChatMessage{.id = id,
                                                       .author = author,
                                                       .body = displayBody,
                                                       .sentAt = sentAt,
                                                       .attachmentId = attachmentId,
-                                                      .attachmentFilename = attachmentFilename});
+                                                      .attachmentFilename = attachmentFilename,
+                                                      .replyToMessageId = replyToMessageId});
                 desktopNotifier_->notifyMessage(author, displayBody, currentUserLogin_);
                 // Канал уже открыт — не непрочитанный, но превью в
                 // сайдбаре (issue #152) всё равно должно оставаться
@@ -298,6 +299,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
     connect(&chatClient_, &ChatClient::userTyping, this,
             [this](const QString& login) { chatView_->showTypingUser(login); });
+    connect(&chatClient_, &ChatClient::onlineMembersReceived, this,
+            [this](const QStringList& logins) { memberListPanel_->setOnlineLogins(logins); });
+    connect(&chatClient_, &ChatClient::presenceChanged, this,
+            [this](const QString& login, bool online) { memberListPanel_->setLoginOnline(login, online); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
@@ -308,6 +313,11 @@ MainWindow::MainWindow(QWidget* parent)
     // звонке — переиспользуем тот же слот, а не дублируем его тело.
     connect(callWindow_, &CallWindow::leaveCallRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::minimizeRequested, this, &MainWindow::onCallMinimizeRequested);
+    // Issue #312.
+    connect(callWindow_, &CallWindow::reactionRequested, this,
+            [this](const QString& emoji) { callManager_.sendReaction(emoji); });
+    connect(&callManager_, &CallManager::reactionReceived, this,
+            [this](const QString& login, const QString& emoji) { callWindow_->showReaction(login, emoji); });
     connect(floatingCallTilesOverlay_, &FloatingCallTilesOverlay::restoreRequested, this,
             &MainWindow::onCallRestoreRequested);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
@@ -328,7 +338,7 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
     connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
             [this](qint64 id, const QString& /*filename*/) {
-                chatClient_.sendMessage(chatView_->messageEdit()->text(), id);
+                chatClient_.sendMessage(chatView_->messageEdit()->text(), id, chatView_->consumeReplyTarget());
                 chatView_->messageEdit()->clear();
             });
     connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
@@ -435,6 +445,11 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
+        // Issue #309 — presence for the previous community doesn't
+        // apply here; closeChatView() above already dropped chatClient_'s
+        // subscription, so no fresh online_members arrives until a
+        // channel in this community is opened.
+        memberListPanel_->setOnlineLogins({});
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
@@ -522,6 +537,10 @@ MainWindow::MainWindow(QWidget* parent)
             dmChatClient_.sendMessage(body);
         }
     });
+    // Issue #313 — same shape as chatClient_'s typing wiring above.
+    connect(directMessageView_, &DirectMessageView::typingRequested, this, [this]() { dmChatClient_.sendTyping(); });
+    connect(&dmChatClient_, &ChatClient::userTyping, this,
+            [this](const QString& login) { directMessageView_->showTypingUser(login); });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {
@@ -754,7 +773,8 @@ MainWindow::MainWindow(QWidget* parent)
                                                   .sentAt = info.sentAt,
                                                   .attachmentId = info.attachmentId,
                                                   .attachmentFilename = info.attachmentFilename,
-                                                  .reactions = toReactionSummaries(info.reactions)});
+                                                  .reactions = toReactionSummaries(info.reactions),
+                                                  .replyToMessageId = info.replyToMessageId});
                 }
                 if (oldestMessageId_ < 0) {
                     // Первоначальная загрузка истории для этого канала —
@@ -1005,7 +1025,7 @@ void MainWindow::onSendChatMessageClicked() {
         chatClient_.sendEditMessage(chatView_->editingMessageId(), outgoing);
         chatView_->cancelEditingMessage();
     } else {
-        chatClient_.sendMessage(outgoing);
+        chatClient_.sendMessage(outgoing, /*attachmentId=*/-1, chatView_->consumeReplyTarget());
         chatView_->messageEdit()->clear();
     }
 }
@@ -1062,10 +1082,21 @@ void MainWindow::onCallToggleClicked() {
 }
 
 void MainWindow::onCallMinimizeRequested() {
+    // issue #287: без явного move() мини-окно открывается там, где
+    // решит оконный менеджер по умолчанию — никак не привязано к тому,
+    // где только что было CallWindow, что ощущается как "появилось не
+    // там". Читаем geometry() до hide() — после hide() она у скрытого
+    // окна на некоторых платформах не гарантированно валидна.
+    floatingCallTilesOverlay_->move(callWindow_->geometry().topLeft());
     callWindow_->detachTilesTo(floatingCallTilesOverlay_->canvas());
     callWindow_->hide();
     floatingCallTilesOverlay_->show();
     floatingCallTilesOverlay_->raise();
+    // activateWindow() рядом с raise() (issue #287) — raise() один
+    // только поднимает окно в z-order, не гарантируя ему фокус или то,
+    // что оконный менеджер реально выведет его поверх остальных (тот
+    // же паттерн уже применяется в onCallRestoreRequested() ниже).
+    floatingCallTilesOverlay_->activateWindow();
 }
 
 void MainWindow::onCallRestoreRequested() {

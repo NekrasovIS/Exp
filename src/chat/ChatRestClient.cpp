@@ -66,6 +66,7 @@ QList<ChatMessageInfo> parseMessageList(const QByteArray& jsonBytes) {
     for (const QJsonValue& value : document.array()) {
         const QJsonObject object = value.toObject();
         const QJsonValue attachmentIdValue = object.value("attachment_id");
+        const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");
         messages.push_back(ChatMessageInfo{
             .id = object.value("id").toVariant().toLongLong(),
             .author = object.value("author").toString(),
@@ -73,7 +74,8 @@ QList<ChatMessageInfo> parseMessageList(const QByteArray& jsonBytes) {
             .sentAt = object.value("sent_at").toString(),
             .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
             .attachmentFilename = object.value("attachment_filename").toString(),
-            .reactions = parseReactions(object)});
+            .reactions = parseReactions(object),
+            .replyToMessageId = replyToMessageIdValue.isNull() ? -1 : replyToMessageIdValue.toVariant().toLongLong()});
     }
     return messages;
 }
@@ -322,6 +324,7 @@ void ChatRestClient::searchMessages(const QString& token, qint64 channelId, cons
             for (const QJsonValue& value : document.array()) {
                 const QJsonObject object = value.toObject();
                 const QJsonValue attachmentIdValue = object.value("attachment_id");
+                const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");
                 matches.push_back(ChatMessageInfo{
                     .id = object.value("id").toVariant().toLongLong(),
                     .author = object.value("author").toString(),
@@ -329,7 +332,9 @@ void ChatRestClient::searchMessages(const QString& token, qint64 channelId, cons
                     .sentAt = object.value("sent_at").toString(),
                     .attachmentId = attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
                     .attachmentFilename = object.value("attachment_filename").toString(),
-                    .reactions = parseReactions(object)});
+                    .reactions = parseReactions(object),
+                    .replyToMessageId =
+                        replyToMessageIdValue.isNull() ? -1 : replyToMessageIdValue.toVariant().toLongLong()});
             }
         }
         emit messagesFound(channelId, query, matches);

@@ -63,7 +63,15 @@ nlohmann::json toJson(const Channel& channel) {
                            {"is_encrypted", channel.isEncrypted}};
 }
 
+nlohmann::json toJson(const MessageReaction& reaction) {
+    return nlohmann::json{{"emoji", reaction.emoji}, {"logins", reaction.logins}};
+}
+
 nlohmann::json toJson(const Message& message) {
+    nlohmann::json reactions = nlohmann::json::array();
+    for (const MessageReaction& reaction : message.reactions) {
+        reactions.push_back(toJson(reaction));
+    }
     return nlohmann::json{
         {"id", message.id},
         {"author", message.authorLogin},
@@ -73,7 +81,10 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_id",
          message.attachmentId.has_value() ? nlohmann::json(*message.attachmentId) : nlohmann::json(nullptr)},
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
-                                                                        : nlohmann::json(nullptr)}};
+                                                                        : nlohmann::json(nullptr)},
+        {"reactions", reactions},
+        {"reply_to_message_id", message.replyToMessageId.has_value() ? nlohmann::json(*message.replyToMessageId)
+                                                                       : nlohmann::json(nullptr)}};
 }
 
 nlohmann::json toJson(const DirectMessageThread& thread) {

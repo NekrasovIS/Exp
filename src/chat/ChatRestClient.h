@@ -40,7 +40,8 @@ struct MessageReactionInfo {
 /// истории дальше назад (см. beforeId у listMessages()). @p attachmentId
 /// равен -1, а @p attachmentFilename пуст, когда у сообщения нет
 /// вложения (issue #116). @p reactions пуст для сообщения, на которое
-/// пока никто не поставил реакцию (issue #333/#334).
+/// пока никто не поставил реакцию (issue #333/#334). @p replyToMessageId
+/// равен -1, когда это не ответ (issue #306).
 struct ChatMessageInfo {
     qint64 id = 0;
     QString author;
@@ -49,6 +50,7 @@ struct ChatMessageInfo {
     qint64 attachmentId = -1;
     QString attachmentFilename;
     QList<MessageReactionInfo> reactions;
+    qint64 replyToMessageId = -1;
 };
 
 /// Диалог личных сообщений, как его возвращает REST API chat-service
