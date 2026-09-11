@@ -293,6 +293,31 @@ TEST(CallWindowTest, DetachTilesToMovesActiveTilesToNewHostAndShrinksThem) {
     EXPECT_LT(remoteTile->width(), fullSize);
 }
 
+TEST(CallWindowTest, DetachTilesToKeepsActiveLocalTileVisible) {
+    // issue #287: QWidget::setParent() внутри placeTile() неявно
+    // скрывает виджет как побочный эффект смены родителя — до фикса
+    // это молча "выключало" уже включённую камеру/демонстрацию экрана
+    // при каждом сворачивании звонка, хотя setVideoEnabled(true) явно
+    // просил её показывать. Соседний тест
+    // DetachTilesToMovesActiveTilesToNewHostAndShrinksThem проверяет
+    // только parentWidget()/размер, не видимость — этот тест закрывает
+    // именно её.
+    CallWindow window;
+    QWidget overlayCanvas;
+    window.setVideoEnabled(true);
+    window.setScreenShareEnabled(true);
+    auto* localCameraTile = qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget());
+    auto* localScreenShareTile =
+        qobject_cast<DraggableVideoTile*>(window.localScreenShareVideoWidget()->parentWidget());
+    ASSERT_FALSE(localCameraTile->isHidden());
+    ASSERT_FALSE(localScreenShareTile->isHidden());
+
+    window.detachTilesTo(&overlayCanvas);
+
+    EXPECT_FALSE(localCameraTile->isHidden());
+    EXPECT_FALSE(localScreenShareTile->isHidden());
+}
+
 TEST(CallWindowTest, DetachTilesToPreservesDisabledLocalTileVisibility) {
     // issue #215: участник без активного видео не должен внезапно
     // "появиться" только оттого, что звонок свернули — detachTilesTo()

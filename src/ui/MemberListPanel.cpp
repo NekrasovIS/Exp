@@ -58,7 +58,30 @@ void MemberListPanel::setMembers(const QStringList& logins) {
     listWidget_->clear();
     for (const QString& login : sorted) {
         auto* item = new QListWidgetItem(login, listWidget_);
-        item->setIcon(ui_icons::communityAvatarIcon(login.left(1).toUpper()));
+        item->setIcon(ui_icons::memberAvatarIcon(login.left(1).toUpper(), onlineLogins_.contains(login)));
+    }
+}
+
+void MemberListPanel::setOnlineLogins(const QStringList& logins) {
+    onlineLogins_ = QSet<QString>(logins.begin(), logins.end());
+    for (int i = 0; i < listWidget_->count(); ++i) {
+        QListWidgetItem* item = listWidget_->item(i);
+        item->setIcon(ui_icons::memberAvatarIcon(item->text().left(1).toUpper(), onlineLogins_.contains(item->text())));
+    }
+}
+
+void MemberListPanel::setLoginOnline(const QString& login, bool online) {
+    if (online) {
+        onlineLogins_.insert(login);
+    } else {
+        onlineLogins_.remove(login);
+    }
+    for (int i = 0; i < listWidget_->count(); ++i) {
+        QListWidgetItem* item = listWidget_->item(i);
+        if (item->text() == login) {
+            item->setIcon(ui_icons::memberAvatarIcon(login.left(1).toUpper(), online));
+            break;
+        }
     }
 }
 

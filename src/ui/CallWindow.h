@@ -46,6 +46,12 @@ class DraggableVideoTile;
  * появившийся уже после сворачивания, тоже попадает в оверлей, а не
  * молча создаётся в скрытом videoStrip_. reattachTiles() — обратное
  * действие, вызывается MainWindow-ом по клику "Expand" в оверлее.
+ *
+ * Видимость локальных плиток (issue #287): QWidget::setParent() внутри
+ * placeTile() неявно скрывает виджет как побочный эффект смены
+ * родителя — relocateAllTiles() явно восстанавливает её по videoActive_/
+ * screenShareActive_ сразу после каждого detachTilesTo()/reattachTiles(),
+ * а не полагается на то, что setParent() её не тронет.
  */
 class CallWindow : public QWidget {
     Q_OBJECT

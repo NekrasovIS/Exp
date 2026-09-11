@@ -198,11 +198,10 @@ QPoint CallWindow::nextTileCascadePosition() {
 }
 
 void CallWindow::placeTile(DraggableVideoTile* tile) {
-    // Видимость намеренно не трогает — вызывающая сторона решает: у
-    // новой удалённой плитки (showRemoteVideoFrame()) она всегда
-    // становится видимой, а у локальных камеры/демонстрации экрана при
-    // detachTilesTo()/reattachTiles() (issue #215) нужно сохранить их
-    // текущее состояние enabled/disabled, а не форсировать true.
+    // Видимость сюда не входит намеренно — setParent() ниже уже меняет
+    // её как побочный эффект (см. doc-комментарий relocateAllTiles(),
+    // issue #287), так что решать реальную видимость после этого вызова
+    // должна вызывающая сторона явно, а не эта функция.
     tile->setParent(tileHost_);
     tile->resize(currentTileSize_, currentTileSize_);
     tile->move(nextTileCascadePosition());
@@ -263,15 +262,23 @@ void CallWindow::reattachTiles() {
 
 void CallWindow::relocateAllTiles() {
     nextTileCascadeIndex_ = 0;
+    // QWidget::setParent() (внутри placeTile()) неявно скрывает виджет
+    // как побочный эффект смены родителя (документированное поведение
+    // Qt) — то, что было "сохранить текущую видимость" до issue #287,
+    // на деле после placeTile() всегда читало "скрыто", независимо от
+    // реального состояния до вызова. Явно восстанавливаем видимость по
+    // тем же флагам, которыми управляют setVideoEnabled()/
+    // setScreenShareEnabled(), а не по факту "как было до реparenting'а"
+    // (который к этому моменту уже потерян).
     placeTile(localCameraTile_);
+    localCameraTile_->setVisible(videoActive_);
     placeTile(localScreenShareTile_);
+    localScreenShareTile_->setVisible(screenShareActive_);
     for (DraggableVideoTile* tile : std::as_const(remoteVideoTiles_)) {
         placeTile(tile);
-        // В отличие от локальных плиток выше (сохраняют свою видимость,
-        // см. doc-комментарий placeTile()), удалённая плитка в
-        // remoteVideoTiles_ по инварианту этого класса всегда должна
-        // быть видна, пока существует (см. removeRemoteVideo()) —
-        // явно восстанавливаем на случай, если что-то её скрыло.
+        // Удалённая плитка в remoteVideoTiles_ по инварианту этого
+        // класса всегда должна быть видна, пока существует (см.
+        // removeRemoteVideo()) — та же причина, что и выше у локальных.
         tile->setVisible(true);
     }
     updateVideoStripVisibility();
