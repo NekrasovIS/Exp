@@ -279,6 +279,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
     connect(&chatClient_, &ChatClient::userTyping, this,
             [this](const QString& login) { chatView_->showTypingUser(login); });
+    connect(&chatClient_, &ChatClient::onlineMembersReceived, this,
+            [this](const QStringList& logins) { memberListPanel_->setOnlineLogins(logins); });
+    connect(&chatClient_, &ChatClient::presenceChanged, this,
+            [this](const QString& login, bool online) { memberListPanel_->setLoginOnline(login, online); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
@@ -416,6 +420,11 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
+        // Issue #309 — presence for the previous community doesn't
+        // apply here; closeChatView() above already dropped chatClient_'s
+        // subscription, so no fresh online_members arrives until a
+        // channel in this community is opened.
+        memberListPanel_->setOnlineLogins({});
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,

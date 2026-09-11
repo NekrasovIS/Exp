@@ -38,6 +38,13 @@ namespace devicehub {
  * sfuRoomAssigned() — id комнаты Janus для звонка, отдельным сигналом
  * рядом с callRosterReceived() на тот же ответ joinCall().
  *
+ * onlineMembersReceived()/presenceChanged() (issue #309) — presence is
+ * community-wide, not per-channel: the "subscribed" response to
+ * connectToChannel() carries "online_members" (who else in the same
+ * community is connected to any of its channels right now), and every
+ * later connect/disconnect elsewhere in that community fires
+ * presenceChanged(). Never fires for connectToDirectMessageThread().
+ *
  * sendTyping() (issue #96) отправляет `{"typing": true}`; userTyping()
  * срабатывает на соответствующую рассылку `{"user_typing": "<login>"}`
  * от другого подписчика (chat-service никогда не отправляет это эхом
@@ -205,6 +212,20 @@ signals:
 
     /// Другой подписчик печатает в подписанном канале или диалоге.
     void userTyping(const QString& login);
+
+    /// Presence (issue #309) — снимок логинов, у кого сейчас есть хоть
+    /// одно активное подключение к любому каналу того же сообщества,
+    /// что и подписанный канал (не только к нему одному), не включая
+    /// себя. Тот же ответ на subscribed(), что и sfuRoomAssigned() выше
+    /// — отдельный сигнал, а не поле в subscribed(), по той же причине.
+    /// Никогда не испускается для подписки на личный диалог.
+    void onlineMembersReceived(const QStringList& logins);
+
+    /// Кто-то в том же сообществе подключился/отключился от любого
+    /// своего канала (issue #309) — @p online false только когда у
+    /// @p login не осталось вообще ни одного активного подключения к
+    /// сообществу.
+    void presenceChanged(const QString& login, bool online);
 
 private:
     void onConnected();
