@@ -2,9 +2,12 @@
 
 #include <gtest/gtest.h>
 
+#include <QAction>
 #include <QImage>
 #include <QLabel>
 #include <QLayout>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
 
@@ -255,6 +258,94 @@ TEST(ChatViewTest, SetAttachmentPreviewAfterClearLogDoesNotCrash) {
     QImage image(4, 4, QImage::Format_ARGB32);
     image.fill(Qt::blue);
     view.setAttachmentPreview(7, image);  // must not crash, must not dereference a dangling row
+}
+
+TEST(ChatViewTest, PinnedMessagesButtonHiddenUntilSetPinnedMessagesCountIsPositive) {
+    ChatView view;
+
+    // isHidden(), не isVisible() — тест не показывает окно, а
+    // isVisible() учитывает всю цепочку предков (всегда false для
+    // непоказанного топ-левел виджета).
+    EXPECT_TRUE(view.pinnedMessagesButton()->isHidden());
+
+    view.setPinnedMessagesCount(3);
+    EXPECT_FALSE(view.pinnedMessagesButton()->isHidden());
+    EXPECT_TRUE(view.pinnedMessagesButton()->text().contains("3"));
+
+    view.setPinnedMessagesCount(0);
+    EXPECT_TRUE(view.pinnedMessagesButton()->isHidden());
+}
+
+TEST(ChatViewTest, ClickingPinnedMessagesButtonEmitsPinnedMessagesToggleRequested) {
+    ChatView view;
+    view.setPinnedMessagesCount(1);
+    QSignalSpy spy(&view, &ChatView::pinnedMessagesToggleRequested);
+
+    emit view.pinnedMessagesButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ChatViewTest, SetCanManageChannelIsAppliedToSubsequentlyAppendedRows) {
+    ChatView view;
+    view.setCanManageChannel(true);
+
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+
+    auto* bubble = view.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+}
+
+TEST(ChatViewTest, PinMessageRequestedFromARowBubblesUpThroughTheView) {
+    ChatView view;
+    view.setCanManageChannel(true);
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    auto* row = view.findChild<ChatMessageRow*>();
+    ASSERT_NE(row, nullptr);
+
+    QSignalSpy spy(&view, &ChatView::pinMessageRequested);
+    emit row->pinRequested(1);
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 1);
+}
+
+TEST(ChatViewTest, UpdatePinnedReachesTheRowThatOwnsThatMessageId) {
+    ChatView view;
+    view.setCanManageChannel(true);
+    view.appendMessage(ChatMessage{.id = 9, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+
+    view.updatePinned(9, true);
+
+    EXPECT_FALSE(view.findChild<QLabel*>(QStringLiteral("chatMessagePinnedIndicator"))->isHidden());
+}
+
+TEST(ChatViewTest, UpdatePinnedForAMessageNotCurrentlyShownDoesNotCrash) {
+    ChatView view;
+
+    view.updatePinned(999, true);  // must not crash, must not dereference a dangling row
+}
+
+TEST(ChatViewTest, ClearLogResetsCanManageChannelAndPinnedMessagesCount) {
+    ChatView view;
+    view.setCanManageChannel(true);
+    view.setPinnedMessagesCount(2);
+
+    view.clearLog();
+
+    EXPECT_TRUE(view.pinnedMessagesButton()->isHidden());
+    view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    auto* bubble = view.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    // Контекстное меню теперь строится всегда (issue #333/#334/#306 —
+    // "React"/"Reply" доступны на любом сообщении), поэтому сброс
+    // canManageChannel_ проверяется по отсутствию именно пункта Pin, а
+    // не по отсутствию меню целиком.
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("pinMessageAction")), nullptr);
 }
 
 TEST(ChatViewTest, AppendedMessageWithReactionsShowsAChip) {

@@ -271,11 +271,14 @@ class ChatView {
   +showChannel(channelName: QString)
   +setEncrypted(encrypted: bool)
   +setCurrentUserLogin(login: QString)
+  +setCanManageChannel(canManage: bool)
   +appendMessage(message: ChatMessage)
   +prependMessages(messages: QList<ChatMessage>)
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +updatePinned(id: qint64, isPinned: bool)
+  +setPinnedMessagesCount(count: int)
   +updateReactions(id: qint64, emoji: QString, logins: QStringList)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
@@ -296,6 +299,7 @@ class ChatView {
   +typingIndicatorLabel() : QLabel*
   +loadOlderButton() : QPushButton*
   +memberListToggleButton() : QPushButton*
+  +pinnedMessagesButton() : QPushButton*
   +showTypingUser(login: QString)
   -connectMessageRow(row: ChatMessageRow*)
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
@@ -309,6 +313,9 @@ class ChatView {
   +typingRequested()
   +loadOlderMessagesRequested()
   +deleteMessageRequested(id: qint64)
+  +pinMessageRequested(id: qint64)
+  +unpinMessageRequested(id: qint64)
+  +pinnedMessagesToggleRequested()
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
   +previewAttachmentRequested(attachmentId: qint64)
@@ -536,6 +543,7 @@ struct ChatMessage {
   +sentAt: QString
   +attachmentId: qint64 = -1
   +attachmentFilename: QString
+  +isPinned: bool = false
   +reactions: QList<MessageReactionSummary>
   +replyToMessageId: qint64 = -1
   +replyToAuthor: QString
@@ -554,6 +562,23 @@ class SearchDialog {
   +resultActivated(messageId: qint64)
 }
 SearchDialog ..> ChatMessageInfo : renders
+
+class PinnedMessagesDialog {
+  +pinnedList() : QListWidget*
+  +setPinnedMessages(pinned: QList<PinnedMessageInfo>)
+  .. signals ..
+  +messageActivated(messageId: qint64)
+}
+PinnedMessagesDialog ..> PinnedMessageInfo : renders
+note right of PinnedMessagesDialog
+  Issue #338/#339 — тот же паттерн "чистое
+  представление", что и у SearchDialog, которую
+  этот класс сознательно копирует по форме:
+  MainWindow владеет ChatRestClient/ChatClient,
+  передаёт список через setPinnedMessages(),
+  клик по элементу — messageActivated() ->
+  MainWindow -> ChatView::scrollToMessage().
+end note
 
 class LoginWindow {
   +showCodeSent(identifier: QString)
@@ -589,9 +614,10 @@ end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
 class ChatMessageRow {
-  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "")
+  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "", canManageChannel: bool = false)
   +messageId() : qint64
   +updateBody(newBody: QString)
+  +setPinned(isPinned: bool)
   +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
@@ -599,6 +625,8 @@ class ChatMessageRow {
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
   +deleteRequested(id: qint64)
+  +pinRequested(id: qint64)
+  +unpinRequested(id: qint64)
   +downloadRequested(attachmentId: qint64, filename: QString)
   +reactionToggleRequested(id: qint64, emoji: QString)
   +replyRequested(id: qint64)
@@ -613,10 +641,19 @@ ChatMessageRow *-- ChatBubble : owns (own messages: green\ngradient, right-align
 note right of ChatMessageRow
   Own messages: right-click the bubble for a
   context menu (Edit/Delete) instead of
-  always-visible buttons (issue #150). "React"
-  and Reply (issue #306) are both in that same
-  menu for ANY message, own or not — unlike
-  Edit/Delete.
+  always-visible buttons (issue #150). Pin/Unpin
+  (issue #308/#338/#339) is in that same menu
+  whenever canManageChannel is true, regardless
+  of isOwnMessage — the two conditions are
+  independent, a row can show all three at once.
+  A "📌 Pinned" label is always created (just
+  hidden) so ANY viewer — not only someone who
+  can manage the channel — sees it once
+  setPinned(true) is called from ChatView, in
+  response to ChatClient::messagePinned() for
+  this row's id. "React" and Reply (issue #306)
+  are also in that same menu for ANY message, own
+  or not — unlike Edit/Delete.
 
   "React" (issue #305/#333/#334) — a fixed set
   of 5 emoji, each an action that emits
@@ -805,6 +842,7 @@ MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
 MainWindow *-- ModeratorsDialog : owns (opened from\nCommunitiesPanel, issue #114)
 MainWindow *-- SearchDialog : owns (opened from ChatView's\n"Search" button, issue #118)
+MainWindow *-- PinnedMessagesDialog : owns (opened from ChatView's\n"📌 N" button, issue #338/#339)
 MainWindow *-- FooterBar : owns (bottom)
 MainWindow *-- ToastBanner : owns (floats over ChatView)
 MainWindow *-- DesktopNotifier : owns (issue #92)
@@ -869,6 +907,12 @@ ChatView ..> MainWindow : openSearchRequested() -> show()/raise()\nSearchDialog 
 MainWindow ..> ChatRestClient : searchMessages() (issue #118) >
 ChatRestClient ..> MainWindow : messagesFound() -> SearchDialog::setResults() >
 SearchDialog ..> MainWindow : searchRequested()/resultActivated()\n-> ChatView::scrollToMessage() >
+ChatView ..> MainWindow : pinMessageRequested()/unpinMessageRequested()\n-> ChatClient::sendPinMessage()/sendUnpinMessage() (issue #338/#339) >
+ChatClient ..> MainWindow : messagePinned()/messageUnpinned()\n-> ChatView::updatePinned() (issue #338/#339) >
+ChatView ..> MainWindow : pinnedMessagesToggleRequested() -> show()/raise()\nPinnedMessagesDialog (issue #339) >
+MainWindow ..> ChatRestClient : listPinnedMessages() (issue #338/#339) >
+ChatRestClient ..> MainWindow : pinnedMessagesListed() -> ChatView::setPinnedMessagesCount()/\nPinnedMessagesDialog::setPinnedMessages() (issue #338/#339) >
+PinnedMessagesDialog ..> MainWindow : messageActivated() -> ChatView::scrollToMessage() >
 ChatView ..> ChannelsPanel : createChannelRequested() -> addButton().click() >
 ChatView ..> MainWindow : callToggleRequested() >
 CallWindow ..> MainWindow : muteToggleRequested()/videoToggleRequested()\nscreenShareToggleRequested()/leaveCallRequested() (issue #185) >

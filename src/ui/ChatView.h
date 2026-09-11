@@ -52,6 +52,16 @@ public:
     /// (пузырь выровнен вправо, акцентный цвет, без аватара) или чужим.
     void setCurrentUserLogin(const QString& login);
 
+    /// Владеет ли вошедший пользователь текущим открытым каналом (или
+    /// его сообществом), либо является модератором сообщества (issue
+    /// #338) — управляет видимостью Pin/Unpin у каждой новой строки.
+    /// MainWindow вызывает это при открытии канала, как только известны
+    /// и владелец сообщества, и (асинхронно) список модераторов; строки,
+    /// уже построенные до того, как это значение стало известно, не
+    /// получают Pin/Unpin ретроактивно — принятое упрощение первой
+    /// версии, см. doc-комментарий MainWindow.
+    void setCanManageChannel(bool canManage);
+
     /// Добавляет настоящее сообщение чата — группируется с предыдущим
     /// (без повтора аватара/имени/времени), если они от одного автора
     /// и в пределах нескольких минут друг от друга.
@@ -80,6 +90,17 @@ public:
 
     /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
+
+    /// Обновляет закреплённость строки @p id на месте (issue #338) —
+    /// ничего не делает, если сообщение сейчас не показано, тот же
+    /// принцип, что и у updateMessageBody().
+    void updatePinned(qint64 id, bool isPinned);
+
+    /// Заменяет счётчик на кнопке закреплённых сообщений (issue #338) —
+    /// кнопка скрыта при 0. MainWindow вызывает это при открытии канала
+    /// (после listPinnedMessages()) и на каждое messagePinned()/
+    /// messageUnpinned().
+    void setPinnedMessagesCount(int count);
 
     /// Применяет одно изменение реакции к строке @p id (issue #334) —
     /// ничего не делает, если это сообщение сейчас не показано (тот же
@@ -171,6 +192,9 @@ public:
     /// поэтому только сигнализирует запрос, а не хранит состояние
     /// открыт/свёрнут самостоятельно.
     [[nodiscard]] QPushButton* memberListToggleButton() const { return memberListToggleButton_; }
+    /// Кнопка "📌 N" в шапке (issue #338) — скрыта, пока в канале нет
+    /// закреплённых сообщений (см. setPinnedMessagesCount()).
+    [[nodiscard]] QPushButton* pinnedMessagesButton() const { return pinnedMessagesButton_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -206,6 +230,15 @@ signals:
 
     /// Клик по "Delete" на одном из собственных сообщений пользователя.
     void deleteMessageRequested(qint64 id);
+
+    /// Выбор "Pin"/"Unpin" в контекстном меню сообщения (issue #338) —
+    /// доступно только когда setCanManageChannel(true).
+    void pinMessageRequested(qint64 id);
+    void unpinMessageRequested(qint64 id);
+
+    /// Клик по кнопке "📌 N" в шапке (issue #338) — MainWindow
+    /// показывает/поднимает свой PinnedMessagesDialog.
+    void pinnedMessagesToggleRequested();
 
     /// Клик по "Attach" (issue #116) — MainWindow открывает выбор
     /// файла, загружает выбранный файл через ChatRestClient, затем
@@ -280,6 +313,9 @@ private:
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
     QPushButton* memberListToggleButton_ = nullptr;
+    QPushButton* pinnedMessagesButton_ = nullptr;
+    /// Issue #338 — см. doc-комментарий setCanManageChannel().
+    bool canManageChannel_ = false;
     QLabel* typingIndicatorLabel_ = nullptr;
     /// Виден только пока editingMessageId_ >= 0 — единственный оставшийся
     /// индикатор режима редактирования с тех пор, как sendButton_ стал

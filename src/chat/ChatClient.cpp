@@ -103,6 +103,12 @@ void ChatClient::onTextMessageReceived(const QString& message) {
                             edited.value("edited_at").toString());
     } else if (object.contains("message_deleted")) {
         emit messageDeleted(object.value("message_deleted").toObject().value("id").toVariant().toLongLong());
+    } else if (object.contains("message_pinned")) {
+        const QJsonObject pinned = object.value("message_pinned").toObject();
+        emit messagePinned(pinned.value("id").toVariant().toLongLong(), pinned.value("pinned_by").toString(),
+                            pinned.value("pinned_at").toString());
+    } else if (object.contains("message_unpinned")) {
+        emit messageUnpinned(object.value("message_unpinned").toObject().value("id").toVariant().toLongLong());
     } else if (object.contains("reaction_changed")) {
         const QJsonObject changed = object.value("reaction_changed").toObject();
         QStringList logins;
@@ -190,6 +196,16 @@ void ChatClient::sendEditMessage(qint64 id, const QString& newBody) {
 
 void ChatClient::sendDeleteMessage(qint64 id) {
     const QJsonObject message{{"delete_message", QJsonObject{{"id", id}}}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendPinMessage(qint64 id) {
+    const QJsonObject message{{"pin_message", QJsonObject{{"id", id}}}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendUnpinMessage(qint64 id) {
+    const QJsonObject message{{"unpin_message", QJsonObject{{"id", id}}}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 

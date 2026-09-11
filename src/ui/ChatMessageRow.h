@@ -33,8 +33,11 @@ struct MessageReactionSummary {
 /// чтобы адресовать/подписать конкретное сообщение для редактирования/
 /// удаления; editedAt не задан для сообщения, которое никогда не
 /// редактировалось. attachmentId равен -1, а attachmentFilename пуст,
-/// когда у сообщения нет вложения (issue #116). reactions пуст для
-/// сообщения, на которое пока никто не поставил реакцию (issue #334).
+/// когда у сообщения нет вложения (issue #116). isPinned (issue #338)
+/// отражает состояние на момент загрузки/получения — ChatMessageRow
+/// сама не резолвит его, только рисует то, что передано. reactions
+/// пуст для сообщения, на которое пока никто не поставил реакцию
+/// (issue #334).
 ///
 /// replyToMessageId равен -1, когда это не ответ (issue #306) — тот же
 /// стиль сентинела, что и у attachmentId. Когда >= 0, replyToAuthor/
@@ -54,6 +57,7 @@ struct ChatMessage {
     std::optional<QString> editedAt;
     qint64 attachmentId = -1;
     QString attachmentFilename;
+    bool isPinned = false;
     QList<MessageReactionSummary> reactions;
     qint64 replyToMessageId = -1;
     QString replyToAuthor;
@@ -100,9 +104,15 @@ public:
     /// стилем); пустая строка (значение по умолчанию) — ни одна чужая
     /// реакция никогда не совпадёт с пустым логином, так что это
     /// безопасный сентинел "текущий пользователь неизвестен", а не
-    /// отдельный bool-флаг.
+    /// отдельный bool-флаг. @p canManageChannel (issue #338) — владелец
+    /// канала/сообщества или модератор сообщества, владеющего каналом,
+    /// куда идёт эта строка; управляет только видимостью Pin/Unpin в
+    /// контекстном меню, не связано с @p isOwnMessage (закреплять/
+    /// снимать может не автор, а тот, у кого есть эта роль — см.
+    /// doc-комментарий класса ChatClient::sendPinMessage()).
     ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,
-                   const QString& currentUserLogin = QString(), QWidget* parent = nullptr);
+                   const QString& currentUserLogin = QString(), bool canManageChannel = false,
+                   QWidget* parent = nullptr);
 
     [[nodiscard]] qint64 messageId() const { return messageId_; }
 
@@ -111,6 +121,13 @@ public:
     /// показана (showHeader) — issue #107, вызывается, когда
     /// ChatClient::messageEdited() срабатывает для сообщения этой строки.
     void updateBody(const QString& newBody);
+
+    /// Обновляет закреплённость на месте (issue #338) — вызывается,
+    /// когда ChatClient::messagePinned()/messageUnpinned() срабатывает
+    /// для сообщения этой строки; переключает видимость значка
+    /// "📌 Pinned" и текст пункта меню Pin/Unpin при следующем открытии
+    /// контекстного меню.
+    void setPinned(bool isPinned);
 
     /// Применяет одно изменение реакции (issue #334) — @p logins это
     /// ПОЛНЫЙ список тех, кто сейчас поставил именно @p emoji на это
@@ -143,6 +160,13 @@ signals:
     /// Клик по "Download" на сообщении с вложением (issue #116, любое
     /// сообщение, не только собственное).
     void downloadRequested(qint64 attachmentId, const QString& filename);
+
+    /// Выбор "Pin" в контекстном меню (issue #338, только когда
+    /// сконструировано с canManageChannel true).
+    void pinRequested(qint64 id);
+
+    /// Выбор "Unpin" — то же условие видимости, что и у pinRequested().
+    void unpinRequested(qint64 id);
 
     /// Выбор эмодзи в подменю "React" контекстного меню, либо клик по
     /// уже существующему чипу-реакции под баблом (issue #334) — оба
@@ -187,6 +211,15 @@ private:
     /// заменяет плейсхолдерный текст на реальную картинку, когда она
     /// загружена.
     QLabel* attachmentPreviewLabel_ = nullptr;
+    /// Issue #338 — управляет видимостью Pin/Unpin в контекстном меню,
+    /// построенном лениво при каждом правом клике (см. конструктор), а
+    /// не пересобираемом при setPinned().
+    bool canManageChannel_ = false;
+    bool isPinned_ = false;
+    /// Виден только пока isPinned_ true — null до первого раза, когда
+    /// это стало нужным, создаётся лениво в setPinned() ИЛИ в
+    /// конструкторе, если сообщение изначально уже закреплено.
+    QLabel* pinnedIndicatorLabel_ = nullptr;
     /// Текущее состояние реакций этой строки (issue #334) — источник
     /// истины для rebuildReactionChips(); обновляется на месте
     /// applyReactionChange(), а не пересоздаётся из внешнего списка

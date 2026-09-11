@@ -53,6 +53,20 @@ struct ChatMessageInfo {
     qint64 replyToMessageId = -1;
 };
 
+/// Закреплённое сообщение канала, как его возвращает
+/// `GET /channels/{id}/pinned-messages` (issue #338) — полное
+/// содержимое сообщения плюс метаданные закрепления.
+struct PinnedMessageInfo {
+    qint64 id = 0;
+    QString author;
+    QString body;
+    QString sentAt;
+    qint64 attachmentId = -1;
+    QString attachmentFilename;
+    QString pinnedBy;
+    QString pinnedAt;
+};
+
 /// Диалог личных сообщений, как его возвращает REST API chat-service
 /// (issue #187, Фаза 2).
 struct DirectMessageThreadInfo {
@@ -157,6 +171,13 @@ public:
     /// друга по одному только channelId в ответе.
     void fetchLatestMessage(const QString& token, qint64 channelId);
 
+    /// Запрашивает список закреплённых сообщений канала @p channelId
+    /// (issue #338) — вызывать при открытии канала, аналогично
+    /// listMessages() для истории; доступно любому участнику, не
+    /// только владельцу/модератору (закреплять/снимать — отдельное
+    /// более строгое правило, см. ChatClient::sendPinMessage()).
+    void listPinnedMessages(const QString& token, qint64 channelId);
+
     /// Загружает @p data (сырые байты, на проводе в виде base64) как
     /// новое вложение в @p channelId (issue #116); вызывает
     /// attachmentUploaded() с id, который затем передаётся в
@@ -220,6 +241,10 @@ signals:
     /// Ответ на fetchLatestMessage() — @p messages пуст, если в канале
     /// ещё нет ни одного сообщения, иначе ровно один элемент.
     void latestMessageFetched(qint64 channelId, const QList<ChatMessageInfo>& messages);
+
+    /// Ответ на listPinnedMessages() (issue #338) — @p pinned в том
+    /// порядке, в каком отдаёт сервер (самые новые закрепления первыми).
+    void pinnedMessagesListed(qint64 channelId, const QList<PinnedMessageInfo>& pinned);
 
     /// Ответ на uploadAttachment().
     void attachmentUploaded(qint64 id, const QString& filename);

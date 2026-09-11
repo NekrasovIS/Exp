@@ -127,9 +127,19 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     memberListToggleButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(memberListToggleButton_, &QPushButton::clicked, this, &ChatView::memberListToggleRequested);
 
+    // Кнопка "📌 N" (issue #338) — обычная текстовая кнопка, как
+    // callToggleButton_/searchButton_ рядом (не плоская иконка, как
+    // memberListToggleButton_ — счётчику нужен текст). Скрыта, пока в
+    // канале нет закреплённых сообщений (setPinnedMessagesCount()).
+    pinnedMessagesButton_ = new QPushButton(channelPage);
+    pinnedMessagesButton_->setObjectName(QStringLiteral("pinnedMessagesButton"));
+    pinnedMessagesButton_->setVisible(false);
+    connect(pinnedMessagesButton_, &QPushButton::clicked, this, &ChatView::pinnedMessagesToggleRequested);
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(ui_theme::kSpacingSm);
     headerRow->addWidget(channelTitleLabel_, /*stretch=*/1);
+    headerRow->addWidget(pinnedMessagesButton_);
     headerRow->addWidget(callToggleButton_);
     headerRow->addWidget(searchButton_);
     headerRow->addWidget(memberListToggleButton_);
@@ -304,6 +314,10 @@ void ChatView::setCurrentUserLogin(const QString& login) {
     currentUserLogin_ = login;
 }
 
+void ChatView::setCanManageChannel(bool canManage) {
+    canManageChannel_ = canManage;
+}
+
 ChatMessage ChatView::resolveReplyPreview(const ChatMessage& message) const {
     if (message.replyToMessageId < 0) {
         return message;
@@ -324,7 +338,8 @@ void ChatView::appendMessage(const ChatMessage& message) {
     const bool showHeader =
         !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, resolvedMessage);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
-    auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, messagesContainer_);
+    auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
+                                    messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     requestPreviewIfImageAttachment(resolvedMessage, row);
@@ -361,7 +376,8 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
             messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(resolvedMessage.sentAt));
         }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
-        auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, messagesContainer_);
+        auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
+                                        messagesContainer_);
         // Issue #330: подгруженные через "Load older messages" строки
         // раньше не подключались вообще — Edit/Delete/Download на них
         // молча ничего не делали. Обнаружено при добавлении Reply,
@@ -411,6 +427,8 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+    connect(row, &ChatMessageRow::pinRequested, this, &ChatView::pinMessageRequested);
+    connect(row, &ChatMessageRow::unpinRequested, this, &ChatView::unpinMessageRequested);
     connect(row, &ChatMessageRow::reactionToggleRequested, this, &ChatView::reactionToggleRequested);
     connect(row, &ChatMessageRow::replyRequested, this, &ChatView::setReplyTarget);
 }
@@ -466,6 +484,17 @@ void ChatView::updateReactions(qint64 id, const QString& emoji, const QStringLis
     if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
         row->applyReactionChange(emoji, logins);
     }
+}
+
+void ChatView::updatePinned(qint64 id, bool isPinned) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->setPinned(isPinned);
+    }
+}
+
+void ChatView::setPinnedMessagesCount(int count) {
+    pinnedMessagesButton_->setText(tr("\U0001F4CC %1").arg(count));
+    pinnedMessagesButton_->setVisible(count > 0);
 }
 
 bool ChatView::scrollToMessage(qint64 id) {
@@ -563,6 +592,13 @@ void ChatView::clearLog() {
     // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
     // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
     pendingImagePreviewRows_.clear();
+    // Роль/закреплённые сообщения принадлежали каналу, который только
+    // что очистили (issue #338) — MainWindow заново вызовет
+    // setCanManageChannel()/setPinnedMessagesCount() для нового канала,
+    // но до этого момента новые строки не должны наследовать роль
+    // предыдущего.
+    canManageChannel_ = false;
+    setPinnedMessagesCount(0);
     messagesById_.clear();
 }
 
