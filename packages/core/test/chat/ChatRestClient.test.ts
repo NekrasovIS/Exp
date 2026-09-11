@@ -340,6 +340,55 @@ describe("ChatRestClient", () => {
     });
   });
 
+  describe("unread counters", () => {
+    it("markChannelRead posts message_id to /channels/{id}/read", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, {}));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await client.markChannelRead(kToken, 10, 42);
+
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/channels/10/read`,
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ message_id: 42 }) }),
+      );
+    });
+
+    it("markDmThreadRead posts message_id to /dm/threads/{id}/read", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, {}));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await client.markDmThreadRead(kToken, 7, 99);
+
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/dm/threads/7/read`,
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ message_id: 99 }) }),
+      );
+    });
+
+    it("fetchUnreadCounts maps both channels and dm_threads from /unread", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, {
+          channels: [{ channel_id: 10, unread_count: 3 }],
+          dm_threads: [{ thread_id: 7, unread_count: 1 }],
+        }),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchUnreadCounts(kToken)).resolves.toEqual({
+        channels: [{ channelId: 10, unreadCount: 3 }],
+        threads: [{ threadId: 7, unreadCount: 1 }],
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(`${kBaseUrl}/unread`, expect.anything());
+    });
+
+    it("fetchUnreadCounts resolves with empty arrays when the server omits both fields", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, {}));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchUnreadCounts(kToken)).resolves.toEqual({ channels: [], threads: [] });
+    });
+  });
+
   it("uses ApiError as the rejection type", async () => {
     const fetchImpl = fakeFetch(jsonResponse(401, { error: "unauthorized" }));
     const client = new ChatRestClient(kBaseUrl, fetchImpl);

@@ -1335,6 +1335,31 @@ DeviceHub). Без анонимного доступа — `/join/:code` для 
 join-by-code (issue #301, продуктовое решение — без guest-режима
 "посмотреть, не регистрируясь").
 
+Бейджи непрочитанных сообщений (issue #310/#350) — тот же
+chat-service-счётчик, что и в DeviceHub (issue #349, см. раздел
+chat-service выше): `useUnreadCounts()` (`src/chat/useUnreadCounts.ts`)
+опрашивает `GET /unread` раз в 30с (плюс сразу при монтировании и по
+вызову `refresh()` — `CommunitiesMode` зовёт его при переключении
+сообщества), отдаёт `Map<id, count>` отдельно для каналов и для
+диалогов ЛС. `ChannelsSidebar`/`CommunitiesSidebar` (сумма по каналам
+сообщества, посчитанная в `CommunitiesMode` из карты `channelId →
+communityId`, которая пополняется по мере открытия сообществ — то же
+ограничение, что и у `channelIdToCommunityId_` в MainWindow.cpp: ещё не
+открытое в этой сессии сообщество бейджа не покажет) и `DmThreadsList`
+рисуют счётчик рядом с названием. В отличие от DeviceHub, у веб-клиента
+уже есть постоянный список диалогов ЛС (`DmThreadsList`, issue #268),
+поэтому им, в отличие от десктопа, бейдж всё же достался.
+`useMessages()`/`useDirectMessages()` сами вызывают
+`markChannelRead()`/`markDmThreadRead()` — сразу после начальной
+загрузки истории (по последнему сообщению самой свежей страницы) и на
+каждое живое сообщение, пришедшее по уже открытой WebSocket-подписке
+(она держится только на открытом сейчас канале/диалоге, так что живое
+сообщение всегда означает "прочитано прямо сейчас"); `onSelectChannel`/
+`onSelectThread`/`openThreadWith` дополнительно вызывают
+`clearChannelLocally()`/`clearThreadLocally()` из того же хука —
+оптимистично гасят бейдж в интерфейсе, не дожидаясь ни завершения
+запроса на сервер, ни следующего тика опроса.
+
 Групповые звонки (`CallPanel`/`CallManager`/`useCall`, issue #221) —
 кнопка «Join call» внутри `ChatViewContent`/`EncryptedChatViewContent`
 (та же область, что и звонок в DeviceHub — привязан к каналу, не

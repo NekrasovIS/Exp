@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 
+import { useUnreadCounts } from "../chat/useUnreadCounts.js";
 import { DirectMessageView } from "../dm/DirectMessageView.js";
 import { DmThreadsList } from "../dm/DmThreadsList.js";
 import { useDmThreads } from "../dm/useDmThreads.js";
@@ -16,12 +17,19 @@ import styles from "./pageLayout.module.css";
 export function FriendsMode() {
   const { openThreadWith } = useDmThreads();
   const [selectedThread, setSelectedThread] = useState<{ id: number; otherLogin: string } | null>(null);
+  const { threadCounts, clearThreadLocally } = useUnreadCounts();
 
   async function handleOpenThreadWith(login: string): Promise<void> {
     const id = await openThreadWith(login);
     if (id !== null) {
       setSelectedThread({ id, otherLogin: login });
+      clearThreadLocally(id);
     }
+  }
+
+  function handleSelectThread(id: number, otherLogin: string): void {
+    setSelectedThread({ id, otherLogin });
+    clearThreadLocally(id);
   }
 
   return (
@@ -32,7 +40,8 @@ export function FriendsMode() {
       <div className={styles.sidebarColumn}>
         <DmThreadsList
           selectedThreadId={selectedThread?.id ?? null}
-          onSelectThread={(id, otherLogin) => setSelectedThread({ id, otherLogin })}
+          onSelectThread={handleSelectThread}
+          unreadCounts={threadCounts}
         />
       </div>
       <main className={styles.mainColumn}>

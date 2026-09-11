@@ -73,3 +73,17 @@ export interface DirectMessageInfo {
  * don't need to import ChatRestClient's type for what's conceptually a
  * different (live) source. */
 export type IncomingChatMessage = ChatMessageInfo;
+
+/** Unread-count entry for one channel (issue #310/#350) — mirrors
+ * DeviceHub's `ChatRestClient::ChannelUnreadCount`. */
+export interface ChannelUnreadCount {
+  channelId: number;
+  unreadCount: number;
+}
+
+/** Unread-count entry for one DM thread (issue #310/#350) — mirrors
+ * DeviceHub's `ChatRestClient::ThreadUnreadCount`. */
+export interface ThreadUnreadCount {
+  threadId: number;
+  unreadCount: number;
+}

@@ -55,6 +55,13 @@ export function useMessages(channelId: number) {
       .then((page) => {
         setMessages(page);
         setHasMore(page.length === kPageSize);
+        // Issue #310/#350: this is the freshest page (no beforeId) —
+        // its last message is the newest in the channel, exactly what
+        // just got shown by opening it.
+        const latest = page[page.length - 1];
+        if (latest !== undefined) {
+          void restClient.markChannelRead(token, channelId, latest.id).catch(() => {});
+        }
       })
       .catch(() => setError("Couldn't load messages for this channel."))
       .finally(() => setLoading(false));
@@ -63,6 +70,13 @@ export function useMessages(channelId: number) {
   useEffect(() => {
     const offMessage = socket.on("message", (message) => {
       setMessages((prev) => [...prev, message]);
+      // A live message only arrives while subscribed to this channel —
+      // subscription tracks the currently-open channel, so it's being
+      // read right now (issue #310/#350).
+      const token = getAccessToken();
+      if (token !== null) {
+        void restClient.markChannelRead(token, channelId, message.id).catch(() => {});
+      }
       // Issue #311 — web analog of DesktopNotifier: only while this tab
       // isn't the one being looked at, never for the caller's own
       // message, same as notification_policy::shouldNotify().
@@ -115,7 +129,7 @@ export function useMessages(channelId: number) {
         typingHideTimer.current = null;
       }
     };
-  }, [socket]);
+  }, [socket, restClient, getAccessToken, channelId]);
 
   const loadOlder = useCallback(async () => {
     const token = getAccessToken();

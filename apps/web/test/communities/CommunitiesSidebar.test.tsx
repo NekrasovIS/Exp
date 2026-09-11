@@ -59,6 +59,25 @@ describe("CommunitiesSidebar", () => {
     expect(onSelectCommunity).toHaveBeenCalledWith(1);
   });
 
+  it("renders an unread badge when unreadCounts has a positive entry for a community", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(200, [{ id: 1, name: "Robotics Club", owner: "alice" }])),
+    );
+    render(
+      <SessionProvider>
+        <CommunitiesSidebar
+          selectedCommunityId={null}
+          onSelectCommunity={vi.fn()}
+          unreadCounts={new Map([[1, 12]])}
+        />
+      </SessionProvider>,
+    );
+
+    const button = await screen.findByRole("button", { name: /Robotics Club/ });
+    expect(button).toHaveTextContent("12");
+  });
+
   it("joins by invite code and refreshes the list", async () => {
     const fetchSpy = vi
       .fn()

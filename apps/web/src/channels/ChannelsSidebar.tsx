@@ -26,9 +26,19 @@ interface ChannelsSidebarProps {
   // about it, so selecting it showed "Select a channel" instead of the
   // chat view).
   onSelectChannel: (channel: ChatItem) => void;
+  /** Unread message count per channel id (issue #310/#350), from the
+   * caller's useUnreadCounts() — this component doesn't fetch its own
+   * copy, so a rebuild here never drops CommunitiesMode's shared poll
+   * state. Absent entries render as "no badge", same as a count of 0. */
+  unreadCounts?: ReadonlyMap<number, number>;
 }
 
-export function ChannelsSidebar({ communityId, selectedChannelId, onSelectChannel }: ChannelsSidebarProps) {
+export function ChannelsSidebar({
+  communityId,
+  selectedChannelId,
+  onSelectChannel,
+  unreadCounts,
+}: ChannelsSidebarProps) {
   const { channels, loading, error, createChannel } = useChannels(communityId);
   const identityKeys = useIdentityKeys();
   const { setUpEncryptedChannel } = useEncryptedChannelSetup();
@@ -73,18 +83,26 @@ export function ChannelsSidebar({ communityId, selectedChannelId, onSelectChanne
       {loading && <p className={styles.mutedText}>Loading channels…</p>}
       {error !== null && <p role="alert">{error}</p>}
       <ul className={styles.list}>
-        {channels.map((channel) => (
-          <li key={channel.id}>
-            <button
-              type="button"
-              className={styles.listItemButton}
-              aria-current={channel.id === selectedChannelId}
-              onClick={() => onSelectChannel(channel)}
-            >
-              {channel.isEncrypted ? "🔒 " : ""}#{channel.name}
-            </button>
-          </li>
-        ))}
+        {channels.map((channel) => {
+          const unreadCount = unreadCounts?.get(channel.id) ?? 0;
+          return (
+            <li key={channel.id}>
+              <button
+                type="button"
+                className={styles.listItemButton}
+                aria-current={channel.id === selectedChannelId}
+                onClick={() => onSelectChannel(channel)}
+              >
+                <span className={unreadCount > 0 ? styles.unreadLabel : undefined}>
+                  {channel.isEncrypted ? "🔒 " : ""}#{channel.name}
+                </span>
+                {unreadCount > 0 && (
+                  <span className={styles.unreadBadge}>{unreadCount > 99 ? "99+" : unreadCount}</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <form onSubmit={handleCreate} className={styles.form}>
         <label htmlFor="new-channel-name">New channel</label>

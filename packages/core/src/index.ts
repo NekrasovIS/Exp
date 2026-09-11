@@ -17,6 +17,7 @@ export { ChatRestClient } from "./chat/ChatRestClient.js";
 export { ChatClient } from "./chat/ChatClient.js";
 export type { WebSocketFactory, WebSocketLike } from "./chat/ChatClient.js";
 export type {
+  ChannelUnreadCount,
   ChatItem,
   ChatMessageInfo,
   DirectMessageInfo,
@@ -24,4 +25,5 @@ export type {
   IncomingChatMessage,
   MessageReactionInfo,
   PinnedMessageInfo,
+  ThreadUnreadCount,
 } from "./chat/types.js";

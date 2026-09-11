@@ -13,12 +13,14 @@ import {
 import type { FetchLike } from "../http.js";
 import { toBase64 } from "./base64.js";
 import type {
+  ChannelUnreadCount,
   ChatItem,
   ChatMessageInfo,
   DirectMessageInfo,
   DirectMessageThreadInfo,
   MessageReactionInfo,
   PinnedMessageInfo,
+  ThreadUnreadCount,
 } from "./types.js";
 
 interface ChatItemBody {
@@ -116,6 +118,11 @@ function toDirectMessageThreadInfo(body: DirectMessageThreadBody): DirectMessage
 
 function toDirectMessageInfo(body: DirectMessageBody): DirectMessageInfo {
   return { id: body.id, author: body.author, body: body.body, sentAt: body.sent_at };
+}
+
+interface UnreadCountsBody {
+  channels?: Array<{ channel_id: number; unread_count: number }>;
+  dm_threads?: Array<{ thread_id: number; unread_count: number }>;
 }
 
 function messagesQuery(limit: number, beforeId?: number): string {
@@ -505,6 +512,58 @@ export class ChatRestClient {
       throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
     }
     return res.body.map(toDirectMessageInfo);
+  }
+
+  // ---- Unread counters (issue #310/#350) ----
+
+  /** Idempotent, never moves the marker backward on the server (see
+   * ChatRepository::markChannelRead()'s own doc comment on the C++
+   * side) — safe to call unconditionally on open/scroll-to-latest. */
+  async markChannelRead(token: string, channelId: number, messageId: number): Promise<void> {
+    await this.expectOk(
+      requestJson(
+        this.fetchImpl,
+        resolveUrl(this.baseUrl, `/channels/${channelId}/read`),
+        jsonRequestInit("POST", token, { message_id: messageId }),
+      ),
+    );
+  }
+
+  /** Same contract as {@link markChannelRead}, for a DM thread. */
+  async markDmThreadRead(token: string, threadId: number, messageId: number): Promise<void> {
+    await this.expectOk(
+      requestJson(
+        this.fetchImpl,
+        resolveUrl(this.baseUrl, `/dm/threads/${threadId}/read`),
+        jsonRequestInit("POST", token, { message_id: messageId }),
+      ),
+    );
+  }
+
+  /** One call for every channel/thread the caller belongs to — the same
+   * no-N+1 aggregate query as ChatRepository::listUnreadChannelCounts()/
+   * listUnreadThreadCounts() on the server. */
+  async fetchUnreadCounts(
+    token: string,
+  ): Promise<{ channels: ChannelUnreadCount[]; threads: ThreadUnreadCount[] }> {
+    const res = await requestJson<UnreadCountsBody>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/unread"),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok || res.body === undefined) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return {
+      channels: (res.body.channels ?? []).map((entry) => ({
+        channelId: entry.channel_id,
+        unreadCount: entry.unread_count,
+      })),
+      threads: (res.body.dm_threads ?? []).map((entry) => ({
+        threadId: entry.thread_id,
+        unreadCount: entry.unread_count,
+      })),
+    };
   }
 
   // ---- Shared response-shape helpers ----
