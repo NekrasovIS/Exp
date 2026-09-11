@@ -15,6 +15,7 @@
 #include "ui/ChatBubble.h"
 #include "ui/ChatMessageGrouping.h"
 #include "ui/IconFactory.h"
+#include "ui/MessageFormatting.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -77,7 +78,12 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bubbleLayout->setContentsMargins(bubblePaddingH, bubblePaddingV, bubblePaddingH, bubblePaddingV);
     bubbleLayout->setSpacing(bubbleInnerSpacing);
 
-    bodyLabel_ = new QLabel(message.body, bubble_);
+    rawBody_ = message.body;
+    // Issue #307: @упоминания оборачиваются в **bold** до того, как
+    // попадают в Qt::MarkdownText ниже — тот же приём, что и у обычного
+    // markdown в issue #94, никакого отдельного rich-text прохода не
+    // требуется.
+    bodyLabel_ = new QLabel(message_formatting::highlightMentions(message.body), bubble_);
     bodyLabel_->setObjectName(QStringLiteral("chatMessageBody"));
     bodyLabel_->setWordWrap(true);
     // Issue #94: рендерим **bold**/*italic*/`code`/ссылки/списки через
@@ -203,7 +209,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
             QAction* editAction = menu->addAction(tr("Edit"));
             editAction->setObjectName(QStringLiteral("editMessageAction"));
             connect(editAction, &QAction::triggered, this,
-                    [this]() { emit editRequested(messageId_, bodyLabel_->text()); });
+                    [this]() { emit editRequested(messageId_, rawBody_); });
         }
         QAction* replyAction = menu->addAction(tr("Reply"));
         replyAction->setObjectName(QStringLiteral("replyMessageAction"));
@@ -235,7 +241,8 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
 }
 
 void ChatMessageRow::updateBody(const QString& newBody) {
-    bodyLabel_->setText(newBody);
+    rawBody_ = newBody;
+    bodyLabel_->setText(message_formatting::highlightMentions(newBody));
     if (timeLabel_ != nullptr) {
         timeLabel_->setText(formattedSentAt_ + QStringLiteral(" (edited)"));
     }

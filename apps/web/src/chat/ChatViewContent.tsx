@@ -3,7 +3,7 @@
 // component's encrypted-channel early return never mounts this (and so
 // never calls useMessages/useChatSocket) for one.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
@@ -17,9 +17,20 @@ import { useMessages } from "./useMessages.js";
 interface ChatViewContentProps {
   channelId: number;
   communityId: number;
+  // `| undefined` explicit, not just `?:` — ChatView forwards its own
+  // already-possibly-undefined prop value verbatim, which
+  // exactOptionalPropertyTypes treats differently from the prop being
+  // omitted outright.
+  onOnlineMembers?: ((logins: string[]) => void) | undefined;
+  onPresenceChanged?: ((login: string, online: boolean) => void) | undefined;
 }
 
-export function ChatViewContent({ channelId, communityId }: ChatViewContentProps) {
+export function ChatViewContent({
+  channelId,
+  communityId,
+  onOnlineMembers,
+  onPresenceChanged,
+}: ChatViewContentProps) {
   const { currentLogin } = useSession();
   const isModerator = useIsModerator(communityId);
   const {
@@ -33,8 +44,23 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
     editMessage,
     deleteMessage,
     socket,
+    typingUser,
+    sendTyping,
   } = useMessages(channelId);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Issue #322 — presence rides this channel's socket; just forwarded
+  // up to the caller, which owns the aggregated state (MembersSidebar
+  // is a sibling, not a descendant, of this component).
+  useEffect(() => {
+    const offOnline = onOnlineMembers !== undefined ? socket.on("onlineMembers", onOnlineMembers) : undefined;
+    const offPresence =
+      onPresenceChanged !== undefined ? socket.on("presenceChanged", onPresenceChanged) : undefined;
+    return () => {
+      offOnline?.();
+      offPresence?.();
+    };
+  }, [socket, onOnlineMembers, onPresenceChanged]);
 
   return (
     <section className={styles.section}>
@@ -63,7 +89,8 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
           onDelete={deleteMessage}
         />
       </div>
-      <MessageComposer channelId={channelId} onSend={sendMessage} />
+      {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
+      <MessageComposer channelId={channelId} onSend={sendMessage} onTyping={sendTyping} />
     </section>
   );
 }
