@@ -234,6 +234,14 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
 
 void WebSocketServer::handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription,
                                            const nlohmann::json& body) {
+    // issue #313: checked first, same dispatch style as
+    // handleSubscribedMessage()'s own key-presence chain for channels —
+    // falls through to the {"body"} path below when absent.
+    if (body.contains("typing")) {
+        handleDmTyping(webSocket, subscription);
+        return;
+    }
+
     if (!body.contains("body") || !body["body"].is_string()) {
         webSocket.send(nlohmann::json{{"error", "expected {\"body\"}"}}.dump());
         return;
@@ -531,6 +539,11 @@ void WebSocketServer::handleTyping(ix::WebSocket& webSocket, const Subscription&
                         &webSocket);
 }
 
+void WebSocketServer::handleDmTyping(ix::WebSocket& webSocket, const Subscription& subscription) {
+    broadcastToDmThread(subscription.dmThreadId, nlohmann::json{{"user_typing", subscription.login}}.dump(),
+                         &webSocket);
+}
+
 void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket) {
     bool wasParticipant = false;
     {
@@ -606,13 +619,17 @@ void WebSocketServer::broadcastToCallParticipants(std::int64_t channelId, const 
     }
 }
 
-void WebSocketServer::broadcastToDmThread(std::int64_t dmThreadId, const std::string& json) {
+void WebSocketServer::broadcastToDmThread(std::int64_t dmThreadId, const std::string& json,
+                                           const ix::WebSocket* excludeSocket) {
     // Та же схема "собрать под локом, разослать вне его" (CP.22/CP.43),
     // что и у broadcastToChannel() — см. её doc-комментарий.
     std::vector<std::shared_ptr<ix::WebSocket>> targets;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
         for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            if (client.get() == excludeSocket) {
+                continue;
+            }
             const auto it = subscriptions_.find(client.get());
             if (it != subscriptions_.end() && it->second.isDirectMessage && it->second.dmThreadId == dmThreadId) {
                 targets.push_back(client);

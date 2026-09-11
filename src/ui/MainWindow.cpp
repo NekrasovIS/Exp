@@ -503,6 +503,10 @@ MainWindow::MainWindow(QWidget* parent)
             dmChatClient_.sendMessage(body);
         }
     });
+    // Issue #313 — same shape as chatClient_'s typing wiring above.
+    connect(directMessageView_, &DirectMessageView::typingRequested, this, [this]() { dmChatClient_.sendTyping(); });
+    connect(&dmChatClient_, &ChatClient::userTyping, this,
+            [this](const QString& login) { directMessageView_->showTypingUser(login); });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {

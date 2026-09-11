@@ -102,11 +102,14 @@ namespace chat_service {
  * thread" при отказе — та же приватность, что и у REST-эндпоинтов
  * HttpServer::handlePostDirectMessage()/handleListDirectMessages(), не
  * подтверждающих чужому существование диалога через разные коды ошибок
- * для "не найден" и "не участник"). После подписки на диалог доступно
- * только `{"body": "..."}` — звонки/typing/edit/delete не поддерживаются
- * для личных диалогов на этом этапе (backend Фазы 2 их не реализует),
- * поэтому подписка на диалог не проходит через общую диспетчеризацию
- * handleSubscribedMessage(), а сразу и только через handleDirectMessage().
+ * для "не найден" и "не участник"). После подписки на диалог доступны
+ * `{"body": "..."}` и `{"typing": true}` (issue #313 — тот же смысл, что
+ * и для каналов: рассылает `{"user_typing": "<login>"}` другому участнику
+ * диалога, эфемерно, без явного "перестал печатать") — звонки/edit/delete
+ * не поддерживаются для личных диалогов на этом этапе (backend Фазы 2 их
+ * не реализует), поэтому подписка на диалог не проходит через общую
+ * диспетчеризацию handleSubscribedMessage(), а сразу и только через
+ * handleDirectMessage().
  */
 class WebSocketServer {
 public:
@@ -179,6 +182,10 @@ private:
     /// что и у broadcastToChannel()/broadcastToCallParticipants().
     void stopJanusProxySession(ix::WebSocket* socket);
     void handleTyping(ix::WebSocket& webSocket, const Subscription& subscription);
+    /// Аналог handleTyping() для личного диалога (issue #313) — вызвано
+    /// из handleDirectMessage() (та же причина, что и у самой подписки на
+    /// диалог: DM не проходит общую диспетчеризацию handleSubscribedMessage()).
+    void handleDmTyping(ix::WebSocket& webSocket, const Subscription& subscription);
     void removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket);
     /// Отправляет @p json каждому сокету, подписанному на чат @p channelId,
     /// кроме @p excludeSocket (nullptr — значение по умолчанию — не
@@ -187,10 +194,14 @@ private:
     /// не видел эхо собственного "typing").
     void broadcastToChannel(std::int64_t channelId, const std::string& json, const ix::WebSocket* excludeSocket = nullptr);
     /// Аналог broadcastToChannel() для подписчиков личного диалога
-    /// dmThreadId — их всегда ровно два (участники), включая
-    /// отправителя (тот же принцип "рассылка всем, без локального
-    /// оптимистичного эха", что и у broadcastToChannel()).
-    void broadcastToDmThread(std::int64_t dmThreadId, const std::string& json);
+    /// dmThreadId — их всегда ровно два (участники). @p excludeSocket
+    /// по умолчанию не исключает никого — нужно для рассылки сообщений
+    /// (включая отправителя, тот же принцип "без локального
+    /// оптимистичного эха", что и у broadcastToChannel()); typing-
+    /// уведомления (issue #313), как и у каналов, передают сюда
+    /// отправителя, чтобы он не видел эхо собственного "typing".
+    void broadcastToDmThread(std::int64_t dmThreadId, const std::string& json,
+                              const ix::WebSocket* excludeSocket = nullptr);
     /// В отличие от broadcastToChannel (все подписчики *чата* канала),
     /// это достигает только сокетов, реально находящихся в
     /// callParticipants_[channelId] — тот, кто подписан на текстовый чат
