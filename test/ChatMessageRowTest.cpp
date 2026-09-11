@@ -338,12 +338,22 @@ TEST(ChatMessageRowTest, OwnMessageContextMenuDeleteActionEmitsDeleteRequested) 
     EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
 }
 
-TEST(ChatMessageRowTest, WithoutCanManageChannelNonOwnMessageHasNoContextMenuAndNoPinnedIndicator) {
-    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/false);
+TEST(ChatMessageRowTest, WithoutCanManageChannelNonOwnMessageHasNoPinActionAndNoPinnedIndicator) {
+    // Контекстное меню теперь строится всегда (issue #333/#334/#306 —
+    // "React"/"Reply" доступны на любом сообщении), поэтому
+    // canManageChannel=false больше не означает "меню вообще нет", как
+    // раньше в #339 в одиночку — только "нет пункта Pin в этом меню".
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*currentUserLogin=*/QString(),
+                        /*canManageChannel=*/false);
 
     auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
-    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::DefaultContextMenu);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("pinMessageAction")), nullptr);
     // isHidden(), не isVisible() — тест не показывает окно, а
     // isVisible() учитывает всю цепочку предков (всегда false для
     // непоказанного топ-левел виджета); isHidden() отражает только
@@ -352,7 +362,7 @@ TEST(ChatMessageRowTest, WithoutCanManageChannelNonOwnMessageHasNoContextMenuAnd
 }
 
 TEST(ChatMessageRowTest, CanManageChannelShowsPinActionOnNonOwnMessageButNotEditOrDelete) {
-    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*currentUserLogin=*/QString(), /*canManageChannel=*/true);
 
     auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
@@ -369,7 +379,7 @@ TEST(ChatMessageRowTest, CanManageChannelShowsPinActionOnNonOwnMessageButNotEdit
 }
 
 TEST(ChatMessageRowTest, PinActionOnAnUnpinnedMessageEmitsPinRequestedAndSetPinnedShowsTheIndicator) {
-    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, /*currentUserLogin=*/QString(), /*canManageChannel=*/true);
     auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
 
@@ -403,7 +413,7 @@ TEST(ChatMessageRowTest, PinActionOnAnAlreadyPinnedMessageShowsUnpinAndEmitsUnpi
     // созданный.
     ChatMessage message = sampleMessage();
     message.isPinned = true;
-    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*currentUserLogin=*/QString(), /*canManageChannel=*/true);
     auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
 
@@ -423,13 +433,13 @@ TEST(ChatMessageRowTest, PinActionOnAnAlreadyPinnedMessageShowsUnpinAndEmitsUnpi
 TEST(ChatMessageRowTest, MessageConstructedAlreadyPinnedShowsIndicatorImmediately) {
     ChatMessage message = sampleMessage();
     message.isPinned = true;
-    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*canManageChannel=*/true);
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*currentUserLogin=*/QString(), /*canManageChannel=*/true);
 
     EXPECT_FALSE(row.findChild<QLabel*>(QStringLiteral("chatMessagePinnedIndicator"))->isHidden());
 }
 
 TEST(ChatMessageRowTest, OwnMessageWithCanManageChannelHasEditPinAndDeleteAllTogether) {
-    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true, /*canManageChannel=*/true);
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true, /*currentUserLogin=*/QString(), /*canManageChannel=*/true);
     auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
 

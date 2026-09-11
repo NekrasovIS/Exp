@@ -2,9 +2,12 @@
 
 #include <gtest/gtest.h>
 
+#include <QAction>
 #include <QImage>
 #include <QLabel>
 #include <QLayout>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
 
@@ -335,7 +338,14 @@ TEST(ChatViewTest, ClearLogResetsCanManageChannelAndPinnedMessagesCount) {
     view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
     auto* bubble = view.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
-    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::DefaultContextMenu);
+    // Контекстное меню теперь строится всегда (issue #333/#334/#306 —
+    // "React"/"Reply" доступны на любом сообщении), поэтому сброс
+    // canManageChannel_ проверяется по отсутствию именно пункта Pin, а
+    // не по отсутствию меню целиком.
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("pinMessageAction")), nullptr);
 }
 
 TEST(ChatViewTest, AppendedMessageWithReactionsShowsAChip) {
