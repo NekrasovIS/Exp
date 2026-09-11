@@ -15,7 +15,8 @@ interface DirectMessageViewProps {
 
 export function DirectMessageView({ threadId, otherLogin }: DirectMessageViewProps) {
   const { currentLogin } = useSession();
-  const { messages, loading, error, hasMore, loadOlder, sendMessage } = useDirectMessages(threadId);
+  const { messages, loading, error, hasMore, loadOlder, sendMessage, typingUser, sendTyping } =
+    useDirectMessages(threadId);
 
   return (
     <section className={styles.section}>
@@ -32,7 +33,8 @@ export function DirectMessageView({ threadId, otherLogin }: DirectMessageViewPro
         )}
         <DirectMessageList messages={messages} currentLogin={currentLogin} />
       </div>
-      <DirectMessageComposer onSend={sendMessage} />
+      {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
+      <DirectMessageComposer onSend={sendMessage} onTyping={sendTyping} />
     </section>
   );
 }

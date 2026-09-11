@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -52,5 +52,24 @@ describe("DirectMessageView", () => {
     const socket = FakeWebSocket.instances[0]!;
     const sentFrames = socket.sent.map((frame) => JSON.parse(frame));
     expect(sentFrames).toContainEqual({ body: "hi there" });
+  });
+
+  it("typing in the composer sends a typing frame, and a received user_typing shows the indicator (issue #313)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+
+    render(
+      <SessionProvider>
+        <DirectMessageView threadId={9} otherLogin="bob" />
+      </SessionProvider>,
+    );
+    await screen.findByLabelText("Message");
+    const socket = FakeWebSocket.instances[0]!;
+
+    await userEvent.type(screen.getByLabelText("Message"), "h");
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({ typing: true });
+
+    expect(screen.queryByText("bob is typing…")).not.toBeInTheDocument();
+    act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
+    expect(screen.getByText("bob is typing…")).toBeInTheDocument();
   });
 });

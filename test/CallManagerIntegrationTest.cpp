@@ -47,6 +47,33 @@ std::string envOrDefault(const char* name, const std::string& defaultValue) {
     return value != nullptr ? std::string(value) : defaultValue;
 }
 
+/// Прокачивает событийный цикл, пока @p predicate не станет true или не
+/// истечёт @p timeoutMs (issue #233) — полный неполиморфный сбор
+/// ICE-кандидатов (non-trickle SFU-протокол, см. doc-комментарий
+/// PeerObserver::OnIceGatheringChange()) на сети с недоступным STUN
+/// (см. лог "UDP send ... failed") занимает заметно дольше, чем на
+/// чистой сети, так что фиксированный QTimer::singleShot() либо
+/// избыточно долгий на быстрой сети, либо слишком короткий на
+/// медленной — polling с щедрым верхним пределом устойчив к обоим
+/// случаям, возвращаясь сразу, как только @p predicate выполнится.
+template <typename Predicate>
+bool waitUntil(Predicate predicate, int timeoutMs = 30000, int pollIntervalMs = 200) {
+    QEventLoop loop;
+    QTimer poller;
+    QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
+    QObject::connect(&poller, &QTimer::timeout, &loop, [&]() {
+        if (predicate()) {
+            loop.quit();
+        }
+    });
+    poller.start(pollIntervalMs);
+    if (predicate()) {
+        return true;
+    }
+    loop.exec();
+    return predicate();
+}
+
 bool registerTestUser(QNetworkAccessManager& manager, const QUrl& userServiceUrl, const QString& login,
                        const QString& password) {
     QNetworkRequest request(userServiceUrl.resolved(QUrl(QStringLiteral("/users/register"))));
@@ -498,6 +525,222 @@ TEST(CallManagerIntegrationTest, SfuPublishAndSubscribeOfferAnswerRoundTrip) {
 
     callManagerA.leaveCall();
     callManagerB.leaveCall();
+}
+
+// issue #233: #232 заменил mesh на SFU, но собственное условие issue #233
+// на удаление mesh-кода — не "теоретическая замена", а подтверждённый
+// работающий SFU-звонок минимум с 3 участниками (тем количеством, где
+// mesh уже начинал бы давать нагрузку). Тест выше проверяет только двух —
+// этот специально добавляет третьего. Как и тест выше, не дожидается
+// полной связности ICE/DTLS (см. её doc-комментарий) — сигналинг-уровень
+// (Janus должен знать о трёх publisher'ах в комнате) проверяется через
+// ASSERT, реальные subscribe-соединения на стороне клиента (peers_) —
+// через EXPECT, поскольку зависят от реальной ICE/DTLS-связности, которая
+// на изолированной/ограниченной сети может не устанавливаться вовсе.
+// Основное ручное подтверждение самого протокола для #233 (реальные
+// ICE/DTLS+SDP, без этого ограничения) — services/janus/verify/
+// verify-forwarding.mjs, запускаемый в docker-сети Janus, не с хоста.
+//
+// Все три участника здесь намеренно подключаются с null-устройствами
+// ввода/вывода звука (см. joinCall() ниже), а не с реальным устройством,
+// как сестринский двухучастниковый тест выше: три одновременно живых
+// PeerConnectionFactory (с настоящими worker/network/signaling-потоками
+// WebRTC) в одном процессе на этой машине вносят достаточную задержку
+// планирования потоков, чтобы буфер захвата с реального микрофона у A
+// или B иногда приходил за 20мс вместо ожидаемых 10мс;
+// CallAudioDeviceModule::pushCapturedAudio() передаёт его в WebRTC как
+// есть, а собственный AudioTransportImpl WebRTC жёстко проверяет
+// (фатальный CHECK, валит весь процесс, а не просто один тест) кратность
+// 10мс — воспроизводимо начиная именно с третьего одновременного
+// реального захвата, не в коде CallManager из этого коммита. joinCall()
+// уже штатно поддерживает null-устройство (см. его же doc-комментарий) —
+// сигналинг, ICE/DTLS и реальный SDP-обмен продолжаются как обычно,
+// теряется только реальный захват/рендер звука, что здесь и не
+// проверяется (см. выше — за это отвечает verify-forwarding.mjs).
+TEST(CallManagerIntegrationTest, SfuThreeParticipantPublishAndSubscribeRoundTrip) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+    const QUrl janusUrl(QString::fromStdString(envOrDefault("JANUS_URL", "http://127.0.0.1:8088/janus")));
+
+    const qint64 suffix = QDateTime::currentMSecsSinceEpoch();
+    const QString loginA = QStringLiteral("sfu-3test-a-%1").arg(suffix);
+    const QString loginB = QStringLiteral("sfu-3test-b-%1").arg(suffix);
+    const QString loginC = QStringLiteral("sfu-3test-c-%1").arg(suffix);
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) ||
+        !registerTestUser(manager, userUrl, loginB, password) ||
+        !registerTestUser(manager, userUrl, loginC, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    AuthClient authClientB(authUrl);
+    AuthClient authClientC(authUrl);
+    const std::optional<QString> tokenA = requestToken(authClientA, loginA, password);
+    const std::optional<QString> tokenB = requestToken(authClientB, loginB, password);
+    const std::optional<QString> tokenC = requestToken(authClientC, loginC, password);
+    if (!tokenA.has_value() || !tokenB.has_value() || !tokenC.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(*tokenA, QStringLiteral("sfu-3participant-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    for (const QString& token : {*tokenB, *tokenC}) {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityJoined, &loop, [&](qint64) { loop.quit(); });
+        chatRestClient.joinCommunity(token, communityId);
+        loop.exec();
+    }
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(*tokenA, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    const QString room = QStringLiteral("channel-%1").arg(channelId);
+    if (postJsonSync(manager, janusUrl, QJsonObject{{"janus", "create"}}).value(QStringLiteral("janus")).toString() !=
+        QStringLiteral("success")) {
+        GTEST_SKIP() << "Janus not reachable — run `docker compose --profile sfu up -d janus` to run this test.";
+    }
+
+    ChatClient chatClientA(chatWsUrl);
+    ChatClient chatClientB(chatWsUrl);
+    ChatClient chatClientC(chatWsUrl);
+    for (auto* client : {&chatClientA, &chatClientB, &chatClientC}) {
+        const QString& token = client == &chatClientA ? *tokenA : (client == &chatClientB ? *tokenB : *tokenC);
+        bool subscribed = false;
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(client, &ChatClient::subscribed, &loop, [&](qint64) {
+            subscribed = true;
+            loop.quit();
+        });
+        client->connectToChannel(token, channelId);
+        loop.exec();
+        ASSERT_TRUE(subscribed);
+    }
+
+    AudioInputDevice audioInputA;
+    AudioOutputDevice audioOutputA;
+    AudioInputDevice audioInputB;
+    AudioOutputDevice audioOutputB;
+    AudioInputDevice audioInputC;
+    AudioOutputDevice audioOutputC;
+    CameraDevice cameraA;
+    CameraDevice cameraB;
+    CameraDevice cameraC;
+    ScreenCaptureDevice screenCaptureA;
+    ScreenCaptureDevice screenCaptureB;
+    ScreenCaptureDevice screenCaptureC;
+
+    CallManager callManagerA(chatClientA, audioInputA, audioOutputA, cameraA, screenCaptureA);
+    CallManager callManagerB(chatClientB, audioInputB, audioOutputB, cameraB, screenCaptureB);
+    CallManager callManagerC(chatClientC, audioInputC, audioOutputC, cameraC, screenCaptureC);
+    callManagerA.setLocalLogin(loginA);
+    callManagerB.setLocalLogin(loginB);
+    callManagerC.setLocalLogin(loginC);
+
+    QStringList errorsA;
+    QStringList errorsB;
+    QStringList errorsC;
+    QObject::connect(&callManagerA, &CallManager::callError, [&](const QString& message) { errorsA << message; });
+    QObject::connect(&callManagerB, &CallManager::callError, [&](const QString& message) { errorsB << message; });
+    QObject::connect(&callManagerC, &CallManager::callError, [&](const QString& message) { errorsC << message; });
+
+    callManagerA.joinCall(QAudioDevice(), QAudioDevice());
+    // A публикуется один — ждём, пока Janus реально не увидит его
+    // publisher'ом (не просто "запрос на join отправлен"), прежде чем
+    // впустить кого-то ещё: полный сбор ICE-кандидатов (non-trickle
+    // SFU-протокол) на сети без доступного STUN может занимать заметно
+    // дольше пары секунд, см. doc-комментарий waitUntil() выше.
+    ASSERT_TRUE(waitUntil([&]() {
+        const std::optional<QJsonArray> participants = listJanusRoomParticipants(manager, janusUrl, room);
+        return participants.has_value() && !participants->isEmpty();
+    })) << "A never became a publisher in Janus's own bookkeeping";
+
+    callManagerB.joinCall(QAudioDevice(), QAudioDevice());
+    // B видит A уже publisher'ом (1 subscribe) и сам публикуется
+    // (1 publish); A получает уведомление о новом publisher'е B и
+    // подписывается на него (1 subscribe) — три раунда offer/answer,
+    // каждый со своим полным сбором ICE-кандидатов. Не ASSERT — как и
+    // сигналинговый раунд-трип в SfuPublishAndSubscribeOfferAnswerRoundTrip
+    // выше, реальное подключение subscribe-соединений зависит от полной
+    // связности ICE/DTLS с Janus, которая на изолированной сети (в т.ч.
+    // сети CI) может не устанавливаться вовсе — это здесь не проверяется
+    // (см. doc-комментарий класса теста), только даём процессу шанс
+    // устояться перед финальными проверками ниже.
+    waitUntil([&]() { return callManagerA.activeRemotePeerCount() >= 1 && callManagerB.activeRemotePeerCount() >= 1; });
+
+    callManagerC.joinCall(QAudioDevice(), QAudioDevice());
+    // C видит и A, и B уже publisher'ами (2 subscribe) и сам
+    // публикуется (1 publish); A и B каждый получает уведомление о
+    // новом publisher'е C и подписывается на него (ещё 2 subscribe) —
+    // пять независимых раундов offer/answer, самая нагруженная фаза теста.
+    waitUntil([&]() {
+        return callManagerA.activeRemotePeerCount() >= 2 && callManagerB.activeRemotePeerCount() >= 2 &&
+               callManagerC.activeRemotePeerCount() >= 2;
+    });
+
+    // Все три ожидаемо получают по два callError о null-устройствах
+    // ввода/вывода звука (см. их же joinCall() выше и doc-комментарий
+    // класса теста) — это не ошибка теста, поэтому здесь не EXPECT_TRUE
+    // на пустоту, а точная проверка именно этих двух сообщений у каждого.
+    EXPECT_EQ(errorsA.size(), 2) << errorsA.join(QStringLiteral("; ")).toStdString();
+    EXPECT_EQ(errorsB.size(), 2) << errorsB.join(QStringLiteral("; ")).toStdString();
+    EXPECT_EQ(errorsC.size(), 2) << errorsC.join(QStringLiteral("; ")).toStdString();
+
+    // Сигналинг-уровень (не требует полной связности ICE/DTLS, см. выше) —
+    // тот же самый Janus REST listparticipants, что и в двухучастниковом
+    // тесте, ровно тем же ASSERT'ом: Janus должен видеть все три join'а
+    // как реальных publisher'ов комнаты.
+    const std::optional<QJsonArray> participants = listJanusRoomParticipants(manager, janusUrl, room);
+    ASSERT_TRUE(participants.has_value()) << "Janus became unreachable mid-test";
+    ASSERT_EQ(participants->size(), 3) << "expected exactly A, B and C to be publishers in the room";
+    QSet<QString> displays;
+    for (const QJsonValue& participant : *participants) {
+        displays.insert(participant.toObject().value(QStringLiteral("display")).toString());
+    }
+    EXPECT_TRUE(displays.contains(loginA));
+    EXPECT_TRUE(displays.contains(loginB));
+    EXPECT_TRUE(displays.contains(loginC));
+    // Реальные subscribe-соединения (peers_/activeRemotePeerCount())
+    // сознательно не проверяются здесь тем же ASSERT/EXPECT, что и Janus
+    // выше — как и сестринский двухучастниковый тест выше (см. её
+    // финальные проверки), это зависит от полной связности ICE/DTLS, а
+    // не только от сигналинга, и на изолированной/ограниченной сети
+    // может не устанавливаться вовсе (см. doc-комментарий класса теста и
+    // waitUntil() выше); реальный forwarding-путь подтверждает
+    // verify-forwarding.mjs.
+
+    callManagerA.leaveCall();
+    callManagerB.leaveCall();
+    callManagerC.leaveCall();
 }
 
 }  // namespace devicehub

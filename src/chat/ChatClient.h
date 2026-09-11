@@ -38,6 +38,13 @@ namespace devicehub {
  * sfuRoomAssigned() — id комнаты Janus для звонка, отдельным сигналом
  * рядом с callRosterReceived() на тот же ответ joinCall().
  *
+ * onlineMembersReceived()/presenceChanged() (issue #309) — presence is
+ * community-wide, not per-channel: the "subscribed" response to
+ * connectToChannel() carries "online_members" (who else in the same
+ * community is connected to any of its channels right now), and every
+ * later connect/disconnect elsewhere in that community fires
+ * presenceChanged(). Never fires for connectToDirectMessageThread().
+ *
  * sendTyping() (issue #96) отправляет `{"typing": true}`; userTyping()
  * срабатывает на соответствующую рассылку `{"user_typing": "<login>"}`
  * от другого подписчика (chat-service никогда не отправляет это эхом
@@ -68,7 +75,10 @@ namespace devicehub {
  * subscribed()/messageReceived() на ответ (DirectMessage не несёт
  * attachment_id/attachment_filename — messageReceived() получит для
  * них -1/пустую строку, как и для обычного сообщения без вложения).
- * Никаких кадров звонка/typing/edit_message/delete_message для диалога
+ * sendTyping()/userTyping() тоже работают для диалога (issue #313) —
+ * тот же кадр `{"typing"}`/`{"user_typing"}`, что и для канала, этот
+ * класс не различает их, разница только в маршрутизации на стороне
+ * chat-service. Кадры звонка/edit_message/delete_message для диалога
  * не отправлять — chat-service не обрабатывает их для подписки на
  * личный диалог. Использовать отдельный экземпляр ChatClient для
  * диалогов, не тот же самый, что подписан на канал (нужен независимый
@@ -127,8 +137,9 @@ public:
     void sendJanusMessage(qint64 handle, const QJsonObject& body, const QJsonObject& jsep = QJsonObject());
 
     /// Сообщает chat-service, что локальный пользователь печатает в
-    /// подписанном канале — вызывает userTyping() у всех остальных
-    /// подписчиков.
+    /// подписанном канале или диалоге (issue #313) — вызывает
+    /// userTyping() у остальных подписчиков (в диалоге — у второго
+    /// участника).
     void sendTyping();
 
     /// Запрашивает редактирование сообщения @p id (должно принадлежать
@@ -199,8 +210,22 @@ signals:
     /// через chat-service.
     void janusEventReceived(const QJsonObject& event);
 
-    /// Другой подписчик печатает в подписанном канале.
+    /// Другой подписчик печатает в подписанном канале или диалоге.
     void userTyping(const QString& login);
+
+    /// Presence (issue #309) — снимок логинов, у кого сейчас есть хоть
+    /// одно активное подключение к любому каналу того же сообщества,
+    /// что и подписанный канал (не только к нему одному), не включая
+    /// себя. Тот же ответ на subscribed(), что и sfuRoomAssigned() выше
+    /// — отдельный сигнал, а не поле в subscribed(), по той же причине.
+    /// Никогда не испускается для подписки на личный диалог.
+    void onlineMembersReceived(const QStringList& logins);
+
+    /// Кто-то в том же сообществе подключился/отключился от любого
+    /// своего канала (issue #309) — @p online false только когда у
+    /// @p login не осталось вообще ни одного активного подключения к
+    /// сообществу.
+    void presenceChanged(const QString& login, bool online);
 
 private:
     void onConnected();
