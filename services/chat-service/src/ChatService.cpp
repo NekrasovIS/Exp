@@ -173,4 +173,20 @@ std::vector<DirectMessage> ChatService::listDirectMessages(std::int64_t threadId
     return repository_.listDirectMessages(threadId, limit, beforeId);
 }
 
+void ChatService::markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId) {
+    repository_.markChannelRead(channelId, login, messageId);
+}
+
+void ChatService::markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId) {
+    repository_.markDmThreadRead(threadId, login, messageId);
+}
+
+std::vector<ChannelUnreadCount> ChatService::listUnreadChannelCounts(const std::string& login) {
+    return repository_.listUnreadChannelCounts(login);
+}
+
+std::vector<ThreadUnreadCount> ChatService::listUnreadThreadCounts(const std::string& login) {
+    return repository_.listUnreadThreadCounts(login);
+}
+
 }  // namespace chat_service

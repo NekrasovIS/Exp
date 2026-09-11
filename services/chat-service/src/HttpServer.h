@@ -17,7 +17,9 @@ namespace chat_service {
  *        загрузка/скачивание вложений (issue #116), поиск сообщений
  *        (issue #118), обмен пер-участник ключами канала для E2E-
  *        шифрования (issue #138), приглашения в сообщество по коду
- *        (issue #186) и личные диалоги (issue #187, Фаза 2). Каждый
+ *        (issue #186), личные диалоги (issue #187, Фаза 2) и отметки
+ *        "прочитано"/агрегированные счётчики непрочитанных (issue
+ *        #310/#348). Каждый
  *        маршрут требует действительный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через auth-service
  *        посредством AuthServiceClient.
@@ -89,6 +91,13 @@ private:
     void handleListMyThreads(const httplib::Request& request, httplib::Response& response);
     void handlePostDirectMessage(const httplib::Request& request, httplib::Response& response);
     void handleListDirectMessages(const httplib::Request& request, httplib::Response& response);
+    /// POST /channels/{id}/read (issue #310/#348).
+    void handleMarkChannelRead(const httplib::Request& request, httplib::Response& response);
+    /// POST /dm/threads/{id}/read (issue #310/#348).
+    void handleMarkDmThreadRead(const httplib::Request& request, httplib::Response& response);
+    /// GET /unread (issue #310/#348) — агрегированные счётчики по всем
+    /// каналам/диалогам вызывающего логина одним запросом.
+    void handleGetUnreadCounts(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;

@@ -99,6 +99,13 @@ public:
     /// Janus; см. doc-комментарий ChatRepository::recordJanusRoom().
     void recordCallRoom(std::int64_t channelId, const std::string& janusRoomId);
 
+    /// Issue #310/#348 — см. doc-комментарии соответствующих методов
+    /// ChatRepository.
+    void markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId);
+    void markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
+    [[nodiscard]] std::vector<ChannelUnreadCount> listUnreadChannelCounts(const std::string& login);
+    [[nodiscard]] std::vector<ThreadUnreadCount> listUnreadThreadCounts(const std::string& login);
+
 private:
     ChatRepository& repository_;
 };

@@ -1000,4 +1000,82 @@ void ChatRepository::recordJanusRoom(std::int64_t channelId, const std::string& 
     transaction.commit();
 }
 
+void ChatRepository::markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // GREATEST(NULL, N) = N in Postgres (NULL is only returned if every
+    // argument is NULL) — this single upsert both creates the first-ever
+    // row for (channelId, login) and, on repeat calls, never moves
+    // last_read_message_id backward (a client can legitimately send a
+    // stale id, e.g. a race between two open windows of the same user).
+    transaction.exec(
+        "INSERT INTO channel_read_state (channel_id, login, last_read_message_id) VALUES ($1, $2, $3) "
+        "ON CONFLICT (channel_id, login) DO UPDATE "
+        "SET last_read_message_id = GREATEST(channel_read_state.last_read_message_id, EXCLUDED.last_read_message_id)",
+        pqxx::params{channelId, login, messageId});
+    transaction.commit();
+}
+
+void ChatRepository::markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    transaction.exec(
+        "INSERT INTO dm_thread_read_state (thread_id, login, last_read_message_id) VALUES ($1, $2, $3) "
+        "ON CONFLICT (thread_id, login) DO UPDATE "
+        "SET last_read_message_id = GREATEST(dm_thread_read_state.last_read_message_id, EXCLUDED.last_read_message_id)",
+        pqxx::params{threadId, login, messageId});
+    transaction.commit();
+}
+
+std::vector<ChannelUnreadCount> ChatRepository::listUnreadChannelCounts(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // One query across every channel of every community login belongs
+    // to, rather than one round-trip per channel (the whole point of
+    // this endpoint, per issue #348's own doc comment on avoiding N+1).
+    // m.id > COALESCE(last_read_message_id, 0) treats "never marked
+    // read" as "everything is unread" — ids are BIGSERIAL, so this
+    // reuses insertion order as a cheap proxy for chronological order
+    // instead of comparing timestamps.
+    const pqxx::result rows = transaction.exec(
+        "SELECT c.id, count(m.id) FROM channels c "
+        "JOIN memberships mem ON mem.community_id = c.community_id AND mem.member_login = $1 "
+        "LEFT JOIN channel_read_state crs ON crs.channel_id = c.id AND crs.login = $1 "
+        "LEFT JOIN messages m ON m.channel_id = c.id AND m.id > COALESCE(crs.last_read_message_id, 0) "
+        "GROUP BY c.id",
+        pqxx::params{login});
+
+    std::vector<ChannelUnreadCount> counts;
+    counts.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        counts.push_back(
+            ChannelUnreadCount{.channelId = row[0].as<std::int64_t>(), .unreadCount = row[1].as<std::int64_t>()});
+    }
+    return counts;
+}
+
+std::vector<ThreadUnreadCount> ChatRepository::listUnreadThreadCounts(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT t.id, count(dm.id) FROM direct_message_threads t "
+        "LEFT JOIN dm_thread_read_state trs ON trs.thread_id = t.id AND trs.login = $1 "
+        "LEFT JOIN direct_messages dm ON dm.thread_id = t.id AND dm.id > COALESCE(trs.last_read_message_id, 0) "
+        "WHERE t.user_a_login = $1 OR t.user_b_login = $1 "
+        "GROUP BY t.id",
+        pqxx::params{login});
+
+    std::vector<ThreadUnreadCount> counts;
+    counts.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        counts.push_back(
+            ThreadUnreadCount{.threadId = row[0].as<std::int64_t>(), .unreadCount = row[1].as<std::int64_t>()});
+    }
+    return counts;
+}
+
 }  // namespace chat_service
