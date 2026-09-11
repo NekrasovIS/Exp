@@ -135,15 +135,41 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
 }
 
 void CommunitiesPanel::setCommunities(const QList<ChatItem>& communities) {
+    communities_ = communities;
+    rebuildList();
+}
+
+void CommunitiesPanel::setUnreadCount(qint64 communityId, qint64 unreadCount) {
+    if (unreadCounts_.value(communityId, 0) == unreadCount) {
+        return;
+    }
+    unreadCounts_[communityId] = unreadCount;
+    rebuildList();
+}
+
+void CommunitiesPanel::rebuildList() {
+    // Issue #310/#349: rebuildList() теперь также вызывается из
+    // setUnreadCount() — намного чаще, чем прежний единственный вызов
+    // из setCommunities() (например, на каждый периодический
+    // fetchUnreadCounts()) — без этого выделенный элемент мигал бы
+    // сброшенным при каждом обновлении бейджа.
+    const QListWidgetItem* currentItem = listWidget_->currentItem();
+    const qint64 previouslySelectedId = currentItem != nullptr ? currentItem->data(kIdRole).toLongLong() : -1;
+
     listWidget_->clear();
-    for (const ChatItem& community : communities) {
+    for (const ChatItem& community : communities_) {
         auto* item = new QListWidgetItem(listWidget_);
-        item->setIcon(ui_icons::communityAvatarIcon(community.name.left(1).toUpper()));
-        item->setToolTip(community.name);
+        const qint64 unreadCount = unreadCounts_.value(community.id, 0);
+        item->setIcon(ui_icons::communityAvatarIcon(community.name.left(1).toUpper(), unreadCount));
+        item->setToolTip(unreadCount > 0 ? tr("%1 (%2 unread)").arg(community.name).arg(unreadCount)
+                                          : community.name);
         item->setData(kIdRole, community.id);
         item->setData(kOwnerRole, community.ownerLogin);
         item->setData(kNameRole, community.name);
         item->setData(kInviteCodeRole, community.inviteCode);
+    }
+    if (previouslySelectedId >= 0) {
+        selectCommunityId(previouslySelectedId);
     }
 }
 

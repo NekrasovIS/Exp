@@ -126,31 +126,33 @@ void ChannelsPanel::recordChannelActivity(qint64 channelId, qint64 messageId, co
     entry.previewText = previewText;
     entry.activityAt = activityAt;
     entry.lastMessageId = messageId;
-    if (channelId == openChannelId_) {
-        // Канал открыт прямо сейчас — это сообщение уже прочитано.
-        // Без этого lastReadMessageId_ оставался бы «снимком» на момент
-        // setOpenChannelId() и не отражал бы сообщения, реально
-        // увиденные, пока канал был открыт — следующий фоновый
-        // fetchLatestMessage() после того, как канал закрыт, ошибочно
-        // зажёг бы непрочитанное для сообщения, которое уже видели.
-        lastReadMessageId_[channelId] = messageId;
-        entry.unread = false;
-    } else {
-        entry.unread = messageId > lastReadMessageId_.value(channelId, -1);
-    }
     rebuildList();
 }
 
 void ChannelsPanel::setOpenChannelId(qint64 channelId) {
     openChannelId_ = channelId;
-    lastReadMessageId_[channelId] = activity_.value(channelId).lastMessageId;
-    if (const auto it = activity_.find(channelId); it != activity_.end() && it->unread) {
-        it->unread = false;
+    if (channelId >= 0 && unreadCounts_.value(channelId, 0) != 0) {
+        unreadCounts_[channelId] = 0;
         rebuildList();
     }
 }
 
+void ChannelsPanel::setUnreadCount(qint64 channelId, qint64 unreadCount) {
+    if (unreadCounts_.value(channelId, 0) == unreadCount) {
+        return;
+    }
+    unreadCounts_[channelId] = unreadCount;
+    rebuildList();
+}
+
 void ChannelsPanel::rebuildList() {
+    // Issue #310/#349: rebuildList() теперь также вызывается из
+    // setUnreadCount() — намного чаще, чем раньше (например, на каждый
+    // периодический fetchUnreadCounts()) — без этого выделенный
+    // элемент мигал бы сброшенным при каждом обновлении бейджа.
+    const QListWidgetItem* currentItem = listWidget_->currentItem();
+    const qint64 previouslySelectedId = currentItem != nullptr ? currentItem->data(kIdRole).toLongLong() : -1;
+
     // Каналы с известной активностью — по убыванию времени, первыми;
     // остальные сохраняют относительный порядок, как его вернул сервер
     // (issue #152: "сортировка по времени последней активности").
@@ -178,18 +180,22 @@ void ChannelsPanel::rebuildList() {
         // kNameRole хранит настоящее имя для channelSelected()/rename.
         QString itemText = channel.isEncrypted ? QStringLiteral("# \U0001F512 ") + channel.name
                                                 : QStringLiteral("# ") + channel.name;
-        bool unread = false;
-        if (const auto it = activity_.constFind(channel.id); it != activity_.cend()) {
-            if (!it->previewText.isEmpty()) {
-                itemText += QStringLiteral("\n") + it->previewText;
-            }
-            unread = it->unread;
+        // Issue #310/#349: настоящий серверный счётчик вместо прежней
+        // клиентской эвристики issue #152 — см. doc-комментарий
+        // unreadCounts_.
+        const qint64 unreadCount = unreadCounts_.value(channel.id, 0);
+        if (unreadCount > 0) {
+            itemText += QStringLiteral(" (%1)").arg(unreadCount > 99 ? QStringLiteral("99+")
+                                                                       : QString::number(unreadCount));
+        }
+        if (const auto it = activity_.constFind(channel.id); it != activity_.cend() && !it->previewText.isEmpty()) {
+            itemText += QStringLiteral("\n") + it->previewText;
         }
         auto* item = new QListWidgetItem(itemText, listWidget_);
         item->setData(kIdRole, channel.id);
         item->setData(kOwnerRole, channel.ownerLogin);
         item->setData(kNameRole, channel.name);
-        if (unread) {
+        if (unreadCount > 0) {
             QFont font = item->font();
             font.setBold(true);
             item->setFont(font);
@@ -198,6 +204,9 @@ void ChannelsPanel::rebuildList() {
     }
     listStack_->setCurrentIndex(sorted.isEmpty() ? kEmptyStatePageIndex : kListPageIndex);
     applyFilter();
+    if (previouslySelectedId >= 0) {
+        selectChannelId(previouslySelectedId);
+    }
 }
 
 void ChannelsPanel::selectChannelId(qint64 id) {
