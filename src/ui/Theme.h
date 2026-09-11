@@ -34,6 +34,12 @@ constexpr const char* kMutedForeground = "#8b939c";
 /// зелёным градиентом (communityAvatarIcon()), поэтому бейджу того же
 /// цвета не с чем контрастировать поверх собственного фона.
 constexpr const char* kBadgeBackground = "#ef4444";
+/// Тот же тон, что и `devicehub--MemberListPanel`/`QWidget#sidebar` в
+/// QSS ниже (#202327) — вынесен как константа для IconFactory::
+/// memberAvatarIcon() (issue #309), той же паре причин, что и у
+/// kMutedForeground выше: QPainter-рисование не может ссылаться на
+/// строку QSS, значения держатся в синхроне вручную.
+constexpr const char* kSidebarBackground = "#202327";
 
 /// Таблица стилей Qt (QSS), реализующая тёмную тему с зелёным
 /// градиентным акцентом на основных действиях: три слоя тёмных фонов,

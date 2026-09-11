@@ -6,7 +6,7 @@
 
 import { ChatClient } from "@devicehub/core";
 
-import { useCall } from "./useCall.js";
+import { kCallReactionEmojis, useCall } from "./useCall.js";
 import { VideoTile } from "./VideoTile.js";
 
 interface CallPanelProps {
@@ -46,6 +46,18 @@ export function CallPanel({ chatClient, localLogin }: CallPanelProps) {
       </div>
       {state.error !== null && <p role="alert">{state.error}</p>}
       {state.participants.length > 0 && <p>In call: {state.participants.join(", ")}</p>}
+      <div>
+        {kCallReactionEmojis.map((emoji) => (
+          <button key={emoji} type="button" onClick={() => actions.sendReaction(emoji)}>
+            {emoji}
+          </button>
+        ))}
+      </div>
+      {state.lastReaction !== null && (
+        <p>
+          {state.lastReaction.login} {state.lastReaction.emoji}
+        </p>
+      )}
       <div>
         {state.localCameraStream !== null && (
           <VideoTile stream={state.localCameraStream} label="You (camera)" muted />

@@ -27,14 +27,18 @@ namespace chat_service {
  * `{"token": "...", "channel_id": N}` — проверяется через auth-service
  * (AuthServiceClient), прежде чем соединение будет подписано на этот
  * канал. Каждое следующее сообщение — одно из:
- *   - `{"body": "...", "attachment_id": N}` — сообщение чата,
- *     опционально ссылающееся на файл, уже загруженный через
- *     POST /channels/{id}/attachments из HttpServer (issue #116) —
- *     attachment_id опционален; сохраняется через ChatService, затем
- *     рассылается как JSON каждому соединению, подписанному на тот же
- *     канал (включая отправителя, чтобы все клиенты отрисовывали данные
- *     из одного и того же потока реального времени, а не делали
- *     оптимистичное локальное эхо).
+ *   - `{"body": "...", "attachment_id": N, "reply_to_message_id": N}` —
+ *     сообщение чата; оба дополнительных поля опциональны. attachment_id
+ *     ссылается на файл, уже загруженный через POST
+ *     /channels/{id}/attachments из HttpServer (issue #116).
+ *     reply_to_message_id (issue #306) — id сообщения, на которое это
+ *     отвечает; не проверяется на существование (нет FK на уровне схемы,
+ *     см. её doc-комментарий в init.sql) — клиент сам решает, что
+ *     показать, если не найдёт его в своей истории. Оба сохраняются через
+ *     ChatService, затем рассылаются как JSON каждому соединению,
+ *     подписанному на тот же канал (включая отправителя, чтобы все
+ *     клиенты отрисовывали данные из одного и того же потока реального
+ *     времени, а не делали оптимистичное локальное эхо).
  *   - `{"call_join": true}` — присоединиться к голосовому звонку для
  *     подписанного канала; требует членства в сообществе канала (issue
  *     #231 — раньше не проверялось вообще), иначе `{"error": "not a
@@ -54,6 +58,14 @@ namespace chat_service {
  *     класс никогда не заглядывает внутрь `payload`. Отвечает
  *     `{"error": "peer not in call"}` отправителю, если `to` не является
  *     текущим участником звонка.
+ *   - `{"call_reaction": "<emoji>"}` (issue #312) — лёгкая эмодзи-реакция
+ *     во время звонка, не влияющая на аудио/видео треки; рассылается
+ *     остальным участникам звонка как `{"call_reaction": {"login":
+ *     "<login>", "emoji": "<emoji>"}}` (никогда отправителю обратно —
+ *     тот же принцип, что и у typing ниже). Отвечает `{"error": "not in
+ *     a call"}` отправителю, если он сам сейчас не участник звонка
+ *     подписанного канала (call_join ещё не вызван, или уже вызван
+ *     call_leave). Эфемерно — ничего не сохраняется.
  *   - `{"janus_attach": true}` (issue #232) — прокси-сигналинг SFU:
  *     attach'ит новый handle плагина videoroom к Janus-сессии этого
  *     WS-подключения (создаёт сессию при самом первом вызове; живёт до
@@ -70,6 +82,19 @@ namespace chat_service {
  *     реальный результат/jsep-answer от Janus прилетит асинхронно как
  *     `{"janus_event": {...}}` через отдельный поток long-poll на эту
  *     сессию, запущенный в janus_attach).
+ *   - Presence (issue #309) — не отдельный клиентский кадр, а побочный
+ *     эффект самой подписки на канал: успешный hello на `channel_id`
+ *     отвечает `{"subscribed": true, "channel_id": N, "online_members":
+ *     [...]}` (логины остальных участников ТОГО ЖЕ сообщества, у кого
+ *     сейчас есть хоть одно активное подключение к любому его каналу —
+ *     не только к этому конкретному), затем рассылает остальным
+ *     `{"presence_changed": {"login": "<login>", "online": true}}`.
+ *     Отключение (Close/Error) даёт симметричный `{"online": false}`,
+ *     но только если у этого login не осталось других активных
+ *     подключений к каналам того же сообщества (две открытых вкладки —
+ *     не оффлайн, пока закрыта только одна). Эфемерно, как и typing
+ *     ниже — ничего не сохраняется, нет отдельного REST-эндпоинта для
+ *     истории присутствия.
  *   - `{"typing": true}` — issue #96: рассылает
  *     `{"user_typing": "<login>"}` каждому другому подписчику того же
  *     канала (никогда не отправителю обратно). Эфемерно, как и
@@ -88,8 +113,27 @@ namespace chat_service {
  *     (issue #114): удалить сообщение может собственный автор сообщения,
  *     владелец канала/сообщества либо модератор сообщества. При успехе
  *     рассылает `{"message_deleted": {"id"}}`.
+ *   - `{"pin_message": {"id": N}}`/`{"unpin_message": {"id": N}}` (issue
+ *     #338) — доступно ТОЛЬКО владельцу канала/сообщества или
+ *     модератору сообщества, в отличие от delete_message — не автору
+ *     сообщения как таковому (закрепление — функция управления
+ *     каналом, не модерация конкретного сообщения). Идемпотентно в
+ *     обе стороны. При успехе рассылает `{"message_pinned": {"id",
+ *     "pinned_by", "pinned_at"}}`/`{"message_unpinned": {"id"}}` всем
+ *     подписчикам чата.
+ *   - `{"toggle_reaction": {"message_id": N, "emoji": "..."}}` (issue
+ *     #333) — переключает реакцию отправителя на @p emoji: если он ещё
+ *     не поставил именно эту эмодзи на это сообщение — ставит, если
+ *     уже поставил — снимает (см. doc-комментарий уникального индекса
+ *     message_reactions в init.sql). Доступно любому подписчику чата на
+ *     любое сообщение, включая собственное — не только автору, в
+ *     отличие от edit_message. Рассылает всем подписчикам чата
+ *     `{"reaction_changed": {"message_id", "emoji", "logins": [...]}}`
+ *     — @p logins это ПОЛНЫЙ список тех, кто сейчас поставил именно эту
+ *     эмодзи на это сообщение (после применения переключения), не
+ *     дельта; клиент заменяет свою локальную копию целиком, а не
+ *     инкрементирует счётчик.
  *
-
  * REST (HttpServer) остаётся источником истины для истории/CRUD; этот
  * класс только проталкивает то, что отправлено, пока клиент подключён,
  * и только ретранслирует сигналинг звонков — он никогда не декодирует
@@ -102,11 +146,14 @@ namespace chat_service {
  * thread" при отказе — та же приватность, что и у REST-эндпоинтов
  * HttpServer::handlePostDirectMessage()/handleListDirectMessages(), не
  * подтверждающих чужому существование диалога через разные коды ошибок
- * для "не найден" и "не участник"). После подписки на диалог доступно
- * только `{"body": "..."}` — звонки/typing/edit/delete не поддерживаются
- * для личных диалогов на этом этапе (backend Фазы 2 их не реализует),
- * поэтому подписка на диалог не проходит через общую диспетчеризацию
- * handleSubscribedMessage(), а сразу и только через handleDirectMessage().
+ * для "не найден" и "не участник"). После подписки на диалог доступны
+ * `{"body": "..."}` и `{"typing": true}` (issue #313 — тот же смысл, что
+ * и для каналов: рассылает `{"user_typing": "<login>"}` другому участнику
+ * диалога, эфемерно, без явного "перестал печатать") — звонки/edit/delete
+ * не поддерживаются для личных диалогов на этом этапе (backend Фазы 2 их
+ * не реализует), поэтому подписка на диалог не проходит через общую
+ * диспетчеризацию handleSubscribedMessage(), а сразу и только через
+ * handleDirectMessage().
  */
 class WebSocketServer {
 public:
@@ -123,6 +170,14 @@ private:
     struct Subscription {
         std::string login;
         std::int64_t channelId = 0;
+        /// Сообщество канала выше (issue #309) — обновление в handleHello()
+        /// вместе с channelId, а не отдельным lookup при каждой рассылке
+        /// присутствия: broadcastToCommunity()/расчёт online_members
+        /// сканируют subscriptions_ под локом и не могут звать
+        /// chatService_ (БД) изнутри критической секции (CP.22). Не
+        /// используется, когда isDirectMessage — диалоги не имеют
+        /// сообщества.
+        std::int64_t communityId = 0;
         /// True, когда эта подписка — на личный диалог (dmThreadId), а
         /// не на канал сообщества (channelId) — оба поля взаимно
         /// исключающие, различаются этим флагом, а не значением 0
@@ -155,9 +210,20 @@ private:
     void handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"pin_message": {"id"}} (issue #338) — см. doc-комментарий класса.
+    void handlePinMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"unpin_message": {"id"}} (issue #338) — см. doc-комментарий класса.
+    void handleUnpinMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"toggle_reaction": {"message_id", "emoji"}} (issue #333) — см.
+    /// doc-комментарий класса.
+    void handleToggleReaction(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// issue #312: рассылает лёгкую эмодзи-реакцию остальным участникам
+    /// звонка подписанного канала — отвечает отправителю ошибкой, если
+    /// он сам сейчас не в этом звонке (см. doc-комментарий класса).
+    void handleCallReaction(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     /// issue #232: attach новый videoroom-handle на Janus-сессию этого
     /// подключения, создавая саму сессию (и запуская pumpJanusEvents())
     /// при первом обращении.
@@ -179,6 +245,10 @@ private:
     /// что и у broadcastToChannel()/broadcastToCallParticipants().
     void stopJanusProxySession(ix::WebSocket* socket);
     void handleTyping(ix::WebSocket& webSocket, const Subscription& subscription);
+    /// Аналог handleTyping() для личного диалога (issue #313) — вызвано
+    /// из handleDirectMessage() (та же причина, что и у самой подписки на
+    /// диалог: DM не проходит общую диспетчеризацию handleSubscribedMessage()).
+    void handleDmTyping(ix::WebSocket& webSocket, const Subscription& subscription);
     void removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket);
     /// Отправляет @p json каждому сокету, подписанному на чат @p channelId,
     /// кроме @p excludeSocket (nullptr — значение по умолчанию — не
@@ -186,11 +256,22 @@ private:
     /// уведомления о наборе текста передают сюда отправителя, чтобы он
     /// не видел эхо собственного "typing").
     void broadcastToChannel(std::int64_t channelId, const std::string& json, const ix::WebSocket* excludeSocket = nullptr);
+    /// Presence (issue #309) — рассылает @p json каждому сокету,
+    /// подписанному на ЛЮБОЙ канал сообщества @p communityId (не только
+    /// один конкретный, в отличие от broadcastToChannel), кроме
+    /// @p excludeSocket. Никогда не задевает подписки на личные диалоги
+    /// — у них нет communityId.
+    void broadcastToCommunity(std::int64_t communityId, const std::string& json,
+                               const ix::WebSocket* excludeSocket = nullptr);
     /// Аналог broadcastToChannel() для подписчиков личного диалога
-    /// dmThreadId — их всегда ровно два (участники), включая
-    /// отправителя (тот же принцип "рассылка всем, без локального
-    /// оптимистичного эха", что и у broadcastToChannel()).
-    void broadcastToDmThread(std::int64_t dmThreadId, const std::string& json);
+    /// dmThreadId — их всегда ровно два (участники). @p excludeSocket
+    /// по умолчанию не исключает никого — нужно для рассылки сообщений
+    /// (включая отправителя, тот же принцип "без локального
+    /// оптимистичного эха", что и у broadcastToChannel()); typing-
+    /// уведомления (issue #313), как и у каналов, передают сюда
+    /// отправителя, чтобы он не видел эхо собственного "typing".
+    void broadcastToDmThread(std::int64_t dmThreadId, const std::string& json,
+                              const ix::WebSocket* excludeSocket = nullptr);
     /// В отличие от broadcastToChannel (все подписчики *чата* канала),
     /// это достигает только сокетов, реально находящихся в
     /// callParticipants_[channelId] — тот, кто подписан на текстовый чат

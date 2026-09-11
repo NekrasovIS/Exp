@@ -35,6 +35,30 @@ bool isMemberOfCommunity(pqxx::work& transaction, std::int64_t communityId, cons
     return !rows.empty();
 }
 
+/// Реакции на сообщение @p messageId, сгруппированные по эмодзи (issue
+/// #333), в рамках уже открытой @p transaction — общая часть
+/// listRecentMessages()/searchMessages(); insertMessage() не вызывает
+/// это вовсе, поскольку у только что отправленного сообщения реакций
+/// заведомо ещё нет. Одна строка на результат SELECT, сортированного
+/// по (emoji, created_at) — переход на новый emoji в потоке строк
+/// начинает новую MessageReaction, а не отдельный агрегирующий запрос
+/// (GROUP BY/array_agg) — тот же выбор простоты, что и у поиска ниже
+/// (position() вместо полнотекстового индекса).
+std::vector<MessageReaction> reactionsForMessage(pqxx::work& transaction, std::int64_t messageId) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT emoji, login FROM message_reactions WHERE message_id = $1 ORDER BY emoji, created_at",
+        pqxx::params{messageId});
+    std::vector<MessageReaction> reactions;
+    for (const auto& row : rows) {
+        const std::string emoji = row[0].as<std::string>();
+        if (reactions.empty() || reactions.back().emoji != emoji) {
+            reactions.push_back(MessageReaction{.emoji = emoji});
+        }
+        reactions.back().logins.push_back(row[1].as<std::string>());
+    }
+    return reactions;
+}
+
 /// direct_message_threads хранит неупорядоченную пару в каноническом
 /// порядке (меньший login первым) — одна строка вместо двух, тот же
 /// приём, что и у friendships в user-service.
@@ -458,15 +482,16 @@ std::vector<std::string> ChatRepository::listModerators(std::int64_t communityId
 
 std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, const std::string& authorLogin,
                                                        const std::string& body,
-                                                       std::optional<std::int64_t> attachmentId) {
+                                                       std::optional<std::int64_t> attachmentId,
+                                                       std::optional<std::int64_t> replyToMessageId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
     try {
         const pqxx::result rows = transaction.exec(
-            "INSERT INTO messages (channel_id, author_login, body, attachment_id) VALUES ($1, $2, $3, $4) "
-            "RETURNING id, sent_at",
-            pqxx::params{channelId, authorLogin, body, attachmentId});
+            "INSERT INTO messages (channel_id, author_login, body, attachment_id, reply_to_message_id) "
+            "VALUES ($1, $2, $3, $4, $5) RETURNING id, sent_at",
+            pqxx::params{channelId, authorLogin, body, attachmentId, replyToMessageId});
 
         std::optional<std::string> attachmentFilename;
         if (attachmentId.has_value()) {
@@ -483,9 +508,12 @@ std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, con
                         .body = body,
                         .sentAt = rows[0][1].as<std::string>(),
                         .attachmentId = attachmentId,
-                        .attachmentFilename = attachmentFilename};
+                        .attachmentFilename = attachmentFilename,
+                        .replyToMessageId = replyToMessageId};
     } catch (const pqxx::foreign_key_violation&) {
-        // Либо channelId, либо attachmentId (если установлен) не существует.
+        // channelId либо attachmentId (если установлен) не существует —
+        // reply_to_message_id нарочно без FK (см. её doc-комментарий),
+        // поэтому сам не может вызвать это исключение.
         return std::nullopt;
     }
 }
@@ -503,7 +531,8 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
     // сообщения старше этого id). id DESC как вторичный ключ сортировки
     // делает курсор однозначным, даже если у двух сообщений совпадает sent_at.
     const pqxx::result rows = transaction.exec(
-        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "m.reply_to_message_id "
         "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
         "WHERE m.channel_id = $1 AND ($3::bigint IS NULL OR m.id < $3) "
         "ORDER BY m.sent_at DESC, m.id DESC LIMIT $2",
@@ -512,15 +541,19 @@ std::vector<Message> ChatRepository::listRecentMessages(std::int64_t channelId, 
     std::vector<Message> messages;
     messages.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
+        const std::int64_t messageId = row[0].as<std::int64_t>();
         messages.push_back(
-            Message{.id = row[0].as<std::int64_t>(),
+            Message{.id = messageId,
                     .authorLogin = row[1].as<std::string>(),
                     .body = row[2].as<std::string>(),
                     .sentAt = row[3].as<std::string>(),
                     .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
                     .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
                     .attachmentFilename =
-                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
+                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
+                    .reactions = reactionsForMessage(transaction, messageId),
+                    .replyToMessageId =
+                        row[7].is_null() ? std::nullopt : std::make_optional(row[7].as<std::int64_t>())});
     }
     std::reverse(messages.begin(), messages.end());
     return messages;
@@ -574,6 +607,151 @@ MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_
     return MutationResult::kSuccess;
 }
 
+PinMessageResult ChatRepository::pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                             const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM messages m "
+        "JOIN channels ch ON ch.id = m.channel_id JOIN communities co ON co.id = ch.community_id "
+        "WHERE m.id = $1 AND m.channel_id = $2",
+        pqxx::params{messageId, channelId});
+    if (rows.empty()) {
+        return PinMessageResult{.result = MutationResult::kNotFound};
+    }
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        // Issue #256-style pentest guard, тот же приём, что и у
+        // renameChannel()/deleteChannel(): не состоит в сообществе
+        // вообще — не подтверждаем существование сообщения кому попало.
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return PinMessageResult{.result = MutationResult::kNotFound};
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return PinMessageResult{.result = MutationResult::kForbidden};
+        }
+    }
+
+    transaction.exec(
+        "INSERT INTO pinned_messages (channel_id, message_id, pinned_by) VALUES ($1, $2, $3) "
+        "ON CONFLICT (channel_id, message_id) DO NOTHING",
+        pqxx::params{channelId, messageId, requesterLogin});
+    // Отдельный SELECT после INSERT, а не RETURNING — идемпотентный
+    // повторный pin() не производит строку через ON CONFLICT DO
+    // NOTHING, но вызывающей стороне всё равно нужны pinned_by/pinned_at
+    // ПЕРВОНАЧАЛЬНОГО закрепления для рассылки message_pinned.
+    const pqxx::result pinnedRow = transaction.exec(
+        "SELECT pinned_by, pinned_at FROM pinned_messages WHERE channel_id = $1 AND message_id = $2",
+        pqxx::params{channelId, messageId});
+    transaction.commit();
+    return PinMessageResult{.result = MutationResult::kSuccess,
+                             .pinnedByLogin = pinnedRow[0][0].as<std::string>(),
+                             .pinnedAt = pinnedRow[0][1].as<std::string>()};
+}
+
+MutationResult ChatRepository::unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                             const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM messages m "
+        "JOIN channels ch ON ch.id = m.channel_id JOIN communities co ON co.id = ch.community_id "
+        "WHERE m.id = $1 AND m.channel_id = $2",
+        pqxx::params{messageId, channelId});
+    if (rows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return MutationResult::kForbidden;
+        }
+    }
+
+    transaction.exec("DELETE FROM pinned_messages WHERE channel_id = $1 AND message_id = $2",
+                      pqxx::params{channelId, messageId});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::vector<PinnedMessage> ChatRepository::listPinnedMessages(std::int64_t channelId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "pm.pinned_by, pm.pinned_at "
+        "FROM pinned_messages pm JOIN messages m ON m.id = pm.message_id "
+        "LEFT JOIN attachments a ON a.id = m.attachment_id "
+        "WHERE pm.channel_id = $1 ORDER BY pm.pinned_at DESC",
+        pqxx::params{channelId});
+
+    std::vector<PinnedMessage> pinned;
+    pinned.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        pinned.push_back(PinnedMessage{
+            .message = Message{.id = row[0].as<std::int64_t>(),
+                                .authorLogin = row[1].as<std::string>(),
+                                .body = row[2].as<std::string>(),
+                                .sentAt = row[3].as<std::string>(),
+                                .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
+                                .attachmentId =
+                                    row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
+                                .attachmentFilename =
+                                    row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())},
+            .pinnedByLogin = row[7].as<std::string>(),
+            .pinnedAt = row[8].as<std::string>()});
+    }
+    return pinned;
+}
+
+ToggleReactionResult ChatRepository::toggleReaction(std::int64_t messageId, std::int64_t channelId,
+                                                     const std::string& login, const std::string& emoji) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result messageRows =
+        transaction.exec("SELECT 1 FROM messages WHERE id = $1 AND channel_id = $2", pqxx::params{messageId, channelId});
+    if (messageRows.empty()) {
+        return ToggleReactionResult{.result = MutationResult::kNotFound};
+    }
+
+    const pqxx::result existing = transaction.exec(
+        "SELECT 1 FROM message_reactions WHERE message_id = $1 AND login = $2 AND emoji = $3",
+        pqxx::params{messageId, login, emoji});
+    if (existing.empty()) {
+        transaction.exec("INSERT INTO message_reactions (message_id, login, emoji) VALUES ($1, $2, $3)",
+                          pqxx::params{messageId, login, emoji});
+    } else {
+        // Повторный клик по своей же реакции снимает её (toggle), а не
+        // добавляет вторую строку — см. doc-комментарий уникального
+        // индекса в init.sql.
+        transaction.exec("DELETE FROM message_reactions WHERE message_id = $1 AND login = $2 AND emoji = $3",
+                          pqxx::params{messageId, login, emoji});
+    }
+
+    const pqxx::result loginsRows = transaction.exec(
+        "SELECT login FROM message_reactions WHERE message_id = $1 AND emoji = $2 ORDER BY created_at",
+        pqxx::params{messageId, emoji});
+    std::vector<std::string> logins;
+    logins.reserve(static_cast<std::size_t>(loginsRows.size()));
+    for (const auto& row : loginsRows) {
+        logins.push_back(row[0].as<std::string>());
+    }
+
+    transaction.commit();
+    return ToggleReactionResult{.result = MutationResult::kSuccess, .logins = std::move(logins)};
+}
+
 std::optional<AttachmentMetadata> ChatRepository::createAttachment(std::int64_t channelId,
                                                                      const AttachmentUpload& upload) {
     pqxx::connection connection(connectionString_);
@@ -620,7 +798,8 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
     // проверка подстроки, поэтому символы вроде '%'/'_' в запросе
     // сопоставляются буквально, а не трактуются как SQL-подстановочные знаки.
     const pqxx::result rows = transaction.exec(
-        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename "
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "m.reply_to_message_id "
         "FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id "
         "WHERE m.channel_id = $1 AND position(lower($2) in lower(m.body)) > 0 "
         "ORDER BY m.sent_at DESC, m.id DESC LIMIT $3",
@@ -629,15 +808,19 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
     std::vector<Message> messages;
     messages.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
+        const std::int64_t messageId = row[0].as<std::int64_t>();
         messages.push_back(
-            Message{.id = row[0].as<std::int64_t>(),
+            Message{.id = messageId,
                     .authorLogin = row[1].as<std::string>(),
                     .body = row[2].as<std::string>(),
                     .sentAt = row[3].as<std::string>(),
                     .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
                     .attachmentId = row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
                     .attachmentFilename =
-                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())});
+                        row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
+                    .reactions = reactionsForMessage(transaction, messageId),
+                    .replyToMessageId =
+                        row[7].is_null() ? std::nullopt : std::make_optional(row[7].as<std::int64_t>())});
     }
     return messages;
 }
@@ -815,6 +998,84 @@ void ChatRepository::recordJanusRoom(std::int64_t channelId, const std::string& 
         "ON CONFLICT (channel_id) DO NOTHING",
         pqxx::params{channelId, janusRoomId});
     transaction.commit();
+}
+
+void ChatRepository::markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // GREATEST(NULL, N) = N in Postgres (NULL is only returned if every
+    // argument is NULL) — this single upsert both creates the first-ever
+    // row for (channelId, login) and, on repeat calls, never moves
+    // last_read_message_id backward (a client can legitimately send a
+    // stale id, e.g. a race between two open windows of the same user).
+    transaction.exec(
+        "INSERT INTO channel_read_state (channel_id, login, last_read_message_id) VALUES ($1, $2, $3) "
+        "ON CONFLICT (channel_id, login) DO UPDATE "
+        "SET last_read_message_id = GREATEST(channel_read_state.last_read_message_id, EXCLUDED.last_read_message_id)",
+        pqxx::params{channelId, login, messageId});
+    transaction.commit();
+}
+
+void ChatRepository::markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    transaction.exec(
+        "INSERT INTO dm_thread_read_state (thread_id, login, last_read_message_id) VALUES ($1, $2, $3) "
+        "ON CONFLICT (thread_id, login) DO UPDATE "
+        "SET last_read_message_id = GREATEST(dm_thread_read_state.last_read_message_id, EXCLUDED.last_read_message_id)",
+        pqxx::params{threadId, login, messageId});
+    transaction.commit();
+}
+
+std::vector<ChannelUnreadCount> ChatRepository::listUnreadChannelCounts(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // One query across every channel of every community login belongs
+    // to, rather than one round-trip per channel (the whole point of
+    // this endpoint, per issue #348's own doc comment on avoiding N+1).
+    // m.id > COALESCE(last_read_message_id, 0) treats "never marked
+    // read" as "everything is unread" — ids are BIGSERIAL, so this
+    // reuses insertion order as a cheap proxy for chronological order
+    // instead of comparing timestamps.
+    const pqxx::result rows = transaction.exec(
+        "SELECT c.id, count(m.id) FROM channels c "
+        "JOIN memberships mem ON mem.community_id = c.community_id AND mem.member_login = $1 "
+        "LEFT JOIN channel_read_state crs ON crs.channel_id = c.id AND crs.login = $1 "
+        "LEFT JOIN messages m ON m.channel_id = c.id AND m.id > COALESCE(crs.last_read_message_id, 0) "
+        "GROUP BY c.id",
+        pqxx::params{login});
+
+    std::vector<ChannelUnreadCount> counts;
+    counts.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        counts.push_back(
+            ChannelUnreadCount{.channelId = row[0].as<std::int64_t>(), .unreadCount = row[1].as<std::int64_t>()});
+    }
+    return counts;
+}
+
+std::vector<ThreadUnreadCount> ChatRepository::listUnreadThreadCounts(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT t.id, count(dm.id) FROM direct_message_threads t "
+        "LEFT JOIN dm_thread_read_state trs ON trs.thread_id = t.id AND trs.login = $1 "
+        "LEFT JOIN direct_messages dm ON dm.thread_id = t.id AND dm.id > COALESCE(trs.last_read_message_id, 0) "
+        "WHERE t.user_a_login = $1 OR t.user_b_login = $1 "
+        "GROUP BY t.id",
+        pqxx::params{login});
+
+    std::vector<ThreadUnreadCount> counts;
+    counts.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        counts.push_back(
+            ThreadUnreadCount{.threadId = row[0].as<std::int64_t>(), .unreadCount = row[1].as<std::int64_t>()});
+    }
+    return counts;
 }
 
 }  // namespace chat_service

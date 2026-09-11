@@ -67,3 +67,40 @@ jobs:
 
       - name: Format check
         run: pnpm format
+
+  web-e2e:
+    # Issue #303 — real-Chromium Playwright suite, separate job from
+    # web-clients above so its own slower `playwright install` step
+    # (downloads a real browser binary) never slows down that job's
+    # fast unit-test feedback, and a flaky/failing browser test never
+    # blocks it either. Runs against `vite preview`'s static build
+    # (playwright.config.ts's webServer), not a live backend — every
+    # test in apps/web/e2e mocks its own network calls.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm (via corepack, version pinned in package.json)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install Playwright's Chromium
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E tests
+        working-directory: apps/web
+        run: pnpm test:e2e
