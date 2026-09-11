@@ -293,6 +293,11 @@ MainWindow::MainWindow(QWidget* parent)
     // звонке — переиспользуем тот же слот, а не дублируем его тело.
     connect(callWindow_, &CallWindow::leaveCallRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::minimizeRequested, this, &MainWindow::onCallMinimizeRequested);
+    // Issue #312.
+    connect(callWindow_, &CallWindow::reactionRequested, this,
+            [this](const QString& emoji) { callManager_.sendReaction(emoji); });
+    connect(&callManager_, &CallManager::reactionReceived, this,
+            [this](const QString& login, const QString& emoji) { callWindow_->showReaction(login, emoji); });
     connect(floatingCallTilesOverlay_, &FloatingCallTilesOverlay::restoreRequested, this,
             &MainWindow::onCallRestoreRequested);
     connect(chatView_, &ChatView::deleteMessageRequested, this,

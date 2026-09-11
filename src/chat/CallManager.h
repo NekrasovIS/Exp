@@ -194,6 +194,11 @@ public:
 
     [[nodiscard]] bool screenShareEnabled() const { return screenShareEnabled_; }
 
+    /// Отправляет лёгкую эмодзи-реакцию остальным участникам звонка
+    /// (issue #312) — no-op, если сейчас не в звонке (см. doc-комментарий
+    /// реализации).
+    void sendReaction(const QString& emoji);
+
     /// Число других участников звонка, на которых у этого CallManager
     /// сейчас есть реальное subscribe-соединение (issue #233) — @ref
     /// peers_, один слот на publisher (не считая собственной
@@ -207,6 +212,8 @@ signals:
     void participantJoined(const QString& login);
     void participantLeft(const QString& login);
     void callError(const QString& message);
+    /// Другой участник звонка отправил эмодзи-реакцию (issue #312).
+    void reactionReceived(const QString& login, const QString& emoji);
 
     /// Декодированный кадр из входящего видеотрека удалённого участника
     /// (issue #91) — никогда не испускается для пира, не отправлявшего

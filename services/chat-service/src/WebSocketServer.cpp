@@ -15,6 +15,14 @@ namespace chat_service {
 namespace {
 /// Issue #226 (pentest) — см. doc-комментарий у проверки в handleCallSignal().
 constexpr std::size_t kMaxCallSignalPayloadBytes = 64 * 1024;
+/// Issue #312 — щедрый предел на длину эмодзи (в code units UTF-16 —
+/// nlohmann::json хранит std::string/UTF-8, но лимит всё равно считает
+/// байты UTF-8, тот же порядок величины): реальные эмодзи вплоть до
+/// составных ZWJ-последовательностей (например, семья из нескольких
+/// человек с модификаторами тона кожи) — единицы-десятки байт, не
+/// сотни; предел только чтобы отказать явно неэмодзи-строке, а не
+/// точно проверять, что это ровно один codepoint/grapheme.
+constexpr std::size_t kMaxCallReactionEmojiBytes = 64;
 
 nlohmann::json toJson(const Message& message) {
     return nlohmann::json{
@@ -232,6 +240,8 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleCallLeave(webSocket, subscription);
     } else if (body.contains("call_signal")) {
         handleCallSignal(webSocket, subscription, body["call_signal"]);
+    } else if (body.contains("call_reaction")) {
+        handleCallReaction(webSocket, subscription, body["call_reaction"]);
     } else if (body.contains("janus_attach")) {
         handleJanusAttach(webSocket);
     } else if (body.contains("janus_message")) {
@@ -448,6 +458,36 @@ void WebSocketServer::handleCallSignal(ix::WebSocket& webSocket, const Subscript
 
     target->send(
         nlohmann::json{{"call_signal", {{"from", subscription.login}, {"payload", body["payload"]}}}}.dump());
+}
+
+void WebSocketServer::handleCallReaction(ix::WebSocket& webSocket, const Subscription& subscription,
+                                          const nlohmann::json& emoji) {
+    if (!emoji.is_string() || emoji.get_ref<const std::string&>().empty() ||
+        emoji.get_ref<const std::string&>().size() > kMaxCallReactionEmojiBytes) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"call_reaction\": \"<emoji>\"}"}}.dump());
+        return;
+    }
+
+    // Отправитель сам должен сейчас быть участником звонка этого канала
+    // — та же проверка присутствия, что и у handleCallSignal() выше,
+    // только на себя, а не на целевого пира.
+    bool senderInCall = false;
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        const auto channelIt = callParticipants_.find(subscription.channelId);
+        if (channelIt != callParticipants_.end()) {
+            const auto selfIt = channelIt->second.find(subscription.login);
+            senderInCall = selfIt != channelIt->second.end() && selfIt->second == &webSocket;
+        }
+    }
+    if (!senderInCall) {
+        webSocket.send(nlohmann::json{{"error", "not in a call"}}.dump());
+        return;
+    }
+
+    broadcastToCallParticipants(
+        subscription.channelId,
+        nlohmann::json{{"call_reaction", {{"login", subscription.login}, {"emoji", emoji}}}}.dump(), &webSocket);
 }
 
 void WebSocketServer::handleJanusAttach(ix::WebSocket& webSocket) {

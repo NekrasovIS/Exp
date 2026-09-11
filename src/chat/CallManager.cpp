@@ -202,6 +202,11 @@ CallManager::CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, A
       screenCapture_(screenCapture) {
     connect(&chatClient_, &ChatClient::callPeerJoined, this, &CallManager::onCallPeerJoined);
     connect(&chatClient_, &ChatClient::callPeerLeft, this, &CallManager::onCallPeerLeft);
+    // Issue #312 — pure passthrough, no side effects to manage (unlike
+    // onCallPeerJoined()/onCallPeerLeft(), which set up/tear down peer
+    // connections), so a lambda re-emit is enough here.
+    connect(&chatClient_, &ChatClient::callReactionReceived, this,
+            [this](const QString& login, const QString& emoji) { emit reactionReceived(login, emoji); });
     connect(&chatClient_, &ChatClient::sfuRoomAssigned, this, &CallManager::onSfuRoomAssigned);
     connect(&chatClient_, &ChatClient::janusAttached, this, &CallManager::onJanusAttached);
     connect(&chatClient_, &ChatClient::janusEventReceived, this, &CallManager::onJanusEvent);
@@ -288,6 +293,18 @@ void CallManager::setMuted(bool muted) {
     if (localAudioTrack_) {
         localAudioTrack_->set_enabled(!muted_);
     }
+}
+
+void CallManager::sendReaction(const QString& emoji) {
+    // Issue #312 — no-op, not queued, if not currently in a call:
+    // chatClient_ would reject it with an error anyway (see
+    // WebSocketServer::handleCallReaction()'s "not in a call" check),
+    // and there is no meaningful "reaction the moment I join" semantics
+    // to preserve by queuing it.
+    if (!inCall_) {
+        return;
+    }
+    chatClient_.sendCallReaction(emoji);
 }
 
 void CallManager::ensureLocalCameraTrack() {

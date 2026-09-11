@@ -28,6 +28,13 @@ namespace devicehub {
  * callSignalReceived срабатывают для соответствующих серверных кадров.
  * Валидно только после того, как сработал subscribed().
  *
+ * sendCallReaction() (issue #312) отправляет `{"call_reaction":
+ * "<emoji>"}`; callReactionReceived() срабатывает на рассылку
+ * `{"call_reaction": {"login", "emoji"}}` от другого участника звонка
+ * (chat-service никогда не отправляет это эхом обратно отправителю, тот
+ * же принцип, что и у typing). Оба валидны только пока этот клиент сам
+ * сейчас в звонке (joinCall() уже вызван, leaveCall() ещё нет).
+ *
  * Прокси-сигналинг SFU (issue #232) — параллельный, более новый путь
  * поверх того же WebSocket: sendJanusAttach()/sendJanusMessage()
  * отправляют `{"janus_attach"}`/`{"janus_message": {"handle", "body",
@@ -119,6 +126,12 @@ public:
     /// offer/answer или ICE-кандидат) участнику звонка @p to.
     void sendCallSignal(const QString& to, const QJsonObject& payload);
 
+    /// Лёгкая эмодзи-реакция во время звонка (issue #312) — валидно
+    /// только пока joinCall() уже вызван и leaveCall() ещё нет; вызывает
+    /// errorOccurred(), если этот клиент сейчас не в звонке. Рассылает
+    /// callReactionReceived() остальным участникам, никогда себе.
+    void sendCallReaction(const QString& emoji);
+
     /// Прокси-сигналинг SFU (issue #232): attach'ит новый handle плагина
     /// videoroom на Janus-сессии этого WS-подключения (chat-service
     /// создаёт саму сессию при самом первом вызове за время жизни
@@ -194,6 +207,9 @@ signals:
     /// Сигналинговый payload, ретранслированный от другого участника
     /// звонка.
     void callSignalReceived(const QString& from, const QJsonObject& payload);
+
+    /// Другой участник звонка отправил эмодзи-реакцию (issue #312).
+    void callReactionReceived(const QString& login, const QString& emoji);
 
     /// Ответ на sendJanusAttach() — @p handle нового handle'а плагина
     /// videoroom.
