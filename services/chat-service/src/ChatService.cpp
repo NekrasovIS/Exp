@@ -111,6 +111,20 @@ MutationResult ChatService::deleteMessage(std::int64_t messageId, std::int64_t c
     return repository_.deleteMessage(messageId, channelId, requesterLogin);
 }
 
+PinMessageResult ChatService::pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                          const std::string& requesterLogin) {
+    return repository_.pinMessage(messageId, channelId, requesterLogin);
+}
+
+MutationResult ChatService::unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                          const std::string& requesterLogin) {
+    return repository_.unpinMessage(messageId, channelId, requesterLogin);
+}
+
+std::vector<PinnedMessage> ChatService::listPinnedMessages(std::int64_t channelId) {
+    return repository_.listPinnedMessages(channelId);
+}
+
 std::optional<AttachmentMetadata> ChatService::createAttachment(std::int64_t channelId,
                                                                    const AttachmentUpload& upload) {
     return repository_.createAttachment(channelId, upload);

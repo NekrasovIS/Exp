@@ -58,6 +58,14 @@ public:
                                                  const std::string& requesterLogin, const std::string& newBody);
     [[nodiscard]] MutationResult deleteMessage(std::int64_t messageId, std::int64_t channelId,
                                                 const std::string& requesterLogin);
+
+    /// См. ChatRepository::pinMessage()/unpinMessage()/listPinnedMessages() (issue #338).
+    [[nodiscard]] PinMessageResult pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin);
+    [[nodiscard]] MutationResult unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                               const std::string& requesterLogin);
+    [[nodiscard]] std::vector<PinnedMessage> listPinnedMessages(std::int64_t channelId);
+
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
 
     /// См. ChatRepository::toggleReaction() (issue #333).

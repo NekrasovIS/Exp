@@ -87,6 +87,13 @@ nlohmann::json toJson(const Message& message) {
                                                                        : nlohmann::json(nullptr)}};
 }
 
+nlohmann::json toJson(const PinnedMessage& pinned) {
+    nlohmann::json json = toJson(pinned.message);
+    json["pinned_by"] = pinned.pinnedByLogin;
+    json["pinned_at"] = pinned.pinnedAt;
+    return json;
+}
+
 nlohmann::json toJson(const DirectMessageThread& thread) {
     return nlohmann::json{{"id", thread.id}, {"other_login", thread.otherLogin}, {"created_at", thread.createdAt}};
 }
@@ -182,6 +189,10 @@ void HttpServer::registerRoutes() {
     server_.Get(R"(/channels/(\d+)/messages)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMessages(request, response);
+                 });
+    server_.Get(R"(/channels/(\d+)/pinned-messages)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleListPinnedMessages(request, response);
                  });
     server_.Post(R"(/communities/(\d+)/moderators)",
                   [this](const httplib::Request& request, httplib::Response& response) {
@@ -546,6 +557,28 @@ void HttpServer::handleListMessages(const httplib::Request& request, httplib::Re
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListPinnedMessages(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    const std::optional<Channel> channel = chatService_.findChannel(channelId);
+    if (!channel.has_value() || !chatService_.isMember(channel->communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such channel"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    nlohmann::json pinned = nlohmann::json::array();
+    for (const PinnedMessage& message : chatService_.listPinnedMessages(channelId)) {
+        pinned.push_back(toJson(message));
+    }
+    response.set_content(pinned.dump(), kJsonContentType);
 }
 
 void HttpServer::handlePromoteModerator(const httplib::Request& request, httplib::Response& response) {

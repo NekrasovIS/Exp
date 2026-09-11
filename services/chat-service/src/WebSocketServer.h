@@ -113,6 +113,14 @@ namespace chat_service {
  *     (issue #114): удалить сообщение может собственный автор сообщения,
  *     владелец канала/сообщества либо модератор сообщества. При успехе
  *     рассылает `{"message_deleted": {"id"}}`.
+ *   - `{"pin_message": {"id": N}}`/`{"unpin_message": {"id": N}}` (issue
+ *     #338) — доступно ТОЛЬКО владельцу канала/сообщества или
+ *     модератору сообщества, в отличие от delete_message — не автору
+ *     сообщения как таковому (закрепление — функция управления
+ *     каналом, не модерация конкретного сообщения). Идемпотентно в
+ *     обе стороны. При успехе рассылает `{"message_pinned": {"id",
+ *     "pinned_by", "pinned_at"}}`/`{"message_unpinned": {"id"}}` всем
+ *     подписчикам чата.
  *   - `{"toggle_reaction": {"message_id": N, "emoji": "..."}}` (issue
  *     #333) — переключает реакцию отправителя на @p emoji: если он ещё
  *     не поставил именно эту эмодзи на это сообщение — ставит, если
@@ -126,7 +134,6 @@ namespace chat_service {
  *     дельта; клиент заменяет свою локальную копию целиком, а не
  *     инкрементирует счётчик.
  *
-
  * REST (HttpServer) остаётся источником истины для истории/CRUD; этот
  * класс только проталкивает то, что отправлено, пока клиент подключён,
  * и только ретранслирует сигналинг звонков — он никогда не декодирует
@@ -203,6 +210,10 @@ private:
     void handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"pin_message": {"id"}} (issue #338) — см. doc-комментарий класса.
+    void handlePinMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"unpin_message": {"id"}} (issue #338) — см. doc-комментарий класса.
+    void handleUnpinMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     /// {"toggle_reaction": {"message_id", "emoji"}} (issue #333) — см.
     /// doc-комментарий класса.
     void handleToggleReaction(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);

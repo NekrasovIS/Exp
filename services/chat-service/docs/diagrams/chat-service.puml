@@ -76,6 +76,23 @@ class AttachmentData {
   +contentType : string
   +data : string
 }
+class PinnedMessage {
+  +message : Message
+  +pinnedByLogin : string
+  +pinnedAt : string
+}
+class PinMessageResult {
+  +result : MutationResult
+  +pinnedByLogin : string
+  +pinnedAt : string
+}
+note bottom of PinMessageResult
+  issue #338: idempotent — re-pinning an
+  already-pinned message returns the
+  ORIGINAL pinnedByLogin/pinnedAt, not the
+  second caller's.
+end note
+
 class DirectMessageThread {
   +id : int64
   +otherLogin : string
@@ -123,6 +140,9 @@ class ChatRepository {
   +listRecentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +pinMessage(messageId: int64, channelId: int64, requesterLogin: string) : PinMessageResult
+  +unpinMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
   +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
@@ -137,6 +157,8 @@ ChatRepository ..> Community : creates
 ChatRepository ..> RegenerateInviteCodeResult : returns
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
+ChatRepository ..> PinnedMessage : returns
+ChatRepository ..> PinMessageResult : returns
 ChatRepository ..> AttachmentMetadata : creates
 ChatRepository ..> AttachmentUpload : reads
 ChatRepository ..> AttachmentData : reads
@@ -172,6 +194,9 @@ class ChatService {
   +recentMessages(channelId: int64, limit: int, beforeId: optional<int64>) : vector<Message>
   +editMessage(messageId: int64, channelId: int64, requesterLogin: string, newBody: string) : EditMessageResult
   +deleteMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +pinMessage(messageId: int64, channelId: int64, requesterLogin: string) : PinMessageResult
+  +unpinMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
+  +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
   +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +findOrCreateThread(loginA: string, loginB: string) : int64
@@ -229,6 +254,7 @@ class HttpServer {
   -handleRenameChannel(request, response)
   -handleDeleteChannel(request, response)
   -handleListMessages(request, response)
+  -handleListPinnedMessages(request, response)
   -handleUploadAttachment(request, response)
   -handleDownloadAttachment(request, response)
   -handleSearchMessages(request, response)
@@ -265,6 +291,8 @@ class WebSocketServer {
   -handleDirectMessage(webSocket, subscription, body)
   -handleEditMessage(webSocket, subscription, body)
   -handleDeleteMessage(webSocket, subscription, body)
+  -handlePinMessage(webSocket, subscription, body)
+  -handleUnpinMessage(webSocket, subscription, body)
   -handleToggleReaction(webSocket, subscription, body)
   -handleCallJoin(webSocket, subscription)
   -handleCallLeave(webSocket, subscription)
@@ -311,6 +339,10 @@ note right of HttpServer
                              issue #333; add/remove itself
                              is WS toggle_reaction, not a
                              REST route — see WebSocketServer)
+  GET    /channels/{id}/pinned-messages
+                             (issue #338, any member; pin/unpin
+                             itself is WS pin_message/unpin_message,
+                             owner/moderator only — see WebSocketServer)
   POST   /channels/{id}/attachments
   GET    /attachments/{id}
   GET    /channels/{id}/messages/search

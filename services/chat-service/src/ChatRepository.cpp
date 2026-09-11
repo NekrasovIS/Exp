@@ -607,6 +607,113 @@ MutationResult ChatRepository::deleteMessage(std::int64_t messageId, std::int64_
     return MutationResult::kSuccess;
 }
 
+PinMessageResult ChatRepository::pinMessage(std::int64_t messageId, std::int64_t channelId,
+                                             const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM messages m "
+        "JOIN channels ch ON ch.id = m.channel_id JOIN communities co ON co.id = ch.community_id "
+        "WHERE m.id = $1 AND m.channel_id = $2",
+        pqxx::params{messageId, channelId});
+    if (rows.empty()) {
+        return PinMessageResult{.result = MutationResult::kNotFound};
+    }
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        // Issue #256-style pentest guard, тот же приём, что и у
+        // renameChannel()/deleteChannel(): не состоит в сообществе
+        // вообще — не подтверждаем существование сообщения кому попало.
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return PinMessageResult{.result = MutationResult::kNotFound};
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return PinMessageResult{.result = MutationResult::kForbidden};
+        }
+    }
+
+    transaction.exec(
+        "INSERT INTO pinned_messages (channel_id, message_id, pinned_by) VALUES ($1, $2, $3) "
+        "ON CONFLICT (channel_id, message_id) DO NOTHING",
+        pqxx::params{channelId, messageId, requesterLogin});
+    // Отдельный SELECT после INSERT, а не RETURNING — идемпотентный
+    // повторный pin() не производит строку через ON CONFLICT DO
+    // NOTHING, но вызывающей стороне всё равно нужны pinned_by/pinned_at
+    // ПЕРВОНАЧАЛЬНОГО закрепления для рассылки message_pinned.
+    const pqxx::result pinnedRow = transaction.exec(
+        "SELECT pinned_by, pinned_at FROM pinned_messages WHERE channel_id = $1 AND message_id = $2",
+        pqxx::params{channelId, messageId});
+    transaction.commit();
+    return PinMessageResult{.result = MutationResult::kSuccess,
+                             .pinnedByLogin = pinnedRow[0][0].as<std::string>(),
+                             .pinnedAt = pinnedRow[0][1].as<std::string>()};
+}
+
+MutationResult ChatRepository::unpinMessage(std::int64_t messageId, std::int64_t channelId,
+                                             const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM messages m "
+        "JOIN channels ch ON ch.id = m.channel_id JOIN communities co ON co.id = ch.community_id "
+        "WHERE m.id = $1 AND m.channel_id = $2",
+        pqxx::params{messageId, channelId});
+    if (rows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return MutationResult::kForbidden;
+        }
+    }
+
+    transaction.exec("DELETE FROM pinned_messages WHERE channel_id = $1 AND message_id = $2",
+                      pqxx::params{channelId, messageId});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::vector<PinnedMessage> ChatRepository::listPinnedMessages(std::int64_t channelId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "pm.pinned_by, pm.pinned_at "
+        "FROM pinned_messages pm JOIN messages m ON m.id = pm.message_id "
+        "LEFT JOIN attachments a ON a.id = m.attachment_id "
+        "WHERE pm.channel_id = $1 ORDER BY pm.pinned_at DESC",
+        pqxx::params{channelId});
+
+    std::vector<PinnedMessage> pinned;
+    pinned.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        pinned.push_back(PinnedMessage{
+            .message = Message{.id = row[0].as<std::int64_t>(),
+                                .authorLogin = row[1].as<std::string>(),
+                                .body = row[2].as<std::string>(),
+                                .sentAt = row[3].as<std::string>(),
+                                .editedAt = row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
+                                .attachmentId =
+                                    row[5].is_null() ? std::nullopt : std::make_optional(row[5].as<std::int64_t>()),
+                                .attachmentFilename =
+                                    row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>())},
+            .pinnedByLogin = row[7].as<std::string>(),
+            .pinnedAt = row[8].as<std::string>()});
+    }
+    return pinned;
+}
+
 ToggleReactionResult ChatRepository::toggleReaction(std::int64_t messageId, std::int64_t channelId,
                                                      const std::string& login, const std::string& emoji) {
     pqxx::connection connection(connectionString_);

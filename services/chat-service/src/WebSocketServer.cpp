@@ -267,6 +267,10 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleEditMessage(webSocket, subscription, body["edit_message"]);
     } else if (body.contains("delete_message")) {
         handleDeleteMessage(webSocket, subscription, body["delete_message"]);
+    } else if (body.contains("pin_message")) {
+        handlePinMessage(webSocket, subscription, body["pin_message"]);
+    } else if (body.contains("unpin_message")) {
+        handleUnpinMessage(webSocket, subscription, body["unpin_message"]);
     } else if (body.contains("toggle_reaction")) {
         handleToggleReaction(webSocket, subscription, body["toggle_reaction"]);
     } else {
@@ -399,6 +403,45 @@ void WebSocketServer::handleDeleteMessage(ix::WebSocket& webSocket, const Subscr
     }
 
     broadcastToChannel(subscription.channelId, nlohmann::json{{"message_deleted", {{"id", messageId}}}}.dump());
+}
+
+void WebSocketServer::handlePinMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                        const nlohmann::json& body) {
+    if (!body.contains("id") || !body["id"].is_number_integer()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"id\"}"}}.dump());
+        return;
+    }
+
+    const auto messageId = body["id"].get<std::int64_t>();
+    const PinMessageResult result = chatService_.pinMessage(messageId, subscription.channelId, subscription.login);
+    if (respondIfMutationFailed(webSocket, result.result,
+                                 "only the channel/community owner or a moderator may do that")) {
+        return;
+    }
+
+    broadcastToChannel(subscription.channelId,
+                        nlohmann::json{{"message_pinned",
+                                        {{"id", messageId},
+                                         {"pinned_by", result.pinnedByLogin},
+                                         {"pinned_at", result.pinnedAt}}}}
+                            .dump());
+}
+
+void WebSocketServer::handleUnpinMessage(ix::WebSocket& webSocket, const Subscription& subscription,
+                                          const nlohmann::json& body) {
+    if (!body.contains("id") || !body["id"].is_number_integer()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"id\"}"}}.dump());
+        return;
+    }
+
+    const auto messageId = body["id"].get<std::int64_t>();
+    const MutationResult result = chatService_.unpinMessage(messageId, subscription.channelId, subscription.login);
+    if (respondIfMutationFailed(webSocket, result,
+                                 "only the channel/community owner or a moderator may do that")) {
+        return;
+    }
+
+    broadcastToChannel(subscription.channelId, nlohmann::json{{"message_unpinned", {{"id", messageId}}}}.dump());
 }
 
 void WebSocketServer::handleToggleReaction(ix::WebSocket& webSocket, const Subscription& subscription,

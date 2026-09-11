@@ -935,6 +935,12 @@ TEST(WebSocketServerTest, SubscribedDispatchSurvivesAdversarialPayloads) {
         nlohmann::json{{"body", "x"}, {"attachment_id", nlohmann::json::array()}},
         nlohmann::json{{"typing", nlohmann::json::object()}},
         nlohmann::json{{"typing", nullptr}},
+        nlohmann::json{{"pin_message", "not an object"}},
+        nlohmann::json{{"pin_message", nlohmann::json::array()}},
+        nlohmann::json{{"pin_message", {{"id", "not-a-number"}}}},
+        nlohmann::json{{"pin_message", {{"id", -9223372036854775807LL - 1}}}},
+        nlohmann::json{{"unpin_message", "not an object"}},
+        nlohmann::json{{"unpin_message", {{"id", "not-a-number"}}}},
         nlohmann::json{{"toggle_reaction", "not an object"}},
         nlohmann::json{{"toggle_reaction", {{"message_id", "not-a-number"}, {"emoji", "\U0001F44D"}}}},
         nlohmann::json{{"toggle_reaction", {{"message_id", 1}, {"emoji", 12345}}}},
@@ -1216,6 +1222,85 @@ TEST(WebSocketServerTest, ChatMessageWithAttachmentIdBroadcastsAttachmentFields)
     ASSERT_TRUE(received.has_value());
     EXPECT_EQ((*received)["attachment_id"].get<std::int64_t>(), attachment->id);
     EXPECT_EQ((*received)["attachment_filename"].get<std::string>(), "photo.png");
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, PinThenUnpinMessageBroadcastsToSubscribersAndRejectsNonModerator) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18100"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-pin-test-owner-" + suffix;
+    const std::string member = "ws-pin-test-member-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-pin-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, member));
+
+    const std::optional<std::string> ownerToken = registerAndGetToken(authHost, authPort, owner);
+    const std::optional<std::string> memberToken = registerAndGetToken(authHost, authPort, member);
+    if (!ownerToken.has_value() || !memberToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    WsTestClient ownerClient("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(ownerClient.waitConnected());
+    ownerClient.send(nlohmann::json{{"token", *ownerToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(ownerClient.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    WsTestClient memberClient("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(memberClient.waitConnected());
+    memberClient.send(nlohmann::json{{"token", *memberToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(memberClient.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    ownerClient.send(nlohmann::json{{"body", "pin me"}});
+    const std::optional<nlohmann::json> posted =
+        ownerClient.waitFor([](const nlohmann::json& m) { return m.contains("body"); });
+    ASSERT_TRUE(posted.has_value());
+    memberClient.waitFor([](const nlohmann::json& m) { return m.contains("body"); });  // drain member's own echo
+    const auto messageId = (*posted)["id"].get<std::int64_t>();
+
+    // Обычный участник не может закрепить — только владелец/модератор.
+    memberClient.send(nlohmann::json{{"pin_message", {{"id", messageId}}}});
+    const std::optional<nlohmann::json> forbidden =
+        memberClient.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(forbidden.has_value());
+
+    // Владелец закрепляет — рассылается ОБОИМ подписчикам, включая себя.
+    ownerClient.send(nlohmann::json{{"pin_message", {{"id", messageId}}}});
+    const std::optional<nlohmann::json> pinnedForOwner =
+        ownerClient.waitFor([](const nlohmann::json& m) { return m.contains("message_pinned"); });
+    const std::optional<nlohmann::json> pinnedForMember =
+        memberClient.waitFor([](const nlohmann::json& m) { return m.contains("message_pinned"); });
+    ASSERT_TRUE(pinnedForOwner.has_value());
+    ASSERT_TRUE(pinnedForMember.has_value());
+    EXPECT_EQ((*pinnedForMember)["message_pinned"]["id"].get<std::int64_t>(), messageId);
+    EXPECT_EQ((*pinnedForMember)["message_pinned"]["pinned_by"].get<std::string>(), owner);
+
+    ownerClient.send(nlohmann::json{{"unpin_message", {{"id", messageId}}}});
+    const std::optional<nlohmann::json> unpinnedForMember =
+        memberClient.waitFor([](const nlohmann::json& m) { return m.contains("message_unpinned"); });
+    ASSERT_TRUE(unpinnedForMember.has_value());
+    EXPECT_EQ((*unpinnedForMember)["message_unpinned"]["id"].get<std::int64_t>(), messageId);
 
     server.stop();
 }
