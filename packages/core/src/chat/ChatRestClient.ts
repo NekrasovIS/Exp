@@ -17,6 +17,7 @@ import type {
   ChatMessageInfo,
   DirectMessageInfo,
   DirectMessageThreadInfo,
+  MessageReactionInfo,
   PinnedMessageInfo,
 } from "./types.js";
 
@@ -28,6 +29,11 @@ interface ChatItemBody {
   invite_code?: string;
 }
 
+interface MessageReactionBody {
+  emoji: string;
+  logins: string[];
+}
+
 interface MessageBody {
   id: number;
   author: string;
@@ -35,6 +41,7 @@ interface MessageBody {
   sent_at: string;
   attachment_id?: number | null;
   attachment_filename?: string | null;
+  reactions?: MessageReactionBody[];
 }
 
 interface PinnedMessageBody extends MessageBody {
@@ -70,12 +77,17 @@ function toChatItem(body: ChatItemBody): ChatItem {
   return item;
 }
 
+function toMessageReactionInfo(body: MessageReactionBody): MessageReactionInfo {
+  return { emoji: body.emoji, logins: body.logins };
+}
+
 function toChatMessageInfo(body: MessageBody): ChatMessageInfo {
   const message: ChatMessageInfo = {
     id: body.id,
     author: body.author,
     body: body.body,
     sentAt: body.sent_at,
+    reactions: (body.reactions ?? []).map(toMessageReactionInfo),
   };
   if (body.attachment_id != null) message.attachmentId = body.attachment_id;
   if (body.attachment_filename != null) message.attachmentFilename = body.attachment_filename;

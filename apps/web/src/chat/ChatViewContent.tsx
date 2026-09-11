@@ -45,6 +45,7 @@ export function ChatViewContent({
     sendMessage,
     editMessage,
     deleteMessage,
+    toggleReaction,
     socket,
     typingUser,
     sendTyping,
@@ -98,6 +99,7 @@ export function ChatViewContent({
           isModerator={isModerator}
           onEdit={editMessage}
           onDelete={deleteMessage}
+          onToggleReaction={toggleReaction}
           onPin={pin}
           onUnpin={unpin}
         />

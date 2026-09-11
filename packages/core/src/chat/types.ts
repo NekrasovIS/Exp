@@ -11,6 +11,14 @@ export interface ChatItem {
   inviteCode?: string;
 }
 
+/** One emoji's aggregated reactions on a message (issue #305/#333/#335)
+ * — `logins` is the full list of who reacted with THIS emoji, exactly
+ * as chat-service sends it (never a delta the caller has to merge). */
+export interface MessageReactionInfo {
+  emoji: string;
+  logins: string[];
+}
+
 export interface ChatMessageInfo {
   id: number;
   author: string;
@@ -18,6 +26,10 @@ export interface ChatMessageInfo {
   sentAt: string;
   attachmentId?: number;
   attachmentFilename?: string;
+  /** Always present (possibly empty), unlike attachmentId/attachmentFilename
+   * — chat-service's own `toJson(Message)` always includes the
+   * `reactions` field, even for a message with none. */
+  reactions: MessageReactionInfo[];
 }
 
 /** A pinned channel message (issue #308/#338/#340) — full message

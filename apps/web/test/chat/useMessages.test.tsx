@@ -44,7 +44,7 @@ describe("useMessages", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.messages).toEqual([
-      { id: 1, author: "alice", body: "hi", sentAt: "2026-01-01T00:00:00Z" },
+      { id: 1, author: "alice", body: "hi", sentAt: "2026-01-01T00:00:00Z", reactions: [] },
     ]);
   });
 
@@ -109,6 +109,56 @@ describe("useMessages", () => {
     expect(result.current.messages).toHaveLength(0);
   });
 
+  it("adds a reaction chip on a live reactionChanged event", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(200, [{ id: 1, author: "alice", body: "hi", sent_at: "2026-01-01T00:00:00Z" }]),
+        ),
+    );
+    const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ reaction_changed: { message_id: 1, emoji: "👍", logins: ["bob"] } }),
+      });
+    });
+
+    expect(result.current.messages[0]?.reactions).toEqual([{ emoji: "👍", logins: ["bob"] }]);
+  });
+
+  it("drops the chip entirely when a reactionChanged event carries an empty logins list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, [
+          {
+            id: 1,
+            author: "alice",
+            body: "hi",
+            sent_at: "2026-01-01T00:00:00Z",
+            reactions: [{ emoji: "👍", logins: ["bob"] }],
+          },
+        ]),
+      ),
+    );
+    const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ reaction_changed: { message_id: 1, emoji: "👍", logins: [] } }),
+      });
+    });
+
+    expect(result.current.messages[0]?.reactions).toEqual([]);
+  });
+
   it("loadOlder prepends an older page using the oldest loaded message as before_id", async () => {
     // A full 50-item page is what tells the hook "there might be more"
     // (hasMore = page.length === pageSize) — a short first page (as a
@@ -142,7 +192,7 @@ describe("useMessages", () => {
     expect(secondCallUrl).toContain("before_id=51");
   });
 
-  it("sendMessage/editMessage/deleteMessage send the expected frames over the socket", async () => {
+  it("sendMessage/editMessage/deleteMessage/toggleReaction send the expected frames over the socket", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
     const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -151,11 +201,13 @@ describe("useMessages", () => {
     act(() => result.current.sendMessage("hello", 9));
     act(() => result.current.editMessage(1, "edited"));
     act(() => result.current.deleteMessage(1));
+    act(() => result.current.toggleReaction(1, "👍"));
 
     expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
       { body: "hello", attachment_id: 9 },
       { edit_message: { id: 1, body: "edited" } },
       { delete_message: { id: 1 } },
+      { toggle_reaction: { message_id: 1, emoji: "👍" } },
     ]);
   });
 

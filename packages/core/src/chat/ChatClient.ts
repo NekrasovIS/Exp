@@ -35,6 +35,10 @@ interface ChatClientEventMap {
   message: [message: IncomingChatMessage];
   messageEdited: [id: number, newBody: string, editedAt: string];
   messageDeleted: [id: number];
+  // issue #305/#333/#335 — logins is the FULL list of who reacted with
+  // this emoji after the toggle, never a delta the listener has to
+  // merge (mirrors chat-service's own reaction_changed broadcast).
+  reactionChanged: [messageId: number, emoji: string, logins: string[]];
   // issue #308/#338/#340 — pinnedBy/pinnedAt belong to the ORIGINAL pin
   // even if this particular event was triggered by a second,
   // idempotent pin_message from someone else (see chat-service's own
@@ -188,6 +192,14 @@ export class ChatClient {
     this.sendFrame({ delete_message: { id } });
   }
 
+  /** Toggles @param emoji on message @param id — adds it if the caller
+   * hasn't reacted with it yet, removes it otherwise. Valid only in
+   * channel mode; available on any message, not just the sender's own
+   * (unlike sendEditMessage()/sendDeleteMessage()). */
+  sendToggleReaction(id: number, emoji: string): void {
+    this.sendFrame({ toggle_reaction: { message_id: id, emoji } });
+  }
+
   /** Valid only in channel mode. Unlike sendEditMessage()/
    * sendDeleteMessage(), the server restricts this to the channel/
    * community owner or a moderator — never the message's own author
@@ -332,6 +344,17 @@ export class ChatClient {
         return;
       }
     }
+    if (typeof body.reaction_changed === "object" && body.reaction_changed !== null) {
+      const changed = body.reaction_changed as { message_id?: unknown; emoji?: unknown; logins?: unknown };
+      if (
+        typeof changed.message_id === "number" &&
+        typeof changed.emoji === "string" &&
+        Array.isArray(changed.logins)
+      ) {
+        this.emit("reactionChanged", changed.message_id, changed.emoji, changed.logins as string[]);
+        return;
+      }
+    }
     if (typeof body.message_pinned === "object" && body.message_pinned !== null) {
       const pinned = body.message_pinned as { id?: unknown; pinned_by?: unknown; pinned_at?: unknown };
       if (
@@ -356,6 +379,7 @@ export class ChatClient {
         author: body.author,
         body: body.body,
         sentAt: typeof body.sent_at === "string" ? body.sent_at : "",
+        reactions: Array.isArray(body.reactions) ? (body.reactions as IncomingChatMessage["reactions"]) : [],
       };
       if (typeof body.attachment_id === "number") {
         message.attachmentId = body.attachment_id;
