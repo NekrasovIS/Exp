@@ -27,7 +27,8 @@ struct ChatItem {
 /// в реальном времени, плюс id, нужный для постраничной прокрутки
 /// истории дальше назад (см. beforeId у listMessages()). @p attachmentId
 /// равен -1, а @p attachmentFilename пуст, когда у сообщения нет
-/// вложения (issue #116).
+/// вложения (issue #116). @p replyToMessageId равен -1, когда это не
+/// ответ (issue #306).
 struct ChatMessageInfo {
     qint64 id = 0;
     QString author;
@@ -35,6 +36,7 @@ struct ChatMessageInfo {
     QString sentAt;
     qint64 attachmentId = -1;
     QString attachmentFilename;
+    qint64 replyToMessageId = -1;
 };
 
 /// Диалог личных сообщений, как его возвращает REST API chat-service

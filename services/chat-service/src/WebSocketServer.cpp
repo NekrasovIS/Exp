@@ -34,7 +34,9 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_id",
          message.attachmentId.has_value() ? nlohmann::json(*message.attachmentId) : nlohmann::json(nullptr)},
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
-                                                                        : nlohmann::json(nullptr)}};
+                                                                        : nlohmann::json(nullptr)},
+        {"reply_to_message_id", message.replyToMessageId.has_value() ? nlohmann::json(*message.replyToMessageId)
+                                                                       : nlohmann::json(nullptr)}};
 }
 
 nlohmann::json toJson(const DirectMessage& message) {
@@ -274,9 +276,19 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
         (body.contains("attachment_id") && body["attachment_id"].is_number_integer())
             ? std::make_optional(body["attachment_id"].get<std::int64_t>())
             : std::nullopt;
+    // "reply_to_message_id" (issue #306) — тоже опционален, тот же
+    // уровень доверия, что и у attachment_id выше: не проверяется, что
+    // сообщение с этим id вообще существует в этом канале (нет FK на
+    // уровне схемы, см. её doc-комментарий в init.sql) — клиент сам
+    // решает, что показать, если не найдёт его в своей истории.
+    const std::optional<std::int64_t> replyToMessageId =
+        (body.contains("reply_to_message_id") && body["reply_to_message_id"].is_number_integer())
+            ? std::make_optional(body["reply_to_message_id"].get<std::int64_t>())
+            : std::nullopt;
 
-    const std::optional<Message> stored = chatService_.postMessage(
-        subscription.channelId, subscription.login, body["body"].get<std::string>(), attachmentId);
+    const std::optional<Message> stored =
+        chatService_.postMessage(subscription.channelId, subscription.login, body["body"].get<std::string>(),
+                                  attachmentId, replyToMessageId);
     if (!stored.has_value()) {
         webSocket.send(nlohmann::json{{"error", "no such channel, or no such attachment"}}.dump());
         return;

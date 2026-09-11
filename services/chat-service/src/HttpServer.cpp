@@ -73,7 +73,9 @@ nlohmann::json toJson(const Message& message) {
         {"attachment_id",
          message.attachmentId.has_value() ? nlohmann::json(*message.attachmentId) : nlohmann::json(nullptr)},
         {"attachment_filename", message.attachmentFilename.has_value() ? nlohmann::json(*message.attachmentFilename)
-                                                                        : nlohmann::json(nullptr)}};
+                                                                        : nlohmann::json(nullptr)},
+        {"reply_to_message_id", message.replyToMessageId.has_value() ? nlohmann::json(*message.replyToMessageId)
+                                                                       : nlohmann::json(nullptr)}};
 }
 
 nlohmann::json toJson(const DirectMessageThread& thread) {

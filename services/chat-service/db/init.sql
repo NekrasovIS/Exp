@@ -83,7 +83,16 @@ CREATE TABLE IF NOT EXISTS messages (
     -- rather than CASCADE — an attachment being removed shouldn't take
     -- the message itself down with it (no independent attachment-delete
     -- path exists yet, but this is the safer default if one's added later).
-    attachment_id BIGINT REFERENCES attachments(id) ON DELETE SET NULL
+    attachment_id BIGINT REFERENCES attachments(id) ON DELETE SET NULL,
+    -- Reply/quote (issue #306) — deliberately NOT a foreign key: unlike
+    -- attachment_id above (where the referenced row disappearing should
+    -- detach cleanly via ON DELETE SET NULL), a deleted quoted message
+    -- should neither block the delete nor silently erase this reference
+    -- — the client resolves the id against its own already-loaded
+    -- history and shows "message unavailable" if it can't find it
+    -- (already-deleted or just not loaded), same as it would for an id
+    -- pointing outside the currently-fetched page.
+    reply_to_message_id BIGINT
 );
 
 -- ADD COLUMN IF NOT EXISTS rather than relying solely on the CREATE
@@ -95,6 +104,7 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_id BIGINT REFERENCES at
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS is_moderator BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE communities ADD COLUMN IF NOT EXISTS invite_code TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_message_id BIGINT;
 
 CREATE INDEX IF NOT EXISTS messages_channel_id_sent_at_idx ON messages (channel_id, sent_at);
 

@@ -603,6 +603,62 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     EXPECT_EQ(*messages[0].attachmentFilename, "greeting.txt");
 }
 
+TEST(ChatServiceIntegrationTest, ReplyToMessageIdRoundTripsThroughPostRecentAndSearch) {
+    // Issue #306 — no FK on this column (see its doc comment), so unlike
+    // attachment_id above, an id that doesn't correspond to any real
+    // message is accepted rather than rejected: the client, not the
+    // server, decides what to show when it can't resolve it.
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-reply-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-reply-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> original = service.postMessage(*channelId, owner, "original searchable text");
+    ASSERT_TRUE(original.has_value());
+    EXPECT_FALSE(original->replyToMessageId.has_value());
+
+    const std::optional<Message> reply =
+        service.postMessage(*channelId, owner, "a reply", /*attachmentId=*/std::nullopt, original->id);
+    ASSERT_TRUE(reply.has_value());
+    ASSERT_TRUE(reply->replyToMessageId.has_value());
+    EXPECT_EQ(*reply->replyToMessageId, original->id);
+
+    // An id that doesn't correspond to any message is accepted, not
+    // rejected — see the doc comment above.
+    const std::optional<Message> danglingReply =
+        service.postMessage(*channelId, owner, "reply to nothing", /*attachmentId=*/std::nullopt, 999999999);
+    ASSERT_TRUE(danglingReply.has_value());
+    ASSERT_TRUE(danglingReply->replyToMessageId.has_value());
+    EXPECT_EQ(*danglingReply->replyToMessageId, 999999999);
+
+    const std::vector<Message> recent = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(recent.size(), 3U);
+    const auto recentReply =
+        std::find_if(recent.begin(), recent.end(), [&](const Message& m) { return m.id == reply->id; });
+    ASSERT_NE(recentReply, recent.end());
+    ASSERT_TRUE(recentReply->replyToMessageId.has_value());
+    EXPECT_EQ(*recentReply->replyToMessageId, original->id);
+
+    // searchMessages() (issue #118) has its own SELECT — must carry the
+    // same field, not just recentMessages()'s.
+    const std::vector<Message> searched = service.searchMessages(*channelId, "a reply", 10);
+    ASSERT_EQ(searched.size(), 1U);
+    ASSERT_TRUE(searched[0].replyToMessageId.has_value());
+    EXPECT_EQ(*searched[0].replyToMessageId, original->id);
+}
+
 TEST(ChatServiceIntegrationTest, CreateChannelDefaultsToNotEncryptedAndFlagRoundTripsThroughListAndFind) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");

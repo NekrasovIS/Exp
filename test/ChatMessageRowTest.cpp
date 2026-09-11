@@ -95,12 +95,76 @@ TEST(ChatMessageRowTest, MessageWithAttachmentShowsDownloadButtonAndEmitsOnClick
     EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("report.pdf"));
 }
 
-TEST(ChatMessageRowTest, NonOwnMessageHasNoContextMenu) {
+TEST(ChatMessageRowTest, NonOwnMessageContextMenuHasOnlyReplyNotEditOrDelete) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
     auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
     ASSERT_NE(bubble, nullptr);
-    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::DefaultContextMenu);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_NE(menu->findChild<QAction*>(QStringLiteral("replyMessageAction")), nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("editMessageAction")), nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("deleteMessageAction")), nullptr);
+}
+
+TEST(ChatMessageRowTest, NonOwnMessageContextMenuReplyActionEmitsReplyRequested) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* replyAction = menu->findChild<QAction*>(QStringLiteral("replyMessageAction"));
+    ASSERT_NE(replyAction, nullptr);
+
+    QSignalSpy spy(&row, &ChatMessageRow::replyRequested);
+    replyAction->trigger();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
+}
+
+TEST(ChatMessageRowTest, OwnMessageContextMenuAlsoHasReplyAction) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_NE(menu->findChild<QAction*>(QStringLiteral("replyMessageAction")), nullptr);
+}
+
+TEST(ChatMessageRowTest, MessageWithoutReplyHasNoQuoteLabel) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_EQ(row.findChild<QLabel*>("chatMessageReplyQuote"), nullptr);
+}
+
+TEST(ChatMessageRowTest, MessageWithResolvedReplyShowsAuthorAndSnippetInQuote) {
+    ChatMessage message = sampleMessage();
+    message.replyToMessageId = 7;
+    message.replyToAuthor = "bob";
+    message.replyToBodySnippet = "original text";
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* quote = row.findChild<QLabel*>("chatMessageReplyQuote");
+    ASSERT_NE(quote, nullptr);
+    EXPECT_TRUE(quote->text().contains("bob"));
+    EXPECT_TRUE(quote->text().contains("original text"));
+}
+
+TEST(ChatMessageRowTest, MessageWithUnresolvedReplyShowsUnavailablePlaceholder) {
+    ChatMessage message = sampleMessage();
+    message.replyToMessageId = 7;
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* quote = row.findChild<QLabel*>("chatMessageReplyQuote");
+    ASSERT_NE(quote, nullptr);
+    EXPECT_TRUE(quote->text().contains("unavailable"));
 }
 
 TEST(ChatMessageRowTest, OwnMessageContextMenuEditActionEmitsEditRequestedWithCurrentBody) {

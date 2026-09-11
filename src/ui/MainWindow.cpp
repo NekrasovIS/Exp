@@ -251,14 +251,15 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](qint64 id, const QString& author, const QString& body, const QString& sentAt,
-                   qint64 attachmentId, const QString& attachmentFilename) {
+                   qint64 attachmentId, const QString& attachmentFilename, qint64 replyToMessageId) {
                 const QString displayBody = currentChannelEncrypted_ ? decryptForDisplay(body) : body;
                 chatView_->appendMessage(ChatMessage{.id = id,
                                                       .author = author,
                                                       .body = displayBody,
                                                       .sentAt = sentAt,
                                                       .attachmentId = attachmentId,
-                                                      .attachmentFilename = attachmentFilename});
+                                                      .attachmentFilename = attachmentFilename,
+                                                      .replyToMessageId = replyToMessageId});
                 desktopNotifier_->notifyMessage(author, displayBody, currentUserLogin_);
                 // Канал уже открыт — не непрочитанный, но превью в
                 // сайдбаре (issue #152) всё равно должно оставаться
@@ -318,7 +319,7 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
     connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
             [this](qint64 id, const QString& /*filename*/) {
-                chatClient_.sendMessage(chatView_->messageEdit()->text(), id);
+                chatClient_.sendMessage(chatView_->messageEdit()->text(), id, chatView_->consumeReplyTarget());
                 chatView_->messageEdit()->clear();
             });
     connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
@@ -752,7 +753,8 @@ MainWindow::MainWindow(QWidget* parent)
                                                   .body = currentChannelEncrypted_ ? decryptForDisplay(info.body) : info.body,
                                                   .sentAt = info.sentAt,
                                                   .attachmentId = info.attachmentId,
-                                                  .attachmentFilename = info.attachmentFilename});
+                                                  .attachmentFilename = info.attachmentFilename,
+                                                  .replyToMessageId = info.replyToMessageId});
                 }
                 if (oldestMessageId_ < 0) {
                     // Первоначальная загрузка истории для этого канала —
@@ -1003,7 +1005,7 @@ void MainWindow::onSendChatMessageClicked() {
         chatClient_.sendEditMessage(chatView_->editingMessageId(), outgoing);
         chatView_->cancelEditingMessage();
     } else {
-        chatClient_.sendMessage(outgoing);
+        chatClient_.sendMessage(outgoing, /*attachmentId=*/-1, chatView_->consumeReplyTarget());
         chatView_->messageEdit()->clear();
     }
 }
