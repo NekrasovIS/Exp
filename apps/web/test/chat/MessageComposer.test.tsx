@@ -8,13 +8,21 @@ import { jsonResponse, routedFetch } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
 
-function renderComposer(onSend = vi.fn()) {
+function renderComposer(overrides: Partial<Parameters<typeof MessageComposer>[0]> = {}) {
+  const onSend = overrides.onSend ?? vi.fn();
+  const onCancelReply = overrides.onCancelReply ?? vi.fn();
   render(
     <SessionProvider>
-      <MessageComposer channelId={7} communityId={1} onSend={onSend} />
+      <MessageComposer
+        channelId={7}
+        communityId={1}
+        onSend={onSend}
+        {...overrides}
+        onCancelReply={onCancelReply}
+      />
     </SessionProvider>,
   );
-  return { onSend };
+  return { onSend, onCancelReply };
 }
 
 beforeEach(() => {
@@ -118,6 +126,35 @@ describe("MessageComposer", () => {
 
     expect(screen.queryByRole("button", { name: "@alice" })).not.toBeInTheDocument();
     expect(input).toHaveValue("hey @al");
+  });
+
+  it("shows no reply bar when there is no reply target", () => {
+    renderComposer();
+    expect(screen.queryByText(/Replying to/)).not.toBeInTheDocument();
+  });
+
+  it("shows the reply bar with the target's author/snippet, and Cancel calls onCancelReply", async () => {
+    const { onCancelReply } = renderComposer({
+      replyTarget: { id: 5, author: "bob", snippet: "the original text" },
+    });
+
+    expect(screen.getByText("bob")).toBeInTheDocument();
+    expect(screen.getByText(/the original text/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelReply).toHaveBeenCalled();
+  });
+
+  it("clears the reply target after sending", async () => {
+    const { onSend, onCancelReply } = renderComposer({
+      replyTarget: { id: 5, author: "bob", snippet: "the original text" },
+    });
+
+    await userEvent.type(screen.getByLabelText("Message"), "here's my reply");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSend).toHaveBeenCalledWith("here's my reply", undefined);
+    expect(onCancelReply).toHaveBeenCalled();
   });
 
   it("shows an error when the upload fails", async () => {

@@ -38,3 +38,9 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
+
+.replyBar {
+  margin: 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}

@@ -873,6 +873,49 @@ TEST(HttpServerTest, ListMessagesRespectsLimitQueryParam) {
     EXPECT_EQ(body.size(), 1U);
 }
 
+TEST(HttpServerTest, ListPinnedMessagesReturnsOnlyPinnedOnesNewestPinFirstAndRejectsNonMember) {
+    auto fixtureOpt = TestFixture::create("http-server-pinned");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-pinned-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<Message> notPinned = chatService.postMessage(*channelId, fixture.ownerLogin, "not pinned");
+    const std::optional<Message> pinnedFirst = chatService.postMessage(*channelId, fixture.ownerLogin, "pinned first");
+    const std::optional<Message> pinnedSecond = chatService.postMessage(*channelId, fixture.ownerLogin, "pinned second");
+    ASSERT_TRUE(notPinned.has_value());
+    ASSERT_TRUE(pinnedFirst.has_value());
+    ASSERT_TRUE(pinnedSecond.has_value());
+    ASSERT_EQ(chatService.pinMessage(pinnedFirst->id, *channelId, fixture.ownerLogin).result, MutationResult::kSuccess);
+    ASSERT_EQ(chatService.pinMessage(pinnedSecond->id, *channelId, fixture.ownerLogin).result, MutationResult::kSuccess);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const std::string outsiderLogin = "http-server-pinned-outsider-" + uniqueSuffix();
+    const std::optional<std::string> outsiderToken = registerAndGetToken(fixture.authHost, fixture.authPort, outsiderLogin);
+    ASSERT_TRUE(outsiderToken.has_value());
+    const httplib::Result outsiderResult = client.Get("/channels/" + std::to_string(*channelId) + "/pinned-messages",
+                                                        httplib::Headers{{"Authorization", bearer(*outsiderToken)}});
+    ASSERT_TRUE(outsiderResult);
+    EXPECT_EQ(outsiderResult->status, 404);
+
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/channels/" + std::to_string(*channelId) + "/pinned-messages", headers);
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body);
+    ASSERT_EQ(body.size(), 2U);
+    // Самые новые закрепления первыми — pinnedSecond закреплён позже.
+    EXPECT_EQ(body[0]["id"].get<std::int64_t>(), pinnedSecond->id);
+    EXPECT_EQ(body[0]["pinned_by"].get<std::string>(), fixture.ownerLogin);
+    EXPECT_FALSE(body[0]["pinned_at"].get<std::string>().empty());
+    EXPECT_EQ(body[1]["id"].get<std::int64_t>(), pinnedFirst->id);
+}
+
 TEST(HttpServerTest, PromoteModeratorRejectsNonOwnerWith403) {
     auto fixtureOpt = TestFixture::create("http-server-promote-403");
     if (!fixtureOpt.has_value()) {

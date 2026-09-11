@@ -3,23 +3,37 @@
 // component's encrypted-channel early return never mounts this (and so
 // never calls useMessages/useChatSocket) for one.
 
-import { useState } from "react";
+import type { ChatMessageInfo } from "@devicehub/core";
+import { useEffect, useState } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { useSession } from "../session/SessionContext.js";
 import { MessageComposer } from "./MessageComposer.js";
-import { MessageList } from "./MessageList.js";
+import { MessageList, truncatedSnippet } from "./MessageList.js";
 import { MessageSearch } from "./MessageSearch.js";
+import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMessages } from "./useMessages.js";
+import { usePinnedMessages } from "./usePinnedMessages.js";
 
 interface ChatViewContentProps {
   channelId: number;
   communityId: number;
+  // `| undefined` explicit, not just `?:` — ChatView forwards its own
+  // already-possibly-undefined prop value verbatim, which
+  // exactOptionalPropertyTypes treats differently from the prop being
+  // omitted outright.
+  onOnlineMembers?: ((logins: string[]) => void) | undefined;
+  onPresenceChanged?: ((login: string, online: boolean) => void) | undefined;
 }
 
-export function ChatViewContent({ channelId, communityId }: ChatViewContentProps) {
+export function ChatViewContent({
+  channelId,
+  communityId,
+  onOnlineMembers,
+  onPresenceChanged,
+}: ChatViewContentProps) {
   const { currentLogin } = useSession();
   const isModerator = useIsModerator(communityId);
   const {
@@ -32,9 +46,42 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
     sendMessage,
     editMessage,
     deleteMessage,
+    toggleReaction,
     socket,
+    typingUser,
+    sendTyping,
   } = useMessages(channelId);
+  const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(false);
+  // Reply target (issue #306/#331) — resolved from `messages` itself,
+  // same client-side model as DeviceHub's ChatView; cleared once the
+  // composer actually sends (see MessageComposer's onCancelReply).
+  const [replyTarget, setReplyTarget] = useState<ChatMessageInfo | null>(null);
+
+  function handleSend(body: string, attachmentId?: number): void {
+    sendMessage(body, attachmentId, replyTarget?.id);
+  }
+
+  function handleReply(id: number): void {
+    const target = messages.find((m) => m.id === id);
+    if (target !== undefined) {
+      setReplyTarget(target);
+    }
+  }
+
+  // Issue #322 — presence rides this channel's socket; just forwarded
+  // up to the caller, which owns the aggregated state (MembersSidebar
+  // is a sibling, not a descendant, of this component).
+  useEffect(() => {
+    const offOnline = onOnlineMembers !== undefined ? socket.on("onlineMembers", onOnlineMembers) : undefined;
+    const offPresence =
+      onPresenceChanged !== undefined ? socket.on("presenceChanged", onPresenceChanged) : undefined;
+    return () => {
+      offOnline?.();
+      offPresence?.();
+    };
+  }, [socket, onOnlineMembers, onPresenceChanged]);
 
   return (
     <section className={styles.section}>
@@ -43,8 +90,14 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
         <button type="button" onClick={() => setSearchOpen((open) => !open)}>
           {searchOpen ? "Close search" : "Search"}
         </button>
+        {pinned.length > 0 && (
+          <button type="button" onClick={() => setPinnedOpen((open) => !open)}>
+            📌 {pinned.length}
+          </button>
+        )}
       </div>
       {searchOpen && <MessageSearch channelId={channelId} />}
+      {pinnedOpen && <PinnedMessagesPanel pinned={pinned} />}
 
       <div className={styles.scrollArea}>
         {loading && <p className={styles.statusText}>Loading messages…</p>}
@@ -57,13 +110,30 @@ export function ChatViewContent({ channelId, communityId }: ChatViewContentProps
         <MessageList
           messages={messages}
           editedIds={editedIds}
+          pinnedIds={pinnedIds}
           currentLogin={currentLogin}
           isModerator={isModerator}
           onEdit={editMessage}
           onDelete={deleteMessage}
+          onReply={handleReply}
+          onToggleReaction={toggleReaction}
+          onPin={pin}
+          onUnpin={unpin}
         />
       </div>
-      <MessageComposer channelId={channelId} communityId={communityId} onSend={sendMessage} />
+      {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
+      <MessageComposer
+        channelId={channelId}
+        communityId={communityId}
+        onSend={handleSend}
+        replyTarget={
+          replyTarget !== null
+            ? { id: replyTarget.id, author: replyTarget.author, snippet: truncatedSnippet(replyTarget.body) }
+            : null
+        }
+        onCancelReply={() => setReplyTarget(null)}
+        onTyping={sendTyping}
+      />
     </section>
   );
 }

@@ -3,11 +3,14 @@
 #include <gtest/gtest.h>
 
 #include <QAbstractItemView>
+#include <QAction>
 #include <QCompleter>
 #include <QImage>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
+#include <QMenu>
+#include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTest>
@@ -260,6 +263,278 @@ TEST(ChatViewTest, SetAttachmentPreviewAfterClearLogDoesNotCrash) {
     image.fill(Qt::blue);
     view.setAttachmentPreview(7, image);  // must not crash, must not dereference a dangling row
 }
+
+TEST(ChatViewTest, PinnedMessagesButtonHiddenUntilSetPinnedMessagesCountIsPositive) {
+    ChatView view;
+
+    // isHidden(), не isVisible() — тест не показывает окно, а
+    // isVisible() учитывает всю цепочку предков (всегда false для
+    // непоказанного топ-левел виджета).
+    EXPECT_TRUE(view.pinnedMessagesButton()->isHidden());
+
+    view.setPinnedMessagesCount(3);
+    EXPECT_FALSE(view.pinnedMessagesButton()->isHidden());
+    EXPECT_TRUE(view.pinnedMessagesButton()->text().contains("3"));
+
+    view.setPinnedMessagesCount(0);
+    EXPECT_TRUE(view.pinnedMessagesButton()->isHidden());
+}
+
+TEST(ChatViewTest, ClickingPinnedMessagesButtonEmitsPinnedMessagesToggleRequested) {
+    ChatView view;
+    view.setPinnedMessagesCount(1);
+    QSignalSpy spy(&view, &ChatView::pinnedMessagesToggleRequested);
+
+    emit view.pinnedMessagesButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ChatViewTest, SetCanManageChannelIsAppliedToSubsequentlyAppendedRows) {
+    ChatView view;
+    view.setCanManageChannel(true);
+
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+
+    auto* bubble = view.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+}
+
+TEST(ChatViewTest, PinMessageRequestedFromARowBubblesUpThroughTheView) {
+    ChatView view;
+    view.setCanManageChannel(true);
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    auto* row = view.findChild<ChatMessageRow*>();
+    ASSERT_NE(row, nullptr);
+
+    QSignalSpy spy(&view, &ChatView::pinMessageRequested);
+    emit row->pinRequested(1);
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 1);
+}
+
+TEST(ChatViewTest, UpdatePinnedReachesTheRowThatOwnsThatMessageId) {
+    ChatView view;
+    view.setCanManageChannel(true);
+    view.appendMessage(ChatMessage{.id = 9, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+
+    view.updatePinned(9, true);
+
+    EXPECT_FALSE(view.findChild<QLabel*>(QStringLiteral("chatMessagePinnedIndicator"))->isHidden());
+}
+
+TEST(ChatViewTest, UpdatePinnedForAMessageNotCurrentlyShownDoesNotCrash) {
+    ChatView view;
+
+    view.updatePinned(999, true);  // must not crash, must not dereference a dangling row
+}
+
+TEST(ChatViewTest, ClearLogResetsCanManageChannelAndPinnedMessagesCount) {
+    ChatView view;
+    view.setCanManageChannel(true);
+    view.setPinnedMessagesCount(2);
+
+    view.clearLog();
+
+    EXPECT_TRUE(view.pinnedMessagesButton()->isHidden());
+    view.appendMessage(ChatMessage{.author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    auto* bubble = view.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    // Контекстное меню теперь строится всегда (issue #333/#334/#306 —
+    // "React"/"Reply" доступны на любом сообщении), поэтому сброс
+    // canManageChannel_ проверяется по отсутствию именно пункта Pin, а
+    // не по отсутствию меню целиком.
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("pinMessageAction")), nullptr);
+}
+
+TEST(ChatViewTest, AppendedMessageWithReactionsShowsAChip) {
+    ChatView view;
+    view.appendMessage(ChatMessage{
+        .author = "alice",
+        .body = "hi",
+        .sentAt = "2026-08-05 09:00:00",
+        .reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}}}});
+
+    EXPECT_EQ(view.findChildren<QPushButton*>(QStringLiteral("reactionChip")).size(), 1);
+}
+
+TEST(ChatViewTest, UpdateReactionsReachesTheRowThatOwnsThatMessageId) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 9, .author = "alice", .body = "hi", .sentAt = "2026-08-05 09:00:00"});
+    ASSERT_TRUE(view.findChildren<QPushButton*>(QStringLiteral("reactionChip")).isEmpty());
+
+    view.updateReactions(9, "\U0001F44D", {"bob"});
+
+    EXPECT_EQ(view.findChildren<QPushButton*>(QStringLiteral("reactionChip")).size(), 1);
+}
+
+TEST(ChatViewTest, UpdateReactionsForAMessageNotCurrentlyShownDoesNotCrash) {
+    ChatView view;
+
+    view.updateReactions(999, "\U0001F44D", {"bob"});  // must not crash, must not dereference a dangling row
+}
+
+TEST(ChatViewTest, ClickingAReactionChipEmitsReactionToggleRequestedFromTheView) {
+    ChatView view;
+    view.appendMessage(ChatMessage{
+        .id = 9,
+        .author = "alice",
+        .body = "hi",
+        .sentAt = "2026-08-05 09:00:00",
+        .reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}}}});
+    auto* chip = view.findChild<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_NE(chip, nullptr);
+
+    QSignalSpy spy(&view, &ChatView::reactionToggleRequested);
+    chip->click();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 9);
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("\U0001F44D"));
+}
+
+TEST(ChatViewTest, AppendingAReplyResolvesAuthorAndSnippetFromTheCache) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+
+    view.appendMessage(
+        ChatMessage{.id = 2, .author = "bob", .body = "a reply", .sentAt = "2026-08-05 09:01:00", .replyToMessageId = 1});
+
+    auto* quote = view.findChild<QLabel*>(QStringLiteral("chatMessageReplyQuote"));
+    ASSERT_NE(quote, nullptr);
+    EXPECT_TRUE(quote->text().contains("alice"));
+    EXPECT_TRUE(quote->text().contains("original text"));
+}
+
+TEST(ChatViewTest, AppendingAReplyToAnUnknownIdShowsUnavailablePlaceholder) {
+    ChatView view;
+
+    view.appendMessage(
+        ChatMessage{.id = 2, .author = "bob", .body = "a reply", .sentAt = "2026-08-05 09:01:00", .replyToMessageId = 999});
+
+    auto* quote = view.findChild<QLabel*>(QStringLiteral("chatMessageReplyQuote"));
+    ASSERT_NE(quote, nullptr);
+    EXPECT_TRUE(quote->text().contains("unavailable"));
+}
+
+TEST(ChatViewTest, ClickingReplyOnAMessageRowShowsTheReplyBar) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    auto* row = view.findChild<ChatMessageRow*>();
+    ASSERT_NE(row, nullptr);
+
+    emit row->replyRequested(1);
+
+    auto* replyBarLabel = view.findChild<QLabel*>(QStringLiteral("chatReplyBarLabel"));
+    ASSERT_NE(replyBarLabel, nullptr);
+    EXPECT_TRUE(replyBarLabel->text().contains("alice"));
+    EXPECT_TRUE(replyBarLabel->text().contains("original text"));
+    // isHidden(), не isVisible() — тест не показывает окно, а isVisible()
+    // учитывает всю цепочку предков (всегда false для непоказанного
+    // топ-левел виджета); isHidden() отражает только явный флаг видимости
+    // самого этого виджета, который и переключает setReplyTarget().
+    EXPECT_FALSE(replyBarLabel->parentWidget()->isHidden());
+}
+
+TEST(ChatViewTest, ConsumeReplyTargetReturnsTheIdAndClearsIt) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    view.setReplyTarget(1);
+
+    EXPECT_EQ(view.consumeReplyTarget(), 1);
+    EXPECT_EQ(view.consumeReplyTarget(), -1);
+    EXPECT_TRUE(view.findChild<QLabel*>(QStringLiteral("chatReplyBarLabel"))->parentWidget()->isHidden());
+}
+
+TEST(ChatViewTest, ClickingReplyBarCancelButtonClearsTheReplyTarget) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    view.setReplyTarget(1);
+
+    emit view.findChild<QPushButton*>(QStringLiteral("chatReplyBarCancelButton"))->clicked();
+
+    EXPECT_EQ(view.consumeReplyTarget(), -1);
+}
+
+TEST(ChatViewTest, StartingAReplyCancelsAPendingEdit) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    auto* row = view.findChild<ChatMessageRow*>();
+    ASSERT_NE(row, nullptr);
+    emit row->editRequested(1, QStringLiteral("original text"));
+    ASSERT_EQ(view.editingMessageId(), 1);
+
+    emit row->replyRequested(1);
+
+    EXPECT_EQ(view.editingMessageId(), -1);
+}
+
+TEST(ChatViewTest, StartingAnEditCancelsAPendingReply) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    auto* row = view.findChild<ChatMessageRow*>();
+    ASSERT_NE(row, nullptr);
+    view.setReplyTarget(1);
+
+    emit row->editRequested(1, QStringLiteral("original text"));
+
+    EXPECT_EQ(view.consumeReplyTarget(), -1);
+}
+
+TEST(ChatViewTest, RemovingTheCurrentReplyTargetClearsIt) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    view.setReplyTarget(1);
+
+    view.removeMessage(1);
+
+    EXPECT_EQ(view.consumeReplyTarget(), -1);
+}
+
+TEST(ChatViewTest, ClearLogClearsAnyPendingReplyTarget) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 1, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+    view.setReplyTarget(1);
+
+    view.clearLog();
+
+    EXPECT_EQ(view.consumeReplyTarget(), -1);
+}
+
+TEST(ChatViewTest, PrependedMessageRowsAreConnectedJustLikeAppendedOnes) {
+    // Регрессия для issue #330: prependMessages() ("Load older messages")
+    // раньше не подключала строки к connectMessageRow() вообще — клик по
+    // Reply/Edit/Delete/Download на подгруженном старом сообщении молча
+    // ничего не делал.
+    ChatView view;
+    view.prependMessages({ChatMessage{.id = 1, .author = "alice", .body = "old message", .sentAt = "2026-08-05 09:00:00"}});
+    auto* row = view.findChild<ChatMessageRow*>();
+    ASSERT_NE(row, nullptr);
+
+    emit row->replyRequested(1);
+
+    auto* replyBarLabel = view.findChild<QLabel*>(QStringLiteral("chatReplyBarLabel"));
+    ASSERT_NE(replyBarLabel, nullptr);
+    EXPECT_FALSE(replyBarLabel->parentWidget()->isHidden());
+}
+
+TEST(ChatViewTest, PrependedReplyResolvesAgainstAlreadyCachedMessages) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 5, .author = "alice", .body = "original text", .sentAt = "2026-08-05 09:00:00"});
+
+    view.prependMessages(
+        {ChatMessage{.id = 1, .author = "bob", .body = "an old reply", .sentAt = "2026-08-05 08:00:00", .replyToMessageId = 5}});
+
+    auto* quote = view.findChild<QLabel*>(QStringLiteral("chatMessageReplyQuote"));
+    ASSERT_NE(quote, nullptr);
+    EXPECT_TRUE(quote->text().contains("alice"));
+    EXPECT_TRUE(quote->text().contains("original text"));
+}
+
 
 TEST(ChatViewTest, TypingAtWithMatchingMembersSetsCompletionPrefixAndCandidate) {
     ChatView view;

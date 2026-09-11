@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QPixmap>
 #include <QPushButton>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QVideoWidget>
 
@@ -23,6 +24,21 @@ constexpr int kVideoTileSize = 160;
 constexpr int kMiniVideoTileSize = 96;
 constexpr int kCascadeStep = 28;
 constexpr int kCascadeMaxSteps = 8;
+/// Issue #312 — тот же порядок величины, что kTypingIndicatorHideMs у
+/// ChatView, только короче: реакция — мгновенный жест, а не состояние,
+/// которое имеет смысл держать на экране несколько секунд подряд.
+constexpr int kReactionFeedHideMs = 2500;
+
+/// Фиксированный набор быстрых реакций (issue #312) — эмодзи вне
+/// Basic Multilingual Plane (нужен суррогатная пара в UTF-16) записаны
+/// экранированными Unicode-литералами `\U0001F...`, тот же приём, что
+/// videoPlaceholder's "\U0001F3AC" в ChatMessageRow.cpp; ❤️ (U+2764
+/// U+FE0F) — оба кодпойнта уже в BMP, суррогатная пара не нужна, можно
+/// прямо в исходнике.
+QList<QString> reactionEmojis() {
+    return {QStringLiteral("\U0001F44D"), QStringLiteral("❤️"), QStringLiteral("\U0001F602"),
+            QStringLiteral("\U0001F389"), QStringLiteral("\U0001F44F")};
+}
 
 /// Ключ remoteVideoTiles_ для (@p peerLogin, @p isScreenShare) — камера
 /// и демонстрация экрана одного участника (issue #185) получают разные
@@ -75,6 +91,29 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     controlsRow->addWidget(minimizeButton_);
     controlsRow->addWidget(leaveCallButton_);
 
+    // Issue #312 — фиксированный набор быстрых реакций, своя строка под
+    // controlsRow, а не смешаны с ним: это не переключатели состояния
+    // звонка, как остальные кнопки выше, а одноразовые жесты.
+    auto* reactionsRow = new QHBoxLayout;
+    reactionsRow->setSpacing(ui_theme::kSpacingSm);
+    for (const QString& emoji : reactionEmojis()) {
+        auto* reactionButton = new QPushButton(emoji, this);
+        reactionButton->setProperty("reactionEmoji", emoji);
+        connect(reactionButton, &QPushButton::clicked, this,
+                [this, emoji]() { emit reactionRequested(emoji); });
+        reactionButtons_.append(reactionButton);
+        reactionsRow->addWidget(reactionButton);
+    }
+    reactionsRow->addStretch(1);
+
+    reactionFeedLabel_ = new QLabel(this);
+    reactionFeedLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    reactionFeedLabel_->setVisible(false);
+    reactionFeedHideTimer_ = new QTimer(this);
+    reactionFeedHideTimer_->setSingleShot(true);
+    reactionFeedHideTimer_->setInterval(kReactionFeedHideMs);
+    connect(reactionFeedHideTimer_, &QTimer::timeout, this, [this]() { reactionFeedLabel_->setVisible(false); });
+
     callParticipantsLabel_ = new QLabel(this);
     callParticipantsLabel_->setObjectName(QStringLiteral("mutedDescription"));
     callParticipantsLabel_->setWordWrap(true);
@@ -108,8 +147,16 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     localScreenShareTile_->setVisible(false);
 
     rootLayout->addLayout(controlsRow);
+    rootLayout->addLayout(reactionsRow);
+    rootLayout->addWidget(reactionFeedLabel_);
     rootLayout->addWidget(callParticipantsLabel_);
     rootLayout->addWidget(videoStrip_, /*stretch=*/1);
+}
+
+void CallWindow::showReaction(const QString& login, const QString& emoji) {
+    reactionFeedLabel_->setText(QStringLiteral("%1 %2").arg(login, emoji));
+    reactionFeedLabel_->setVisible(true);
+    reactionFeedHideTimer_->start();
 }
 
 void CallWindow::setMuted(bool muted) {
@@ -151,11 +198,10 @@ QPoint CallWindow::nextTileCascadePosition() {
 }
 
 void CallWindow::placeTile(DraggableVideoTile* tile) {
-    // Видимость намеренно не трогает — вызывающая сторона решает: у
-    // новой удалённой плитки (showRemoteVideoFrame()) она всегда
-    // становится видимой, а у локальных камеры/демонстрации экрана при
-    // detachTilesTo()/reattachTiles() (issue #215) нужно сохранить их
-    // текущее состояние enabled/disabled, а не форсировать true.
+    // Видимость сюда не входит намеренно — setParent() ниже уже меняет
+    // её как побочный эффект (см. doc-комментарий relocateAllTiles(),
+    // issue #287), так что решать реальную видимость после этого вызова
+    // должна вызывающая сторона явно, а не эта функция.
     tile->setParent(tileHost_);
     tile->resize(currentTileSize_, currentTileSize_);
     tile->move(nextTileCascadePosition());
@@ -216,15 +262,23 @@ void CallWindow::reattachTiles() {
 
 void CallWindow::relocateAllTiles() {
     nextTileCascadeIndex_ = 0;
+    // QWidget::setParent() (внутри placeTile()) неявно скрывает виджет
+    // как побочный эффект смены родителя (документированное поведение
+    // Qt) — то, что было "сохранить текущую видимость" до issue #287,
+    // на деле после placeTile() всегда читало "скрыто", независимо от
+    // реального состояния до вызова. Явно восстанавливаем видимость по
+    // тем же флагам, которыми управляют setVideoEnabled()/
+    // setScreenShareEnabled(), а не по факту "как было до реparenting'а"
+    // (который к этому моменту уже потерян).
     placeTile(localCameraTile_);
+    localCameraTile_->setVisible(videoActive_);
     placeTile(localScreenShareTile_);
+    localScreenShareTile_->setVisible(screenShareActive_);
     for (DraggableVideoTile* tile : std::as_const(remoteVideoTiles_)) {
         placeTile(tile);
-        // В отличие от локальных плиток выше (сохраняют свою видимость,
-        // см. doc-комментарий placeTile()), удалённая плитка в
-        // remoteVideoTiles_ по инварианту этого класса всегда должна
-        // быть видна, пока существует (см. removeRemoteVideo()) —
-        // явно восстанавливаем на случай, если что-то её скрыло.
+        // Удалённая плитка в remoteVideoTiles_ по инварианту этого
+        // класса всегда должна быть видна, пока существует (см.
+        // removeRemoteVideo()) — та же причина, что и выше у локальных.
         tile->setVisible(true);
     }
     updateVideoStripVisibility();

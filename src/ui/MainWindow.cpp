@@ -44,6 +44,7 @@
 #include "ui/LoginWindow.h"
 #include "ui/MemberListPanel.h"
 #include "ui/ModeratorsDialog.h"
+#include "ui/PinnedMessagesDialog.h"
 #include "ui/ProfileDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SettingsDialog.h"
@@ -84,6 +85,19 @@ QString truncateForChannelPreview(const QString& body) {
         flattened += QStringLiteral("…");
     }
     return flattened;
+}
+
+/// Сводит ChatRestClient::MessageReactionInfo (src/chat) к
+/// devicehub::MessageReactionSummary (src/ui/ChatMessageRow.h), поле в
+/// поле (issue #333/#334) — та же граница между слоями, что уже
+/// проведена для ChatMessageInfo/ChatMessage.
+QList<MessageReactionSummary> toReactionSummaries(const QList<MessageReactionInfo>& reactions) {
+    QList<MessageReactionSummary> summaries;
+    summaries.reserve(reactions.size());
+    for (const MessageReactionInfo& reaction : reactions) {
+        summaries.push_back(MessageReactionSummary{.emoji = reaction.emoji, .logins = reaction.logins});
+    }
+    return summaries;
 }
 }  // namespace
 
@@ -251,14 +265,15 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 channelId) { chatView_->appendSystemLine(tr("-- subscribed to channel %1 --").arg(channelId)); });
     connect(&chatClient_, &ChatClient::messageReceived, this,
             [this](qint64 id, const QString& author, const QString& body, const QString& sentAt,
-                   qint64 attachmentId, const QString& attachmentFilename) {
+                   qint64 attachmentId, const QString& attachmentFilename, qint64 replyToMessageId) {
                 const QString displayBody = currentChannelEncrypted_ ? decryptForDisplay(body) : body;
                 chatView_->appendMessage(ChatMessage{.id = id,
                                                       .author = author,
                                                       .body = displayBody,
                                                       .sentAt = sentAt,
                                                       .attachmentId = attachmentId,
-                                                      .attachmentFilename = attachmentFilename});
+                                                      .attachmentFilename = attachmentFilename,
+                                                      .replyToMessageId = replyToMessageId});
                 desktopNotifier_->notifyMessage(author, displayBody, currentUserLogin_);
                 // Канал уже открыт — не непрочитанный, но превью в
                 // сайдбаре (issue #152) всё равно должно оставаться
@@ -274,11 +289,74 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatClient_, &ChatClient::messageDeleted, this,
             [this](qint64 id) { chatView_->removeMessage(id); });
+    connect(&chatClient_, &ChatClient::messagePinned, this,
+            [this](qint64 id, const QString& pinnedBy, const QString& pinnedAt) {
+                chatView_->updatePinned(id, /*isPinned=*/true);
+                if (std::none_of(currentPinnedMessages_.cbegin(), currentPinnedMessages_.cend(),
+                                  [id](const PinnedMessageInfo& info) { return info.id == id; })) {
+                    // Полное содержимое сообщения для панели закреплённых
+                    // (issue #338) уже есть в самой строке ChatView — но
+                    // раз message_pinned не несёт body/author, надёжнее
+                    // просто перезапросить список целиком, чем собирать
+                    // его из уже показанной строки, которая может не
+                    // существовать (сообщение вне текущей страницы истории).
+                    chatRestClient_.listPinnedMessages(lastToken_, selectedChannelId_);
+                } else {
+                    // Уже в списке (это была идемпотентная повторная
+                    // закрепление тем же или другим модератором) — ничего
+                    // не меняется, перезапрос не нужен.
+                    pinnedMessagesDialog_->setPinnedMessages(currentPinnedMessages_);
+                }
+                Q_UNUSED(pinnedBy);
+                Q_UNUSED(pinnedAt);
+            });
+    connect(&chatClient_, &ChatClient::messageUnpinned, this, [this](qint64 id) {
+        chatView_->updatePinned(id, /*isPinned=*/false);
+        currentPinnedMessages_.removeIf([id](const PinnedMessageInfo& info) { return info.id == id; });
+        chatView_->setPinnedMessagesCount(currentPinnedMessages_.size());
+        pinnedMessagesDialog_->setPinnedMessages(currentPinnedMessages_);
+    });
+    connect(&chatRestClient_, &ChatRestClient::pinnedMessagesListed, this,
+            [this](qint64 channelId, const QList<PinnedMessageInfo>& pinned) {
+                if (channelId != selectedChannelId_) {
+                    return;
+                }
+                currentPinnedMessages_ = pinned;
+                chatView_->setPinnedMessagesCount(pinned.size());
+                pinnedMessagesDialog_->setPinnedMessages(pinned);
+                // Issue #339 (найдено при переходе к веб-версии, #340):
+                // сообщения, уже закреплённые ДО открытия канала, иначе
+                // никогда не получают инлайн-значок "📌 Pinned" в самой
+                // ленте — GET .../messages не несёт is_pinned для каждого
+                // сообщения (это единственная работа этого отдельного
+                // REST-эндпоинта), а строки уже построены к этому моменту
+                // с ChatMessage::isPinned по умолчанию false.
+                for (const PinnedMessageInfo& info : pinned) {
+                    chatView_->updatePinned(info.id, /*isPinned=*/true);
+                }
+            });
+    connect(chatView_, &ChatView::pinnedMessagesToggleRequested, this, [this]() {
+        pinnedMessagesDialog_->show();
+        pinnedMessagesDialog_->raise();
+        pinnedMessagesDialog_->activateWindow();
+    });
+    connect(pinnedMessagesDialog_, &PinnedMessagesDialog::messageActivated, this,
+            [this](qint64 messageId) { chatView_->scrollToMessage(messageId); });
+    connect(&chatClient_, &ChatClient::reactionChanged, this,
+            [this](qint64 id, const QString& emoji, const QStringList& logins) {
+                chatView_->updateReactions(id, emoji, logins);
+            });
+    connect(chatView_, &ChatView::reactionToggleRequested, this,
+            [this](qint64 id, const QString& emoji) { chatClient_.sendToggleReaction(id, emoji); });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
     connect(&chatClient_, &ChatClient::userTyping, this,
             [this](const QString& login) { chatView_->showTypingUser(login); });
+    connect(&chatClient_, &ChatClient::onlineMembersReceived, this,
+            [this](const QStringList& logins) { memberListPanel_->setOnlineLogins(logins); });
+    connect(&chatClient_, &ChatClient::presenceChanged, this,
+            [this](const QString& login, bool online) { memberListPanel_->setLoginOnline(login, online); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
@@ -289,10 +367,18 @@ MainWindow::MainWindow(QWidget* parent)
     // звонке — переиспользуем тот же слот, а не дублируем его тело.
     connect(callWindow_, &CallWindow::leaveCallRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::minimizeRequested, this, &MainWindow::onCallMinimizeRequested);
+    // Issue #312.
+    connect(callWindow_, &CallWindow::reactionRequested, this,
+            [this](const QString& emoji) { callManager_.sendReaction(emoji); });
+    connect(&callManager_, &CallManager::reactionReceived, this,
+            [this](const QString& login, const QString& emoji) { callWindow_->showReaction(login, emoji); });
     connect(floatingCallTilesOverlay_, &FloatingCallTilesOverlay::restoreRequested, this,
             &MainWindow::onCallRestoreRequested);
     connect(chatView_, &ChatView::deleteMessageRequested, this,
             [this](qint64 id) { chatClient_.sendDeleteMessage(id); });
+    connect(chatView_, &ChatView::pinMessageRequested, this, [this](qint64 id) { chatClient_.sendPinMessage(id); });
+    connect(chatView_, &ChatView::unpinMessageRequested, this,
+            [this](qint64 id) { chatClient_.sendUnpinMessage(id); });
     connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
     connect(chatView_, &ChatView::downloadAttachmentRequested, this,
             [this](qint64 attachmentId, const QString& filename) {
@@ -309,7 +395,7 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
     connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
             [this](qint64 id, const QString& /*filename*/) {
-                chatClient_.sendMessage(chatView_->messageEdit()->text(), id);
+                chatClient_.sendMessage(chatView_->messageEdit()->text(), id, chatView_->consumeReplyTarget());
                 chatView_->messageEdit()->clear();
             });
     connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
@@ -416,6 +502,18 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
+        // Issue #338: нужно знать роль вошедшего пользователя в этом
+        // сообществе, чтобы решить, показывать ли Pin/Unpin, ещё до
+        // того, как он откроет конкретный канал — запрашивается здесь,
+        // а не в openChannel()/finishOpeningChannel(), с запасом по
+        // времени на сетевой round trip.
+        currentCommunityModeratorLogins_.clear();
+        chatRestClient_.listModerators(lastToken_, id);
+        // Issue #309 — presence for the previous community doesn't
+        // apply here; closeChatView() above already dropped chatClient_'s
+        // subscription, so no fresh online_members arrives until a
+        // channel in this community is opened.
+        memberListPanel_->setOnlineLogins({});
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
@@ -503,6 +601,10 @@ MainWindow::MainWindow(QWidget* parent)
             dmChatClient_.sendMessage(body);
         }
     });
+    // Issue #313 — same shape as chatClient_'s typing wiring above.
+    connect(directMessageView_, &DirectMessageView::typingRequested, this, [this]() { dmChatClient_.sendTyping(); });
+    connect(&dmChatClient_, &ChatClient::userTyping, this,
+            [this](const QString& login) { directMessageView_->showTypingUser(login); });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {
@@ -577,6 +679,13 @@ MainWindow::MainWindow(QWidget* parent)
             [this](qint64 id, const QStringList& logins) {
                 if (id == moderatorsDialog_->communityId()) {
                     moderatorsDialog_->setModerators(logins);
+                }
+                // Issue #338: та же рассылка, но для роли вошедшего
+                // пользователя в открытом(-ываемом) канале — независимо
+                // от того, открыт ли ModeratorsDialog сейчас.
+                if (id == selectedCommunityId_) {
+                    currentCommunityModeratorLogins_ = logins;
+                    chatView_->setCanManageChannel(currentUserCanManageChannel());
                 }
             });
     connect(&chatRestClient_, &ChatRestClient::communityJoined, this, [this](qint64 id) {
@@ -738,7 +847,9 @@ MainWindow::MainWindow(QWidget* parent)
                                                   .body = currentChannelEncrypted_ ? decryptForDisplay(info.body) : info.body,
                                                   .sentAt = info.sentAt,
                                                   .attachmentId = info.attachmentId,
-                                                  .attachmentFilename = info.attachmentFilename});
+                                                  .attachmentFilename = info.attachmentFilename,
+                                                  .reactions = toReactionSummaries(info.reactions),
+                                                  .replyToMessageId = info.replyToMessageId});
                 }
                 if (oldestMessageId_ < 0) {
                     // Первоначальная загрузка истории для этого канала —
@@ -884,6 +995,7 @@ void MainWindow::buildUi() {
     profileDialog_ = new ProfileDialog(this);
     moderatorsDialog_ = new ModeratorsDialog(this);
     searchDialog_ = new SearchDialog(this);
+    pinnedMessagesDialog_ = new PinnedMessagesDialog(this);
     loginWindow_ = new LoginWindow(this);
 }
 
@@ -989,7 +1101,7 @@ void MainWindow::onSendChatMessageClicked() {
         chatClient_.sendEditMessage(chatView_->editingMessageId(), outgoing);
         chatView_->cancelEditingMessage();
     } else {
-        chatClient_.sendMessage(outgoing);
+        chatClient_.sendMessage(outgoing, /*attachmentId=*/-1, chatView_->consumeReplyTarget());
         chatView_->messageEdit()->clear();
     }
 }
@@ -1046,10 +1158,21 @@ void MainWindow::onCallToggleClicked() {
 }
 
 void MainWindow::onCallMinimizeRequested() {
+    // issue #287: без явного move() мини-окно открывается там, где
+    // решит оконный менеджер по умолчанию — никак не привязано к тому,
+    // где только что было CallWindow, что ощущается как "появилось не
+    // там". Читаем geometry() до hide() — после hide() она у скрытого
+    // окна на некоторых платформах не гарантированно валидна.
+    floatingCallTilesOverlay_->move(callWindow_->geometry().topLeft());
     callWindow_->detachTilesTo(floatingCallTilesOverlay_->canvas());
     callWindow_->hide();
     floatingCallTilesOverlay_->show();
     floatingCallTilesOverlay_->raise();
+    // activateWindow() рядом с raise() (issue #287) — raise() один
+    // только поднимает окно в z-order, не гарантируя ему фокус или то,
+    // что оконный менеджер реально выведет его поверх остальных (тот
+    // же паттерн уже применяется в onCallRestoreRequested() ниже).
+    floatingCallTilesOverlay_->activateWindow();
 }
 
 void MainWindow::onCallRestoreRequested() {
@@ -1194,6 +1317,16 @@ void MainWindow::refreshChannelsForSelectedCommunity() {
     chatRestClient_.listChannels(lastToken_, selectedCommunityId_);
 }
 
+bool MainWindow::currentUserCanManageChannel() const {
+    if (selectedCommunityId_ < 0 || currentUserLogin_.isEmpty()) {
+        return false;
+    }
+    const auto it = std::find_if(communities_.cbegin(), communities_.cend(),
+                                  [this](const ChatItem& item) { return item.id == selectedCommunityId_; });
+    const bool isOwner = it != communities_.cend() && it->ownerLogin == currentUserLogin_;
+    return isOwner || currentCommunityModeratorLogins_.contains(currentUserLogin_);
+}
+
 void MainWindow::openChannel(qint64 id, const QString& name) {
     // Звонок привязан к тому каналу, на который мы подписаны — выходим
     // из него перед переключением, а не оставляем PeerConnection
@@ -1205,6 +1338,10 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
     chatClient_.disconnectFromChannel();
     chatView_->showChannel(name);
     chatView_->clearLog();
+    // Issue #338: clearLog() выше уже сбросила это в false — выставляем
+    // заново из уже (скорее всего) известной роли в сообществе,
+    // запрошенной при его выборе (см. communitySelected()).
+    chatView_->setCanManageChannel(currentUserCanManageChannel());
     searchDialog_->clearResults();
 
     const auto it = std::find_if(channels_.cbegin(), channels_.cend(), [id](const ChatItem& item) { return item.id == id; });
@@ -1225,6 +1362,7 @@ void MainWindow::openChannel(qint64 id, const QString& name) {
 void MainWindow::finishOpeningChannel(qint64 id) {
     chatClient_.connectToChannel(lastToken_, id);
     chatRestClient_.listMessages(lastToken_, id, kMessagePageSize);
+    chatRestClient_.listPinnedMessages(lastToken_, id);
 }
 
 void MainWindow::closeChatView() {
@@ -1239,6 +1377,9 @@ void MainWindow::closeChatView() {
     channelsPanel_->setOpenChannelId(-1);
     chatView_->showPlaceholder();
     searchDialog_->clearResults();
+    // Issue #338 — принадлежали только что закрытому каналу.
+    currentPinnedMessages_.clear();
+    pinnedMessagesDialog_->setPinnedMessages({});
 }
 
 void MainWindow::wrapPendingEncryptedChannelKeyForMember(const QString& login, const QString& publicKeyBase64) {

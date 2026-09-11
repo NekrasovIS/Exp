@@ -22,6 +22,7 @@
 #include <QString>
 #include <QVideoFrame>
 
+#include <cstddef>
 #include <deque>
 #include <memory>
 #include <string>
@@ -34,9 +35,16 @@ class QScreen;
 namespace devicehub {
 
 /**
- * @brief Оркестрация mesh-голосовых звонков: один `webrtc::PeerConnection`
- *        на каждого удалённого участника звонка, подключённый к релею
- *        сигналинга звонков в ChatClient (issue #46, Phase 3).
+ * @brief Оркестрация групповых голосовых звонков через SFU (Janus
+ *        videoroom, issue #230/#231/#232): одно publish-соединение
+ *        (собственные аудио/камера/демонстрация экрана) плюс по одному
+ *        subscribe-соединению на каждого чужого Janus-feed, подключённых
+ *        к прокси-протоколу Janus-сигналинга в ChatClient. До issue #233
+ *        здесь же жил параллельный mesh-путь (issue #46, Phase 3 — один
+ *        `webrtc::PeerConnection` на каждого удалённого участника
+ *        напрямую) — полностью убран после того, как #232 подтвердил
+ *        стабильную работу SFU-пути минимум с 3 участниками (см. commit
+ *        message issue #233 и services/janus/verify/verify-forwarding.mjs).
  *
  * Владеет единственным `webrtc::PeerConnectionFactoryInterface`
  * (создаётся лениво, при первом joinCall()) и `CallAudioDeviceModule`
@@ -44,14 +52,6 @@ namespace devicehub {
  * PeerConnection, создаваемый этим классом, использует общую
  * фабрику/ADM, поэтому входящее аудио от всех пиров микшируется в один
  * поток воспроизведения самим libwebrtc.
- *
- * Правило инициации mesh (избегает одновременных офферов в одной паре):
- * только что присоединившийся пир всегда отправляет offer каждому
- * участнику, уже присутствующему в ростере; уже присутствующие участники
- * только отвечают. Этот класс следует этому правилу, отправляя offer
- * всем в списке из callRosterReceived() и отвечая только в ответ на
- * входящий offer (callSignalReceived()) — никогда в callPeerJoined(),
- * который носит чисто информационный характер.
  *
  * PeerConnectionObserver и колбэки observer'ов SetLocal/RemoteDescription
  * срабатывают на собственном signaling-потоке WebRTC, никогда на
@@ -79,16 +79,15 @@ namespace devicehub {
  * enableVideo(), и подключается ко всем PeerConnection, существующим на
  * этот момент — единственный случай, добавляющий трек к уже
  * согласованному соединению, поэтому enableVideo() явно вызывает
- * negotiateLocal() для каждого из них тут же на месте (так же, как это
- * уже делают ensurePeerConnection()/onCallRosterReceived() для
- * изначального аудиотрека, вместо того чтобы реагировать на собственное
- * уведомление WebRTC OnRenegotiationNeeded() — почему, см. doc-комментарий
- * к этому методу у PeerObserver: опора одновременно и на явный вызов, и
- * на это уведомление для одного и того же изменения трека приводила к
- * гонке между ними при живом тестировании, повреждая обмен). Более
- * поздний PeerConnection (ensurePeerConnection()) подхватывает трек уже
- * как часть своего собственного изначального offer/answer. После этого
- * первого подключения enableVideo()/disableVideo() лишь переключают
+ * negotiateLocal() для каждого из них тут же на месте, вместо того чтобы
+ * реагировать на собственное уведомление WebRTC OnRenegotiationNeeded() —
+ * почему, см. doc-комментарий к этому методу у PeerObserver: опора
+ * одновременно и на явный вызов, и на это уведомление для одного и того
+ * же изменения трека приводила к гонке между ними при живом
+ * тестировании, повреждая обмен. Более позднее PeerConnection (созданное
+ * уже после первого enableVideo()) подхватывает трек уже как часть
+ * своего собственного изначального offer/answer. После этого первого
+ * подключения enableVideo()/disableVideo() лишь переключают
  * VideoTrackInterface::set_enabled() — тот же механизм, что setMuted()
  * использует для аудио — и намеренно никогда больше не удаляют трек:
  * RemoveTrackOrError() приводил к реальному фатальному assert внутри
@@ -195,10 +194,26 @@ public:
 
     [[nodiscard]] bool screenShareEnabled() const { return screenShareEnabled_; }
 
+    /// Отправляет лёгкую эмодзи-реакцию остальным участникам звонка
+    /// (issue #312) — no-op, если сейчас не в звонке (см. doc-комментарий
+    /// реализации).
+    void sendReaction(const QString& emoji);
+
+    /// Число других участников звонка, на которых у этого CallManager
+    /// сейчас есть реальное subscribe-соединение (issue #233) — @ref
+    /// peers_, один слот на publisher (не считая собственной
+    /// публикации). Нужно тестам, чтобы отличить "Janus знает о трёх
+    /// publisher'ах" от "у клиента реально три открытых соединения" —
+    /// это не всегда одно и то же при ошибке в переборе списка
+    /// publishers.
+    [[nodiscard]] std::size_t activeRemotePeerCount() const { return peers_.size(); }
+
 signals:
     void participantJoined(const QString& login);
     void participantLeft(const QString& login);
     void callError(const QString& message);
+    /// Другой участник звонка отправил эмодзи-реакцию (issue #312).
+    void reactionReceived(const QString& login, const QString& emoji);
 
     /// Декодированный кадр из входящего видеотрека удалённого участника
     /// (issue #91) — никогда не испускается для пира, не отправлявшего
@@ -247,10 +262,8 @@ private:
         /// SFU (issue #232): handle плагина videoroom на Janus-сессии
         /// этого WS-подключения, которому принадлежит это соединение —
         /// -1, пока не назначен (см. onJanusAttached()). Для
-        /// publishConnection_ — handle публикации; для записи в peers_
-        /// (переиспользуется под subscribe-соединение SFU вместо
-        /// mesh-пира, см. doc-комментарий класса) — handle подписки на
-        /// конкретный чужой feed.
+        /// publishConnection_ — handle публикации; для записи в peers_ —
+        /// handle подписки на конкретный чужой feed.
         qint64 janusHandle = -1;
         /// Только для subscribe-записей в peers_ (janusHandle >= 0) — id
         /// чужого Janus-feed, на который подписана эта запись; нужен,
@@ -260,10 +273,8 @@ private:
         QString sfuFeedId;
     };
 
-    void onCallRosterReceived(const QStringList& participants);
     void onCallPeerJoined(const QString& login);
     void onCallPeerLeft(const QString& login);
-    void onCallSignalReceived(const QString& from, const QJsonObject& payload);
 
     /// SFU (issue #232): комната для этого звонка назначена
     /// chat-service'ом — запускает публикацию (ensurePublishConnection()).
@@ -285,18 +296,16 @@ private:
     void onJanusEvent(const QJsonObject& event);
 
     void ensureFactory();
-    PeerConnectionEntry* ensurePeerConnection(const QString& peerLogin);
     void closePeerConnection(const QString& peerLogin);
 
     /// Создаёт (один раз на звонок) публикующее SFU-соединение,
     /// attach'ит handle плагина videoroom и join'ится как publisher —
     /// см. doc-комментарий класса о модели "один publish + N subscribe"
-    /// (issue #232), заменяющей mesh-пиры.
+    /// (issue #232).
     void ensurePublishConnection();
     /// Гарантирует, что для чужого Janus-feed @p feedId (объявленного
-    /// как @p peerLogin) существует subscribe-соединение — переиспользует
-    /// peers_ (issue #232): один слот на peerLogin, как и было для mesh,
-    /// просто теперь это subscribe-, а не mesh-пир. No-op, если это наш
+    /// как @p peerLogin) существует subscribe-соединение в peers_
+    /// (issue #232) — один слот на peerLogin. No-op, если это наш
     /// собственный feed (ownFeedId_) или peerLogin уже есть в peers_.
     void ensureSubscribeConnection(const QString& feedId, const QString& peerLogin);
     /// Начинает следующий отложенный attach из subscribeQueue_, если
@@ -308,16 +317,14 @@ private:
     void closeSubscribeConnectionByFeed(const QString& feedId);
     /// Единая точка создания webrtc::PeerConnection с общей
     /// STUN-конфигурацией и PeerObserver — переиспользуется
-    /// ensurePeerConnection() (mesh), ensurePublishConnection() и
-    /// созданием subscribe-записи в onJanusAttached() (issue #232),
-    /// вместо тройного дублирования одного и того же блока настройки.
+    /// ensurePublishConnection() и созданием subscribe-записи в
+    /// onJanusAttached() (issue #232), вместо повторения одного и того
+    /// же блока настройки.
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> createPeerConnection(const QString& label,
                                                                                  std::unique_ptr<PeerObserver>& observerOut);
-    /// Реакция на полный сбор ICE-кандидатов (issue #232) — для SFU-
-    /// соединений (janusHandle >= 0) здесь и только здесь отправляется
-    /// offer/answer Janus'у (без trickle, кандидаты уже внутри SDP); для
-    /// mesh — no-op, кандидаты трикклятся по одному через
-    /// handleLocalIceCandidate(), как и раньше.
+    /// Реакция на полный сбор ICE-кандидатов (issue #232) — здесь и
+    /// только здесь отправляется offer/answer Janus'у (без trickle,
+    /// кандидаты уже внутри SDP).
     void handleIceGatheringComplete(const QString& peerLogin);
 
     /// Запускает (пере)согласование local-description для
@@ -328,7 +335,6 @@ private:
 
     void handleLocalDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
     void handleRemoteDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage);
-    void handleLocalIceCandidate(const QString& peerLogin, const QJsonObject& payload);
 
     /// На соединении пира `peerLogin` появился новый (или
     /// пересогласованный) transceiver — если он несёт видеотрек и у
@@ -396,10 +402,9 @@ private:
     webrtc::scoped_refptr<CallVideoTrackSource> screenShareTrackSource_;
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> localScreenShareTrack_;
 
-    // peers_ переиспользуется под subscribe-соединения SFU (issue #232) —
-    // см. doc-комментарии ensureSubscribeConnection()/closePeerConnection():
-    // один слот на peerLogin, как и раньше для mesh-пиров, просто теперь
-    // за ним stands subscribe-, а не mesh-PeerConnection.
+    // Subscribe-соединения SFU (issue #232) — см. doc-комментарии
+    // ensureSubscribeConnection()/closePeerConnection(): один слот на
+    // peerLogin чужого publisher'а.
     std::unordered_map<std::string, PeerConnectionEntry> peers_;
     bool inCall_ = false;
     bool muted_ = false;

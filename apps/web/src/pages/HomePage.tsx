@@ -2,16 +2,24 @@
 // "Friends" button that swaps the sidebar/main-area content between
 // communities/channels/chat and friends/DMs.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import styles from "./HomePage.module.css";
 import { CommunitiesMode } from "./CommunitiesMode.js";
 import { FriendsMode } from "./FriendsMode.js";
+import { requestNotificationPermission } from "../notifications/browserNotifications.js";
 
 type Mode = "communities" | "friends";
 
 export function HomePage() {
   const [mode, setMode] = useState<Mode>("communities");
+
+  // Issue #311 — same "ask once, near the top-level authenticated
+  // screen" placement as DeviceHub constructing DesktopNotifier from
+  // MainWindow's own constructor.
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
 
   return (
     <div className={styles.page}>
