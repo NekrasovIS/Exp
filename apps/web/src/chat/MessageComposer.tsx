@@ -2,11 +2,17 @@
 // text field, an attach button (uploads immediately on file selection,
 // then the file rides along as attachment_id on the next Send), and
 // Send.
+//
+// @mention autocomplete (issue #326) is layered onto the same <input>
+// via useMentionAutocomplete() — see that hook's own doc comment for
+// why it doesn't (yet) reuse #322's useMembers().
 
 import { ChatRestClient } from "@devicehub/core";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import styles from "./MessageComposer.module.css";
+import { MentionSuggestions } from "./MentionSuggestions.js";
+import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -22,6 +28,7 @@ interface ReplyTarget {
 
 interface MessageComposerProps {
   channelId: number;
+  communityId: number;
   onSend: (body: string, attachmentId?: number) => void;
   replyTarget?: ReplyTarget | null;
   onCancelReply?: () => void;
@@ -34,6 +41,7 @@ interface MessageComposerProps {
 
 export function MessageComposer({
   channelId,
+  communityId,
   onSend,
   replyTarget,
   onCancelReply,
@@ -41,6 +49,8 @@ export function MessageComposer({
 }: MessageComposerProps) {
   const { getAccessToken } = useSession();
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
+  const mention = useMentionAutocomplete(communityId);
+  const bodyInputRef = useRef<HTMLInputElement>(null);
 
   const [body, setBody] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<{ id: number; filename: string } | null>(null);
@@ -81,6 +91,42 @@ export function MessageComposer({
     onCancelReply?.();
   }
 
+  function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
+    setBody(event.target.value);
+    onTyping?.();
+    mention.handleTextChange(event.target.value, event.target.selectionStart ?? event.target.value.length);
+  }
+
+  function selectMention(login: string): void {
+    const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
+    const result = mention.applySuggestion(body, cursorPos, login);
+    setBody(result.text);
+    requestAnimationFrame(() => bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos));
+  }
+
+  function handleBodyKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (mention.suggestions.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      mention.moveActive(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      mention.moveActive(-1);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
+      const result = mention.applyActive(body, cursorPos);
+      setBody(result.text);
+      requestAnimationFrame(() =>
+        bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos),
+      );
+    } else if (event.key === "Escape") {
+      mention.dismiss();
+    }
+  }
+
   return (
     <>
       {error !== null && <p role="alert">{error}</p>}
@@ -115,12 +161,16 @@ export function MessageComposer({
         </label>
         <input
           id="message-body"
+          ref={bodyInputRef}
           className={styles.bodyInput}
           value={body}
-          onChange={(event) => {
-            setBody(event.target.value);
-            onTyping?.();
-          }}
+          onChange={handleBodyChange}
+          onKeyDown={handleBodyKeyDown}
+        />
+        <MentionSuggestions
+          suggestions={mention.suggestions}
+          activeIndex={mention.activeIndex}
+          onSelect={selectMention}
         />
         <button type="submit" disabled={uploading}>
           Send

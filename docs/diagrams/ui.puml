@@ -301,10 +301,15 @@ class ChatView {
   +memberListToggleButton() : QPushButton*
   +pinnedMessagesButton() : QPushButton*
   +showTypingUser(login: QString)
+  +setChannelMemberLogins(logins: QStringList)
+  +mentionCompleter() : QCompleter*
+  #eventFilter(watched: QObject*, event: QEvent*) : bool
   -connectMessageRow(row: ChatMessageRow*)
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
   -resolveReplyPreview(message: ChatMessage) : ChatMessage
   -buildDateSeparatorLabel(sentAt: QString) : QLabel*
+  -updateMentionAutocomplete()
+  -insertMentionCompletion(login: QString)
   .. signals ..
   +createChannelRequested()
   +callToggleRequested()
@@ -355,6 +360,21 @@ note right of ChatView
   скрытием той же панели в режиме друзей, issue
   #187 — оба места переключают один и тот же флаг
   по независимым причинам).
+
+  Issue #326: mentionCompleter_ (QCompleter) —
+  подключён к messageEdit_ только через setWidget()
+  (не QLineEdit::setCompleter(), который заменял бы
+  ПОЛНЫЙ текст поля целиком). updateMentionAutocomplete()
+  на каждый textEdited() находит "@" на границе слова
+  перед курсором, фильтрует channelMemberLogins_ и
+  вызывает complete(); mentionModel_ (QStringListModel)
+  обновляется на месте setChannelMemberLogins(), а не
+  пересоздаётся. eventFilter() установлен на
+  messageEdit_ ПОСЛЕ setWidget() (Qt вызывает фильтры
+  от последнего установленного к первому) — перехватывает
+  Enter/Tab/Escape, пока попап открыт, чтобы Enter не
+  одновременно и подставлял подсказку, и триггерил
+  returnPressed()->sendButton_->click().
 
   Issue #188: appendMessage()/prependMessages()
   вставляют разделитель даты

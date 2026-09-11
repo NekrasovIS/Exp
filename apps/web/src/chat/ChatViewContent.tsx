@@ -124,6 +124,7 @@ export function ChatViewContent({
       {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
       <MessageComposer
         channelId={channelId}
+        communityId={communityId}
         onSend={handleSend}
         replyTarget={
           replyTarget !== null

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageComposer } from "../../src/chat/MessageComposer.js";
 import { SessionProvider } from "../../src/session/SessionContext.js";
-import { jsonResponse } from "../testUtils.js";
+import { jsonResponse, routedFetch } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
 
@@ -13,7 +13,13 @@ function renderComposer(overrides: Partial<Parameters<typeof MessageComposer>[0]
   const onCancelReply = overrides.onCancelReply ?? vi.fn();
   render(
     <SessionProvider>
-      <MessageComposer channelId={7} onSend={onSend} {...overrides} onCancelReply={onCancelReply} />
+      <MessageComposer
+        channelId={7}
+        communityId={1}
+        onSend={onSend}
+        {...overrides}
+        onCancelReply={onCancelReply}
+      />
     </SessionProvider>,
   );
   return { onSend, onCancelReply };
@@ -28,6 +34,11 @@ beforeEach(() => {
       expiresAt: Math.floor(Date.now() / 1000) + 3600,
     }),
   );
+  // Default stub for the /members request useMentionAutocomplete()
+  // fires on mount (issue #326) — tests that care about a different
+  // fetch response (upload success/failure, or the mention flow's own
+  // member list) override this with their own vi.stubGlobal() call.
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
 });
 
 afterEach(() => {
@@ -51,7 +62,15 @@ describe("MessageComposer", () => {
   });
 
   it("uploads a selected file, then sends with the resulting attachment id", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(201, { id: 99, filename: "photo.png" })));
+    // routedFetch, not a single shared mockResolvedValue Response — this
+    // component now also fires a /members request on mount (issue #326's
+    // mention autocomplete), and a Response body can only be read once;
+    // reusing one Response instance for both requests would make whichever
+    // one reads it second fail to parse its body.
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([[/\/attachments$/, () => jsonResponse(201, { id: 99, filename: "photo.png" })]]),
+    );
     const { onSend } = renderComposer();
 
     const file = new File(["fake-bytes"], "photo.png", { type: "image/png" });
@@ -63,6 +82,50 @@ describe("MessageComposer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(onSend).toHaveBeenCalledWith("check this out", 99);
+  });
+
+  it("typing '@' shows member suggestions, and picking one inserts the mention", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, ["alice", "bob"])));
+    const { onSend } = renderComposer();
+
+    const input = screen.getByLabelText("Message");
+    await userEvent.type(input, "hey @al");
+
+    await userEvent.click(await screen.findByRole("button", { name: "@alice" }));
+    expect(input).toHaveValue("hey @alice ");
+
+    await userEvent.type(input, "welcome");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSend).toHaveBeenCalledWith("hey @alice welcome", undefined);
+  });
+
+  it("ArrowDown/Enter selects a suggestion without submitting the form", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, ["alice", "bob"])));
+    const { onSend } = renderComposer();
+
+    const input = screen.getByLabelText("Message");
+    await userEvent.type(input, "hey @");
+    await screen.findByRole("button", { name: "@bob" });
+
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+
+    expect(input).toHaveValue("hey @bob ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("Escape dismisses the suggestions without changing the text", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, ["alice"])));
+    renderComposer();
+
+    const input = screen.getByLabelText("Message");
+    await userEvent.type(input, "hey @al");
+    await screen.findByRole("button", { name: "@alice" });
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("button", { name: "@alice" })).not.toBeInTheDocument();
+    expect(input).toHaveValue("hey @al");
   });
 
   it("shows no reply bar when there is no reply target", () => {
@@ -95,7 +158,10 @@ describe("MessageComposer", () => {
   });
 
   it("shows an error when the upload fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(400, { error: "not valid base64" })));
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([[/\/attachments$/, () => jsonResponse(400, { error: "not valid base64" })]]),
+    );
     renderComposer();
 
     const file = new File(["fake-bytes"], "bad.bin", { type: "application/octet-stream" });

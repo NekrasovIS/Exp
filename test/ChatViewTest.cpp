@@ -2,14 +2,18 @@
 
 #include <gtest/gtest.h>
 
+#include <QAbstractItemView>
 #include <QAction>
+#include <QCompleter>
 #include <QImage>
 #include <QLabel>
 #include <QLayout>
+#include <QLineEdit>
 #include <QMenu>
 #include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QTest>
 
 namespace devicehub {
 namespace {
@@ -529,6 +533,116 @@ TEST(ChatViewTest, PrependedReplyResolvesAgainstAlreadyCachedMessages) {
     ASSERT_NE(quote, nullptr);
     EXPECT_TRUE(quote->text().contains("alice"));
     EXPECT_TRUE(quote->text().contains("original text"));
+}
+
+
+TEST(ChatViewTest, TypingAtWithMatchingMembersSetsCompletionPrefixAndCandidate) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob", "carol"});
+
+    view.messageEdit()->setText("hey @al");
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+
+    EXPECT_EQ(view.mentionCompleter()->completionPrefix(), QStringLiteral("al"));
+    EXPECT_EQ(view.mentionCompleter()->currentCompletion(), QStringLiteral("alice"));
+    EXPECT_TRUE(view.mentionCompleter()->popup()->isVisible());
+}
+
+TEST(ChatViewTest, TypingWithoutAtDoesNotOpenTheMentionPopup) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+
+    view.messageEdit()->setText("hello there");
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+
+    EXPECT_FALSE(view.mentionCompleter()->popup()->isVisible());
+}
+
+TEST(ChatViewTest, EmailLikeAtIsNotTreatedAsAMentionTrigger) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "example"});
+
+    view.messageEdit()->setText("contact user@example");
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+
+    EXPECT_FALSE(view.mentionCompleter()->popup()->isVisible());
+}
+
+TEST(ChatViewTest, NoMatchingMembersClosesThePopup) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+
+    view.messageEdit()->setText("hey @zz");
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+
+    EXPECT_FALSE(view.mentionCompleter()->popup()->isVisible());
+}
+
+TEST(ChatViewTest, SelectingAMentionCompletionInsertsItAtTheTriggerPosition) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+    view.messageEdit()->setText("hey @al");
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+
+    emit view.mentionCompleter()->activated(QStringLiteral("alice"));
+
+    EXPECT_EQ(view.messageEdit()->text(), QStringLiteral("hey @alice "));
+    EXPECT_FALSE(view.mentionCompleter()->popup()->isVisible());
+}
+
+TEST(ChatViewTest, MentionCompletionPreservesTextAfterTheCursor) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+    view.messageEdit()->setText("hey @al, welcome");
+    view.messageEdit()->setCursorPosition(7);  // right after "al", before ", welcome"
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+
+    emit view.mentionCompleter()->activated(QStringLiteral("alice"));
+
+    EXPECT_EQ(view.messageEdit()->text(), QStringLiteral("hey @alice , welcome"));
+}
+
+TEST(ChatViewTest, PressingEnterWhileTheMentionPopupIsOpenSelectsInsteadOfSendingTheMessage) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+    view.messageEdit()->setText("hey @al");
+    view.messageEdit()->setCursorPosition(7);
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+    ASSERT_TRUE(view.mentionCompleter()->popup()->isVisible());
+
+    QSignalSpy sendClickSpy(view.sendButton(), &QPushButton::clicked);
+    QTest::keyClick(view.messageEdit(), Qt::Key_Return);
+
+    EXPECT_EQ(sendClickSpy.count(), 0);
+    EXPECT_TRUE(view.messageEdit()->text().startsWith(QStringLiteral("hey @alice")));
+    EXPECT_FALSE(view.mentionCompleter()->popup()->isVisible());
+}
+
+TEST(ChatViewTest, PressingEscapeWhileTheMentionPopupIsOpenJustClosesItWithoutChangingText) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+    view.messageEdit()->setText("hey @al");
+    view.messageEdit()->setCursorPosition(7);
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+    ASSERT_TRUE(view.mentionCompleter()->popup()->isVisible());
+
+    QTest::keyClick(view.messageEdit(), Qt::Key_Escape);
+
+    EXPECT_FALSE(view.mentionCompleter()->popup()->isVisible());
+    EXPECT_EQ(view.messageEdit()->text(), QStringLiteral("hey @al"));
+}
+
+TEST(ChatViewTest, PressingEnterWithNoMentionPopupOpenStillSendsNormally) {
+    ChatView view;
+    view.setChannelMemberLogins({"alice", "bob"});
+    view.messageEdit()->setText("hello there");
+    emit view.messageEdit()->textEdited(view.messageEdit()->text());
+    ASSERT_FALSE(view.mentionCompleter()->popup()->isVisible());
+
+    QSignalSpy sendClickSpy(view.sendButton(), &QPushButton::clicked);
+    QTest::keyClick(view.messageEdit(), Qt::Key_Return);
+
+    EXPECT_EQ(sendClickSpy.count(), 1);
 }
 
 }  // namespace
