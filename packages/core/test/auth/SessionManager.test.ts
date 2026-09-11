@@ -171,3 +171,44 @@ describe("SessionManager", () => {
     expect(onRefreshError).toHaveBeenCalledWith(failure);
   });
 });
+
+// Separate top-level describe — deliberately outside the block above's
+// vi.useFakeTimers()/vi.useRealTimers() hooks, since this test needs to
+// control the global `setTimeout` binding itself, not the passage of
+// time.
+describe("SessionManager — default scheduleTimeout binding (regression, issue #303)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("invokes the default scheduler as a plain call, not a method call bound to `this`", () => {
+    // Real bug found while writing apps/web's Playwright E2E suite: the
+    // previous default was the bare `setTimeout` reference assigned to
+    // a class field, then invoked as `this.scheduleTimeoutFn(...)` — a
+    // *method* call, which binds `this` to the SessionManager instance.
+    // Real browsers throw "Illegal invocation" when their native
+    // setTimeout is called with a receiver that isn't window/undefined
+    // — jsdom's timers don't enforce this (confirmed separately), which
+    // is exactly why unit tests never caught it; only a real-Chromium
+    // E2E test did. This simulates that strictness explicitly so a
+    // regression to the old pattern fails here too, without needing a
+    // real browser.
+    const realSetTimeout = setTimeout;
+    function strictSetTimeout(this: unknown, callback: () => void, delayMs: number) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return realSetTimeout(callback, delayMs);
+    }
+    vi.stubGlobal("setTimeout", strictSetTimeout);
+
+    // No scheduleTimeout override — exercises the real default, which
+    // is what actually broke in a browser. (clearTimeout has the same
+    // shape of bug, but this first setTokens() call never reaches it —
+    // clearScheduledRefresh() only calls it when a handle already
+    // exists, see the class's own code.)
+    const manager = new SessionManager(fakeAuthClient());
+
+    expect(() => manager.setTokens(kBaseTokens)).not.toThrow();
+  });
+});

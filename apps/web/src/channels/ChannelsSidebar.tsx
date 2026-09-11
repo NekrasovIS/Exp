@@ -5,6 +5,7 @@
 // when no community is selected — the caller decides what that gap
 // looks like.
 
+import type { ChatItem } from "@devicehub/core";
 import { useState, type FormEvent } from "react";
 
 import { useChannels } from "./useChannels.js";
@@ -15,7 +16,16 @@ import styles from "../pages/sidebarNav.module.css";
 interface ChannelsSidebarProps {
   communityId: number | null;
   selectedChannelId: number | null;
-  onSelectChannel: (channelId: number) => void;
+  // Passes the full ChatItem, not just its id — the caller (CommunitiesMode)
+  // needs isEncrypted for ChatView, and grabbing that from this component's
+  // own (already up to date, since it's what rendered the button) list
+  // avoids keeping a second, independently-fetched copy of the same
+  // channels list around just to look that flag up (issue #303: that
+  // second copy went stale right after creating a channel — the newly
+  // created channel was clickable here but the other copy never learned
+  // about it, so selecting it showed "Select a channel" instead of the
+  // chat view).
+  onSelectChannel: (channel: ChatItem) => void;
 }
 
 export function ChannelsSidebar({ communityId, selectedChannelId, onSelectChannel }: ChannelsSidebarProps) {
@@ -69,7 +79,7 @@ export function ChannelsSidebar({ communityId, selectedChannelId, onSelectChanne
               type="button"
               className={styles.listItemButton}
               aria-current={channel.id === selectedChannelId}
-              onClick={() => onSelectChannel(channel.id)}
+              onClick={() => onSelectChannel(channel)}
             >
               {channel.isEncrypted ? "🔒 " : ""}#{channel.name}
             </button>
