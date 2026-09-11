@@ -167,6 +167,12 @@ public:
     /// пользователю).
     void sendDeleteMessage(qint64 id);
 
+    /// Переключает реакцию @p emoji текущего пользователя на сообщении
+    /// @p id (issue #333/#334) — повторный вызов с той же эмодзи снимает
+    /// её. Доступно на любом сообщении, не только своём. Вызывает ответ
+    /// reactionChanged() у всех подписчиков канала, включая отправителя.
+    void sendToggleReaction(qint64 id, const QString& emoji);
+
 signals:
     /// Испускается, как только chat-service подтверждает подписку —
     /// @p id это channelId или dmThreadId, в зависимости от того, какой
@@ -189,6 +195,13 @@ signals:
 
     /// Сообщение было удалено.
     void messageDeleted(qint64 id);
+
+    /// Реакция на сообщение @p id изменилась (issue #333/#334) — @p
+    /// logins это ПОЛНЫЙ список тех, кто сейчас поставил именно @p
+    /// emoji на это сообщение (после применения переключения на
+    /// сервере), не дельта; пусто, если это было снятие последней
+    /// реакции этой эмодзи.
+    void reactionChanged(qint64 id, const QString& emoji, const QStringList& logins);
 
     void errorOccurred(const QString& message);
 

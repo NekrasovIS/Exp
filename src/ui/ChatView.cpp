@@ -324,7 +324,7 @@ void ChatView::appendMessage(const ChatMessage& message) {
     const bool showHeader =
         !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, resolvedMessage);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
-    auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, messagesContainer_);
+    auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     requestPreviewIfImageAttachment(resolvedMessage, row);
@@ -361,7 +361,7 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
             messagesLayout_->insertWidget(insertIndex++, buildDateSeparatorLabel(resolvedMessage.sentAt));
         }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
-        auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, messagesContainer_);
+        auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, messagesContainer_);
         // Issue #330: подгруженные через "Load older messages" строки
         // раньше не подключались вообще — Edit/Delete/Download на них
         // молча ничего не делали. Обнаружено при добавлении Reply,
@@ -411,6 +411,7 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     });
     connect(row, &ChatMessageRow::deleteRequested, this, &ChatView::deleteMessageRequested);
     connect(row, &ChatMessageRow::downloadRequested, this, &ChatView::downloadAttachmentRequested);
+    connect(row, &ChatMessageRow::reactionToggleRequested, this, &ChatView::reactionToggleRequested);
     connect(row, &ChatMessageRow::replyRequested, this, &ChatView::setReplyTarget);
 }
 
@@ -458,6 +459,12 @@ void ChatView::updateMessageBody(qint64 id, const QString& newBody) {
     // процитировал бы уже неактуальный текст.
     if (const auto it = messagesById_.find(id); it != messagesById_.end()) {
         it->body = newBody;
+    }
+}
+
+void ChatView::updateReactions(qint64 id, const QString& emoji, const QStringList& logins) {
+    if (ChatMessageRow* row = findMessageRow(messagesLayout_, id); row != nullptr) {
+        row->applyReactionChange(emoji, logins);
     }
 }
 

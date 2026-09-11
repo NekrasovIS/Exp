@@ -81,6 +81,13 @@ public:
     /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
 
+    /// Применяет одно изменение реакции к строке @p id (issue #334) —
+    /// ничего не делает, если это сообщение сейчас не показано (тот же
+    /// принцип, что и у updateMessageBody()). @p logins — полный список
+    /// для @p emoji после переключения, как приходит из
+    /// ChatClient::reactionChanged(), не дельта.
+    void updateReactions(qint64 id, const QString& emoji, const QStringList& logins);
+
     /// Передаёт загруженное изображение вложения дальше в строку,
     /// которая его запросила (issue #188, см. previewAttachmentRequested())
     /// — ничего не делает, если та строка с тех пор исчезла (например,
@@ -209,6 +216,12 @@ signals:
     /// Клик по "Download" на сообщении с вложением — всплывает вверх
     /// из того ChatMessageRow, откуда пришёл.
     void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
+
+    /// Выбор эмодзи в подменю "React" либо клик по уже существующему
+    /// чипу-реакции — всплывает вверх из того ChatMessageRow, откуда
+    /// пришёл (issue #334). MainWindow вызывает
+    /// ChatClient::sendToggleReaction().
+    void reactionToggleRequested(qint64 id, const QString& emoji);
 
     /// Испускается сразу при появлении строки с вложением-изображением
     /// (issue #188, см. isImageAttachment()) — MainWindow запускает

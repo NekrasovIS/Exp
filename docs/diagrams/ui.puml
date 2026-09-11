@@ -276,6 +276,7 @@ class ChatView {
   +setLoadOlderVisible(visible: bool)
   +updateMessageBody(id: qint64, newBody: QString)
   +removeMessage(id: qint64)
+  +updateReactions(id: qint64, emoji: QString, logins: QStringList)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
@@ -311,6 +312,7 @@ class ChatView {
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
   +previewAttachmentRequested(attachmentId: qint64)
+  +reactionToggleRequested(id: qint64, emoji: QString)
 }
 note right of ChatView
   Issue #185: mute/видео/демонстрация экрана/
@@ -524,16 +526,22 @@ note right of FloatingCallTilesOverlay
   окон обратно.
 end note
 
+struct MessageReactionSummary {
+  +emoji: QString
+  +logins: QStringList
+}
 struct ChatMessage {
   +author: QString
   +body: QString
   +sentAt: QString
   +attachmentId: qint64 = -1
   +attachmentFilename: QString
+  +reactions: QList<MessageReactionSummary>
   +replyToMessageId: qint64 = -1
   +replyToAuthor: QString
   +replyToBodySnippet: QString
 }
+ChatMessage "1" *-- "0..*" MessageReactionSummary : one per used emoji (issue #333/#334)
 
 class SearchDialog {
   +queryEdit() : QLineEdit*
@@ -581,15 +589,18 @@ end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
 class ChatMessageRow {
-  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool)
+  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "")
   +messageId() : qint64
   +updateBody(newBody: QString)
+  +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
   #resizeEvent(event: QResizeEvent*)
+  -rebuildReactionChips()
   .. signals ..
   +editRequested(id: qint64, currentBody: QString)
   +deleteRequested(id: qint64)
   +downloadRequested(attachmentId: qint64, filename: QString)
+  +reactionToggleRequested(id: qint64, emoji: QString)
   +replyRequested(id: qint64)
 }
 class ChatBubble {
@@ -602,9 +613,25 @@ ChatMessageRow *-- ChatBubble : owns (own messages: green\ngradient, right-align
 note right of ChatMessageRow
   Own messages: right-click the bubble for a
   context menu (Edit/Delete) instead of
-  always-visible buttons (issue #150). Reply
-  (issue #306) is in that same menu for ANY
-  message, own or not — unlike Edit/Delete.
+  always-visible buttons (issue #150). "React"
+  and Reply (issue #306) are both in that same
+  menu for ANY message, own or not — unlike
+  Edit/Delete.
+
+  "React" (issue #305/#333/#334) — a fixed set
+  of 5 emoji, each an action that emits
+  reactionToggleRequested(). A chip per used
+  emoji ("emoji count") also renders below the
+  body — clicking it is the same toggle as
+  picking that emoji from the menu; hovering
+  shows the logins via tooltip.
+  applyReactionChange(emoji, logins) applies ONE
+  changed emoji's full login list (as
+  ChatClient::reactionChanged() delivers it, not
+  a delta) against reactions_ and rebuilds the
+  chip row from scratch (rebuildReactionChips())
+  — simpler than patching one QPushButton in
+  place, and reactions per message are always few.
 
   Issue #306: replyToMessageId >= 0 shows a
   quote block above the body — replyToAuthor/

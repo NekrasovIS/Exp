@@ -22,13 +22,26 @@ struct ChatItem {
     QString inviteCode;
 };
 
+/// Одна агрегированная реакция на сообщение, как её возвращает REST
+/// (issue #333/#334) — та же форма, что и в поле "reactions" у ответа
+/// chat-service, просто в Qt-типах. Отдельный тип от
+/// devicehub::MessageReactionSummary (ui/ChatMessageRow.h) — src/chat/
+/// не зависит от src/ui/, тот же принцип послойности, что уже
+/// соблюдается для ChatMessageInfo/ChatMessage (MainWindow сводит их
+/// вручную, поле в поле).
+struct MessageReactionInfo {
+    QString emoji;
+    QStringList logins;
+};
+
 /// Сообщение чата, как его возвращает REST-эндпоинт истории
 /// chat-service — та же форма, что и поля messageReceived() у ChatClient
 /// в реальном времени, плюс id, нужный для постраничной прокрутки
 /// истории дальше назад (см. beforeId у listMessages()). @p attachmentId
 /// равен -1, а @p attachmentFilename пуст, когда у сообщения нет
-/// вложения (issue #116). @p replyToMessageId равен -1, когда это не
-/// ответ (issue #306).
+/// вложения (issue #116). @p reactions пуст для сообщения, на которое
+/// пока никто не поставил реакцию (issue #333/#334). @p replyToMessageId
+/// равен -1, когда это не ответ (issue #306).
 struct ChatMessageInfo {
     qint64 id = 0;
     QString author;
@@ -36,6 +49,7 @@ struct ChatMessageInfo {
     QString sentAt;
     qint64 attachmentId = -1;
     QString attachmentFilename;
+    QList<MessageReactionInfo> reactions;
     qint64 replyToMessageId = -1;
 };
 

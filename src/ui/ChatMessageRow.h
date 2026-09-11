@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QList>
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 
 #include <optional>
@@ -13,6 +15,17 @@ namespace devicehub {
 
 class ChatBubble;
 
+/// Одна агрегированная реакция на сообщение, для отображения (issue
+/// #334) — та же форма, что и MessageReaction на стороне chat-service
+/// (см. WebSocketServer::toJson(), поле "reactions" у сообщения),
+/// просто в Qt-типах. @p logins — все, кто поставил именно эту эмодзи,
+/// в порядке, в котором это отдал сервер (кто поставил раньше — раньше
+/// в списке).
+struct MessageReactionSummary {
+    QString emoji;
+    QStringList logins;
+};
+
 /// Сообщение чата в том виде, в каком оно приходит из
 /// ChatClient::messageReceived() — sentAt это исходная строка метки
 /// времени сервера (сериализация Postgres, например
@@ -20,7 +33,8 @@ class ChatBubble;
 /// чтобы адресовать/подписать конкретное сообщение для редактирования/
 /// удаления; editedAt не задан для сообщения, которое никогда не
 /// редактировалось. attachmentId равен -1, а attachmentFilename пуст,
-/// когда у сообщения нет вложения (issue #116).
+/// когда у сообщения нет вложения (issue #116). reactions пуст для
+/// сообщения, на которое пока никто не поставил реакцию (issue #334).
 ///
 /// replyToMessageId равен -1, когда это не ответ (issue #306) — тот же
 /// стиль сентинела, что и у attachmentId. Когда >= 0, replyToAuthor/
@@ -40,6 +54,7 @@ struct ChatMessage {
     std::optional<QString> editedAt;
     qint64 attachmentId = -1;
     QString attachmentFilename;
+    QList<MessageReactionSummary> reactions;
     qint64 replyToMessageId = -1;
     QString replyToAuthor;
     QString replyToBodySnippet;
@@ -80,7 +95,14 @@ class ChatMessageRow : public QWidget {
     Q_OBJECT
 
 public:
-    ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage, QWidget* parent = nullptr);
+    /// @p currentUserLogin (issue #334) — нужен только чтобы решить,
+    /// какая из чипов-реакций под баблом — "моя" (выделяется отдельным
+    /// стилем); пустая строка (значение по умолчанию) — ни одна чужая
+    /// реакция никогда не совпадёт с пустым логином, так что это
+    /// безопасный сентинел "текущий пользователь неизвестен", а не
+    /// отдельный bool-флаг.
+    ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,
+                   const QString& currentUserLogin = QString(), QWidget* parent = nullptr);
 
     [[nodiscard]] qint64 messageId() const { return messageId_; }
 
@@ -89,6 +111,14 @@ public:
     /// показана (showHeader) — issue #107, вызывается, когда
     /// ChatClient::messageEdited() срабатывает для сообщения этой строки.
     void updateBody(const QString& newBody);
+
+    /// Применяет одно изменение реакции (issue #334) — @p logins это
+    /// ПОЛНЫЙ список тех, кто сейчас поставил именно @p emoji на это
+    /// сообщение (как приходит в ChatClient::reactionChanged(), см. её
+    /// doc-комментарий), не дельта. Пустой @p logins убирает чип этой
+    /// эмодзи целиком, а не показывает "0". Другие эмодзи на этом же
+    /// сообщении не трогает.
+    void applyReactionChange(const QString& emoji, const QStringList& logins);
 
     /// Заменяет плейсхолдер превью изображения-вложения на реально
     /// загруженный @p image (issue #188), масштабируя с сохранением
@@ -114,6 +144,13 @@ signals:
     /// сообщение, не только собственное).
     void downloadRequested(qint64 attachmentId, const QString& filename);
 
+    /// Выбор эмодзи в подменю "React" контекстного меню, либо клик по
+    /// уже существующему чипу-реакции под баблом (issue #334) — оба
+    /// пути ведут к одному и тому же переключению (toggle) на стороне
+    /// сервера, поэтому оба эмитят один и тот же сигнал. Доступно на
+    /// любом сообщении, не только собственном.
+    void reactionToggleRequested(qint64 id, const QString& emoji);
+
     /// Выбор "Reply" в контекстном меню по правому клику (issue #306) —
     /// доступно на любом сообщении, не только собственном, в отличие от
     /// editRequested/deleteRequested. Слушатель (ChatView) сам решает,
@@ -125,6 +162,12 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    /// Перестраивает ряд чипов-реакций из reactions_ с нуля (issue
+    /// #334) — общая часть конструктора и applyReactionChange(); проще
+    /// пересобрать все чипы заново, чем инкрементально править один
+    /// QPushButton, а реакций на одном сообщении всегда мало.
+    void rebuildReactionChips();
+
     ChatBubble* bubble_ = nullptr;
     QLabel* bodyLabel_ = nullptr;
     /// Null, если сконструировано с showHeader false — сгруппированные
@@ -144,6 +187,18 @@ private:
     /// заменяет плейсхолдерный текст на реальную картинку, когда она
     /// загружена.
     QLabel* attachmentPreviewLabel_ = nullptr;
+    /// Текущее состояние реакций этой строки (issue #334) — источник
+    /// истины для rebuildReactionChips(); обновляется на месте
+    /// applyReactionChange(), а не пересоздаётся из внешнего списка
+    /// каждый раз, поскольку ChatClient::reactionChanged() несёт только
+    /// одну изменившуюся эмодзи за раз, не весь набор.
+    QList<MessageReactionSummary> reactions_;
+    QString currentUserLogin_;
+    /// Контейнер под чипы-реакции — создаётся один раз в конструкторе и
+    /// дальше только скрывается/показывается (setVisible()) и
+    /// перестраивается изнутри (rebuildReactionChips()), а не
+    /// создаётся/удаляется заново на каждое изменение.
+    QWidget* reactionsRow_ = nullptr;
 };
 
 }  // namespace devicehub

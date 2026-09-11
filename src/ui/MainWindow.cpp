@@ -85,6 +85,19 @@ QString truncateForChannelPreview(const QString& body) {
     }
     return flattened;
 }
+
+/// Сводит ChatRestClient::MessageReactionInfo (src/chat) к
+/// devicehub::MessageReactionSummary (src/ui/ChatMessageRow.h), поле в
+/// поле (issue #333/#334) — та же граница между слоями, что уже
+/// проведена для ChatMessageInfo/ChatMessage.
+QList<MessageReactionSummary> toReactionSummaries(const QList<MessageReactionInfo>& reactions) {
+    QList<MessageReactionSummary> summaries;
+    summaries.reserve(reactions.size());
+    for (const MessageReactionInfo& reaction : reactions) {
+        summaries.push_back(MessageReactionSummary{.emoji = reaction.emoji, .logins = reaction.logins});
+    }
+    return summaries;
+}
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -275,6 +288,12 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(&chatClient_, &ChatClient::messageDeleted, this,
             [this](qint64 id) { chatView_->removeMessage(id); });
+    connect(&chatClient_, &ChatClient::reactionChanged, this,
+            [this](qint64 id, const QString& emoji, const QStringList& logins) {
+                chatView_->updateReactions(id, emoji, logins);
+            });
+    connect(chatView_, &ChatView::reactionToggleRequested, this,
+            [this](qint64 id, const QString& emoji) { chatClient_.sendToggleReaction(id, emoji); });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
@@ -754,6 +773,7 @@ MainWindow::MainWindow(QWidget* parent)
                                                   .sentAt = info.sentAt,
                                                   .attachmentId = info.attachmentId,
                                                   .attachmentFilename = info.attachmentFilename,
+                                                  .reactions = toReactionSummaries(info.reactions),
                                                   .replyToMessageId = info.replyToMessageId});
                 }
                 if (oldestMessageId_ < 0) {

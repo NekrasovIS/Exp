@@ -95,6 +95,132 @@ TEST(ChatMessageRowTest, MessageWithAttachmentShowsDownloadButtonAndEmitsOnClick
     EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("report.pdf"));
 }
 
+TEST(ChatMessageRowTest, NonOwnMessageContextMenuHasReactButNotEditOrDelete) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    EXPECT_EQ(bubble->contextMenuPolicy(), Qt::CustomContextMenu);
+
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_NE(menu->findChild<QMenu*>(QStringLiteral("reactMessageMenu")), nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("editMessageAction")), nullptr);
+    EXPECT_EQ(menu->findChild<QAction*>(QStringLiteral("deleteMessageAction")), nullptr);
+}
+
+TEST(ChatMessageRowTest, ReactMenuActionEmitsReactionToggleRequestedWithItsEmoji) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    auto* reactMenu = menu->findChild<QMenu*>(QStringLiteral("reactMessageMenu"));
+    ASSERT_NE(reactMenu, nullptr);
+    const QList<QAction*> reactionActions = reactMenu->findChildren<QAction*>(QStringLiteral("reactionMenuAction"));
+    ASSERT_FALSE(reactionActions.isEmpty());
+
+    QSignalSpy spy(&row, &ChatMessageRow::reactionToggleRequested);
+    reactionActions.first()->trigger();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
+    EXPECT_EQ(spy.at(0).at(1).toString(), reactionActions.first()->text());
+}
+
+TEST(ChatMessageRowTest, OwnMessageContextMenuAlsoHasReactSubmenu) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    auto* bubble = row.findChild<QWidget*>(QStringLiteral("chatMessageBubble"));
+    ASSERT_NE(bubble, nullptr);
+    emit bubble->customContextMenuRequested(QPoint(5, 5));
+    auto* menu = bubble->findChild<QMenu*>(QStringLiteral("chatMessageContextMenu"));
+    ASSERT_NE(menu, nullptr);
+    EXPECT_NE(menu->findChild<QMenu*>(QStringLiteral("reactMessageMenu")), nullptr);
+}
+
+TEST(ChatMessageRowTest, MessageWithNoReactionsHasNoVisibleReactionChips) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_TRUE(row.findChildren<QPushButton*>(QStringLiteral("reactionChip")).isEmpty());
+}
+
+TEST(ChatMessageRowTest, MessageConstructedWithReactionsShowsAChipPerEmojiWithCountAndTooltip) {
+    ChatMessage message = sampleMessage();
+    message.reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob", "carol"}}};
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    const QList<QPushButton*> chips = row.findChildren<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_EQ(chips.size(), 1);
+    EXPECT_TRUE(chips.first()->text().contains("2"));
+    EXPECT_EQ(chips.first()->toolTip(), QStringLiteral("bob, carol"));
+}
+
+TEST(ChatMessageRowTest, ClickingAReactionChipEmitsReactionToggleRequested) {
+    ChatMessage message = sampleMessage();
+    message.reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}}};
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false);
+    auto* chip = row.findChild<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_NE(chip, nullptr);
+
+    QSignalSpy spy(&row, &ChatMessageRow::reactionToggleRequested);
+    chip->click();
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), row.messageId());
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("\U0001F44D"));
+}
+
+TEST(ChatMessageRowTest, OwnReactionChipHasOwnReactionPropertySetWhenCurrentUserIsInLogins) {
+    ChatMessage message = sampleMessage();
+    message.reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob", "carol"}}};
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false, /*currentUserLogin=*/"carol");
+
+    auto* chip = row.findChild<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_NE(chip, nullptr);
+    EXPECT_TRUE(chip->property("ownReaction").toBool());
+}
+
+TEST(ChatMessageRowTest, ApplyReactionChangeAddsAndUpdatesAChip) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+    ASSERT_TRUE(row.findChildren<QPushButton*>(QStringLiteral("reactionChip")).isEmpty());
+
+    row.applyReactionChange("\U0001F44D", {"bob"});
+    QList<QPushButton*> chips = row.findChildren<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_EQ(chips.size(), 1);
+    EXPECT_TRUE(chips.first()->text().contains("1"));
+
+    row.applyReactionChange("\U0001F44D", {"bob", "carol"});
+    chips = row.findChildren<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_EQ(chips.size(), 1);
+    EXPECT_TRUE(chips.first()->text().contains("2"));
+}
+
+TEST(ChatMessageRowTest, ApplyReactionChangeWithEmptyLoginsRemovesTheChip) {
+    ChatMessage message = sampleMessage();
+    message.reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}}};
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false);
+    ASSERT_EQ(row.findChildren<QPushButton*>(QStringLiteral("reactionChip")).size(), 1);
+
+    row.applyReactionChange("\U0001F44D", {});
+
+    EXPECT_TRUE(row.findChildren<QPushButton*>(QStringLiteral("reactionChip")).isEmpty());
+}
+
+TEST(ChatMessageRowTest, ApplyReactionChangeDoesNotAffectOtherEmojis) {
+    ChatMessage message = sampleMessage();
+    message.reactions = {MessageReactionSummary{.emoji = "\U0001F44D", .logins = {"bob"}},
+                          MessageReactionSummary{.emoji = "\U0001F389", .logins = {"carol"}}};
+    ChatMessageRow row(message, /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    row.applyReactionChange("\U0001F44D", {});
+
+    const QList<QPushButton*> chips = row.findChildren<QPushButton*>(QStringLiteral("reactionChip"));
+    ASSERT_EQ(chips.size(), 1);
+    EXPECT_TRUE(chips.first()->text().contains("\U0001F389"));
+}
+
 TEST(ChatMessageRowTest, NonOwnMessageContextMenuHasOnlyReplyNotEditOrDelete) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
