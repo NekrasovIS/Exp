@@ -113,6 +113,18 @@ namespace chat_service {
  *     (issue #114): удалить сообщение может собственный автор сообщения,
  *     владелец канала/сообщества либо модератор сообщества. При успехе
  *     рассылает `{"message_deleted": {"id"}}`.
+ *   - `{"toggle_reaction": {"message_id": N, "emoji": "..."}}` (issue
+ *     #333) — переключает реакцию отправителя на @p emoji: если он ещё
+ *     не поставил именно эту эмодзи на это сообщение — ставит, если
+ *     уже поставил — снимает (см. doc-комментарий уникального индекса
+ *     message_reactions в init.sql). Доступно любому подписчику чата на
+ *     любое сообщение, включая собственное — не только автору, в
+ *     отличие от edit_message. Рассылает всем подписчикам чата
+ *     `{"reaction_changed": {"message_id", "emoji", "logins": [...]}}`
+ *     — @p logins это ПОЛНЫЙ список тех, кто сейчас поставил именно эту
+ *     эмодзи на это сообщение (после применения переключения), не
+ *     дельта; клиент заменяет свою локальную копию целиком, а не
+ *     инкрементирует счётчик.
  *
 
  * REST (HttpServer) остаётся источником истины для истории/CRUD; этот
@@ -191,6 +203,9 @@ private:
     void handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleEditMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleDeleteMessage(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"toggle_reaction": {"message_id", "emoji"}} (issue #333) — см.
+    /// doc-комментарий класса.
+    void handleToggleReaction(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
