@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <optional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -69,15 +70,38 @@ void WebSocketServer::handleMessage(const std::shared_ptr<ix::ConnectionState>& 
         case ix::WebSocketMessageType::Close:
         case ix::WebSocketMessageType::Error: {
             std::optional<Subscription> subscription;
+            // Issue #309 — whether this login has any other subscription
+            // left in the same community (a second tab) determines
+            // whether to actually broadcast "offline": checked in the
+            // same locked block as the erase, right after it, so the
+            // snapshot reflects subscriptions_ with this socket already
+            // removed.
+            bool stillOnlineInCommunity = false;
             {
                 const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
                 if (const auto it = subscriptions_.find(&webSocket); it != subscriptions_.end()) {
                     subscription = it->second;
                     subscriptions_.erase(it);
                 }
+                if (subscription.has_value() && !subscription->isDirectMessage) {
+                    for (const auto& [socket, existing] : subscriptions_) {
+                        if (!existing.isDirectMessage && existing.communityId == subscription->communityId &&
+                            existing.login == subscription->login) {
+                            stillOnlineInCommunity = true;
+                            break;
+                        }
+                    }
+                }
             }
             if (subscription.has_value()) {
                 removeCallParticipant(*subscription, &webSocket);
+                if (!subscription->isDirectMessage && !stillOnlineInCommunity) {
+                    broadcastToCommunity(
+                        subscription->communityId,
+                        nlohmann::json{{"presence_changed", {{"login", subscription->login}, {"online", false}}}}
+                            .dump(),
+                        &webSocket);
+                }
             }
             stopJanusProxySession(&webSocket);
             break;
@@ -145,11 +169,30 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
         webSocket.close();
         return;
     }
+    // Issue #309 — collected under the same lock as the insert below, so
+    // the snapshot is consistent with what other threads could observe
+    // concurrently. A std::set, not vector: the same login can already
+    // have another subscription open on a different channel of this
+    // community (a second tab), and should only be listed once.
+    std::set<std::string> onlineMembers;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
-        subscriptions_[&webSocket] = Subscription{.login = *login, .channelId = channelId};
+        for (const auto& [socket, existing] : subscriptions_) {
+            if (!existing.isDirectMessage && existing.communityId == channel->communityId &&
+                existing.login != *login) {
+                onlineMembers.insert(existing.login);
+            }
+        }
+        subscriptions_[&webSocket] =
+            Subscription{.login = *login, .channelId = channelId, .communityId = channel->communityId};
     }
-    webSocket.send(nlohmann::json{{"subscribed", true}, {"channel_id", channelId}}.dump());
+    webSocket.send(nlohmann::json{{"subscribed", true},
+                                   {"channel_id", channelId},
+                                   {"online_members", onlineMembers}}
+                       .dump());
+    broadcastToCommunity(channel->communityId,
+                          nlohmann::json{{"presence_changed", {{"login", *login}, {"online", true}}}}.dump(),
+                          &webSocket);
 }
 
 void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const std::string& payload) {
@@ -234,6 +277,14 @@ void WebSocketServer::handleChatMessage(ix::WebSocket& webSocket, const Subscrip
 
 void WebSocketServer::handleDirectMessage(ix::WebSocket& webSocket, const Subscription& subscription,
                                            const nlohmann::json& body) {
+    // issue #313: checked first, same dispatch style as
+    // handleSubscribedMessage()'s own key-presence chain for channels —
+    // falls through to the {"body"} path below when absent.
+    if (body.contains("typing")) {
+        handleDmTyping(webSocket, subscription);
+        return;
+    }
+
     if (!body.contains("body") || !body["body"].is_string()) {
         webSocket.send(nlohmann::json{{"error", "expected {\"body\"}"}}.dump());
         return;
@@ -531,6 +582,11 @@ void WebSocketServer::handleTyping(ix::WebSocket& webSocket, const Subscription&
                         &webSocket);
 }
 
+void WebSocketServer::handleDmTyping(ix::WebSocket& webSocket, const Subscription& subscription) {
+    broadcastToDmThread(subscription.dmThreadId, nlohmann::json{{"user_typing", subscription.login}}.dump(),
+                         &webSocket);
+}
+
 void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix::WebSocket* socket) {
     bool wasParticipant = false;
     {
@@ -578,6 +634,30 @@ void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::stri
     }
 }
 
+void WebSocketServer::broadcastToCommunity(std::int64_t communityId, const std::string& json,
+                                            const ix::WebSocket* excludeSocket) {
+    // Same "collect under the lock, send outside it" shape as
+    // broadcastToChannel() above (CP.22/CP.43) — the only difference is
+    // matching on communityId (any channel of it) instead of one
+    // specific channelId.
+    std::vector<std::shared_ptr<ix::WebSocket>> targets;
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            if (client.get() == excludeSocket) {
+                continue;
+            }
+            const auto it = subscriptions_.find(client.get());
+            if (it != subscriptions_.end() && !it->second.isDirectMessage && it->second.communityId == communityId) {
+                targets.push_back(client);
+            }
+        }
+    }
+    for (const std::shared_ptr<ix::WebSocket>& client : targets) {
+        client->send(json);
+    }
+}
+
 void WebSocketServer::broadcastToCallParticipants(std::int64_t channelId, const std::string& json,
                                                    const ix::WebSocket* excludeSocket) {
     // То же рассуждение CP.22/CP.43, что и у broadcastToChannel() выше.
@@ -606,13 +686,17 @@ void WebSocketServer::broadcastToCallParticipants(std::int64_t channelId, const 
     }
 }
 
-void WebSocketServer::broadcastToDmThread(std::int64_t dmThreadId, const std::string& json) {
+void WebSocketServer::broadcastToDmThread(std::int64_t dmThreadId, const std::string& json,
+                                           const ix::WebSocket* excludeSocket) {
     // Та же схема "собрать под локом, разослать вне его" (CP.22/CP.43),
     // что и у broadcastToChannel() — см. её doc-комментарий.
     std::vector<std::shared_ptr<ix::WebSocket>> targets;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
         for (const std::shared_ptr<ix::WebSocket>& client : server_.getClients()) {
+            if (client.get() == excludeSocket) {
+                continue;
+            }
             const auto it = subscriptions_.find(client.get());
             if (it != subscriptions_.end() && it->second.isDirectMessage && it->second.dmThreadId == dmThreadId) {
                 targets.push_back(client);

@@ -84,7 +84,6 @@ class CallManager {
   +remoteVideoTrackRemoved(peerLogin: QString, isScreenShare: bool)
   -ensureFactory()
   -createPeerConnection(label: QString, observerOut: unique_ptr<PeerObserver>&) : PeerConnectionInterface*
-  -ensurePeerConnection(peerLogin: QString) : PeerConnectionEntry* {mesh, unused since #232}
   -closePeerConnection(peerLogin: QString)
   -negotiateLocal(peerLogin: QString)
   -handleIceGatheringComplete(peerLogin: QString)
@@ -113,17 +112,10 @@ CallManager --> CameraDevice : uses (&), frameAvailable()\n-> pushFrame() (issue
 CallManager --> ScreenCaptureDevice : uses (&), frameAvailable()\n-> pushFrame() (issue #112)
 CallManager *-- WebrtcPeerConnectionFactory : owns (built lazily on joinCall())
 CallManager "1" *-- "0..1" WebrtcPeerConnection : owns, publishConnection_\n(issue #232, own outgoing media)
-CallManager "1" *-- "0..*" WebrtcPeerConnection : owns via peers_, one\nsubscribe connection per remote\nparticipant (issue #232; mesh\nbefore it, unused since)
+CallManager "1" *-- "0..*" WebrtcPeerConnection : owns via peers_, one\nsubscribe connection per remote\nparticipant (issue #232; mesh\nremoved, issue #233)
 CallManager *-- CallAudioDeviceModule : owns (issue #64), registered\nas the factory's ADM
 CallManager "1" *-- "0..2" CallVideoTrackSource : owns (issue #72, split into\ntwo independent tracks in #185),\neach created lazily on first use
 note right of CallManager
-  Mesh initiation rule (issue #46): the newly
-  joining peer always offers to everyone
-  already in call_roster; existing participants
-  only ever answer, in response to an incoming
-  offer via callSignalReceived() — never on
-  callPeerJoined(), which is purely informational.
-
   PeerConnectionObserver / SetLocal-/
   SetRemoteDescriptionObserverInterface
   callbacks fire on WebRTC's own signaling
@@ -149,9 +141,9 @@ note right of CallManager
   created once, on the first enableVideo() call, and
   attached to every existing PeerConnection right there
   — negotiateLocal() is called explicitly for each one,
-  the same way ensurePeerConnection()/
-  onCallRosterReceived() already negotiate the initial
-  audio track, rather than reacting to WebRTC's own
+  the same way the "joined" branch in onJanusEvent()
+  already negotiates the initial audio track of
+  publishConnection_, rather than reacting to WebRTC's own
   OnRenegotiationNeeded() notification (deliberately left
   as its inherited no-op). Relying on both an explicit
   call AND that notification for the same track change
@@ -163,7 +155,7 @@ note right of CallManager
   stable"). A PeerConnection created after video is
   already on picks the track up as part of its own
   initial offer/answer instead (attachCameraTrack(), also
-  called from ensurePeerConnection()). Once attached, the
+  called from ensurePublishConnection()). Once attached, the
   track is never removed again — enableVideo()/
   disableVideo() only toggle
   VideoTrackInterface::set_enabled(), the same mechanism
@@ -211,36 +203,42 @@ note right of CallManager
 end note
 
 note right of CallManager
-  SFU (issue #123/#230/#231/#232): mesh's "one PeerConnection
-  per remote participant" is replaced by "one publish
-  PeerConnection (own audio/camera/screen) + one subscribe
-  PeerConnection per remote feed", talking to Janus videoroom
-  through chat-service's WebSocket proxy (janus_attach/
-  janus_message/janus_event) instead of directly — mesh's own
-  call_join/call_leave signaling still runs (chat-service uses
-  it to assign the SFU room via sfuRoomAssigned()), but
-  onCallRosterReceived() no longer drives ensurePeerConnection()/
-  negotiateLocal() for it; mesh code stays in the file, unused,
-  until #233 removes it.
+  SFU (issue #123/#230/#231/#232): this class's only path is now
+  "one publish PeerConnection (own audio/camera/screen) + one
+  subscribe PeerConnection per remote feed", talking to Janus
+  videoroom through chat-service's WebSocket proxy (janus_attach/
+  janus_message/janus_event) instead of directly. call_join/
+  call_leave signaling still runs (chat-service uses it to assign
+  the SFU room via sfuRoomAssigned()), but this class's own
+  mesh-era "one PeerConnection per remote participant" code
+  (ensurePeerConnection()/onCallRosterReceived()/
+  onCallSignalReceived()/handleLocalIceCandidate(), issue #46
+  Phase 3) is gone — removed by issue #233 once #232 confirmed a
+  working SFU call with 3+ participants (see
+  services/janus/verify/verify-forwarding.mjs and
+  CallManagerIntegrationTest's own 3-participant test).
 
   Both publish and subscribe connections skip ICE trickle
   entirely (the proxy has no "janus":"trickle" request) —
   PeerObserver::OnIceGatheringChange() waits for full candidate
   gathering, then handleIceGatheringComplete() sends the offer/
   answer (with every candidate embedded in the SDP) as Janus's
-  "configure"/"start" request. handleLocalDescriptionSet()
-  recognizes this by PeerConnectionEntry::janusHandle >= 0 and
-  skips its usual immediate call_signal send for those entries.
+  "configure"/"start" request; handleLocalDescriptionSet() itself
+  now only reports errors, everything else moved to
+  handleIceGatheringComplete(). PeerObserver::OnIceCandidate() is
+  a bare no-op override for the same reason (mesh used it to send
+  call_signal per candidate; SFU never trickles).
 
   Publisher discovery: on our own "joined" event, and on every
   later room "event" carrying a publishers list, this class
   calls ensureSubscribeConnection(feedId, display) for each —
   "display" is the remote peer's login, set via setLocalLogin()
   when *they* joined as publisher, since Janus itself has no
-  notion of chat-service logins. peers_ is reused verbatim for
-  these subscribe connections (one per peerLogin, same as mesh
-  used it) so handleRemoteTrack()/RemoteVideoSink above need no
-  changes — only which PeerConnection the frames arrive from.
+  notion of chat-service logins. peers_ (one subscribe connection
+  per peerLogin) is the same map mesh used to key one
+  PeerConnection per remote participant, so handleRemoteTrack()/
+  RemoteVideoSink above needed no changes when mesh was replaced —
+  only which PeerConnection the frames arrive from.
 
   Known gap: a track added to an already-connected
   publishConnection_ (enableVideo()/enableScreenShare() called

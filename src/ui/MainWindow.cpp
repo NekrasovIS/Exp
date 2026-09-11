@@ -279,6 +279,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
     connect(&chatClient_, &ChatClient::userTyping, this,
             [this](const QString& login) { chatView_->showTypingUser(login); });
+    connect(&chatClient_, &ChatClient::onlineMembersReceived, this,
+            [this](const QStringList& logins) { memberListPanel_->setOnlineLogins(logins); });
+    connect(&chatClient_, &ChatClient::presenceChanged, this,
+            [this](const QString& login, bool online) { memberListPanel_->setLoginOnline(login, online); });
 
     connect(chatView_, &ChatView::callToggleRequested, this, &MainWindow::onCallToggleClicked);
     connect(callWindow_, &CallWindow::muteToggleRequested, this, &MainWindow::onMuteToggleClicked);
@@ -416,6 +420,11 @@ MainWindow::MainWindow(QWidget* parent)
         closeChatView();
         refreshChannelsForSelectedCommunity();
         chatRestClient_.listMembers(lastToken_, id);
+        // Issue #309 — presence for the previous community doesn't
+        // apply here; closeChatView() above already dropped chatClient_'s
+        // subscription, so no fresh online_members arrives until a
+        // channel in this community is opened.
+        memberListPanel_->setOnlineLogins({});
     });
     connect(communitiesPanel_, &CommunitiesPanel::friendsRequested, this, &MainWindow::onFriendsButtonClicked);
     connect(communitiesPanel_, &CommunitiesPanel::manageModeratorsRequested, this,
@@ -503,6 +512,10 @@ MainWindow::MainWindow(QWidget* parent)
             dmChatClient_.sendMessage(body);
         }
     });
+    // Issue #313 — same shape as chatClient_'s typing wiring above.
+    connect(directMessageView_, &DirectMessageView::typingRequested, this, [this]() { dmChatClient_.sendTyping(); });
+    connect(&dmChatClient_, &ChatClient::userTyping, this,
+            [this](const QString& login) { directMessageView_->showTypingUser(login); });
 
     connect(channelsPanel_, &ChannelsPanel::createRequested, this, [this](const QString& name, bool isEncrypted) {
         if (selectedCommunityId_ < 0) {
@@ -1042,10 +1055,21 @@ void MainWindow::onCallToggleClicked() {
 }
 
 void MainWindow::onCallMinimizeRequested() {
+    // issue #287: без явного move() мини-окно открывается там, где
+    // решит оконный менеджер по умолчанию — никак не привязано к тому,
+    // где только что было CallWindow, что ощущается как "появилось не
+    // там". Читаем geometry() до hide() — после hide() она у скрытого
+    // окна на некоторых платформах не гарантированно валидна.
+    floatingCallTilesOverlay_->move(callWindow_->geometry().topLeft());
     callWindow_->detachTilesTo(floatingCallTilesOverlay_->canvas());
     callWindow_->hide();
     floatingCallTilesOverlay_->show();
     floatingCallTilesOverlay_->raise();
+    // activateWindow() рядом с raise() (issue #287) — raise() один
+    // только поднимает окно в z-order, не гарантируя ему фокус или то,
+    // что оконный менеджер реально выведет его поверх остальных (тот
+    // же паттерн уже применяется в onCallRestoreRequested() ниже).
+    floatingCallTilesOverlay_->activateWindow();
 }
 
 void MainWindow::onCallRestoreRequested() {
