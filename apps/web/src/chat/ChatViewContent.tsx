@@ -12,7 +12,9 @@ import { useSession } from "../session/SessionContext.js";
 import { MessageComposer } from "./MessageComposer.js";
 import { MessageList } from "./MessageList.js";
 import { MessageSearch } from "./MessageSearch.js";
+import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMessages } from "./useMessages.js";
+import { usePinnedMessages } from "./usePinnedMessages.js";
 
 interface ChatViewContentProps {
   channelId: number;
@@ -47,7 +49,9 @@ export function ChatViewContent({
     typingUser,
     sendTyping,
   } = useMessages(channelId);
+  const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(false);
 
   // Issue #322 — presence rides this channel's socket; just forwarded
   // up to the caller, which owns the aggregated state (MembersSidebar
@@ -69,8 +73,14 @@ export function ChatViewContent({
         <button type="button" onClick={() => setSearchOpen((open) => !open)}>
           {searchOpen ? "Close search" : "Search"}
         </button>
+        {pinned.length > 0 && (
+          <button type="button" onClick={() => setPinnedOpen((open) => !open)}>
+            📌 {pinned.length}
+          </button>
+        )}
       </div>
       {searchOpen && <MessageSearch channelId={channelId} />}
+      {pinnedOpen && <PinnedMessagesPanel pinned={pinned} />}
 
       <div className={styles.scrollArea}>
         {loading && <p className={styles.statusText}>Loading messages…</p>}
@@ -83,10 +93,13 @@ export function ChatViewContent({
         <MessageList
           messages={messages}
           editedIds={editedIds}
+          pinnedIds={pinnedIds}
           currentLogin={currentLogin}
           isModerator={isModerator}
           onEdit={editMessage}
           onDelete={deleteMessage}
+          onPin={pin}
+          onUnpin={unpin}
         />
       </div>
       {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
