@@ -46,6 +46,13 @@
   margin-top: var(--space-1);
 }
 
+/* Issue #307 — same "bold, no separate color" treatment as DeviceHub's
+   message_formatting::highlightMentions() (Qt::MarkdownText renders
+   **bold** the same way there). */
+.mention {
+  font-weight: 700;
+}
+
 .edited {
   font-size: var(--font-size-sm);
   opacity: 0.7;
@@ -77,7 +84,7 @@
 
 .actionButton:hover:not(:disabled) {
   opacity: 1;
-  background: rgb(0 0 0 / 0.08);
+  background: rgb(255 255 255 / 0.08);
 }
 
 .editInput {

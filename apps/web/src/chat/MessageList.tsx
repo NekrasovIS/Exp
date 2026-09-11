@@ -13,6 +13,7 @@ import { useState } from "react";
 
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
+import { MessageBody } from "./MessageBody.js";
 
 interface MessageListProps {
   messages: ChatMessageInfo[];
@@ -88,7 +89,9 @@ export function MessageList({
               ) : (
                 <>
                   {isPinned && <span className={styles.pinned}>📌 Pinned</span>}
-                  <span>{message.body}</span>
+                  <span>
+                    <MessageBody text={message.body} />
+                  </span>
                   {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
                   {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
                     <span className={styles.attachment}>

@@ -58,6 +58,16 @@ interface ChatClientEventMap {
   janusMessageAck: [response: unknown];
   janusEvent: [event: Record<string, unknown>];
   userTyping: [login: string];
+  // Presence (issue #322 — chat-service's own #309): community-wide,
+  // not per-channel. onlineMembers is a second event on the same
+  // "subscribed" response as subscribed above (mirrors sfuRoomAssigned's
+  // own "second event on one response" shape) — logins already
+  // connected to any channel of this subscription's community, not
+  // including self. presenceChanged fires for every later
+  // connect/disconnect elsewhere in that community. Neither fires for
+  // a DM-thread subscription (dialogs have no community).
+  onlineMembers: [logins: string[]];
+  presenceChanged: [login: string, online: boolean];
 }
 
 type EventListener<K extends keyof ChatClientEventMap> = (...args: ChatClientEventMap[K]) => void;
@@ -249,7 +259,17 @@ export class ChatClient {
       if (typeof id === "number") {
         this.emit("subscribed", id);
       }
+      if (Array.isArray(body.online_members)) {
+        this.emit("onlineMembers", body.online_members as string[]);
+      }
       return;
+    }
+    if (typeof body.presence_changed === "object" && body.presence_changed !== null) {
+      const presence = body.presence_changed as { login?: unknown; online?: unknown };
+      if (typeof presence.login === "string" && typeof presence.online === "boolean") {
+        this.emit("presenceChanged", presence.login, presence.online);
+        return;
+      }
     }
     if (Array.isArray(body.call_roster)) {
       this.emit("callRoster", body.call_roster as string[]);

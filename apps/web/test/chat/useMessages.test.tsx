@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMessages } from "../../src/chat/useMessages.js";
 import { SessionProvider } from "../../src/session/SessionContext.js";
-import { FakeWebSocket, jsonResponse } from "../testUtils.js";
+import { fakeToken, FakeWebSocket, jsonResponse } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
 
@@ -157,5 +157,116 @@ describe("useMessages", () => {
       { edit_message: { id: 1, body: "edited" } },
       { delete_message: { id: 1 } },
     ]);
+  });
+
+  // Issue #318 — mirrors useDirectMessages.test.tsx's own "typing"
+  // describe block; fake timers switched on only after the initial
+  // async load already settled under real timers.
+  describe("typing", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sendTyping sends a {typing:true} frame, throttled while called repeatedly", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const socket = FakeWebSocket.instances[0]!;
+
+      vi.useFakeTimers();
+      act(() => {
+        result.current.sendTyping();
+        result.current.sendTyping();
+      });
+      expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([{ typing: true }]);
+
+      act(() => vi.advanceTimersByTime(2000));
+      act(() => result.current.sendTyping());
+      expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([{ typing: true }, { typing: true }]);
+    });
+
+    it("a received user_typing sets typingUser, then auto-clears after the hide window", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const socket = FakeWebSocket.instances[0]!;
+
+      vi.useFakeTimers();
+      act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
+      expect(result.current.typingUser).toBe("bob");
+
+      act(() => vi.advanceTimersByTime(3000));
+      expect(result.current.typingUser).toBeNull();
+    });
+  });
+
+  // Issue #311 — a live message notifies (web analog of DesktopNotifier)
+  // only while this tab is hidden and the message isn't the caller's own.
+  describe("notifications", () => {
+    afterEach(() => {
+      Object.defineProperty(document, "hidden", { value: false, configurable: true });
+    });
+
+    it("shows a notification for another author's message while the tab is hidden", async () => {
+      const NotificationCtor = vi.fn();
+      vi.stubGlobal("Notification", Object.assign(NotificationCtor, { permission: "granted" }));
+      Object.defineProperty(document, "hidden", { value: true, configurable: true });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => {
+        socket.onmessage?.({
+          data: JSON.stringify({ id: 2, author: "bob", body: "hello", sent_at: "2026-01-01T00:01:00Z" }),
+        });
+      });
+
+      expect(NotificationCtor).toHaveBeenCalledWith("bob", { body: "hello" });
+    });
+
+    it("does not notify while the tab is visible", async () => {
+      const NotificationCtor = vi.fn();
+      vi.stubGlobal("Notification", Object.assign(NotificationCtor, { permission: "granted" }));
+      Object.defineProperty(document, "hidden", { value: false, configurable: true });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => {
+        socket.onmessage?.({
+          data: JSON.stringify({ id: 2, author: "bob", body: "hello", sent_at: "2026-01-01T00:01:00Z" }),
+        });
+      });
+
+      expect(NotificationCtor).not.toHaveBeenCalled();
+    });
+
+    it("does not notify for the caller's own message even while hidden", async () => {
+      localStorage.setItem(
+        kStorageKey,
+        JSON.stringify({
+          token: fakeToken("alice"),
+          refreshToken: "refresh-token",
+          expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      );
+      const NotificationCtor = vi.fn();
+      vi.stubGlobal("Notification", Object.assign(NotificationCtor, { permission: "granted" }));
+      Object.defineProperty(document, "hidden", { value: true, configurable: true });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => {
+        socket.onmessage?.({
+          data: JSON.stringify({ id: 2, author: "alice", body: "hello", sent_at: "2026-01-01T00:01:00Z" }),
+        });
+      });
+
+      expect(NotificationCtor).not.toHaveBeenCalled();
+    });
   });
 });

@@ -95,6 +95,52 @@ describe("ChatClient", () => {
 
       expect(onSubscribed).toHaveBeenCalledWith(7);
     });
+
+    // Issue #322 (chat-service's own #309) — same "second event on the
+    // same response" shape as sfuRoomAssigned's own tests below.
+    it("also emits 'onlineMembers' when online_members is present", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onOnlineMembers = vi.fn();
+      client.on("onlineMembers", onOnlineMembers);
+
+      socket.simulateMessage(
+        JSON.stringify({ subscribed: true, channel_id: 42, online_members: ["alice", "bob"] }),
+      );
+
+      expect(onOnlineMembers).toHaveBeenCalledWith(["alice", "bob"]);
+    });
+
+    it("does not emit 'onlineMembers' when online_members is absent (a DM subscription)", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onOnlineMembers = vi.fn();
+      client.on("onlineMembers", onOnlineMembers);
+
+      socket.simulateMessage(JSON.stringify({ subscribed: true, dm_thread_id: 7 }));
+
+      expect(onOnlineMembers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("presenceChanged", () => {
+    it("emits login and online for a presence_changed frame", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onPresenceChanged = vi.fn();
+      client.on("presenceChanged", onPresenceChanged);
+
+      socket.simulateMessage(JSON.stringify({ presence_changed: { login: "bob", online: true } }));
+
+      expect(onPresenceChanged).toHaveBeenCalledWith("bob", true);
+    });
+
+    it("emits online:false the same way", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onPresenceChanged = vi.fn();
+      client.on("presenceChanged", onPresenceChanged);
+
+      socket.simulateMessage(JSON.stringify({ presence_changed: { login: "bob", online: false } }));
+
+      expect(onPresenceChanged).toHaveBeenCalledWith("bob", false);
+    });
   });
 
   it("emits 'message' for an incoming chat message, with a null attachment_id becoming undefined", () => {
