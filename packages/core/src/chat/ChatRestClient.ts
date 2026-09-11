@@ -12,7 +12,14 @@ import {
 } from "../http.js";
 import type { FetchLike } from "../http.js";
 import { toBase64 } from "./base64.js";
-import type { ChatItem, ChatMessageInfo, DirectMessageInfo, DirectMessageThreadInfo } from "./types.js";
+import type {
+  ChatItem,
+  ChatMessageInfo,
+  DirectMessageInfo,
+  DirectMessageThreadInfo,
+  MessageReactionInfo,
+  PinnedMessageInfo,
+} from "./types.js";
 
 interface ChatItemBody {
   id: number;
@@ -20,6 +27,11 @@ interface ChatItemBody {
   owner: string;
   is_encrypted?: boolean;
   invite_code?: string;
+}
+
+interface MessageReactionBody {
+  emoji: string;
+  logins: string[];
 }
 
 interface MessageBody {
@@ -30,6 +42,12 @@ interface MessageBody {
   attachment_id?: number | null;
   attachment_filename?: string | null;
   reply_to_message_id?: number | null;
+  reactions?: MessageReactionBody[];
+}
+
+interface PinnedMessageBody extends MessageBody {
+  pinned_by: string;
+  pinned_at: string;
 }
 
 interface DirectMessageThreadBody {
@@ -60,17 +78,36 @@ function toChatItem(body: ChatItemBody): ChatItem {
   return item;
 }
 
+function toMessageReactionInfo(body: MessageReactionBody): MessageReactionInfo {
+  return { emoji: body.emoji, logins: body.logins };
+}
+
 function toChatMessageInfo(body: MessageBody): ChatMessageInfo {
   const message: ChatMessageInfo = {
     id: body.id,
     author: body.author,
     body: body.body,
     sentAt: body.sent_at,
+    reactions: (body.reactions ?? []).map(toMessageReactionInfo),
   };
   if (body.attachment_id != null) message.attachmentId = body.attachment_id;
   if (body.attachment_filename != null) message.attachmentFilename = body.attachment_filename;
   if (body.reply_to_message_id != null) message.replyToMessageId = body.reply_to_message_id;
   return message;
+}
+
+function toPinnedMessageInfo(body: PinnedMessageBody): PinnedMessageInfo {
+  const pinned: PinnedMessageInfo = {
+    id: body.id,
+    author: body.author,
+    body: body.body,
+    sentAt: body.sent_at,
+    pinnedBy: body.pinned_by,
+    pinnedAt: body.pinned_at,
+  };
+  if (body.attachment_id != null) pinned.attachmentId = body.attachment_id;
+  if (body.attachment_filename != null) pinned.attachmentFilename = body.attachment_filename;
+  return pinned;
 }
 
 function toDirectMessageThreadInfo(body: DirectMessageThreadBody): DirectMessageThreadInfo {
@@ -341,6 +378,22 @@ export class ChatRestClient {
     } catch {
       return [];
     }
+  }
+
+  /** Any channel member may read the pinned list (issue #308/#338/#340)
+   * — pinning/unpinning itself is a stricter owner-or-moderator-only
+   * action, sent over the WebSocket (see {@link ChatClient.sendPinMessage}),
+   * not this REST client. */
+  async listPinnedMessages(token: string, channelId: number): Promise<PinnedMessageInfo[]> {
+    const res = await requestJson<PinnedMessageBody[]>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, `/channels/${channelId}/pinned-messages`),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok || !Array.isArray(res.body)) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return res.body.map(toPinnedMessageInfo);
   }
 
   async uploadAttachment(

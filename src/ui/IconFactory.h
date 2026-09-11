@@ -21,6 +21,15 @@ QIcon plusIcon(const QColor& strokeColor);
 /// текстовой строки.
 QIcon communityAvatarIcon(const QString& label);
 
+/// Тот же круглый аватар, что и communityAvatarIcon(), плюс маленький
+/// зелёный кружок с рамкой в цвет фона панели в правом нижнем углу,
+/// когда @p online — presence-индикатор участника (issue #309) в
+/// MemberListPanel. Отдельная функция, не необязательный параметр у
+/// communityAvatarIcon(): та рисует аватары сообществ в CommunitiesPanel,
+/// где presence не имеет смысла — общий параметр там был бы всегда
+/// false и только шумел бы в каждом вызове.
+QIcon memberAvatarIcon(const QString& label, bool online);
+
 /// Стрелка отправки (бумажный самолётик) — рисуется вручную по той же
 /// причине, что и plusIcon() (нет SVG icon-engine в статической сборке
 /// Qt6). Используется как иконка кнопки "Send" в композере сообщения

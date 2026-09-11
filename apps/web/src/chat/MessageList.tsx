@@ -10,12 +10,27 @@
 // of history shows "Message unavailable" rather than fetching it
 // specially (same client-side resolution model as DeviceHub's
 // ChatView::messagesById_).
+//
+// Reactions (issue #305/#333/#335) are available on ANY message, own
+// or not — unlike Edit/Delete, gating is not by author/moderator at
+// all. The fixed 5-emoji set matches DeviceHub's own ChatMessageRow
+// (reactionEmojis()) and the in-call reaction set (issue #312), so a
+// user sees the same choices everywhere in the app.
+//
+// Pin/Unpin (issue #308/#338/#340) is role-gated the same way delete
+// is — reuses the same `isModerator` flag, not a separate check —
+// but unlike delete, it's independent of authorship: pinning is a
+// channel-management action, not message moderation, so it never
+// shows just because the viewer happens to be the author.
 
 import type { ChatMessageInfo } from "@devicehub/core";
 import { useMemo, useState } from "react";
 
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
+import { MessageBody } from "./MessageBody.js";
+
+const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
 
 const kReplySnippetMaxChars = 60;
 
@@ -26,25 +41,39 @@ export function truncatedSnippet(body: string): string {
 interface MessageListProps {
   messages: ChatMessageInfo[];
   editedIds: ReadonlySet<number>;
+  pinnedIds: ReadonlySet<number>;
   currentLogin: string | null;
   isModerator: boolean;
   onEdit: (id: number, newBody: string) => void;
   onDelete: (id: number) => void;
   onReply: (id: number) => void;
+  onToggleReaction: (id: number, emoji: string) => void;
+  onPin: (id: number) => void;
+  onUnpin: (id: number) => void;
 }
 
 export function MessageList({
   messages,
   editedIds,
+  pinnedIds,
   currentLogin,
   isModerator,
   onEdit,
   onDelete,
   onReply,
+  onToggleReaction,
+  onPin,
+  onUnpin,
 }: MessageListProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [reactingId, setReactingId] = useState<number | null>(null);
   const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+
+  function pickReaction(id: number, emoji: string): void {
+    onToggleReaction(id, emoji);
+    setReactingId(null);
+  }
 
   function startEditing(message: ChatMessageInfo): void {
     setEditingId(message.id);
@@ -62,8 +91,13 @@ export function MessageList({
     <ul className={styles.list}>
       {messages.map((message) => {
         const isOwn = message.author === currentLogin;
+        const isPinned = pinnedIds.has(message.id);
         return (
-          <li key={message.id} className={`${styles.row} ${isOwn ? styles.rowOwn : ""}`}>
+          <li
+            key={message.id}
+            id={`message-${message.id}`}
+            className={`${styles.row} ${isOwn ? styles.rowOwn : ""}`}
+          >
             <div className={`${styles.bubble} ${isOwn ? styles.bubbleOwn : ""}`}>
               <strong className={styles.author}>{message.author}</strong>
               {editingId === message.id ? (
@@ -88,6 +122,7 @@ export function MessageList({
                 </>
               ) : (
                 <>
+                  {isPinned && <span className={styles.pinned}>📌 Pinned</span>}
                   {message.replyToMessageId !== undefined &&
                     (() => {
                       const original = messagesById.get(message.replyToMessageId);
@@ -103,7 +138,9 @@ export function MessageList({
                         </span>
                       );
                     })()}
-                  <span>{message.body}</span>
+                  <span>
+                    <MessageBody text={message.body} />
+                  </span>
                   {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
                   {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
                     <span className={styles.attachment}>
@@ -113,6 +150,41 @@ export function MessageList({
                       />
                     </span>
                   )}
+                  <div className={styles.reactions}>
+                    {message.reactions.map((reaction) => (
+                      <button
+                        key={reaction.emoji}
+                        type="button"
+                        className={styles.reactionChip}
+                        title={reaction.logins.join(", ")}
+                        onClick={() => onToggleReaction(message.id, reaction.emoji)}
+                      >
+                        {reaction.emoji} {reaction.logins.length}
+                      </button>
+                    ))}
+                    {reactingId === message.id ? (
+                      <span className={styles.reactPicker}>
+                        {kReactionEmojis.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            className={styles.reactPickerEmoji}
+                            onClick={() => pickReaction(message.id, emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.actionButton}
+                        onClick={() => setReactingId(message.id)}
+                      >
+                        React
+                      </button>
+                    )}
+                  </div>
                   <div className={styles.actions}>
                     <button type="button" className={styles.actionButton} onClick={() => onReply(message.id)}>
                       Reply
@@ -124,6 +196,15 @@ export function MessageList({
                         onClick={() => startEditing(message)}
                       >
                         Edit
+                      </button>
+                    )}
+                    {isModerator && (
+                      <button
+                        type="button"
+                        className={styles.actionButton}
+                        onClick={() => (isPinned ? onUnpin(message.id) : onPin(message.id))}
+                      >
+                        {isPinned ? "Unpin" : "Pin"}
                       </button>
                     )}
                     {(isOwn || isModerator) && (

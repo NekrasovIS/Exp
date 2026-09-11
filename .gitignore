@@ -9,3 +9,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 .pnpm-store/
+
+# Playwright (issue #303) — local run artifacts, not source
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/playwright/.cache/

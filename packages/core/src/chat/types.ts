@@ -11,6 +11,14 @@ export interface ChatItem {
   inviteCode?: string;
 }
 
+/** One emoji's aggregated reactions on a message (issue #305/#333/#335)
+ * — `logins` is the full list of who reacted with THIS emoji, exactly
+ * as chat-service sends it (never a delta the caller has to merge). */
+export interface MessageReactionInfo {
+  emoji: string;
+  logins: string[];
+}
+
 export interface ChatMessageInfo {
   id: number;
   author: string;
@@ -24,6 +32,26 @@ export interface ChatMessageInfo {
    * client resolves it from whatever history it already has loaded
    * (see MessageList's own quote-rendering), same as DeviceHub. */
   replyToMessageId?: number;
+  /** Always present (possibly empty), unlike attachmentId/attachmentFilename
+   * — chat-service's own `toJson(Message)` always includes the
+   * `reactions` field, even for a message with none. */
+  reactions: MessageReactionInfo[];
+}
+
+/** A pinned channel message (issue #308/#338/#340) — full message
+ * content plus who/when pinned it, as returned by
+ * `GET /channels/{id}/pinned-messages`. Deliberately not an extension
+ * of {@link ChatMessageInfo} with optional pin fields: pin metadata
+ * only ever exists alongside a full message, never independently. */
+export interface PinnedMessageInfo {
+  id: number;
+  author: string;
+  body: string;
+  sentAt: string;
+  attachmentId?: number;
+  attachmentFilename?: string;
+  pinnedBy: string;
+  pinnedAt: string;
 }
 
 export interface DirectMessageThreadInfo {

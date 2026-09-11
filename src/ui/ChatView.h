@@ -52,6 +52,16 @@ public:
     /// (пузырь выровнен вправо, акцентный цвет, без аватара) или чужим.
     void setCurrentUserLogin(const QString& login);
 
+    /// Владеет ли вошедший пользователь текущим открытым каналом (или
+    /// его сообществом), либо является модератором сообщества (issue
+    /// #338) — управляет видимостью Pin/Unpin у каждой новой строки.
+    /// MainWindow вызывает это при открытии канала, как только известны
+    /// и владелец сообщества, и (асинхронно) список модераторов; строки,
+    /// уже построенные до того, как это значение стало известно, не
+    /// получают Pin/Unpin ретроактивно — принятое упрощение первой
+    /// версии, см. doc-комментарий MainWindow.
+    void setCanManageChannel(bool canManage);
+
     /// Добавляет настоящее сообщение чата — группируется с предыдущим
     /// (без повтора аватара/имени/времени), если они от одного автора
     /// и в пределах нескольких минут друг от друга.
@@ -80,6 +90,24 @@ public:
 
     /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
+
+    /// Обновляет закреплённость строки @p id на месте (issue #338) —
+    /// ничего не делает, если сообщение сейчас не показано, тот же
+    /// принцип, что и у updateMessageBody().
+    void updatePinned(qint64 id, bool isPinned);
+
+    /// Заменяет счётчик на кнопке закреплённых сообщений (issue #338) —
+    /// кнопка скрыта при 0. MainWindow вызывает это при открытии канала
+    /// (после listPinnedMessages()) и на каждое messagePinned()/
+    /// messageUnpinned().
+    void setPinnedMessagesCount(int count);
+
+    /// Применяет одно изменение реакции к строке @p id (issue #334) —
+    /// ничего не делает, если это сообщение сейчас не показано (тот же
+    /// принцип, что и у updateMessageBody()). @p logins — полный список
+    /// для @p emoji после переключения, как приходит из
+    /// ChatClient::reactionChanged(), не дельта.
+    void updateReactions(qint64 id, const QString& emoji, const QStringList& logins);
 
     /// Передаёт загруженное изображение вложения дальше в строку,
     /// которая его запросила (issue #188, см. previewAttachmentRequested())
@@ -121,6 +149,27 @@ public:
     /// показывает/скрывает вместе с этим состоянием.
     void setCallState(bool inCall);
 
+    /// Помечает сообщение @p id как цель ответа (issue #306) — показывает
+    /// строку "Replying to ..." над композером с автором/фрагментом
+    /// текста оригинала из messagesById_. Ничего не делает, если @p id
+    /// сейчас не в этом кэше — в норме не должно происходить, поскольку
+    /// ChatMessageRow эмитит replyRequested только для строк, которые
+    /// сама ChatView только что построила и закэшировала. Отменяет
+    /// текущее редактирование, если оно шло — это два взаимоисключающих
+    /// режима композера.
+    void setReplyTarget(qint64 id);
+
+    /// Снимает текущую цель ответа и скрывает строку "Replying to ...",
+    /// не отправляя сообщение — клик по кнопке отмены рядом с ней.
+    void clearReplyTarget();
+
+    /// Возвращает id текущей цели ответа (-1, если её нет) и сразу же
+    /// снимает её. MainWindow вызывает это ровно один раз при
+    /// фактической отправке сообщения, чтобы прикрепить
+    /// reply_to_message_id к исходящему кадру и не оставить старую цель
+    /// висящей на следующее сообщение.
+    [[nodiscard]] qint64 consumeReplyTarget();
+
     /// Показывает "<login> is typing…" на несколько секунд, затем
     /// автоматически скрывает — MainWindow вызывает это из
     /// ChatClient::userTyping(). Issue #96: одновременно показывается
@@ -143,6 +192,9 @@ public:
     /// поэтому только сигнализирует запрос, а не хранит состояние
     /// открыт/свёрнут самостоятельно.
     [[nodiscard]] QPushButton* memberListToggleButton() const { return memberListToggleButton_; }
+    /// Кнопка "📌 N" в шапке (issue #338) — скрыта, пока в канале нет
+    /// закреплённых сообщений (см. setPinnedMessagesCount()).
+    [[nodiscard]] QPushButton* pinnedMessagesButton() const { return pinnedMessagesButton_; }
 
 signals:
     /// Испускается при клике по кнопке "Create channel" на заглушке —
@@ -179,6 +231,15 @@ signals:
     /// Клик по "Delete" на одном из собственных сообщений пользователя.
     void deleteMessageRequested(qint64 id);
 
+    /// Выбор "Pin"/"Unpin" в контекстном меню сообщения (issue #338) —
+    /// доступно только когда setCanManageChannel(true).
+    void pinMessageRequested(qint64 id);
+    void unpinMessageRequested(qint64 id);
+
+    /// Клик по кнопке "📌 N" в шапке (issue #338) — MainWindow
+    /// показывает/поднимает свой PinnedMessagesDialog.
+    void pinnedMessagesToggleRequested();
+
     /// Клик по "Attach" (issue #116) — MainWindow открывает выбор
     /// файла, загружает выбранный файл через ChatRestClient, затем
     /// автоматически отправляет его как сообщение (см. doc-комментарий
@@ -188,6 +249,12 @@ signals:
     /// Клик по "Download" на сообщении с вложением — всплывает вверх
     /// из того ChatMessageRow, откуда пришёл.
     void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
+
+    /// Выбор эмодзи в подменю "React" либо клик по уже существующему
+    /// чипу-реакции — всплывает вверх из того ChatMessageRow, откуда
+    /// пришёл (issue #334). MainWindow вызывает
+    /// ChatClient::sendToggleReaction().
+    void reactionToggleRequested(qint64 id, const QString& emoji);
 
     /// Испускается сразу при появлении строки с вложением-изображением
     /// (issue #188, см. isImageAttachment()) — MainWindow запускает
@@ -209,6 +276,14 @@ private:
     /// previewAttachmentRequested() — общая часть appendMessage()/
     /// prependMessages(), оба создают строки одинаково.
     void requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row);
+
+    /// Возвращает копию @p message с заполненными replyToAuthor/
+    /// replyToBodySnippet (issue #306), если message.replyToMessageId
+    /// найден в messagesById_ — общая часть appendMessage()/
+    /// prependMessages(). Оставляет оба поля пустыми (ChatMessageRow
+    /// покажет заглушку "unavailable"), если не найден, и возвращает
+    /// @p message без изменений, если replyToMessageId < 0.
+    [[nodiscard]] ChatMessage resolveReplyPreview(const ChatMessage& message) const;
 
     /// Строит центрированную метку-разделитель дат (issue #188) —
     /// "Today"/"Yesterday"/полная дата в зависимости от того, на какой
@@ -238,6 +313,9 @@ private:
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
     QPushButton* memberListToggleButton_ = nullptr;
+    QPushButton* pinnedMessagesButton_ = nullptr;
+    /// Issue #338 — см. doc-комментарий setCanManageChannel().
+    bool canManageChannel_ = false;
     QLabel* typingIndicatorLabel_ = nullptr;
     /// Виден только пока editingMessageId_ >= 0 — единственный оставшийся
     /// индикатор режима редактирования с тех пор, как sendButton_ стал
@@ -245,6 +323,11 @@ private:
     QLabel* editingIndicatorLabel_ = nullptr;
     QTimer* typingIndicatorHideTimer_ = nullptr;
     QTimer* typingThrottleTimer_ = nullptr;
+    /// Полоса "Replying to ..." над композером (issue #306) — видна
+    /// только пока replyTargetId_ >= 0.
+    QWidget* replyBar_ = nullptr;
+    QLabel* replyBarLabel_ = nullptr;
+    qint64 replyTargetId_ = -1;
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;
@@ -261,6 +344,12 @@ private:
     /// может исчезнуть (переключение канала -> clearLog(), удаление
     /// сообщения) раньше, чем придёт ответ.
     QHash<qint64, QPointer<ChatMessageRow>> pendingImagePreviewRows_;
+    /// Кэш уже показанных сообщений по id (issue #306) — используется,
+    /// чтобы резолвить автора/фрагмент текста для цитаты-ответа (как у
+    /// новых сообщений, так и для строки "Replying to ..." при выборе
+    /// цели ответа). Не растёт неограниченно: очищается в clearLog() при
+    /// каждом переключении канала, как и сам список показанных строк.
+    QHash<qint64, ChatMessage> messagesById_;
 };
 
 }  // namespace devicehub
