@@ -35,6 +35,16 @@ interface ChatClientEventMap {
   message: [message: IncomingChatMessage];
   messageEdited: [id: number, newBody: string, editedAt: string];
   messageDeleted: [id: number];
+  // issue #305/#333/#335 — logins is the FULL list of who reacted with
+  // this emoji after the toggle, never a delta the listener has to
+  // merge (mirrors chat-service's own reaction_changed broadcast).
+  reactionChanged: [messageId: number, emoji: string, logins: string[]];
+  // issue #308/#338/#340 — pinnedBy/pinnedAt belong to the ORIGINAL pin
+  // even if this particular event was triggered by a second,
+  // idempotent pin_message from someone else (see chat-service's own
+  // PinMessageResult doc comment).
+  messagePinned: [id: number, pinnedBy: string, pinnedAt: string];
+  messageUnpinned: [id: number];
   error: [message: string];
   callRoster: [participants: string[]];
   // SFU room for the call (issue #221/#232) — same call_join response as
@@ -56,6 +66,16 @@ interface ChatClientEventMap {
   janusMessageAck: [response: unknown];
   janusEvent: [event: Record<string, unknown>];
   userTyping: [login: string];
+  // Presence (issue #322 — chat-service's own #309): community-wide,
+  // not per-channel. onlineMembers is a second event on the same
+  // "subscribed" response as subscribed above (mirrors sfuRoomAssigned's
+  // own "second event on one response" shape) — logins already
+  // connected to any channel of this subscription's community, not
+  // including self. presenceChanged fires for every later
+  // connect/disconnect elsewhere in that community. Neither fires for
+  // a DM-thread subscription (dialogs have no community).
+  onlineMembers: [logins: string[]];
+  presenceChanged: [login: string, online: boolean];
 }
 
 type EventListener<K extends keyof ChatClientEventMap> = (...args: ChatClientEventMap[K]) => void;
@@ -112,10 +132,18 @@ export class ChatClient {
     this.socket = null;
   }
 
-  sendMessage(body: string, attachmentId?: number): void {
+  /** @param replyToMessageId (issue #306/#331) — id of the message this
+   * one replies to; chat-service does not verify it exists (a reply to
+   * a since-deleted or never-loaded message is accepted, same as
+   * DeviceHub — see the schema's own doc comment on why this column
+   * carries no foreign key). */
+  sendMessage(body: string, attachmentId?: number, replyToMessageId?: number): void {
     const frame: Record<string, unknown> = { body };
     if (attachmentId !== undefined) {
       frame.attachment_id = attachmentId;
+    }
+    if (replyToMessageId !== undefined) {
+      frame.reply_to_message_id = replyToMessageId;
     }
     this.sendFrame(frame);
   }
@@ -185,6 +213,29 @@ export class ChatClient {
     this.sendFrame({ delete_message: { id } });
   }
 
+  /** Toggles @param emoji on message @param id — adds it if the caller
+   * hasn't reacted with it yet, removes it otherwise. Valid only in
+   * channel mode; available on any message, not just the sender's own
+   * (unlike sendEditMessage()/sendDeleteMessage()). */
+  sendToggleReaction(id: number, emoji: string): void {
+    this.sendFrame({ toggle_reaction: { message_id: id, emoji } });
+  }
+
+  /** Valid only in channel mode. Unlike sendEditMessage()/
+   * sendDeleteMessage(), the server restricts this to the channel/
+   * community owner or a moderator — never the message's own author
+   * as such (pinning is a channel-management action, not message
+   * moderation). Idempotent — pinning an already-pinned message is a
+   * no-op that still answers with a `messagePinned` event. */
+  sendPinMessage(id: number): void {
+    this.sendFrame({ pin_message: { id } });
+  }
+
+  /** Same authorization rule as sendPinMessage(); idempotent. */
+  sendUnpinMessage(id: number): void {
+    this.sendFrame({ unpin_message: { id } });
+  }
+
   private open(): void {
     const socket = this.wsFactory(this.url);
     this.socket = socket;
@@ -241,7 +292,17 @@ export class ChatClient {
       if (typeof id === "number") {
         this.emit("subscribed", id);
       }
+      if (Array.isArray(body.online_members)) {
+        this.emit("onlineMembers", body.online_members as string[]);
+      }
       return;
+    }
+    if (typeof body.presence_changed === "object" && body.presence_changed !== null) {
+      const presence = body.presence_changed as { login?: unknown; online?: unknown };
+      if (typeof presence.login === "string" && typeof presence.online === "boolean") {
+        this.emit("presenceChanged", presence.login, presence.online);
+        return;
+      }
     }
     if (Array.isArray(body.call_roster)) {
       this.emit("callRoster", body.call_roster as string[]);
@@ -311,18 +372,51 @@ export class ChatClient {
         return;
       }
     }
+    if (typeof body.reaction_changed === "object" && body.reaction_changed !== null) {
+      const changed = body.reaction_changed as { message_id?: unknown; emoji?: unknown; logins?: unknown };
+      if (
+        typeof changed.message_id === "number" &&
+        typeof changed.emoji === "string" &&
+        Array.isArray(changed.logins)
+      ) {
+        this.emit("reactionChanged", changed.message_id, changed.emoji, changed.logins as string[]);
+        return;
+      }
+    }
+    if (typeof body.message_pinned === "object" && body.message_pinned !== null) {
+      const pinned = body.message_pinned as { id?: unknown; pinned_by?: unknown; pinned_at?: unknown };
+      if (
+        typeof pinned.id === "number" &&
+        typeof pinned.pinned_by === "string" &&
+        typeof pinned.pinned_at === "string"
+      ) {
+        this.emit("messagePinned", pinned.id, pinned.pinned_by, pinned.pinned_at);
+        return;
+      }
+    }
+    if (typeof body.message_unpinned === "object" && body.message_unpinned !== null) {
+      const unpinned = body.message_unpinned as { id?: unknown };
+      if (typeof unpinned.id === "number") {
+        this.emit("messageUnpinned", unpinned.id);
+        return;
+      }
+    }
     if (typeof body.author === "string" && typeof body.body === "string") {
       const message: IncomingChatMessage = {
         id: typeof body.id === "number" ? body.id : 0,
         author: body.author,
         body: body.body,
         sentAt: typeof body.sent_at === "string" ? body.sent_at : "",
+        reactions: Array.isArray(body.reactions) ? (body.reactions as IncomingChatMessage["reactions"]) : [],
       };
       if (typeof body.attachment_id === "number") {
         message.attachmentId = body.attachment_id;
       }
       if (typeof body.attachment_filename === "string") {
         message.attachmentFilename = body.attachment_filename;
+      }
+      if (typeof body.reply_to_message_id === "number") {
+        message.replyToMessageId = body.reply_to_message_id;
       }
       this.emit("message", message);
     }
