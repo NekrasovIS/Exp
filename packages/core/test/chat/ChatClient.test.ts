@@ -95,6 +95,52 @@ describe("ChatClient", () => {
 
       expect(onSubscribed).toHaveBeenCalledWith(7);
     });
+
+    // Issue #322 (chat-service's own #309) — same "second event on the
+    // same response" shape as sfuRoomAssigned's own tests below.
+    it("also emits 'onlineMembers' when online_members is present", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onOnlineMembers = vi.fn();
+      client.on("onlineMembers", onOnlineMembers);
+
+      socket.simulateMessage(
+        JSON.stringify({ subscribed: true, channel_id: 42, online_members: ["alice", "bob"] }),
+      );
+
+      expect(onOnlineMembers).toHaveBeenCalledWith(["alice", "bob"]);
+    });
+
+    it("does not emit 'onlineMembers' when online_members is absent (a DM subscription)", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onOnlineMembers = vi.fn();
+      client.on("onlineMembers", onOnlineMembers);
+
+      socket.simulateMessage(JSON.stringify({ subscribed: true, dm_thread_id: 7 }));
+
+      expect(onOnlineMembers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("presenceChanged", () => {
+    it("emits login and online for a presence_changed frame", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onPresenceChanged = vi.fn();
+      client.on("presenceChanged", onPresenceChanged);
+
+      socket.simulateMessage(JSON.stringify({ presence_changed: { login: "bob", online: true } }));
+
+      expect(onPresenceChanged).toHaveBeenCalledWith("bob", true);
+    });
+
+    it("emits online:false the same way", () => {
+      const { client, socket } = makeClientAndSocket();
+      const onPresenceChanged = vi.fn();
+      client.on("presenceChanged", onPresenceChanged);
+
+      socket.simulateMessage(JSON.stringify({ presence_changed: { login: "bob", online: false } }));
+
+      expect(onPresenceChanged).toHaveBeenCalledWith("bob", false);
+    });
   });
 
   it("emits 'message' for an incoming chat message, with a null attachment_id becoming undefined", () => {
@@ -171,6 +217,28 @@ describe("ChatClient", () => {
     );
 
     expect(onChanged).toHaveBeenCalledWith(1, "👍", ["alice", "bob"]);
+  });
+
+  it("emits 'messagePinned'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onPinned = vi.fn();
+    client.on("messagePinned", onPinned);
+
+    socket.simulateMessage(
+      JSON.stringify({ message_pinned: { id: 1, pinned_by: "alice", pinned_at: "now" } }),
+    );
+
+    expect(onPinned).toHaveBeenCalledWith(1, "alice", "now");
+  });
+
+  it("emits 'messageUnpinned'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onUnpinned = vi.fn();
+    client.on("messageUnpinned", onUnpinned);
+
+    socket.simulateMessage(JSON.stringify({ message_unpinned: { id: 1 } }));
+
+    expect(onUnpinned).toHaveBeenCalledWith(1);
   });
 
   it("emits 'error' for a protocol-level {error} frame", () => {
@@ -405,6 +473,17 @@ describe("ChatClient", () => {
 
       client.sendToggleReaction(1, "👍");
       expect(socket.lastSentFrame()).toEqual({ toggle_reaction: { message_id: 1, emoji: "👍" } });
+    });
+
+    it("sendPinMessage/sendUnpinMessage send the expected frames", () => {
+      const { client, socket } = makeClientAndSocket();
+      client.connectToChannel("t1", 1);
+
+      client.sendPinMessage(1);
+      expect(socket.lastSentFrame()).toEqual({ pin_message: { id: 1 } });
+
+      client.sendUnpinMessage(1);
+      expect(socket.lastSentFrame()).toEqual({ unpin_message: { id: 1 } });
     });
 
     it("throws when sending before a connection is established", () => {

@@ -18,6 +18,7 @@ import type {
   DirectMessageInfo,
   DirectMessageThreadInfo,
   MessageReactionInfo,
+  PinnedMessageInfo,
 } from "./types.js";
 
 interface ChatItemBody {
@@ -41,6 +42,11 @@ interface MessageBody {
   attachment_id?: number | null;
   attachment_filename?: string | null;
   reactions?: MessageReactionBody[];
+}
+
+interface PinnedMessageBody extends MessageBody {
+  pinned_by: string;
+  pinned_at: string;
 }
 
 interface DirectMessageThreadBody {
@@ -86,6 +92,20 @@ function toChatMessageInfo(body: MessageBody): ChatMessageInfo {
   if (body.attachment_id != null) message.attachmentId = body.attachment_id;
   if (body.attachment_filename != null) message.attachmentFilename = body.attachment_filename;
   return message;
+}
+
+function toPinnedMessageInfo(body: PinnedMessageBody): PinnedMessageInfo {
+  const pinned: PinnedMessageInfo = {
+    id: body.id,
+    author: body.author,
+    body: body.body,
+    sentAt: body.sent_at,
+    pinnedBy: body.pinned_by,
+    pinnedAt: body.pinned_at,
+  };
+  if (body.attachment_id != null) pinned.attachmentId = body.attachment_id;
+  if (body.attachment_filename != null) pinned.attachmentFilename = body.attachment_filename;
+  return pinned;
 }
 
 function toDirectMessageThreadInfo(body: DirectMessageThreadBody): DirectMessageThreadInfo {
@@ -356,6 +376,22 @@ export class ChatRestClient {
     } catch {
       return [];
     }
+  }
+
+  /** Any channel member may read the pinned list (issue #308/#338/#340)
+   * — pinning/unpinning itself is a stricter owner-or-moderator-only
+   * action, sent over the WebSocket (see {@link ChatClient.sendPinMessage}),
+   * not this REST client. */
+  async listPinnedMessages(token: string, channelId: number): Promise<PinnedMessageInfo[]> {
+    const res = await requestJson<PinnedMessageBody[]>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, `/channels/${channelId}/pinned-messages`),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok || !Array.isArray(res.body)) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return res.body.map(toPinnedMessageInfo);
   }
 
   async uploadAttachment(

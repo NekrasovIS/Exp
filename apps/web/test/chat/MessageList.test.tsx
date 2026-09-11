@@ -14,11 +14,14 @@ function renderList(overrides: Partial<Parameters<typeof MessageList>[0]> = {}) 
     <MessageList
       messages={kMessages}
       editedIds={new Set()}
+      pinnedIds={new Set()}
       currentLogin="alice"
       isModerator={false}
       onEdit={vi.fn()}
       onDelete={vi.fn()}
       onToggleReaction={vi.fn()}
+      onPin={vi.fn()}
+      onUnpin={vi.fn()}
       {...overrides}
     />,
   );
@@ -38,13 +41,13 @@ describe("MessageList", () => {
     expect(bobButtonNames).toEqual(["React"]);
   });
 
-  it("shows Delete (but not Edit) on someone else's message for a moderator", () => {
+  it("shows Delete and Pin (but not Edit) on someone else's message for a moderator", () => {
     renderList({ isModerator: true });
 
     const bobItem = screen.getAllByRole("listitem")[1]!;
     expect(bobItem).toHaveTextContent("hi from bob");
     const buttonNames = Array.from(bobItem.querySelectorAll("button")).map((b) => b.textContent);
-    expect(buttonNames).toEqual(["React", "Delete"]);
+    expect(buttonNames).toEqual(["React", "Pin", "Delete"]);
   });
 
   it("marks an edited message and lets the author save a new body", async () => {
@@ -106,5 +109,66 @@ describe("MessageList", () => {
 
     expect(onToggleReaction).toHaveBeenCalledWith(1, "❤️");
     expect(screen.queryByRole("button", { name: "❤️" })).not.toBeInTheDocument();
+  });
+
+  it("does not show a Pin/Unpin button for a non-moderator, even on their own message", () => {
+    renderList();
+
+    const aliceItem = screen.getAllByRole("listitem")[0]!;
+    const buttonNames = Array.from(aliceItem.querySelectorAll("button")).map((b) => b.textContent);
+    expect(buttonNames).not.toContain("Pin");
+    expect(buttonNames).not.toContain("Unpin");
+  });
+
+  it("shows a 'Pinned' badge for a message in pinnedIds, regardless of role", () => {
+    renderList({ pinnedIds: new Set([2]) });
+
+    expect(screen.getByText("📌 Pinned")).toBeInTheDocument();
+    const aliceItem = screen.getAllByRole("listitem")[0]!;
+    expect(aliceItem).not.toHaveTextContent("📌 Pinned");
+  });
+
+  it("calls onPin for an unpinned message and onUnpin for an already-pinned one", async () => {
+    const onPin = vi.fn();
+    const onUnpin = vi.fn();
+    renderList({ isModerator: true, pinnedIds: new Set([2]), onPin, onUnpin });
+
+    await userEvent.click(screen.getByRole("button", { name: "Pin" }));
+    expect(onPin).toHaveBeenCalledWith(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "Unpin" }));
+    expect(onUnpin).toHaveBeenCalledWith(2);
+  });
+
+  // Issue #307 — MessageBody's own split logic is unit-tested directly
+  // in MessageBody.test.tsx; this only checks the wiring, and that
+  // editing prefills the plain, unwrapped body (message.body is never
+  // mutated to begin with — MessageBody only builds React nodes at
+  // render time — but this pins that down explicitly).
+  it("highlights a mention, and editing still prefills the plain unwrapped body", async () => {
+    const messagesWithMention = [
+      { id: 1, author: "alice", body: "hi @bob", sentAt: "2026-01-01T00:00:00Z", reactions: [] },
+    ];
+    render(
+      <MessageList
+        messages={messagesWithMention}
+        editedIds={new Set()}
+        pinnedIds={new Set()}
+        currentLogin="alice"
+        isModerator={false}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleReaction={vi.fn()}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+      />,
+    );
+
+    const item = screen.getAllByRole("listitem")[0]!;
+    // The author's own <strong> is the first one — the mention is the second.
+    expect(item.querySelectorAll("strong")[1]?.textContent).toBe("@bob");
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("textbox")).toHaveValue("hi @bob");
   });
 });

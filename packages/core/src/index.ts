@@ -23,4 +23,5 @@ export type {
   DirectMessageThreadInfo,
   IncomingChatMessage,
   MessageReactionInfo,
+  PinnedMessageInfo,
 } from "./chat/types.js";

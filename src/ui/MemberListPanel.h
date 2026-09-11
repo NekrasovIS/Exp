@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QSet>
 #include <QStringList>
 #include <QWidget>
 
@@ -38,7 +39,21 @@ public:
 
     /// Заменяет список участников — сортирует по алфавиту сама, чтобы
     /// вызывающему коду не нужно было сортировать @p logins заранее.
+    /// Presence-состояние (issue #309), если уже известно, переживает
+    /// это — рисуется по уже накопленному onlineLogins_, не сбрасывается
+    /// каждым обновлением списка через REST.
     void setMembers(const QStringList& logins);
+
+    /// Начальный снимок присутствия (issue #309) — ChatClient::
+    /// onlineMembersReceived() при подписке на канал сообщества;
+    /// заменяет весь набор целиком и перерисовывает уже показанные
+    /// строки.
+    void setOnlineLogins(const QStringList& logins);
+
+    /// Живое обновление присутствия одного участника (issue #309) —
+    /// ChatClient::presenceChanged(); обновляет иконку строки на месте,
+    /// без пересборки всего списка, если @p login сейчас показан.
+    void setLoginOnline(const QString& login, bool online);
 
     /// Нужен, чтобы не предлагать "Grant channel key access" для
     /// собственной строки в списке.
@@ -68,6 +83,9 @@ private:
     QListWidget* listWidget_ = nullptr;
     QString currentUserLogin_;
     bool channelEncrypted_ = false;
+    /// Presence (issue #309) — survives setMembers() rebuilding the
+    /// list (a REST refresh shouldn't blank out live presence state).
+    QSet<QString> onlineLogins_;
 };
 
 }  // namespace devicehub

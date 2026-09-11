@@ -32,6 +32,22 @@ export interface ChatMessageInfo {
   reactions: MessageReactionInfo[];
 }
 
+/** A pinned channel message (issue #308/#338/#340) — full message
+ * content plus who/when pinned it, as returned by
+ * `GET /channels/{id}/pinned-messages`. Deliberately not an extension
+ * of {@link ChatMessageInfo} with optional pin fields: pin metadata
+ * only ever exists alongside a full message, never independently. */
+export interface PinnedMessageInfo {
+  id: number;
+  author: string;
+  body: string;
+  sentAt: string;
+  attachmentId?: number;
+  attachmentFilename?: string;
+  pinnedBy: string;
+  pinnedAt: string;
+}
+
 export interface DirectMessageThreadInfo {
   id: number;
   otherLogin: string;
