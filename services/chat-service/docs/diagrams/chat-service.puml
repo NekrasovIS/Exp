@@ -30,13 +30,30 @@ class Message {
   +sentAt : string
   +attachmentId : optional<int64>
   +attachmentFilename : optional<string>
+  +reactions : vector<MessageReaction>
 }
+class MessageReaction {
+  +emoji : string
+  +logins : vector<string>
+}
+Message "1" *-- "0..*" MessageReaction : one per used emoji (issue #333)
 enum MutationResult {
   kSuccess
   kNotFound
   kForbidden
   kConflict
 }
+class ToggleReactionResult {
+  +result : MutationResult
+  +logins : vector<string>
+}
+note bottom of ToggleReactionResult
+  issue #333: logins — the FULL list for
+  that one emoji on that one message
+  after the toggle is applied (possibly
+  empty, if this was the last vote and it
+  just got removed), not a delta.
+end note
 class RegenerateInviteCodeResult {
   +result : MutationResult
   +inviteCode : string
@@ -126,6 +143,7 @@ class ChatRepository {
   +pinMessage(messageId: int64, channelId: int64, requesterLogin: string) : PinMessageResult
   +unpinMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
   +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
+  +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
   +findChannelKey(channelId: int64, login: string) : optional<string>
@@ -145,6 +163,7 @@ ChatRepository ..> AttachmentMetadata : creates
 ChatRepository ..> AttachmentUpload : reads
 ChatRepository ..> AttachmentData : reads
 ChatRepository ..> MutationResult : returns
+ChatRepository ..> ToggleReactionResult : returns
 ChatRepository ..> DirectMessageThread : returns
 ChatRepository ..> DirectMessage : returns
 ChatRepository ..> PqxxConnection : opens per call
@@ -178,6 +197,7 @@ class ChatService {
   +pinMessage(messageId: int64, channelId: int64, requesterLogin: string) : PinMessageResult
   +unpinMessage(messageId: int64, channelId: int64, requesterLogin: string) : MutationResult
   +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
+  +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
   +findOrCreateThread(loginA: string, loginB: string) : int64
   +listMyThreads(login: string) : vector<DirectMessageThread>
@@ -273,6 +293,7 @@ class WebSocketServer {
   -handleDeleteMessage(webSocket, subscription, body)
   -handlePinMessage(webSocket, subscription, body)
   -handleUnpinMessage(webSocket, subscription, body)
+  -handleToggleReaction(webSocket, subscription, body)
   -handleCallJoin(webSocket, subscription)
   -handleCallLeave(webSocket, subscription)
   -handleCallSignal(webSocket, subscription, body)
@@ -313,6 +334,11 @@ note right of HttpServer
                               owner, or community moderator)
   DELETE /channels/{id}      (same authority as PATCH)
   GET    /channels/{id}/messages
+                             (each message includes
+                             aggregated "reactions" —
+                             issue #333; add/remove itself
+                             is WS toggle_reaction, not a
+                             REST route — see WebSocketServer)
   GET    /channels/{id}/pinned-messages
                              (issue #338, any member; pin/unpin
                              itself is WS pin_message/unpin_message,

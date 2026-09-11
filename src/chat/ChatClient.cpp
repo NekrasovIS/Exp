@@ -47,6 +47,21 @@ void ChatClient::onTextMessageReceived(const QString& message) {
     } else if (object.contains("subscribed")) {
         emit subscribed(object.contains("dm_thread_id") ? object.value("dm_thread_id").toVariant().toLongLong()
                                                           : object.value("channel_id").toVariant().toLongLong());
+        // Issue #309 — same "separate signal on the same subscribed
+        // response" shape as sfuRoomAssigned() above; absent for a DM
+        // subscription (diaogs have no community, see doc comment).
+        if (object.contains("online_members")) {
+            QStringList onlineLogins;
+            const QJsonArray members = object.value("online_members").toArray();
+            onlineLogins.reserve(members.size());
+            for (const QJsonValue& login : members) {
+                onlineLogins.append(login.toString());
+            }
+            emit onlineMembersReceived(onlineLogins);
+        }
+    } else if (object.contains("presence_changed")) {
+        const QJsonObject presence = object.value("presence_changed").toObject();
+        emit presenceChanged(presence.value("login").toString(), presence.value("online").toBool());
     } else if (object.contains("call_roster")) {
         QStringList participants;
         const QJsonArray roster = object.value("call_roster").toArray();
@@ -71,6 +86,9 @@ void ChatClient::onTextMessageReceived(const QString& message) {
     } else if (object.contains("call_signal")) {
         const QJsonObject signal = object.value("call_signal").toObject();
         emit callSignalReceived(signal.value("from").toString(), signal.value("payload").toObject());
+    } else if (object.contains("call_reaction") && object.value("call_reaction").isObject()) {
+        const QJsonObject reaction = object.value("call_reaction").toObject();
+        emit callReactionReceived(reaction.value("login").toString(), reaction.value("emoji").toString());
     } else if (object.contains("janus_attached")) {
         emit janusAttached(object.value("janus_attached").toObject().value("handle").toVariant().toLongLong());
     } else if (object.contains("janus_message_ack")) {
@@ -85,20 +103,40 @@ void ChatClient::onTextMessageReceived(const QString& message) {
                             edited.value("edited_at").toString());
     } else if (object.contains("message_deleted")) {
         emit messageDeleted(object.value("message_deleted").toObject().value("id").toVariant().toLongLong());
+    } else if (object.contains("reaction_changed")) {
+        const QJsonObject changed = object.value("reaction_changed").toObject();
+        QStringList logins;
+        const QJsonArray loginsArray = changed.value("logins").toArray();
+        logins.reserve(loginsArray.size());
+        for (const QJsonValue& login : loginsArray) {
+            logins.append(login.toString());
+        }
+        emit reactionChanged(changed.value("message_id").toVariant().toLongLong(), changed.value("emoji").toString(),
+                              logins);
     } else if (object.contains("author") && object.contains("body")) {
         const QJsonValue attachmentIdValue = object.value("attachment_id");
+        const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");
         emit messageReceived(object.value("id").toVariant().toLongLong(), object.value("author").toString(),
                               object.value("body").toString(), object.value("sent_at").toString(),
                               attachmentIdValue.isNull() ? -1 : attachmentIdValue.toVariant().toLongLong(),
-                              object.value("attachment_filename").toString());
+                              object.value("attachment_filename").toString(),
+                              replyToMessageIdValue.isNull() ? -1 : replyToMessageIdValue.toVariant().toLongLong());
     }
 }
 
-void ChatClient::sendMessage(const QString& body, qint64 attachmentId) {
+void ChatClient::sendMessage(const QString& body, qint64 attachmentId, qint64 replyToMessageId) {
     QJsonObject message{{"body", body}};
     if (attachmentId >= 0) {
         message.insert("attachment_id", attachmentId);
     }
+    if (replyToMessageId >= 0) {
+        message.insert("reply_to_message_id", replyToMessageId);
+    }
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendToggleReaction(qint64 id, const QString& emoji) {
+    const QJsonObject message{{"toggle_reaction", QJsonObject{{"message_id", id}, {"emoji", emoji}}}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
@@ -118,6 +156,11 @@ void ChatClient::leaveCall() {
 
 void ChatClient::sendCallSignal(const QString& to, const QJsonObject& payload) {
     const QJsonObject message{{"call_signal", QJsonObject{{"to", to}, {"payload", payload}}}};
+    webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
+void ChatClient::sendCallReaction(const QString& emoji) {
+    const QJsonObject message{{"call_reaction", emoji}};
     webSocket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 

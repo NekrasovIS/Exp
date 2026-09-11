@@ -661,6 +661,129 @@ TEST(ChatServiceIntegrationTest, AttachmentUploadAndMessageReferenceRoundTrip) {
     EXPECT_EQ(*messages[0].attachmentFilename, "greeting.txt");
 }
 
+TEST(ChatServiceIntegrationTest, ToggleReactionAggregatesMultipleUsersAndRoundTripsThroughRecentAndSearch) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "reaction-test-owner-" + suffix;
+    const std::string other = "reaction-test-other-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("reaction-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> posted = service.postMessage(*channelId, owner, "react to this please");
+    ASSERT_TRUE(posted.has_value());
+    EXPECT_TRUE(posted->reactions.empty());
+
+    // Несуществующее сообщение — kNotFound, а не тихий успех.
+    EXPECT_EQ(service.toggleReaction(999999999, *channelId, owner, "\U0001F44D").result, MutationResult::kNotFound);
+    // Правильное сообщение, но не тот channelId — тоже kNotFound (та же
+    // защита, что уже есть у editMessage()/deleteMessage()).
+    EXPECT_EQ(service.toggleReaction(posted->id, 999999999, owner, "\U0001F44D").result, MutationResult::kNotFound);
+
+    const ToggleReactionResult firstAdd = service.toggleReaction(posted->id, *channelId, owner, "\U0001F44D");
+    ASSERT_EQ(firstAdd.result, MutationResult::kSuccess);
+    ASSERT_EQ(firstAdd.logins.size(), 1U);
+    EXPECT_EQ(firstAdd.logins[0], owner);
+
+    // Второй пользователь ставит ту же эмодзи — оба теперь в списке.
+    const ToggleReactionResult secondAdd = service.toggleReaction(posted->id, *channelId, other, "\U0001F44D");
+    ASSERT_EQ(secondAdd.result, MutationResult::kSuccess);
+    ASSERT_EQ(secondAdd.logins.size(), 2U);
+    EXPECT_EQ(secondAdd.logins[0], owner);  // порядок по created_at — кто раньше, тот раньше
+    EXPECT_EQ(secondAdd.logins[1], other);
+
+    // Другая эмодзи от owner — отдельная агрегированная запись, не
+    // затирает первую.
+    const ToggleReactionResult secondEmoji = service.toggleReaction(posted->id, *channelId, owner, "\U0001F389");
+    ASSERT_EQ(secondEmoji.result, MutationResult::kSuccess);
+    ASSERT_EQ(secondEmoji.logins.size(), 1U);
+
+    // recentMessages()/searchMessages() оба видят агрегированный итог:
+    // 2 разные эмодзи, у первой — 2 логина, у второй — 1.
+    const std::vector<Message> recent = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(recent.size(), 1U);
+    ASSERT_EQ(recent[0].reactions.size(), 2U);
+    EXPECT_EQ(recent[0].reactions[0].emoji, "\U0001F389");  // сортировка по emoji в reactionsForMessage()
+    EXPECT_EQ(recent[0].reactions[1].emoji, "\U0001F44D");
+    EXPECT_EQ(recent[0].reactions[1].logins.size(), 2U);
+
+    const std::vector<Message> found = service.searchMessages(*channelId, "react to this", 10);
+    ASSERT_EQ(found.size(), 1U);
+    EXPECT_EQ(found[0].reactions.size(), 2U);
+
+    // owner снимает свой лайк — остаётся только other.
+    const ToggleReactionResult removed = service.toggleReaction(posted->id, *channelId, owner, "\U0001F44D");
+    ASSERT_EQ(removed.result, MutationResult::kSuccess);
+    ASSERT_EQ(removed.logins.size(), 1U);
+    EXPECT_EQ(removed.logins[0], other);
+}
+
+TEST(ChatServiceIntegrationTest, ReplyToMessageIdRoundTripsThroughPostRecentAndSearch) {
+    // Issue #306 — no FK on this column (see its doc comment), so unlike
+    // attachment_id above, an id that doesn't correspond to any real
+    // message is accepted rather than rejected: the client, not the
+    // server, decides what to show when it can't resolve it.
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "integration-test-reply-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("integration-test-reply-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> original = service.postMessage(*channelId, owner, "original searchable text");
+    ASSERT_TRUE(original.has_value());
+    EXPECT_FALSE(original->replyToMessageId.has_value());
+
+    const std::optional<Message> reply =
+        service.postMessage(*channelId, owner, "a reply", /*attachmentId=*/std::nullopt, original->id);
+    ASSERT_TRUE(reply.has_value());
+    ASSERT_TRUE(reply->replyToMessageId.has_value());
+    EXPECT_EQ(*reply->replyToMessageId, original->id);
+
+    // An id that doesn't correspond to any message is accepted, not
+    // rejected — see the doc comment above.
+    const std::optional<Message> danglingReply =
+        service.postMessage(*channelId, owner, "reply to nothing", /*attachmentId=*/std::nullopt, 999999999);
+    ASSERT_TRUE(danglingReply.has_value());
+    ASSERT_TRUE(danglingReply->replyToMessageId.has_value());
+    EXPECT_EQ(*danglingReply->replyToMessageId, 999999999);
+
+    const std::vector<Message> recent = service.recentMessages(*channelId, 10);
+    ASSERT_EQ(recent.size(), 3U);
+    const auto recentReply =
+        std::find_if(recent.begin(), recent.end(), [&](const Message& m) { return m.id == reply->id; });
+    ASSERT_NE(recentReply, recent.end());
+    ASSERT_TRUE(recentReply->replyToMessageId.has_value());
+    EXPECT_EQ(*recentReply->replyToMessageId, original->id);
+
+    // searchMessages() (issue #118) has its own SELECT — must carry the
+    // same field, not just recentMessages()'s.
+    const std::vector<Message> searched = service.searchMessages(*channelId, "a reply", 10);
+    ASSERT_EQ(searched.size(), 1U);
+    ASSERT_TRUE(searched[0].replyToMessageId.has_value());
+    EXPECT_EQ(*searched[0].replyToMessageId, original->id);
+}
+
 TEST(ChatServiceIntegrationTest, CreateChannelDefaultsToNotEncryptedAndFlagRoundTripsThroughListAndFind) {
     const std::string connectionString = envOrDefault(
         "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");

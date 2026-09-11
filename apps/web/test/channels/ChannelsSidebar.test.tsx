@@ -67,7 +67,12 @@ describe("ChannelsSidebar", () => {
     const { onSelectChannel } = renderSidebar(42);
 
     await userEvent.click(await screen.findByRole("button", { name: "#general" }));
-    expect(onSelectChannel).toHaveBeenCalledWith(1);
+    expect(onSelectChannel).toHaveBeenCalledWith({
+      id: 1,
+      name: "general",
+      ownerLogin: "alice",
+      isEncrypted: false,
+    });
   });
 
   it("creates a channel and refreshes the list", async () => {

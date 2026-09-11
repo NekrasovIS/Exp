@@ -81,6 +81,13 @@ public:
     /// Полностью удаляет строку @p id, если она сейчас показана.
     void removeMessage(qint64 id);
 
+    /// Применяет одно изменение реакции к строке @p id (issue #334) —
+    /// ничего не делает, если это сообщение сейчас не показано (тот же
+    /// принцип, что и у updateMessageBody()). @p logins — полный список
+    /// для @p emoji после переключения, как приходит из
+    /// ChatClient::reactionChanged(), не дельта.
+    void updateReactions(qint64 id, const QString& emoji, const QStringList& logins);
+
     /// Передаёт загруженное изображение вложения дальше в строку,
     /// которая его запросила (issue #188, см. previewAttachmentRequested())
     /// — ничего не делает, если та строка с тех пор исчезла (например,
@@ -120,6 +127,27 @@ public:
     /// не в ChatView — см. CallWindow (issue #185), которую MainWindow
     /// показывает/скрывает вместе с этим состоянием.
     void setCallState(bool inCall);
+
+    /// Помечает сообщение @p id как цель ответа (issue #306) — показывает
+    /// строку "Replying to ..." над композером с автором/фрагментом
+    /// текста оригинала из messagesById_. Ничего не делает, если @p id
+    /// сейчас не в этом кэше — в норме не должно происходить, поскольку
+    /// ChatMessageRow эмитит replyRequested только для строк, которые
+    /// сама ChatView только что построила и закэшировала. Отменяет
+    /// текущее редактирование, если оно шло — это два взаимоисключающих
+    /// режима композера.
+    void setReplyTarget(qint64 id);
+
+    /// Снимает текущую цель ответа и скрывает строку "Replying to ...",
+    /// не отправляя сообщение — клик по кнопке отмены рядом с ней.
+    void clearReplyTarget();
+
+    /// Возвращает id текущей цели ответа (-1, если её нет) и сразу же
+    /// снимает её. MainWindow вызывает это ровно один раз при
+    /// фактической отправке сообщения, чтобы прикрепить
+    /// reply_to_message_id к исходящему кадру и не оставить старую цель
+    /// висящей на следующее сообщение.
+    [[nodiscard]] qint64 consumeReplyTarget();
 
     /// Показывает "<login> is typing…" на несколько секунд, затем
     /// автоматически скрывает — MainWindow вызывает это из
@@ -189,6 +217,12 @@ signals:
     /// из того ChatMessageRow, откуда пришёл.
     void downloadAttachmentRequested(qint64 attachmentId, const QString& filename);
 
+    /// Выбор эмодзи в подменю "React" либо клик по уже существующему
+    /// чипу-реакции — всплывает вверх из того ChatMessageRow, откуда
+    /// пришёл (issue #334). MainWindow вызывает
+    /// ChatClient::sendToggleReaction().
+    void reactionToggleRequested(qint64 id, const QString& emoji);
+
     /// Испускается сразу при появлении строки с вложением-изображением
     /// (issue #188, см. isImageAttachment()) — MainWindow запускает
     /// фоновую загрузку через ChatRestClient::downloadAttachment() и
@@ -209,6 +243,14 @@ private:
     /// previewAttachmentRequested() — общая часть appendMessage()/
     /// prependMessages(), оба создают строки одинаково.
     void requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row);
+
+    /// Возвращает копию @p message с заполненными replyToAuthor/
+    /// replyToBodySnippet (issue #306), если message.replyToMessageId
+    /// найден в messagesById_ — общая часть appendMessage()/
+    /// prependMessages(). Оставляет оба поля пустыми (ChatMessageRow
+    /// покажет заглушку "unavailable"), если не найден, и возвращает
+    /// @p message без изменений, если replyToMessageId < 0.
+    [[nodiscard]] ChatMessage resolveReplyPreview(const ChatMessage& message) const;
 
     /// Строит центрированную метку-разделитель дат (issue #188) —
     /// "Today"/"Yesterday"/полная дата в зависимости от того, на какой
@@ -245,6 +287,11 @@ private:
     QLabel* editingIndicatorLabel_ = nullptr;
     QTimer* typingIndicatorHideTimer_ = nullptr;
     QTimer* typingThrottleTimer_ = nullptr;
+    /// Полоса "Replying to ..." над композером (issue #306) — видна
+    /// только пока replyTargetId_ >= 0.
+    QWidget* replyBar_ = nullptr;
+    QLabel* replyBarLabel_ = nullptr;
+    qint64 replyTargetId_ = -1;
     bool hasLastMessage_ = false;
     ChatMessage lastMessage_;
     QString currentUserLogin_;
@@ -261,6 +308,12 @@ private:
     /// может исчезнуть (переключение канала -> clearLog(), удаление
     /// сообщения) раньше, чем придёт ответ.
     QHash<qint64, QPointer<ChatMessageRow>> pendingImagePreviewRows_;
+    /// Кэш уже показанных сообщений по id (issue #306) — используется,
+    /// чтобы резолвить автора/фрагмент текста для цитаты-ответа (как у
+    /// новых сообщений, так и для строки "Replying to ..." при выборе
+    /// цели ответа). Не растёт неограниченно: очищается в clearLog() при
+    /// каждом переключении канала, как и сам список показанных строк.
+    QHash<qint64, ChatMessage> messagesById_;
 };
 
 }  // namespace devicehub

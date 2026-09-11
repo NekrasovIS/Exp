@@ -87,4 +87,30 @@ describe("MessageList", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onDelete).toHaveBeenCalledWith(1);
   });
+
+  // Issue #307 — MessageBody's own split logic is unit-tested directly
+  // in MessageBody.test.tsx; this only checks the wiring, and that
+  // editing prefills the plain, unwrapped body (message.body is never
+  // mutated to begin with — MessageBody only builds React nodes at
+  // render time — but this pins that down explicitly).
+  it("highlights a mention, and editing still prefills the plain unwrapped body", async () => {
+    const messagesWithMention = [{ id: 1, author: "alice", body: "hi @bob", sentAt: "2026-01-01T00:00:00Z" }];
+    render(
+      <MessageList
+        messages={messagesWithMention}
+        editedIds={new Set()}
+        currentLogin="alice"
+        isModerator={false}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    const item = screen.getAllByRole("listitem")[0]!;
+    // The author's own <strong> is the first one — the mention is the second.
+    expect(item.querySelectorAll("strong")[1]?.textContent).toBe("@bob");
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("textbox")).toHaveValue("hi @bob");
+  });
 });
