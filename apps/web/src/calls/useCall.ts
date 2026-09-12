@@ -139,9 +139,9 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
   }, [chatClient, localLogin]);
 
   const join = useCallback(() => {
-    void managerRef.current
-      ?.joinCall()
-      .then(() => setState((prev) => ({ ...prev, inCall: true, muted: managerRef.current?.isMuted() ?? false })));
+    void managerRef.current?.joinCall().then(() => {
+      setState((prev) => ({ ...prev, inCall: true, muted: managerRef.current?.isMuted() ?? false }));
+    });
   }, []);
 
   const leave = useCallback(() => {
