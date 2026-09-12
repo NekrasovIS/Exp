@@ -4,7 +4,7 @@
 // with a hook instead of a widget class on the UI side.
 
 import { ChatClient } from "@devicehub/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CallManager } from "./CallManager.js";
 
@@ -66,11 +66,28 @@ const kInitialState: CallState = {
  * current user's own login (never shown as a participant/tile of its
  * own — mirrors CallManager's ownFeedId/localLogin filtering). */
 export function useCall(chatClient: ChatClient, localLogin: string): [CallState, CallActions] {
-  const manager = useMemo(() => new CallManager(chatClient, localLogin), [chatClient, localLogin]);
+  // Issue #365 — a fresh CallManager per effect run (not useMemo's
+  // "stable across renders" instance) so its lifecycle exactly matches
+  // the effect's own mount/cleanup, including React StrictMode's
+  // deliberate dev-only mount -> cleanup -> mount cycle: CallManager
+  // subscribes to chatClient ONCE, in its constructor, and dispose()
+  // permanently tears that down — a useMemo'd instance survives
+  // StrictMode's synthetic remount (same object, no new render), so its
+  // cleanup-triggered dispose() during the discarded first mount left
+  // it deaf to every future call_roster/call_peer_joined/janus_event
+  // from chatClient for the rest of the component's life, with no way
+  // to resubscribe short of a whole new instance. Symptom: nobody ever
+  // showed up in the participant list, and remote camera/screen-share
+  // never arrived — not a race in the roster fix (issue #362) itself,
+  // but this made it and the pre-existing callPeerJoined path both look
+  // broken identically, since both ride the same doomed subscription.
+  const managerRef = useRef<CallManager | null>(null);
   const [state, setState] = useState<CallState>(kInitialState);
   const hideReactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const manager = new CallManager(chatClient, localLogin);
+    managerRef.current = manager;
     const unsubscribes = [
       manager.on("reactionReceived", (login, emoji) => {
         if (hideReactionTimer.current !== null) {
@@ -114,29 +131,38 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
     return () => {
       unsubscribes.forEach((off) => off());
       manager.dispose();
+      managerRef.current = null;
       if (hideReactionTimer.current !== null) {
         clearTimeout(hideReactionTimer.current);
       }
     };
-  }, [manager]);
+  }, [chatClient, localLogin]);
 
   const join = useCallback(() => {
-    void manager
-      .joinCall()
-      .then(() => setState((prev) => ({ ...prev, inCall: true, muted: manager.isMuted() })));
-  }, [manager]);
+    void managerRef.current
+      ?.joinCall()
+      .then(() => setState((prev) => ({ ...prev, inCall: true, muted: managerRef.current?.isMuted() ?? false })));
+  }, []);
 
   const leave = useCallback(() => {
-    manager.leaveCall();
+    managerRef.current?.leaveCall();
     setState(kInitialState);
-  }, [manager]);
+  }, []);
 
   const toggleMute = useCallback(() => {
+    const manager = managerRef.current;
+    if (manager === null) {
+      return;
+    }
     manager.setMuted(!manager.isMuted());
     setState((prev) => ({ ...prev, muted: manager.isMuted() }));
-  }, [manager]);
+  }, []);
 
   const toggleVideo = useCallback(() => {
+    const manager = managerRef.current;
+    if (manager === null) {
+      return;
+    }
     if (manager.videoEnabled()) {
       manager.disableVideo();
       setState((prev) => ({ ...prev, videoEnabled: false }));
@@ -147,9 +173,13 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
           setState((prev) => ({ ...prev, videoEnabled: manager.videoEnabled(), screenShareEnabled: false })),
         );
     }
-  }, [manager]);
+  }, []);
 
   const toggleScreenShare = useCallback(() => {
+    const manager = managerRef.current;
+    if (manager === null) {
+      return;
+    }
     if (manager.screenShareEnabled()) {
       manager.disableScreenShare();
       setState((prev) => ({ ...prev, screenShareEnabled: false }));
@@ -162,9 +192,9 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
         })),
       );
     }
-  }, [manager]);
+  }, []);
 
-  const sendReaction = useCallback((emoji: string) => manager.sendReaction(emoji), [manager]);
+  const sendReaction = useCallback((emoji: string) => managerRef.current?.sendReaction(emoji), []);
 
   return [state, { join, leave, toggleMute, toggleVideo, toggleScreenShare, sendReaction }];
 }
