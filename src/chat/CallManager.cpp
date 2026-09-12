@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QMetaObject>
+#include <QTimer>
 
 #include <utility>
 #include <vector>
@@ -46,6 +47,56 @@ constexpr char kScreenShareTrackId[] = "call-screenshare-video0";
 QString publishConnectionLabel() {
     return QStringLiteral("__sfu_publish__");
 }
+
+/// Issue #373 — извлекает список stream `mid` одного элемента массива
+/// "publishers" из событий комнаты Janus (`{..., "streams": [{"mid": ...},
+/// ...]}`) — общий код для обеих веток (videoroom == "joined"/"event") в
+/// onJanusEvent(), которым нужен этот список для ensureSubscribeConnection().
+QStringList publisherStreamMids(const QJsonObject& publisher) {
+    QStringList mids;
+    for (const QJsonValue& streamValue : publisher.value(QStringLiteral("streams")).toArray()) {
+        const QString mid = streamValue.toObject().value(QStringLiteral("mid")).toString();
+        if (!mid.isEmpty()) {
+            mids.append(mid);
+        }
+    }
+    return mids;
+}
+
+/// Issue #364 — на некоторых реальных сетях (замечено: хост с несколькими
+/// виртуальными сетевыми адаптерами — Docker/VPN/WSL — рядом с настоящим)
+/// iceGatheringState никогда не доходит до kIceGatheringComplete: похоже,
+/// libwebrtc ждёт, пока STUN-запрос устаканится на каждом интерфейсе, и
+/// если хотя бы один из них (недостижимый маршрут, нерабочий адаптер)
+/// никогда не отвечает, сбор кандидатов зависает навсегда — подтверждено
+/// ожиданием 60+ секунд без изменений, несмотря на то что пригодные
+/// host/srflx-кандидаты уже собраны за миллисекунды. Раньше это означало,
+/// что offer/answer этого не-trickle протокола (см. doc-комментарий
+/// PeerObserver::OnIceGatheringChange()) никогда не уходил Janus'у вообще
+/// — то же ограничение и та же причина, что и у одноимённого фикса на
+/// веб-клиенте (apps/web/src/calls/CallManager.ts, там 2000ms). Таймаут
+/// даёт уйти offer/answer с тем набором кандидатов, что успел собраться к
+/// этому моменту — на сломанной сети это работающий звонок вместо звонка,
+/// который никогда не подключится.
+///
+/// 8000ms, не 2000ms, как на вебе — здесь именно libwebrtc (не браузерный
+/// Chromium), и его собственный, на этой машине вполне рабочий, но не
+/// мгновенный сбор кандидатов через реальный интернет-STUN стабильно
+/// занимает несколько секунд дольше 2000ms. При 2000ms живое тестирование
+/// (CallManagerIntegrationTest.SfuPublishAndSubscribeOfferAnswerRoundTrip)
+/// воспроизводимо роняло процесс фатальным CHECK внутри
+/// audio_transport_impl.cc ("number_of_frames * 100 == sample_rate") —
+/// таймаут срабатывал РАНЬШЕ настоящего kIceGatheringComplete, из-за чего
+/// реальный захват/передача звука начинались заметно раньше, чем при
+/// естественном завершении сбора, и это сталкивалось с уже
+/// задокументированной хрупкостью синхронизации реального захвата
+/// микрофона под несколькими одновременными PeerConnectionFactory (см.
+/// комментарий у SfuThreeParticipantPublishAndSubscribeRoundTrip). 8000ms
+/// не мешает естественному завершению сбора (там же тест по-прежнему
+/// укладывается в те же ~13.5 секунд, что и до фикса — сам таймер ни разу
+/// не успевает сработать первым), оставаясь при этом на два порядка
+/// меньше наблюдавшегося 60+-секундного зависания на сломанной сети.
+constexpr int kIceGatheringTimeoutMs = 8000;
 }  // namespace
 
 /// Адаптер webrtc::PeerConnectionObserver — каждый колбэк срабатывает на
@@ -65,9 +116,13 @@ public:
     // теперь) не трикклят ICE-кандидаты по одному — у прокси-протокола
     // chat-service нет отдельного запроса Janus "trickle" (не-trickle
     // сигналинг: кандидаты едут внутри самого SDP), поэтому offer/answer
-    // им уходит только здесь, после полного сбора, а не сразу после
+    // в норме уходит именно отсюда, после полного сбора, а не сразу после
     // SetLocalDescription — см. doc-комментарий
-    // CallManager::handleIceGatheringComplete().
+    // CallManager::handleIceGatheringComplete(). Issue #364: на сети, где
+    // это состояние никогда не наступает, тот же offer/answer всё равно
+    // уйдёт — по таймауту из negotiateLocal() (см. doc-комментарий
+    // kIceGatheringTimeoutMs) — так что этот колбэк уже не единственный
+    // путь туда, просто более ранний, когда сеть в порядке.
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState newState) override {
         if (newState != webrtc::PeerConnectionInterface::kIceGatheringComplete) {
             return;
@@ -516,9 +571,19 @@ void CallManager::negotiateLocal(const QString& peerLogin) {
         state != webrtc::PeerConnectionInterface::kHaveRemoteOffer) {
         return;
     }
+    entry->iceGatheringMessageSent = false;
     const webrtc::scoped_refptr<LocalDescriptionSetObserver> observer =
         webrtc::make_ref_counted<LocalDescriptionSetObserver>(*this, peerLogin);
     entry->connection->SetLocalDescription(observer);
+    // Issue #364 — ограниченный по времени запасной путь на случай, если
+    // OnIceGatheringChange() так и не сообщит kIceGatheringComplete на
+    // этой сети (см. doc-комментарий kIceGatheringTimeoutMs). `this` в
+    // качестве контекстного объекта означает, что Qt сам отменит этот
+    // колбэк, если CallManager будет разрушен раньше, чем он сработает —
+    // то же условие безопасности, что F.52 требует для любой лямбды,
+    // которая может выполниться позже своей объемлющей области видимости.
+    QTimer::singleShot(kIceGatheringTimeoutMs, this,
+                        [this, peerLogin] { handleIceGatheringComplete(peerLogin); });
 }
 
 void CallManager::handleLocalDescriptionSet(const QString& peerLogin, bool ok, const QString& errorMessage) {
@@ -548,10 +613,18 @@ void CallManager::handleIceGatheringComplete(const QString& peerLogin) {
     if (!entry->connection || entry->janusHandle < 0) {
         return;
     }
+    // Issue #364 — идемпотентность между настоящим OnIceGatheringChange()
+    // и таймаутом из negotiateLocal(): какой из двух ни сработал бы
+    // первым для этого раунда согласования, второй не должен отправить
+    // тот же (или запоздалый) SDP повторно.
+    if (entry->iceGatheringMessageSent) {
+        return;
+    }
     const webrtc::SessionDescriptionInterface* description = entry->connection->local_description();
     if (description == nullptr) {
         return;
     }
+    entry->iceGatheringMessageSent = true;
     const QJsonObject jsep{
         {"type", description->GetType() == webrtc::SdpType::kOffer ? QStringLiteral("offer") : QStringLiteral("answer")},
         {"sdp", QString::fromStdString(description->ToString())}};
@@ -732,24 +805,49 @@ void CallManager::ensurePublishConnection() {
     chatClient_.sendJanusAttach();
 }
 
-void CallManager::ensureSubscribeConnection(const QString& feedId, const QString& peerLogin) {
-    if (feedId.isEmpty() || peerLogin.isEmpty() || feedId == ownFeedId_ || peerLogin == localLogin_ ||
-        peers_.contains(peerLogin.toStdString())) {
+void CallManager::ensureSubscribeConnection(const QString& feedId, const QString& peerLogin,
+                                             const QStringList& mids) {
+    if (feedId.isEmpty() || peerLogin.isEmpty() || feedId == ownFeedId_ || peerLogin == localLogin_) {
+        return;
+    }
+    const auto it = peers_.find(peerLogin.toStdString());
+    if (it != peers_.end()) {
+        subscribeToNewStreams(it->second, feedId, mids);
         return;
     }
     if (pendingAttach_ != PendingJanusAttach::kNone) {
-        subscribeQueue_.emplace_back(feedId, peerLogin);
+        subscribeQueue_.emplace_back(feedId, peerLogin, mids);
         return;
     }
     pendingAttach_ = PendingJanusAttach::kSubscribe;
     pendingSubscribeFeedId_ = feedId;
     pendingSubscribePeerLogin_ = peerLogin;
+    pendingSubscribeMids_ = mids;
     chatClient_.sendJanusAttach();
+}
+
+void CallManager::subscribeToNewStreams(PeerConnectionEntry& entry, const QString& feedId,
+                                         const QStringList& mids) {
+    QStringList newMids;
+    for (const QString& mid : mids) {
+        if (!entry.subscribedMids.contains(mid)) {
+            newMids.append(mid);
+        }
+    }
+    if (newMids.isEmpty()) {
+        return;
+    }
+    QJsonArray streams;
+    for (const QString& mid : newMids) {
+        entry.subscribedMids.insert(mid);
+        streams.append(QJsonObject{{"feed", feedId}, {"mid", mid}});
+    }
+    chatClient_.sendJanusMessage(entry.janusHandle, QJsonObject{{"request", "subscribe"}, {"streams", streams}});
 }
 
 void CallManager::processNextQueuedSubscribe() {
     while (pendingAttach_ == PendingJanusAttach::kNone && !subscribeQueue_.empty()) {
-        const auto [feedId, peerLogin] = subscribeQueue_.front();
+        const auto [feedId, peerLogin, mids] = subscribeQueue_.front();
         subscribeQueue_.pop_front();
         if (peers_.contains(peerLogin.toStdString())) {
             continue;  // подписались за это время, пока ждали своей очереди — берём следующего
@@ -757,6 +855,7 @@ void CallManager::processNextQueuedSubscribe() {
         pendingAttach_ = PendingJanusAttach::kSubscribe;
         pendingSubscribeFeedId_ = feedId;
         pendingSubscribePeerLogin_ = peerLogin;
+        pendingSubscribeMids_ = mids;
         chatClient_.sendJanusAttach();
         return;
     }
@@ -784,9 +883,11 @@ void CallManager::onJanusAttached(qint64 handle) {
         case PendingJanusAttach::kSubscribe: {
             const QString feedId = pendingSubscribeFeedId_;
             const QString peerLogin = pendingSubscribePeerLogin_;
+            const QStringList mids = pendingSubscribeMids_;
             pendingAttach_ = PendingJanusAttach::kNone;
             pendingSubscribeFeedId_.clear();
             pendingSubscribePeerLogin_.clear();
+            pendingSubscribeMids_.clear();
 
             std::unique_ptr<PeerObserver> observer;
             const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection =
@@ -797,6 +898,7 @@ void CallManager::onJanusAttached(qint64 handle) {
                 entry.observer = std::move(observer);
                 entry.janusHandle = handle;
                 entry.sfuFeedId = feedId;
+                entry.subscribedMids = QSet<QString>(mids.begin(), mids.end());
                 peers_.emplace(peerLogin.toStdString(), std::move(entry));
                 chatClient_.sendJanusMessage(
                     handle, QJsonObject{{"request", "join"}, {"room", sfuRoom_}, {"ptype", "subscriber"}, {"feed", feedId}});
@@ -822,14 +924,16 @@ void CallManager::onJanusEvent(const QJsonObject& event) {
             for (const QJsonValue& publisherValue : data.value(QStringLiteral("publishers")).toArray()) {
                 const QJsonObject publisher = publisherValue.toObject();
                 ensureSubscribeConnection(publisher.value(QStringLiteral("id")).toString(),
-                                           publisher.value(QStringLiteral("display")).toString());
+                                           publisher.value(QStringLiteral("display")).toString(),
+                                           publisherStreamMids(publisher));
             }
             negotiateLocal(publishConnectionLabel());
         } else if (videoroom == QStringLiteral("event")) {
             for (const QJsonValue& publisherValue : data.value(QStringLiteral("publishers")).toArray()) {
                 const QJsonObject publisher = publisherValue.toObject();
                 ensureSubscribeConnection(publisher.value(QStringLiteral("id")).toString(),
-                                           publisher.value(QStringLiteral("display")).toString());
+                                           publisher.value(QStringLiteral("display")).toString(),
+                                           publisherStreamMids(publisher));
             }
             const QString leavingFeed = data.contains(QStringLiteral("leaving"))
                                              ? data.value(QStringLiteral("leaving")).toString()
