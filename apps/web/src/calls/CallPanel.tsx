@@ -6,6 +6,7 @@
 
 import { ChatClient } from "@devicehub/core";
 
+import styles from "./CallPanel.module.css";
 import { kCallReactionEmojis, useCall } from "./useCall.js";
 import { VideoTile } from "./VideoTile.js";
 
@@ -19,46 +20,55 @@ export function CallPanel({ chatClient, localLogin }: CallPanelProps) {
 
   if (!state.inCall) {
     return (
-      <div>
-        <button type="button" onClick={actions.join}>
-          Join call
-        </button>
-        {state.error !== null && <p role="alert">{state.error}</p>}
+      <div className={styles.container}>
+        <div className={styles.joinRow}>
+          <button type="button" data-variant="primary" onClick={actions.join}>
+            Join call
+          </button>
+          {state.error !== null && <p role="alert">{state.error}</p>}
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div>
-        <button type="button" onClick={actions.toggleMute}>
+    <div className={styles.container}>
+      <div className={styles.controls}>
+        <button type="button" aria-pressed={state.muted} onClick={actions.toggleMute}>
           {state.muted ? "Unmute" : "Mute"}
         </button>
-        <button type="button" onClick={actions.toggleVideo}>
+        <button type="button" aria-pressed={state.videoEnabled} onClick={actions.toggleVideo}>
           {state.videoEnabled ? "Disable video" : "Enable video"}
         </button>
-        <button type="button" onClick={actions.toggleScreenShare}>
+        <button type="button" aria-pressed={state.screenShareEnabled} onClick={actions.toggleScreenShare}>
           {state.screenShareEnabled ? "Stop sharing" : "Share screen"}
         </button>
-        <button type="button" onClick={actions.leave}>
+        <button type="button" className={styles.leaveButton} onClick={actions.leave}>
           Leave call
         </button>
       </div>
       {state.error !== null && <p role="alert">{state.error}</p>}
-      {state.participants.length > 0 && <p>In call: {state.participants.join(", ")}</p>}
-      <div>
+      {state.participants.length > 0 && (
+        <p className={styles.participants}>In call: {state.participants.join(", ")}</p>
+      )}
+      <div className={styles.reactions}>
         {kCallReactionEmojis.map((emoji) => (
-          <button key={emoji} type="button" onClick={() => actions.sendReaction(emoji)}>
+          <button
+            key={emoji}
+            type="button"
+            className={styles.reactionButton}
+            onClick={() => actions.sendReaction(emoji)}
+          >
             {emoji}
           </button>
         ))}
       </div>
       {state.lastReaction !== null && (
-        <p>
+        <p className={styles.reactionFeed}>
           {state.lastReaction.login} {state.lastReaction.emoji}
         </p>
       )}
-      <div>
+      <div className={styles.videoGrid}>
         {state.localCameraStream !== null && (
           <VideoTile stream={state.localCameraStream} label="You (camera)" muted />
         )}
