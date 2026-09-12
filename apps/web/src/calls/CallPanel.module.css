@@ -1,0 +1,95 @@
+/*
+ * Issue #371 — CallPanel had no CSS at all: every element was a bare
+ * <div>/<button>, so the video area rendered at raw camera resolution
+ * (pushing the remote participant's tile off-screen with no way to see
+ * both without scrolling) and the toolbar had no visual hierarchy.
+ * Same token set as the rest of the app (theme.css) — this only adds
+ * layout, sizing, and the toggle/danger states the shared button reset
+ * doesn't know about.
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.joinRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Mute/Enable video/Share screen are toggles — same "selected" accent
+   fill the sidebars already use for aria-current, applied here to
+   aria-pressed instead (the semantically correct ARIA role for a
+   two-state toggle button, which these are, unlike a nav selection). */
+.controls button[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: transparent;
+  color: var(--color-text-on-accent);
+}
+
+/* Leave call is destructive-ish — a quiet danger outline at rest (never
+   default-red on a row of otherwise-neutral buttons; only warms up on
+   hover/press, mirroring how every other button here only accents on
+   interaction). */
+.leaveButton {
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+.leaveButton:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+
+.participants {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.reactions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.reactionButton {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  border-radius: 50%;
+}
+
+.reactionFeed {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* A horizontal filmstrip, not a full-bleed hero — this sits above the
+   message list in the same scrolling column (see chatView.module.css's
+   .section), so a tall video grid would shove the conversation below
+   the fold. Wrapping instead of a fixed row lets a handful of
+   participants stay visible without scrolling; overflow-x covers the
+   rest for a larger call. */
+.videoGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

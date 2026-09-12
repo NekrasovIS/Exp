@@ -1,0 +1,42 @@
+/*
+ * Issue #371 — see CallPanel.module.css's own doc comment for the
+ * "video area had zero CSS" problem this fixes. Each tile: a fixed,
+ * modest size (real camera/screen resolution used to render at full
+ * native size), rounded + cropped like every other rounded surface in
+ * this theme, with the label overlaid on a gradient scrim rather than
+ * as a separate line — the standard video-call convention, and it
+ * keeps the tile's own footprint to just the video.
+ */
+
+.tile {
+  position: relative;
+  flex: 0 0 auto;
+  width: 200px;
+  aspect-ratio: 4 / 3;
+  margin: 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+}
+
+.tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tile figcaption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+  color: #fff;
+  background: linear-gradient(to top, rgb(0 0 0 / 0.7), transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
