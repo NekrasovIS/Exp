@@ -42,6 +42,14 @@ ChatMessage sampleMessageWithVideoAttachment() {
                         .attachmentFilename = "clip.mp4"};
 }
 
+ChatMessage sampleMessageWithAudioAttachment() {
+    return ChatMessage{.author = "alice",
+                        .body = "",
+                        .sentAt = "2026-08-05 09:00:00",
+                        .attachmentId = 45,
+                        .attachmentFilename = "voice-message-123.wav"};
+}
+
 TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
@@ -518,6 +526,59 @@ TEST(ChatMessageRowTest, VideoAttachmentShowsAPlaceholderWithTheFilename) {
     ASSERT_NE(placeholder, nullptr);
     EXPECT_TRUE(placeholder->text().contains(QStringLiteral("clip.mp4")));
     EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentPreview"), nullptr);
+}
+
+TEST(ChatMessageRowTest, IsAudioAttachmentRecognizesWavExtensionOnly) {
+    EXPECT_TRUE(isAudioAttachment(QStringLiteral("voice-message-123.wav")));
+    EXPECT_TRUE(isAudioAttachment(QStringLiteral("clip.WAV")));
+    EXPECT_FALSE(isAudioAttachment(QStringLiteral("clip.mp4")));
+    EXPECT_FALSE(isAudioAttachment(QStringLiteral("photo.png")));
+}
+
+// Issue #359 — голосовое сообщение показывает Play вместо ссылки
+// "Download", в отличие от любого другого вложения: сохранять WAV на
+// диск незачем, вложение существует только чтобы быть прослушанным.
+TEST(ChatMessageRowTest, AudioAttachmentShowsPlayButtonInsteadOfDownload) {
+    ChatMessageRow row(sampleMessageWithAudioAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* playButton = row.findChild<QPushButton*>("playVoiceMessageButton");
+    ASSERT_NE(playButton, nullptr);
+    EXPECT_TRUE(playButton->text().contains(QStringLiteral("Play")));
+    EXPECT_EQ(row.findChild<QPushButton*>("downloadAttachmentButton"), nullptr);
+    EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentPreview"), nullptr);
+    EXPECT_EQ(row.findChild<QLabel*>("chatAttachmentVideoPlaceholder"), nullptr);
+}
+
+TEST(ChatMessageRowTest, ClickingPlayBeforeAudioIsLoadedEmitsPlaybackRequestedAndDisablesTheButton) {
+    ChatMessageRow row(sampleMessageWithAudioAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+    QSignalSpy spy(&row, &ChatMessageRow::playbackRequested);
+
+    auto* playButton = row.findChild<QPushButton*>("playVoiceMessageButton");
+    ASSERT_NE(playButton, nullptr);
+    emit playButton->clicked();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 45);
+    EXPECT_FALSE(playButton->isEnabled());
+    EXPECT_TRUE(playButton->text().contains(QStringLiteral("Loading")));
+}
+
+TEST(ChatMessageRowTest, SetAudioDataWithEmptyBytesShowsAFallbackMessage) {
+    ChatMessageRow row(sampleMessageWithAudioAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    row.setAudioData(QByteArray());
+
+    auto* playButton = row.findChild<QPushButton*>("playVoiceMessageButton");
+    ASSERT_NE(playButton, nullptr);
+    EXPECT_TRUE(playButton->text().contains(QStringLiteral("unavailable")));
+}
+
+TEST(ChatMessageRowTest, SetAudioDataOnARowWithoutAnAudioAttachmentIsANoop) {
+    ChatMessageRow row(sampleMessageWithAttachment(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    row.setAudioData(QByteArray("not really audio"));  // must not crash
+
+    EXPECT_EQ(row.findChild<QPushButton*>("playVoiceMessageButton"), nullptr);
 }
 
 }  // namespace

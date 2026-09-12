@@ -40,6 +40,7 @@ TEST(ChatViewTest, SetEncryptedAddsLockPrefixAndDisablesAttachAndSearch) {
     EXPECT_NE(title->text(), QStringLiteral("secret"));  // присутствует префикс с замком
     EXPECT_FALSE(view.attachButton()->isEnabled());
     EXPECT_FALSE(view.searchButton()->isEnabled());
+    EXPECT_FALSE(view.recordVoiceButton()->isEnabled());  // issue #359, тот же принцип, что и у attachButton()
 }
 
 TEST(ChatViewTest, SetEncryptedFalseRestoresPlainTitleAndReenablesButtons) {
@@ -54,6 +55,7 @@ TEST(ChatViewTest, SetEncryptedFalseRestoresPlainTitleAndReenablesButtons) {
     EXPECT_EQ(title->text(), QStringLiteral("general"));
     EXPECT_TRUE(view.attachButton()->isEnabled());
     EXPECT_TRUE(view.searchButton()->isEnabled());
+    EXPECT_TRUE(view.recordVoiceButton()->isEnabled());  // issue #359, тот же принцип, что и у attachButton()
 }
 
 TEST(ChatViewTest, ShowPlaceholderSwitchesBackFromChannel) {
@@ -148,6 +150,29 @@ TEST(ChatViewTest, ClickingSearchButtonEmitsOpenSearchRequested) {
     emit view.searchButton()->clicked();
 
     EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ChatViewTest, ClickingRecordVoiceButtonEmitsRecordVoiceToggleRequested) {
+    ChatView view;
+    QSignalSpy spy(&view, &ChatView::recordVoiceToggleRequested);
+
+    emit view.recordVoiceButton()->clicked();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ChatViewTest, SetRecordingVoiceTogglesTheButtonBetweenIdleAndStopLabels) {
+    ChatView view;
+    const QString idleText = view.recordVoiceButton()->text();
+
+    view.setRecordingVoice(true);
+    const QString recordingText = view.recordVoiceButton()->text();
+
+    EXPECT_NE(recordingText, idleText);
+
+    view.setRecordingVoice(false);
+
+    EXPECT_EQ(view.recordVoiceButton()->text(), idleText);
 }
 
 TEST(ChatViewTest, ScrollToMessageReturnsTrueForALoadedMessageAndFalseOtherwise) {
@@ -262,6 +287,47 @@ TEST(ChatViewTest, SetAttachmentPreviewAfterClearLogDoesNotCrash) {
     QImage image(4, 4, QImage::Format_ARGB32);
     image.fill(Qt::blue);
     view.setAttachmentPreview(7, image);  // must not crash, must not dereference a dangling row
+}
+
+// Issue #359 — в отличие от превью изображения (запрашивается сразу
+// для каждой строки-картинки), голосовое сообщение просит данные лениво
+// — только по клику на "Play", не при появлении строки.
+TEST(ChatViewTest, ClickingPlayEmitsVoicePlaybackRequestedAndSetVoiceMessageDataReachesThatRow) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.id = 10,
+                                    .author = "alice",
+                                    .body = "",
+                                    .sentAt = "2026-08-05 09:00:00",
+                                    .attachmentId = 8,
+                                    .attachmentFilename = "voice-message-1.wav"});
+    auto* playButton = view.findChild<QPushButton*>(QStringLiteral("playVoiceMessageButton"));
+    ASSERT_NE(playButton, nullptr);
+    QSignalSpy spy(&view, &ChatView::voicePlaybackRequested);
+
+    emit playButton->clicked();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toLongLong(), 8);
+    EXPECT_FALSE(playButton->isEnabled());
+
+    view.setVoiceMessageData(8, QByteArray("not really a wav, just checking it reaches the row"));
+
+    EXPECT_TRUE(playButton->isEnabled());
+}
+
+TEST(ChatViewTest, SetVoiceMessageDataAfterClearLogDoesNotCrash) {
+    ChatView view;
+    view.appendMessage(ChatMessage{.author = "alice",
+                                    .body = "",
+                                    .sentAt = "2026-08-05 09:00:00",
+                                    .attachmentId = 8,
+                                    .attachmentFilename = "voice-message-1.wav"});
+    auto* playButton = view.findChild<QPushButton*>(QStringLiteral("playVoiceMessageButton"));
+    ASSERT_NE(playButton, nullptr);
+    emit playButton->clicked();
+    view.clearLog();
+
+    view.setVoiceMessageData(8, QByteArray("bytes"));  // must not crash, must not dereference a dangling row
 }
 
 TEST(ChatViewTest, PinnedMessagesButtonHiddenUntilSetPinnedMessagesCountIsPositive) {

@@ -88,6 +88,30 @@ end note
 AudioInputDevice --> "0..1" QAudioSource : owns (unique_ptr)
 AudioInputDevice ..> QAudioDevice : uses
 
+package "audio_utils" {
+  class WavEncoder << (F,orchid) function >> {
+    +{static} encodeWav(pcmData: QByteArray, format: QAudioFormat) : QByteArray
+  }
+}
+
+class VoiceMessageRecorder {
+  +start(device: QAudioDevice)
+  +stop() : QByteArray
+  +isRecording() : bool
+  .. signals ..
+  +errorOccurred(message: QString)
+}
+note right of VoiceMessageRecorder
+  Issue #359. Owns its own AudioInputDevice,
+  separate from MainWindow's shared instance
+  (mic test / CallManager) — no cross-feature
+  conflict at the Qt/OS level. Accumulates PCM
+  from pcmDataAvailable() while recording; stop()
+  hands the buffer to WavEncoder::encodeWav().
+end note
+VoiceMessageRecorder *-- AudioInputDevice : owns
+VoiceMessageRecorder ..> WavEncoder : uses
+
 class CameraDevice {
   +setDevice(device: QCameraDevice)
   +start()

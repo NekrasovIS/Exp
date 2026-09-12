@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -7,8 +8,12 @@
 
 #include <optional>
 
+class QAudioOutput;
+class QBuffer;
 class QImage;
 class QLabel;
+class QMediaPlayer;
+class QPushButton;
 class QResizeEvent;
 
 namespace devicehub {
@@ -75,6 +80,14 @@ struct ChatMessage {
 /// файла (в отличие от изображений, у видео нет дешёвого способа
 /// получить превью-кадр без скачивания и декодирования всего файла).
 [[nodiscard]] bool isVideoAttachment(const QString& filename);
+
+/// True для голосовых сообщений (issue #359) — WAV-вложения, созданные
+/// `VoiceMessageRecorder`. В отличие от произвольного вложения с
+/// расширением `.wav`, отличить которое от голосового сообщения по
+/// одному только имени файла в принципе нельзя, для этой версии
+/// достаточно: рендерится Play/Pause вместо ссылки "Download" на любой
+/// `.wav`, так же как рендерится превью на любое изображение.
+[[nodiscard]] bool isAudioAttachment(const QString& filename);
 
 /**
  * @brief Одна строка в списке сообщений ChatView, оформленная в виде
@@ -146,6 +159,14 @@ public:
     /// проверки, поэтому вызывающий код может звать это безусловно.
     void setAttachmentPreview(const QImage& image);
 
+    /// Передаёт скачанные байты голосового сообщения (issue #359) в
+    /// проигрыватель и сразу начинает воспроизведение — вызывается
+    /// ChatView в ответ на playbackRequested(). Ничего не делает, если
+    /// у этой строки нет вложения-голосового сообщения (см.
+    /// isAudioAttachment()) — тот же принцип защитной проверки, что и у
+    /// setAttachmentPreview() выше.
+    void setAudioData(const QByteArray& data);
+
 signals:
     /// Выбор "Edit" в контекстном меню по правому клику (только для
     /// собственных сообщений, issue #107/#150) — @p currentBody
@@ -182,6 +203,14 @@ signals:
     /// только id.
     void replyRequested(qint64 id);
 
+    /// Клик по "▶ Play" на голосовом сообщении (issue #359), когда
+    /// аудио ещё не загружено этой строкой — вызывающий код запускает
+    /// скачивание и позже вызывает setAudioData(). Повторный клик по
+    /// Play/Pause после того, как аудио уже загружено, ничего не
+    /// эмиттит — переключает уже созданный проигрыватель напрямую, без
+    /// повторного похода за данными.
+    void playbackRequested(qint64 attachmentId);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
@@ -211,6 +240,21 @@ private:
     /// заменяет плейсхолдерный текст на реальную картинку, когда она
     /// загружена.
     QLabel* attachmentPreviewLabel_ = nullptr;
+    /// Кнопка "▶ Play"/"⏸ Pause" вложения-голосового сообщения (issue
+    /// #359, см. isAudioAttachment()) — null для строк без такого
+    /// вложения. audioPlayer_/audioOutput_/audioBuffer_ создаются лениво
+    /// в setAudioData(), а не в конструкторе — до первого клика по Play
+    /// байтов ещё нет, а до setAudioData() создавать проигрыватель не
+    /// для чего.
+    QPushButton* playButton_ = nullptr;
+    QMediaPlayer* audioPlayer_ = nullptr;
+    QAudioOutput* audioOutput_ = nullptr;
+    /// QBuffer::setData() копирует байты во внутреннее хранилище самого
+    /// буфера (не хранит указатель на внешний QByteArray) — умышленно,
+    /// чтобы не зависеть от порядка разрушения QObject-детей этой
+    /// строки и отдельного QByteArray-члена.
+    QBuffer* audioBuffer_ = nullptr;
+    qint64 attachmentId_ = -1;
     /// Issue #338 — управляет видимостью Pin/Unpin в контекстном меню,
     /// построенном лениво при каждом правом клике (см. конструктор), а
     /// не пересобираемом при setPinned().

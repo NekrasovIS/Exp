@@ -16,6 +16,7 @@
 #include "devices/CameraDevice.h"
 #include "devices/DeviceEnumerator.h"
 #include "devices/ScreenCaptureDevice.h"
+#include "devices/VoiceMessageRecorder.h"
 #include "ui/ToastBanner.h"
 #include "user/IdentityKeyStore.h"
 #include "user/UserProfileClient.h"
@@ -79,6 +80,14 @@ private:
     /// как сработает ChatRestClient::attachmentUploaded() (см.
     /// MainWindow.cpp).
     void onAttachFileClicked();
+    /// Клик по кнопке записи голосового сообщения (issue #359) —
+    /// переключает voiceMessageRecorder_ старт/стоп; на стоп сразу
+    /// загружает готовый WAV через ChatRestClient::uploadAttachment(),
+    /// тем же путём, что и обычное файловое вложение (см. подключение
+    /// ChatRestClient::attachmentUploaded() в MainWindow.cpp — оно уже
+    /// отправляет сообщение с этим attachment_id, отдельно вызывать
+    /// sendMessage() здесь не нужно).
+    void onRecordVoiceToggleClicked();
     void onCallToggleClicked();
     void onMuteToggleClicked();
     void onVideoToggleClicked();
@@ -208,6 +217,9 @@ private:
     AudioInputDevice audioInput_;
     CameraDevice camera_;
     ScreenCaptureDevice screenCapture_;
+    /// Issue #359 — своя запись, независимая от audioInput_ выше (та —
+    /// общая для mic-теста в настройках и CallManager во время звонка).
+    VoiceMessageRecorder voiceMessageRecorder_;
     AuthClient authClient_;
     ChatClient chatClient_;
     /// Отдельное WebSocket-соединение для живой доставки личных
