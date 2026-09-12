@@ -535,6 +535,20 @@ TEST(ChatMessageRowTest, IsAudioAttachmentRecognizesWavExtensionOnly) {
     EXPECT_FALSE(isAudioAttachment(QStringLiteral("photo.png")));
 }
 
+// Issue #360 — веб-клиент записывает голосовые сообщения через
+// MediaRecorder в .webm/.ogg/.m4a, не .wav. .ogg/.m4a permissive, как
+// .wav; .webm требует ещё и префикс "voice-message-", потому что этот
+// контейнер уже занят isVideoAttachment() (issue #188) для настоящих
+// видео-вложений.
+TEST(ChatMessageRowTest, IsAudioAttachmentRecognizesWebRecordedContainers) {
+    EXPECT_TRUE(isAudioAttachment(QStringLiteral("voice-message-123.ogg")));
+    EXPECT_TRUE(isAudioAttachment(QStringLiteral("voice-message-123.m4a")));
+    EXPECT_TRUE(isAudioAttachment(QStringLiteral("voice-message-123.webm")));
+    EXPECT_TRUE(isAudioAttachment(QStringLiteral("VOICE-MESSAGE-123.WEBM")));
+    EXPECT_FALSE(isAudioAttachment(QStringLiteral("holiday-clip.webm")))
+        << "a plain .webm should still be recognized as video, not audio";
+}
+
 // Issue #359 — голосовое сообщение показывает Play вместо ссылки
 // "Download", в отличие от любого другого вложения: сохранять WAV на
 // диск незачем, вложение существует только чтобы быть прослушанным.

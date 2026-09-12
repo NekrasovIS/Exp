@@ -44,3 +44,13 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
+
+/* Issue #360 — recording is an active, urgent state (unlike CallPanel's
+   passive mute/video toggles, which only reflect your own quiet
+   on/off), so this fills solid danger red instead of the accent fill
+   those use for aria-pressed. */
+.recordButton[aria-pressed="true"] {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}

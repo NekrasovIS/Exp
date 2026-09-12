@@ -691,6 +691,13 @@ note left of ChatMessageRow
   and calls setAudioData(), which builds a
   QMediaPlayer/QAudioOutput/QBuffer lazily and
   starts playback immediately.
+
+  Issue #360 extended isAudioAttachment() to also
+  recognize .ogg/.m4a (permissive, like .wav) and
+  .webm — but .webm additionally requires a
+  "voice-message-" filename prefix, since that
+  extension is already claimed by
+  isVideoAttachment() for real video attachments.
 end note
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)

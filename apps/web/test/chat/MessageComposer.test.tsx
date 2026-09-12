@@ -8,6 +8,45 @@ import { jsonResponse, routedFetch } from "../testUtils.js";
 
 const kStorageKey = "devicehub.web.session";
 
+// Issue #360 — same fake MediaRecorder as useVoiceRecorder.test.ts,
+// duplicated locally rather than imported: this file is exercising the
+// record button's wiring into the composer, not the recorder hook
+// itself (already covered on its own).
+class FakeMediaRecorder {
+  static isTypeSupported = vi.fn((type: string) => type === "audio/webm;codecs=opus");
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  readonly mimeType = "audio/webm;codecs=opus";
+  readonly stream: MediaStream;
+  private readonly stopListeners: Array<() => void> = [];
+
+  constructor(stream: MediaStream) {
+    this.stream = stream;
+  }
+
+  addEventListener(event: string, listener: () => void): void {
+    if (event === "stop") {
+      this.stopListeners.push(listener);
+    }
+  }
+
+  start(): void {}
+
+  stop(): void {
+    this.ondataavailable?.({ data: new Blob(["fake-audio"], { type: this.mimeType }) });
+    this.stopListeners.forEach((listener) => listener());
+  }
+}
+
+function stubMicrophone(): void {
+  vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ kind: "audio", stop: vi.fn() }] }),
+    },
+  });
+}
+
 function renderComposer(overrides: Partial<Parameters<typeof MessageComposer>[0]> = {}) {
   const onSend = overrides.onSend ?? vi.fn();
   const onCancelReply = overrides.onCancelReply ?? vi.fn();
@@ -168,5 +207,40 @@ describe("MessageComposer", () => {
     await userEvent.upload(screen.getByLabelText("Attach a file"), file);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't upload/i);
+  });
+
+  it("records a voice message and sends it as the attachment (issue #360)", async () => {
+    stubMicrophone();
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([
+        [/\/attachments$/, () => jsonResponse(201, { id: 42, filename: "voice-message-1.webm" })],
+      ]),
+    );
+    const { onSend } = renderComposer();
+
+    const recordButton = screen.getByRole("button", { name: "Record a voice message" });
+    await userEvent.click(recordButton);
+    expect(screen.getByRole("button", { name: "Stop recording" })).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+
+    expect(await screen.findByText(/Attached: voice-message-1\.webm/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledWith("", 42);
+  });
+
+  it("shows an error when the microphone can't be opened", async () => {
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    renderComposer();
+
+    await userEvent.click(screen.getByRole("button", { name: "Record a voice message" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/microphone/i);
   });
 });

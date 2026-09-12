@@ -6,6 +6,15 @@
 // @mention autocomplete (issue #326) is layered onto the same <input>
 // via useMentionAutocomplete() — see that hook's own doc comment for
 // why it doesn't (yet) reuse #322's useMembers().
+//
+// Voice messages (issue #360) reuse this same "upload immediately,
+// ride along as attachment_id on Send" mechanism: the 🎤 button starts
+// useVoiceRecorder(), a second click ("⏹") stops it and uploads the
+// resulting Blob exactly like handleFileSelected() uploads a picked
+// File, landing in the same pendingAttachment state. There's no
+// separate encrypted-channel disablement here (unlike desktop's
+// recordVoiceMessageButton) because EncryptedChatViewContent.tsx never
+// renders this composer at all — it has its own simpler one.
 
 import { ChatRestClient } from "@devicehub/core";
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -13,6 +22,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type Keyboa
 import styles from "./MessageComposer.module.css";
 import { MentionSuggestions } from "./MentionSuggestions.js";
 import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
+import { useVoiceRecorder } from "./useVoiceRecorder.js";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -50,6 +60,7 @@ export function MessageComposer({
   const { getAccessToken } = useSession();
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
   const mention = useMentionAutocomplete(communityId);
+  const voiceRecorder = useVoiceRecorder();
   const bodyInputRef = useRef<HTMLInputElement>(null);
   // Issue #369 — a mention-suggestion pick needs to move the caret to
   // right after the inserted "@login " (see selectMention()/
@@ -83,12 +94,7 @@ export function MessageComposer({
     pendingCursorPos.current = null;
   }, [body]);
 
-  async function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (file === undefined) {
-      return;
-    }
+  async function uploadBytes(filename: string, contentType: string, bytes: Uint8Array): Promise<void> {
     const token = getAccessToken();
     if (token === null) {
       return;
@@ -96,14 +102,37 @@ export function MessageComposer({
     setError(null);
     setUploading(true);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const uploaded = await client.uploadAttachment(token, channelId, file.name, file.type, bytes);
+      const uploaded = await client.uploadAttachment(token, channelId, filename, contentType, bytes);
       setPendingAttachment(uploaded);
     } catch {
       setError("Couldn't upload that file.");
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined) {
+      return;
+    }
+    await uploadBytes(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
+  }
+
+  async function handleVoiceToggle(): Promise<void> {
+    if (voiceRecorder.isRecording) {
+      const recorded = await voiceRecorder.stop();
+      if (recorded !== null) {
+        await uploadBytes(
+          recorded.filename,
+          recorded.blob.type,
+          new Uint8Array(await recorded.blob.arrayBuffer()),
+        );
+      }
+      return;
+    }
+    await voiceRecorder.start();
   }
 
   function handleSubmit(event: FormEvent): void {
@@ -154,6 +183,7 @@ export function MessageComposer({
   return (
     <>
       {error !== null && <p role="alert">{error}</p>}
+      {voiceRecorder.error !== null && <p role="alert">{voiceRecorder.error}</p>}
       {replyTarget != null && (
         <p className={styles.replyBar}>
           Replying to <strong>{replyTarget.author}</strong>: {replyTarget.snippet}{" "}
@@ -180,6 +210,16 @@ export function MessageComposer({
           type="file"
           onChange={(event) => void handleFileSelected(event)}
         />
+        <button
+          type="button"
+          className={styles.recordButton}
+          aria-pressed={voiceRecorder.isRecording}
+          aria-label={voiceRecorder.isRecording ? "Stop recording" : "Record a voice message"}
+          title={voiceRecorder.isRecording ? "Stop recording" : "Record a voice message"}
+          onClick={() => void handleVoiceToggle()}
+        >
+          {voiceRecorder.isRecording ? "⏹" : "🎤"}
+        </button>
         <label htmlFor="message-body" className={styles.bodyLabel}>
           Message
         </label>
