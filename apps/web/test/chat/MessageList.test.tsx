@@ -1,32 +1,53 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageList } from "../../src/chat/MessageList.js";
+import { SessionProvider } from "../../src/session/SessionContext.js";
 
 const kMessages = [
   { id: 1, author: "alice", body: "hi from alice", sentAt: "2026-01-01T00:00:00Z", reactions: [] },
   { id: 2, author: "bob", body: "hi from bob", sentAt: "2026-01-01T00:01:00Z", reactions: [] },
 ];
 
+const kStorageKey = "devicehub.web.session";
+
 function renderList(overrides: Partial<Parameters<typeof MessageList>[0]> = {}) {
   return render(
-    <MessageList
-      messages={kMessages}
-      editedIds={new Set()}
-      pinnedIds={new Set()}
-      currentLogin="alice"
-      isModerator={false}
-      onEdit={vi.fn()}
-      onDelete={vi.fn()}
-      onReply={vi.fn()}
-      onToggleReaction={vi.fn()}
-      onPin={vi.fn()}
-      onUnpin={vi.fn()}
-      {...overrides}
-    />,
+    <SessionProvider>
+      <MessageList
+        messages={kMessages}
+        editedIds={new Set()}
+        pinnedIds={new Set()}
+        currentLogin="alice"
+        isModerator={false}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onReply={vi.fn()}
+        onToggleReaction={vi.fn()}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        {...overrides}
+      />
+    </SessionProvider>,
   );
 }
+
+beforeEach(() => {
+  localStorage.setItem(
+    kStorageKey,
+    JSON.stringify({
+      token: "access-token",
+      refreshToken: "refresh-token",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    }),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
 describe("MessageList", () => {
   it("shows Edit and Delete only on the current user's own message", () => {
@@ -228,5 +249,27 @@ describe("MessageList", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getByRole("textbox")).toHaveValue("hi @bob");
+  });
+
+  // Issue #360 — an attachment recognized by isVoiceMessageAttachment()
+  // renders as VoiceMessagePlayer (a Play button) instead of
+  // AttachmentDownloadLink's "Download: ..." link; anything else keeps
+  // the plain download link, unchanged from before this feature.
+  it("renders a voice-message attachment as a Play button, not a download link", () => {
+    renderList({
+      messages: [{ ...kMessages[0]!, attachmentId: 9, attachmentFilename: "voice-message-1.webm" }],
+    });
+
+    expect(screen.getByRole("button", { name: /Play voice message/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Download:/)).not.toBeInTheDocument();
+  });
+
+  it("renders a non-voice attachment as the plain download link", () => {
+    renderList({
+      messages: [{ ...kMessages[0]!, attachmentId: 9, attachmentFilename: "report.pdf" }],
+    });
+
+    expect(screen.getByText(/Download: report\.pdf/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Play voice message/ })).not.toBeInTheDocument();
   });
 });

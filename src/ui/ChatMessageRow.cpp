@@ -81,7 +81,14 @@ bool isVideoAttachment(const QString& filename) {
 }
 
 bool isAudioAttachment(const QString& filename) {
-    return hasAnyExtension(filename, {".wav"});
+    if (hasAnyExtension(filename, {".wav", ".ogg", ".m4a"})) {
+        return true;
+    }
+    // .webm уже занят isVideoAttachment() — см. doc-комментарий в
+    // ChatMessageRow.h, почему для этого расширения одного совпадения
+    // недостаточно и нужен ещё префикс имени файла.
+    return filename.startsWith(QStringLiteral("voice-message-"), Qt::CaseInsensitive) &&
+           hasAnyExtension(filename, {".webm"});
 }
 
 ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,

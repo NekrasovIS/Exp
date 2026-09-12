@@ -22,13 +22,20 @@
 // but unlike delete, it's independent of authorship: pinning is a
 // channel-management action, not message moderation, so it never
 // shows just because the viewer happens to be the author.
+//
+// Voice messages (issue #360) render as VoiceMessagePlayer instead of
+// AttachmentDownloadLink when isVoiceMessageAttachment() recognizes the
+// filename — same branch point desktop's ChatMessageRow uses for its
+// own isAudioAttachment() check.
 
 import type { ChatMessageInfo } from "@devicehub/core";
 import { useMemo, useState } from "react";
 
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
+import { isVoiceMessageAttachment } from "./isVoiceMessageAttachment.js";
 import { MessageBody } from "./MessageBody.js";
+import { VoiceMessagePlayer } from "./VoiceMessagePlayer.js";
 
 const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
 
@@ -144,10 +151,17 @@ export function MessageList({
                   {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
                   {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
                     <span className={styles.attachment}>
-                      <AttachmentDownloadLink
-                        attachmentId={message.attachmentId}
-                        filename={message.attachmentFilename}
-                      />
+                      {isVoiceMessageAttachment(message.attachmentFilename) ? (
+                        <VoiceMessagePlayer
+                          attachmentId={message.attachmentId}
+                          filename={message.attachmentFilename}
+                        />
+                      ) : (
+                        <AttachmentDownloadLink
+                          attachmentId={message.attachmentId}
+                          filename={message.attachmentFilename}
+                        />
+                      )}
                     </span>
                   )}
                   <div className={styles.reactions}>
