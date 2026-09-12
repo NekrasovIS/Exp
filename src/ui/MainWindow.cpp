@@ -192,6 +192,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&audioInput_, &AudioInputDevice::errorOccurred, this, [this](const QString& message) {
         settingsDialog_->micStatusLabel()->setText(tr("Error: %1").arg(message));
     });
+    connect(&voiceMessageRecorder_, &VoiceMessageRecorder::errorOccurred, this, [this](const QString& message) {
+        chatView_->setRecordingVoice(false);
+        showToast(tr("Couldn't record a voice message: %1").arg(message), ToastBanner::Variant::kError);
+    });
     connect(&camera_, &CameraDevice::errorOccurred, this, [this](const QString& message) {
         settingsDialog_->cameraStatusLabel()->setText(tr("Error: %1").arg(message));
     });
@@ -407,6 +411,14 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatView_, &ChatView::unpinMessageRequested, this,
             [this](qint64 id) { chatClient_.sendUnpinMessage(id); });
     connect(chatView_, &ChatView::attachFileRequested, this, &MainWindow::onAttachFileClicked);
+    connect(chatView_, &ChatView::recordVoiceToggleRequested, this, &MainWindow::onRecordVoiceToggleClicked);
+    // Issue #359: та же ChatRestClient::downloadAttachment(), что и
+    // "Download"/превью изображения выше, только результат идёт в
+    // ChatView::setVoiceMessageData() — attachmentDownloaded() ниже
+    // различает все три случая по тому, в каком из pending*-состояний
+    // найдётся @p attachmentId (см. её собственный doc-комментарий).
+    connect(chatView_, &ChatView::voicePlaybackRequested, this,
+            [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
     connect(chatView_, &ChatView::downloadAttachmentRequested, this,
             [this](qint64 attachmentId, const QString& filename) {
                 pendingDownloadFilenames_.insert(attachmentId, filename);
@@ -428,14 +440,19 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&chatRestClient_, &ChatRestClient::attachmentDownloaded, this,
             [this](qint64 attachmentId, const QByteArray& data) {
                 if (!pendingDownloadFilenames_.contains(attachmentId)) {
-                    // Фоновая загрузка превью изображения (issue #188),
-                    // не клик по "Download" — decode напрямую в строку
-                    // сообщения, никакого диалога сохранения. Пустой
+                    // Фоновая загрузка превью изображения (issue #188)
+                    // ИЛИ голосового сообщения по клику "Play" (issue
+                    // #359) — не клик по "Download". Оба вызова ниже
+                    // безопасны независимо от того, какой из двух это
+                    // был: setAttachmentPreview()/setVoiceMessageData()
+                    // сами проверяют свой pending-набор и молча ничего
+                    // не делают, если @p attachmentId не их. Пустой
                     // QImage() при неудачном decode — setAttachmentPreview()
                     // сама показывает "Preview unavailable" в этом случае.
                     QImage image;
                     image.loadFromData(data);
                     chatView_->setAttachmentPreview(attachmentId, image);
+                    chatView_->setVoiceMessageData(attachmentId, data);
                     return;
                 }
                 const QString filename = pendingDownloadFilenames_.take(attachmentId);
@@ -1226,6 +1243,31 @@ void MainWindow::onAttachFileClicked() {
     // по сравнению с двухшаговым сценарием "прикрепить, просмотреть,
     // затем нажать Send".
     chatRestClient_.uploadAttachment(lastToken_, selectedChannelId_, QFileInfo(path).fileName(), contentType, data);
+}
+
+void MainWindow::onRecordVoiceToggleClicked() {
+    if (voiceMessageRecorder_.isRecording()) {
+        const QByteArray wavData = voiceMessageRecorder_.stop();
+        chatView_->setRecordingVoice(false);
+        if (wavData.isEmpty()) {
+            showToast(tr("Recording failed or was empty"), ToastBanner::Variant::kError);
+            return;
+        }
+        // Тот же путь, что и обычное файловое вложение (issue #116) —
+        // attachmentUploaded() уже отправляет сообщение с этим
+        // attachment_id, см. её подключение выше в этом файле.
+        const QString filename =
+            QStringLiteral("voice-message-%1.wav").arg(QDateTime::currentMSecsSinceEpoch());
+        chatRestClient_.uploadAttachment(lastToken_, selectedChannelId_, filename, QStringLiteral("audio/wav"),
+                                          wavData);
+        return;
+    }
+    if (selectedChannelId_ < 0 || currentChannelEncrypted_) {
+        return;
+    }
+    const QAudioDevice device = settingsDialog_->inputCombo()->currentData().value<QAudioDevice>();
+    voiceMessageRecorder_.start(device);
+    chatView_->setRecordingVoice(true);
 }
 
 void MainWindow::onCallToggleClicked() {

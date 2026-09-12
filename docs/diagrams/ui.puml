@@ -304,6 +304,8 @@ class ChatView {
   +setPinnedMessagesCount(count: int)
   +updateReactions(id: qint64, emoji: QString, logins: QStringList)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
+  +setVoiceMessageData(attachmentId: qint64, data: QByteArray)
+  +setRecordingVoice(recording: bool)
   +scrollToMessage(id: qint64) : bool
   +editingMessageId() : qint64
   +cancelEditingMessage()
@@ -317,6 +319,7 @@ class ChatView {
   +messageEdit() : QLineEdit*
   +sendButton() : QPushButton*
   +attachButton() : QPushButton*
+  +recordVoiceButton() : QPushButton*
   +callToggleButton() : QPushButton*
   +searchButton() : QPushButton*
   +typingIndicatorLabel() : QLabel*
@@ -348,6 +351,8 @@ class ChatView {
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
   +previewAttachmentRequested(attachmentId: qint64)
   +reactionToggleRequested(id: qint64, emoji: QString)
+  +recordVoiceToggleRequested()
+  +voicePlaybackRequested(attachmentId: qint64)
 }
 note right of ChatView
   Issue #185: mute/видео/демонстрация экрана/
@@ -663,6 +668,7 @@ class ChatMessageRow {
   +setPinned(isPinned: bool)
   +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
+  +setAudioData(data: QByteArray)
   #resizeEvent(event: QResizeEvent*)
   -rebuildReactionChips()
   .. signals ..
@@ -673,7 +679,19 @@ class ChatMessageRow {
   +downloadRequested(attachmentId: qint64, filename: QString)
   +reactionToggleRequested(id: qint64, emoji: QString)
   +replyRequested(id: qint64)
+  +playbackRequested(attachmentId: qint64)
 }
+note left of ChatMessageRow
+  setAudioData() (issue #359) — a voice-message
+  attachment (WAV, isAudioAttachment()) renders a
+  Play/Pause button instead of the Download link.
+  Clicking Play before setAudioData() has been
+  called emits playbackRequested() instead of
+  playing anything; ChatView downloads the bytes
+  and calls setAudioData(), which builds a
+  QMediaPlayer/QAudioOutput/QBuffer lazily and
+  starts playback immediately.
+end note
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
   #paintEvent(event: QPaintEvent*)

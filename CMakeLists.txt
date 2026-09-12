@@ -55,6 +55,10 @@ add_library(devicehub_core
     src/devices/AudioOutputDevice.cpp
     src/devices/AudioInputDevice.h
     src/devices/AudioInputDevice.cpp
+    src/devices/VoiceMessageRecorder.h
+    src/devices/VoiceMessageRecorder.cpp
+    src/devices/audio_utils/WavEncoder.h
+    src/devices/audio_utils/WavEncoder.cpp
     src/devices/CameraDevice.h
     src/devices/CameraDevice.cpp
     src/devices/IScreenCaptureBackend.h
@@ -301,6 +305,8 @@ add_executable(devicehub_tests
     test/CallManagerIntegrationTest.cpp
     test/CallVideoTrackSourceTest.cpp
     test/ScreenCaptureDeviceTest.cpp
+    test/WavEncoderTest.cpp
+    test/VoiceMessageRecorderTest.cpp
 )
 target_link_libraries(devicehub_tests PRIVATE
     devicehub_core

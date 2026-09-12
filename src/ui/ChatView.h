@@ -50,6 +50,13 @@ public:
     /// после showChannel() для того канала, к которому это относится.
     void setEncrypted(bool encrypted);
 
+    /// Переключает вид кнопки записи между "🎤" (не идёт запись) и "⏹
+    /// Stop" (идёт) — MainWindow вызывает это в ответ на собственное
+    /// решение start()/stop() у VoiceMessageRecorder, а не наоборот:
+    /// ChatView не владеет записывающим устройством, только отражает
+    /// его состояние (issue #359).
+    void setRecordingVoice(bool recording);
+
     /// Нужно, чтобы решить, является ли добавляемое сообщение "своим"
     /// (пузырь выровнен вправо, акцентный цвет, без аватара) или чужим.
     void setCurrentUserLogin(const QString& login);
@@ -116,6 +123,12 @@ public:
     /// — ничего не делает, если та строка с тех пор исчезла (например,
     /// пользователь переключил канал раньше, чем пришёл ответ).
     void setAttachmentPreview(qint64 attachmentId, const QImage& image);
+
+    /// Передаёт скачанные байты голосового сообщения дальше в строку,
+    /// которая их запросила (issue #359, см. voicePlaybackRequested())
+    /// — ничего не делает, если та строка с тех пор исчезла, тот же
+    /// принцип, что и у setAttachmentPreview() выше.
+    void setVoiceMessageData(qint64 attachmentId, const QByteArray& data);
 
     /// Прокручивает к строке @p id, если она сейчас показана (issue
     /// #118, переход к результату поиска) — @return false, если это
@@ -194,6 +207,9 @@ public:
     [[nodiscard]] QLineEdit* messageEdit() const { return messageEdit_; }
     [[nodiscard]] QPushButton* sendButton() const { return sendButton_; }
     [[nodiscard]] QPushButton* attachButton() const { return attachButton_; }
+    /// Кнопка записи голосового сообщения (issue #359) — рядом с
+    /// attachButton() в композере.
+    [[nodiscard]] QPushButton* recordVoiceButton() const { return recordVoiceButton_; }
     [[nodiscard]] QPushButton* callToggleButton() const { return callToggleButton_; }
     [[nodiscard]] QPushButton* searchButton() const { return searchButton_; }
     [[nodiscard]] QLabel* typingIndicatorLabel() const { return typingIndicatorLabel_; }
@@ -281,6 +297,20 @@ signals:
     /// использует для настоящих кликов по "Download".
     void previewAttachmentRequested(qint64 attachmentId);
 
+    /// Клик по кнопке записи голосового сообщения (issue #359) —
+    /// переключает запись старт/стоп; MainWindow владеет самим
+    /// VoiceMessageRecorder и решает, что делать с готовым WAV на
+    /// стороне stop() (см. doc-комментарий MainWindow::
+    /// onRecordVoiceToggleClicked()).
+    void recordVoiceToggleRequested();
+
+    /// Клик по "▶ Play" на голосовом сообщении, когда аудио ещё не
+    /// загружено этой строкой (issue #359) — тот же принцип, что и у
+    /// previewAttachmentRequested() выше, MainWindow скачивает через
+    /// ChatRestClient::downloadAttachment() и передаёт результат
+    /// обратно в setVoiceMessageData().
+    void voicePlaybackRequested(qint64 attachmentId);
+
 protected:
     /// Перехватывает Enter/Tab/Escape у messageEdit_, пока всплывающий
     /// список автокомплита (issue #326) открыт, чтобы они выбирали
@@ -348,6 +378,9 @@ private:
     QLineEdit* messageEdit_ = nullptr;
     QPushButton* sendButton_ = nullptr;
     QPushButton* attachButton_ = nullptr;
+    /// Кнопка записи голосового сообщения (issue #359), рядом с
+    /// attachButton_ в композере.
+    QPushButton* recordVoiceButton_ = nullptr;
     QPushButton* callToggleButton_ = nullptr;
     bool encrypted_ = false;
     QPushButton* searchButton_ = nullptr;
@@ -383,6 +416,11 @@ private:
     /// может исчезнуть (переключение канала -> clearLog(), удаление
     /// сообщения) раньше, чем придёт ответ.
     QHash<qint64, QPointer<ChatMessageRow>> pendingImagePreviewRows_;
+    /// Строки, ожидающие ответа на voicePlaybackRequested() (issue
+    /// #359) — тот же принцип QPointer, что и у
+    /// pendingImagePreviewRows_ выше, но заполняется лениво по клику на
+    /// "Play", а не сразу для каждой строки с голосовым сообщением.
+    QHash<qint64, QPointer<ChatMessageRow>> pendingVoicePlaybackRows_;
     /// Логины участников текущего сообщества (issue #326) — только для
     /// фильтрации автокомплита, см. setChannelMemberLogins().
     QStringList channelMemberLogins_;

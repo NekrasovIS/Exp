@@ -1,10 +1,14 @@
 #include "ui/ChatMessageRow.h"
 
 #include <QAction>
+#include <QAudioOutput>
+#include <QBuffer>
 #include <QFontMetricsF>
 #include <QHBoxLayout>
+#include <QIODevice>
 #include <QImage>
 #include <QLabel>
+#include <QMediaPlayer>
 #include <QMenu>
 #include <QPixmap>
 #include <QPoint>
@@ -74,6 +78,10 @@ bool isImageAttachment(const QString& filename) {
 
 bool isVideoAttachment(const QString& filename) {
     return hasAnyExtension(filename, {".mp4", ".mov", ".webm", ".mkv", ".avi"});
+}
+
+bool isAudioAttachment(const QString& filename) {
+    return hasAnyExtension(filename, {".wav"});
 }
 
 ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,
@@ -177,7 +185,31 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     }
     bubbleLayout->addWidget(bodyLabel_);
 
-    if (message.attachmentId >= 0) {
+    if (message.attachmentId >= 0 && isAudioAttachment(message.attachmentFilename)) {
+        // Голосовое сообщение (issue #359) — Play/Pause вместо ссылки
+        // "Download": вложение существует только чтобы быть
+        // прослушанным на месте, сохранять WAV на диск незачем.
+        attachmentId_ = message.attachmentId;
+        playButton_ = new QPushButton(QStringLiteral("▶ ") + tr("Play"), bubble_);
+        playButton_->setObjectName(QStringLiteral("playVoiceMessageButton"));
+        if (isOwnMessage) {
+            playButton_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        }
+        connect(playButton_, &QPushButton::clicked, this, [this]() {
+            if (audioPlayer_ != nullptr) {
+                if (audioPlayer_->playbackState() == QMediaPlayer::PlayingState) {
+                    audioPlayer_->pause();
+                } else {
+                    audioPlayer_->play();
+                }
+                return;
+            }
+            playButton_->setEnabled(false);
+            playButton_->setText(tr("Loading…"));
+            emit playbackRequested(attachmentId_);
+        });
+        bubbleLayout->addWidget(playButton_);
+    } else if (message.attachmentId >= 0) {
         auto* downloadButton = new QPushButton(tr("Download: %1").arg(message.attachmentFilename), bubble_);
         downloadButton->setObjectName(QStringLiteral("downloadAttachmentButton"));
         if (isOwnMessage) {
@@ -336,6 +368,34 @@ void ChatMessageRow::setAttachmentPreview(const QImage& image) {
         kAttachmentPreviewMaxWidth, kAttachmentPreviewMaxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     attachmentPreviewLabel_->setText(QString());
     attachmentPreviewLabel_->setPixmap(scaled);
+}
+
+void ChatMessageRow::setAudioData(const QByteArray& data) {
+    if (playButton_ == nullptr) {
+        return;
+    }
+    if (data.isEmpty()) {
+        playButton_->setText(tr("Playback unavailable"));
+        return;
+    }
+    // setData() копирует байты во внутреннее хранилище QBuffer —
+    // безопасно относительно порядка разрушения QObject-детей этой
+    // строки (см. doc-комментарий audioBuffer_ в заголовке), в отличие
+    // от конструктора QBuffer(QByteArray*, ...), который бы хранил
+    // указатель на внешний QByteArray.
+    audioBuffer_ = new QBuffer(this);
+    audioBuffer_->setData(data);
+    audioBuffer_->open(QIODevice::ReadOnly);
+    audioOutput_ = new QAudioOutput(this);
+    audioPlayer_ = new QMediaPlayer(this);
+    audioPlayer_->setAudioOutput(audioOutput_);
+    audioPlayer_->setSourceDevice(audioBuffer_);
+    connect(audioPlayer_, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
+        playButton_->setText((state == QMediaPlayer::PlayingState ? QStringLiteral("⏸ ") + tr("Pause")
+                                                                   : QStringLiteral("▶ ") + tr("Play")));
+    });
+    playButton_->setEnabled(true);
+    audioPlayer_->play();
 }
 
 void ChatMessageRow::applyReactionChange(const QString& emoji, const QStringList& logins) {

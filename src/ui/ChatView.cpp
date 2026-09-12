@@ -289,6 +289,12 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     attachButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(attachButton_, &QPushButton::clicked, this, &ChatView::attachFileRequested);
 
+    recordVoiceButton_ = new QPushButton(QStringLiteral("\U0001F3A4"), composer);
+    recordVoiceButton_->setObjectName(QStringLiteral("recordVoiceMessageButton"));
+    recordVoiceButton_->setToolTip(tr("Record a voice message"));
+    recordVoiceButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
+    connect(recordVoiceButton_, &QPushButton::clicked, this, &ChatView::recordVoiceToggleRequested);
+
     sendButton_ = new QPushButton(composer);
     sendButton_->setObjectName(QStringLiteral("sendChatMessageButton"));
     sendButton_->setToolTip(tr("Send"));
@@ -299,6 +305,7 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     connect(messageEdit_, &QLineEdit::returnPressed, sendButton_, &QPushButton::click);
 
     composerLayout->addWidget(attachButton_);
+    composerLayout->addWidget(recordVoiceButton_);
     composerLayout->addWidget(messageEdit_, /*stretch=*/1);
     composerLayout->addWidget(sendButton_);
 
@@ -337,8 +344,19 @@ void ChatView::setEncrypted(bool encrypted) {
     attachButton_->setToolTip(encrypted
                                    ? tr("Attachments aren't supported in encrypted channels yet")
                                    : QString());
+    // Голосовое сообщение — обычное вложение (issue #359), та же
+    // причина отключения, что и у attachButton_ выше.
+    recordVoiceButton_->setEnabled(!encrypted);
+    recordVoiceButton_->setToolTip(encrypted
+                                        ? tr("Voice messages aren't supported in encrypted channels yet")
+                                        : tr("Record a voice message"));
     searchButton_->setEnabled(!encrypted);
     searchButton_->setToolTip(encrypted ? tr("Search isn't available in encrypted channels") : QString());
+}
+
+void ChatView::setRecordingVoice(bool recording) {
+    recordVoiceButton_->setText(recording ? QStringLiteral("⏹") : QStringLiteral("\U0001F3A4"));
+    recordVoiceButton_->setToolTip(recording ? tr("Stop recording") : tr("Record a voice message"));
 }
 
 void ChatView::updateChannelTitleLabel() {
@@ -467,6 +485,10 @@ void ChatView::connectMessageRow(ChatMessageRow* row) {
     connect(row, &ChatMessageRow::unpinRequested, this, &ChatView::unpinMessageRequested);
     connect(row, &ChatMessageRow::reactionToggleRequested, this, &ChatView::reactionToggleRequested);
     connect(row, &ChatMessageRow::replyRequested, this, &ChatView::setReplyTarget);
+    connect(row, &ChatMessageRow::playbackRequested, this, [this, row](qint64 attachmentId) {
+        pendingVoicePlaybackRows_.insert(attachmentId, row);
+        emit voicePlaybackRequested(attachmentId);
+    });
 }
 
 void ChatView::requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row) {
@@ -483,6 +505,14 @@ void ChatView::setAttachmentPreview(qint64 attachmentId, const QImage& image) {
         return;
     }
     row->setAttachmentPreview(image);
+}
+
+void ChatView::setVoiceMessageData(qint64 attachmentId, const QByteArray& data) {
+    const QPointer<ChatMessageRow> row = pendingVoicePlaybackRows_.take(attachmentId);
+    if (row.isNull()) {
+        return;
+    }
+    row->setAudioData(data);
 }
 
 QLabel* ChatView::buildDateSeparatorLabel(const QString& sentAt) {
@@ -704,6 +734,7 @@ void ChatView::clearLog() {
     // (QPointer сам обнулился бы и без этого) — очищаем сразу, а не
     // ждём, пока setAttachmentPreview() найдёт их null одну за другой.
     pendingImagePreviewRows_.clear();
+    pendingVoicePlaybackRows_.clear();
     // Роль/закреплённые сообщения принадлежали каналу, который только
     // что очистили (issue #338) — MainWindow заново вызовет
     // setCanManageChannel()/setPinnedMessagesCount() для нового канала,
