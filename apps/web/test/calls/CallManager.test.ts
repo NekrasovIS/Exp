@@ -128,6 +128,35 @@ describe("CallManager", () => {
     expect(manager.inCall()).toBe(true);
   });
 
+  // Issue #362 — without this, a participant joining the call second (or
+  // later) never saw anyone already in it, only those who joined after
+  // them: call_roster (this client's own call_join response) lists
+  // pre-existing participants, separately from call_peer_joined (which
+  // only fires for joins that happen after this client's own).
+  it("emits 'participantJoined' for each name in the initial call_roster", async () => {
+    const { socket, manager } = setup();
+    const onParticipantJoined = vi.fn();
+    manager.on("participantJoined", onParticipantJoined);
+
+    await manager.joinCall();
+    socket.simulateMessage(JSON.stringify({ call_roster: ["bob", "carol"], sfu_room: "channel-1" }));
+
+    expect(onParticipantJoined).toHaveBeenCalledWith("bob");
+    expect(onParticipantJoined).toHaveBeenCalledWith("carol");
+    expect(onParticipantJoined).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits 'participantJoined' when the server broadcasts call_peer_joined for someone who joins after", async () => {
+    const { socket, manager } = setup();
+    const onParticipantJoined = vi.fn();
+    manager.on("participantJoined", onParticipantJoined);
+
+    await manager.joinCall();
+    socket.simulateMessage(JSON.stringify({ call_peer_joined: "dave" }));
+
+    expect(onParticipantJoined).toHaveBeenCalledWith("dave");
+  });
+
   it("creates a publish connection and attaches once sfuRoomAssigned fires", async () => {
     const { socket, manager, connections } = setup();
     await manager.joinCall();

@@ -150,6 +150,19 @@ export class CallManager {
   ) {
     this.unsubscribes.push(
       chatClient.on("sfuRoomAssigned", (room) => this.onSfuRoomAssigned(room)),
+      // Issue #362 — the initial roster of who's already in the call
+      // (this client's own join_call response, arriving before any
+      // callPeerJoined for participants who join after). Without this,
+      // a participant joining second or later never saw anyone who was
+      // already in the call — only those who joined after them. Purely
+      // informational, same as callPeerJoined below: the real
+      // connection to each of them is entirely driven by Janus's own
+      // publishers list (see onJanusEvent()), not this roster.
+      chatClient.on("callRoster", (participants) => {
+        for (const login of participants) {
+          this.emit("participantJoined", login);
+        }
+      }),
       chatClient.on("callPeerJoined", (login) => this.emit("participantJoined", login)),
       chatClient.on("callPeerLeft", (login) => this.onCallPeerLeft(login)),
       chatClient.on("janusAttached", (handle) => this.onJanusAttached(handle)),

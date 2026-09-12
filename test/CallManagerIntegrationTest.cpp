@@ -360,6 +360,133 @@ TEST(CallManagerIntegrationTest, OfferAnswerSignalingRoundTripWithoutErrors) {
     callManagerA.leaveCall();
 }
 
+// Issue #362 — chat-service отвечает на СОБСТВЕННЫЙ call_join
+// вызывающего начальным ростером уже присутствующих участников
+// (call_roster), отдельно от call_peer_joined, которым уведомляет
+// остальных о новом присоединившемся. Ни один клиент раньше не слушал
+// callRosterReceived вообще — участник, зашедший не первым, никогда не
+// узнавал о тех, кто уже был в звонке. Не требует Janus (сам ростер от
+// него не зависит) и не требует реальных аудио-устройств (joinCall()
+// с нулевыми QAudioDevice всё равно шлёт call_join, см. её же
+// doc-комментарий и SFU-тесты ниже).
+TEST(CallManagerIntegrationTest, SecondParticipantLearnsAboutFirstFromTheInitialRoster) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+
+    const qint64 suffix = QDateTime::currentMSecsSinceEpoch();
+    const QString loginA = QStringLiteral("call-roster-test-a-%1").arg(suffix);
+    const QString loginB = QStringLiteral("call-roster-test-b-%1").arg(suffix);
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) ||
+        !registerTestUser(manager, userUrl, loginB, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    AuthClient authClientB(authUrl);
+    const std::optional<QString> tokenA = requestToken(authClientA, loginA, password);
+    const std::optional<QString> tokenB = requestToken(authClientB, loginB, password);
+    if (!tokenA.has_value() || !tokenB.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(*tokenA, QStringLiteral("call-roster-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityJoined, &loop, [&](qint64) { loop.quit(); });
+        chatRestClient.joinCommunity(*tokenB, communityId);
+        loop.exec();
+    }
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(*tokenA, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    ChatClient chatClientA(chatWsUrl);
+    ChatClient chatClientB(chatWsUrl);
+    for (auto* client : {&chatClientA, &chatClientB}) {
+        bool subscribed = false;
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(client, &ChatClient::subscribed, &loop, [&](qint64) {
+            subscribed = true;
+            loop.quit();
+        });
+        client->connectToChannel(client == &chatClientA ? *tokenA : *tokenB, channelId);
+        loop.exec();
+        ASSERT_TRUE(subscribed);
+    }
+
+    AudioInputDevice audioInputA;
+    AudioOutputDevice audioOutputA;
+    AudioInputDevice audioInputB;
+    AudioOutputDevice audioOutputB;
+    CameraDevice cameraA;
+    CameraDevice cameraB;
+    ScreenCaptureDevice screenCaptureA;
+    ScreenCaptureDevice screenCaptureB;
+    CallManager callManagerA(chatClientA, audioInputA, audioOutputA, cameraA, screenCaptureA);
+    CallManager callManagerB(chatClientB, audioInputB, audioOutputB, cameraB, screenCaptureB);
+    callManagerA.setLocalLogin(loginA);
+    callManagerB.setLocalLogin(loginB);
+
+    // A joins first — nobody else is in the call yet, so A's own roster
+    // is empty (nothing to assert there); B joins second and should
+    // learn about A purely from B's own call_join response. Waits for
+    // chat-service to actually acknowledge A's own join (ChatClient's
+    // own callRosterReceived(), independent of whether CallManager
+    // listens to it — the very thing under test) before letting B join,
+    // otherwise the two joinCall()s could race and B's join might reach
+    // the server before A's does, making B's (legitimately) empty
+    // roster look like a false pass.
+    bool aRosterAcked = false;
+    QObject::connect(&chatClientA, &ChatClient::callRosterReceived, &chatClientA,
+                      [&](const QStringList&) { aRosterAcked = true; });
+    callManagerA.joinCall(QAudioDevice(), QAudioDevice());
+    ASSERT_TRUE(waitUntil([&]() { return aRosterAcked; }, /*timeoutMs=*/5000))
+        << "A's own call_join was never acknowledged by chat-service";
+
+    QStringList participantsSeenByB;
+    QObject::connect(&callManagerB, &CallManager::participantJoined, &callManagerB,
+                      [&](const QString& login) { participantsSeenByB << login; });
+
+    callManagerB.joinCall(QAudioDevice(), QAudioDevice());
+    ASSERT_TRUE(waitUntil([&]() { return !participantsSeenByB.isEmpty(); }, /*timeoutMs=*/5000))
+        << "B's CallManager never emitted participantJoined for A, who was already in the call";
+    EXPECT_TRUE(participantsSeenByB.contains(loginA));
+
+    callManagerA.leaveCall();
+    callManagerB.leaveCall();
+}
+
 // issue #232: тот же уровень строгости, что и у mesh-теста выше — не
 // дожидается полной ICE/DTLS-связности (см. её doc-комментарий), только
 // проверяет, что сам обмен offer/answer/jsep с Janus проходит без ошибок

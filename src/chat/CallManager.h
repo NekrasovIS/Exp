@@ -20,6 +20,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVideoFrame>
 
 #include <cstddef>
@@ -273,6 +274,13 @@ private:
         QString sfuFeedId;
     };
 
+    /// Issue #362 — начальный ростер уже находящихся в звонке участников
+    /// (ответ на собственный joinCall(), до любых callPeerJoined()) —
+    /// без этого участник, присоединившийся не первым, никогда не видел
+    /// в UI тех, кто уже был в звонке до него. Эмиттит participantJoined()
+    /// для каждого — тот же сигнал и тот же (идемпотентный на стороне
+    /// MainWindow) эффект, что и у onCallPeerJoined() ниже.
+    void onCallRoster(const QStringList& participants);
     void onCallPeerJoined(const QString& login);
     void onCallPeerLeft(const QString& login);
 
