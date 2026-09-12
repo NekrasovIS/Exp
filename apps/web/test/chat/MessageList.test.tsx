@@ -108,7 +108,9 @@ describe("MessageList", () => {
 
   it("renders 'Message unavailable' for a reply whose original isn't in the currently loaded history", () => {
     renderList({
-      messages: [{ id: 3, author: "alice", body: "replying", sentAt: "t", replyToMessageId: 999, reactions: [] }],
+      messages: [
+        { id: 3, author: "alice", body: "replying", sentAt: "t", replyToMessageId: 999, reactions: [] },
+      ],
     });
 
     expect(screen.getByText("Message unavailable")).toBeInTheDocument();
