@@ -32,6 +32,9 @@ int main() {
     const int port = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
     const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
     const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    // Issue #354 — разрешённый origin для веб-клиента (apps/web); см.
+    // doc-комментарий HttpServer::HttpServer().
+    const std::string corsAllowedOrigin = envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:5173");
 
     const auth_service::TokenService tokenService(secret);
     const auth_service::UserServiceClient userServiceClient(userServiceHost, userServicePort);
@@ -59,7 +62,9 @@ int main() {
         std::cout << "One-time-code delivery: Telegram bot configured (preferred over email when both are set)\n";
     }
 
-    auth_service::HttpServer server(tokenService, userServiceClient, *codeDeliveryChannel, telegramChannel.get());
+    auth_service::HttpServer server(tokenService, userServiceClient, *codeDeliveryChannel, telegramChannel.get(),
+                                     /*rateLimitMaxRequests=*/10, /*rateLimitWindow=*/std::chrono::seconds{60},
+                                     corsAllowedOrigin);
 
     std::cout << "auth-service listening on " << host << ":" << port << "\n";
     server.listen(host, port);

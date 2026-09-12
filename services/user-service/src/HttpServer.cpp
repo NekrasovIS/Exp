@@ -91,8 +91,16 @@ nlohmann::json toJson(const FriendRequestInfo& request) {
 }
 }  // namespace
 
-HttpServer::HttpServer(UserService& userService, const AuthServiceClient& authServiceClient)
+HttpServer::HttpServer(UserService& userService, const AuthServiceClient& authServiceClient,
+                        const std::string& corsAllowedOrigin)
     : userService_(userService), authServiceClient_(authServiceClient) {
+    // Issue #354 — see HttpServer.h's doc-comment on corsAllowedOrigin.
+    server_.set_default_headers({
+        {"Access-Control-Allow-Origin", corsAllowedOrigin},
+        {"Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS"},
+        {"Access-Control-Allow-Headers", "Authorization, Content-Type"},
+    });
+    server_.Options(R"(.*)", [](const httplib::Request&, httplib::Response& response) { response.status = 200; });
     registerRoutes();
 }
 

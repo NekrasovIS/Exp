@@ -17,13 +17,21 @@ constexpr int kOtpMaxAttempts = 5;
 
 HttpServer::HttpServer(const TokenService& tokenService, const UserServiceClient& userServiceClient,
                         const ICodeDeliveryChannel& codeDeliveryChannel, const ICodeDeliveryChannel* telegramChannel,
-                        int rateLimitMaxRequests, std::chrono::milliseconds rateLimitWindow)
+                        int rateLimitMaxRequests, std::chrono::milliseconds rateLimitWindow,
+                        const std::string& corsAllowedOrigin)
     : tokenService_(tokenService),
       userServiceClient_(userServiceClient),
       codeDeliveryChannel_(codeDeliveryChannel),
       telegramChannel_(telegramChannel),
       rateLimiter_(rateLimitMaxRequests, rateLimitWindow),
       otpStore_(kOtpTtl, kOtpMaxAttempts) {
+    // Issue #354 — see HttpServer.h's doc-comment on corsAllowedOrigin.
+    server_.set_default_headers({
+        {"Access-Control-Allow-Origin", corsAllowedOrigin},
+        {"Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS"},
+        {"Access-Control-Allow-Headers", "Authorization, Content-Type"},
+    });
+    server_.Options(R"(.*)", [](const httplib::Request&, httplib::Response& response) { response.status = 200; });
     registerRoutes();
 }
 

@@ -37,6 +37,9 @@ int main() {
     // docker-сети.
     const std::string janusHost = envOrDefault("JANUS_HOST", "127.0.0.1");
     const int janusPort = std::stoi(envOrDefault("JANUS_PORT", "8088"));
+    // Issue #354 — разрешённый origin для веб-клиента (apps/web); см.
+    // doc-комментарий HttpServer::HttpServer().
+    const std::string corsAllowedOrigin = envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:5173");
 
     chat_service::ChatRepository repository(connectionString);
     chat_service::ChatService chatService(repository);
@@ -51,7 +54,7 @@ int main() {
     }
     std::cout << "chat-service: WebSocket listening on " << host << ":" << wsPort << "\n";
 
-    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient);
+    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, corsAllowedOrigin);
     std::cout << "chat-service: REST listening on " << host << ":" << restPort << "\n";
     httpServer.listen(host, restPort);
 

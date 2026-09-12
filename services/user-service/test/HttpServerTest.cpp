@@ -99,6 +99,41 @@ TEST(HttpServerTest, RegisterRouteRejectsMissingFieldsWith400) {
     EXPECT_EQ(result->status, 400);
 }
 
+// Issue #354 — CORS headers come from set_default_headers() in the
+// constructor, applied before any route handler runs, so even a 400
+// error response carries them — same reasoning as chat-service's own
+// copy of this test.
+TEST(HttpServerTest, CorsHeadersArePresentOnEveryResponseIncludingErrors) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/users/register", nlohmann::json{{"login", "alice"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+    EXPECT_EQ(result->get_header_value("Access-Control-Allow-Origin"), "http://localhost:5173");
+    EXPECT_FALSE(result->get_header_value("Access-Control-Allow-Methods").empty());
+    EXPECT_FALSE(result->get_header_value("Access-Control-Allow-Headers").empty());
+}
+
+TEST(HttpServerTest, OptionsPreflightSucceedsWithCorsHeaders) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Options("/users/register");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    EXPECT_EQ(result->get_header_value("Access-Control-Allow-Origin"), "http://localhost:5173");
+}
+
 TEST(HttpServerTest, RegisterRouteRejectsMalformedJsonWith400) {
     UserRepository repository(connectionString());
     UserService userService(repository);

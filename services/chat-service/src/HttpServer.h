@@ -40,8 +40,16 @@ namespace chat_service {
  */
 class HttpServer {
 public:
+    /// @p corsAllowedOrigin — issue #354: значение `Access-Control-Allow-Origin`,
+    /// отправляемое на каждый ответ, и разрешённый origin для
+    /// `OPTIONS`-preflight; без него браузерный веб-клиент (issue #264),
+    /// работающий с другого origin (Vite dev server), не может обратиться
+    /// к этому REST API вообще — запрос блокируется самим браузером ещё
+    /// до того, как доходит до сервера. По умолчанию — адрес Vite dev
+    /// server для локальной разработки.
     HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
-               const UserServiceClient& userServiceClient);
+               const UserServiceClient& userServiceClient,
+               const std::string& corsAllowedOrigin = "http://localhost:5173");
 
     /// Блокируется, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);

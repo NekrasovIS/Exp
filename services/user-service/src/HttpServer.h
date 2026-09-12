@@ -42,7 +42,12 @@ namespace user_service {
  */
 class HttpServer {
 public:
-    HttpServer(UserService& userService, const AuthServiceClient& authServiceClient);
+    /// @p corsAllowedOrigin — issue #354: см. doc-комментарий на
+    /// одноимённом параметре chat-service's HttpServer::HttpServer()
+    /// (тот же паттерн CORS для веб-клиента). По умолчанию — адрес Vite
+    /// dev server для локальной разработки.
+    HttpServer(UserService& userService, const AuthServiceClient& authServiceClient,
+               const std::string& corsAllowedOrigin = "http://localhost:5173");
 
     /// Блокирует выполнение, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
