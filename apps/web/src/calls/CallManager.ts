@@ -100,16 +100,40 @@ interface PeerEntry {
 
 const kStunServers = [{ urls: "stun:stun.l.google.com:19302" }];
 
+// Issue #364 — some real networks (observed: a host with several virtual
+// adapters — Docker/VPN/WSL-style — alongside the real one) never fire
+// iceGatheringState "complete" at all: Chromium appears to wait on every
+// interface's own STUN query settling, and if even one of them (an
+// unreachable IPv6 route, an interface with no real connectivity, etc.)
+// never resolves, gathering hangs indefinitely — confirmed waiting 60s+
+// with zero effect. Waiting forever for "complete" before ever sending
+// this side's offer to Janus (this protocol's own non-trickle contract,
+// see the class doc comment) meant the call never actually published
+// anything on such a network — no error, no timeout, just permanently
+// stuck before the first "configure" message. A bounded wait lets the
+// offer go out with whatever candidates arrived in time — in every
+// normal case that's still the complete set (a working STUN round trip
+// typically finishes in well under a second), and on a broken network
+// it trades "some candidates missing" for "actually attempts the call"
+// — the same tradeoff a several-second non-trickle wait always makes
+// relative to true trickle ICE, just bounded instead of unbounded.
+export const kIceGatheringTimeoutMs = 2000;
+
 function waitForIceGatheringComplete(connection: RTCPeerConnectionLike): Promise<void> {
   return new Promise((resolve) => {
     if (connection.iceGatheringState === "complete") {
       resolve();
       return;
     }
+    const finish = (): void => {
+      connection.onicegatheringstatechange = null;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, kIceGatheringTimeoutMs);
     connection.onicegatheringstatechange = () => {
       if (connection.iceGatheringState === "complete") {
-        connection.onicegatheringstatechange = null;
-        resolve();
+        finish();
       }
     };
   });

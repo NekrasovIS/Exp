@@ -2,7 +2,7 @@ import { ChatClient } from "@devicehub/core";
 import type { WebSocketFactory, WebSocketLike } from "@devicehub/core";
 import { describe, expect, it, vi } from "vitest";
 
-import { CallManager } from "../../src/calls/CallManager.js";
+import { CallManager, kIceGatheringTimeoutMs } from "../../src/calls/CallManager.js";
 import type { RTCPeerConnectionLike } from "../../src/calls/CallManager.js";
 
 /** Several negotiatePublish()/answerSubscribe() steps below run
@@ -198,6 +198,60 @@ describe("CallManager", () => {
       .find((m) => m.body.request === "configure");
     expect(configureFrame).toBeDefined();
     expect(connections[0]?.localDescription?.type).toBe("offer");
+  });
+
+  // Issue #364 — some real networks never fire iceGatheringState
+  // "complete" at all (observed: a host with several virtual network
+  // adapters alongside the real one, where at least one interface's own
+  // STUN query never resolves). Waiting unconditionally for "complete"
+  // before sending the offer meant the call never published anything on
+  // such a network — negotiatePublish() just hung forever, silently,
+  // before ever reaching the "configure" send. This fake connection
+  // never reports "complete" on its own (no onicegatheringstatechange
+  // call), mirroring that hang; without the bounded timeout in
+  // waitForIceGatheringComplete(), advancing past kIceGatheringTimeoutMs
+  // would never produce a "configure" frame.
+  it("still sends 'configure' after a timeout if iceGatheringState never reaches 'complete'", async () => {
+    vi.useFakeTimers();
+    try {
+      const { socket, manager, connections } = setup();
+      await manager.joinCall();
+      socket.simulateMessage(JSON.stringify({ call_roster: [], sfu_room: "room-1" }));
+
+      const publishConnection = connections[0];
+      expect(publishConnection).toBeDefined();
+      if (publishConnection) {
+        publishConnection.iceGatheringState = "checking";
+      }
+
+      socket.simulateMessage(JSON.stringify({ janus_attached: { handle: 10 } }));
+      socket.simulateMessage(
+        JSON.stringify({
+          janus_event: {
+            sender: 10,
+            plugindata: { data: { videoroom: "joined", id: "feed-alice", publishers: [] } },
+          },
+        }),
+      );
+      await flushAsync();
+
+      const hasConfigureBeforeTimeout = socket
+        .framesNamed("janus_message")
+        .map((f) => (f as { janus_message: { body: { request: string } } }).janus_message)
+        .some((m) => m.body.request === "configure");
+      expect(hasConfigureBeforeTimeout).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(kIceGatheringTimeoutMs);
+      await flushAsync();
+
+      const configureFrame = socket
+        .framesNamed("janus_message")
+        .map((f) => (f as { janus_message: { body: { request: string } } }).janus_message)
+        .find((m) => m.body.request === "configure");
+      expect(configureFrame).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("subscribes to an existing publisher listed in the 'joined' event", async () => {
