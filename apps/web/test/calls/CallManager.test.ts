@@ -351,10 +351,7 @@ describe("CallManager", () => {
     const subscribeUpdateFrame = socket
       .framesNamed("janus_message")
       .map((f) => (f as { janus_message: { handle: number; body: unknown } }).janus_message)
-      .find(
-        (m) =>
-          m.handle === 11 && (m.body as { request?: string }).request === "subscribe",
-      );
+      .find((m) => m.handle === 11 && (m.body as { request?: string }).request === "subscribe");
     expect(subscribeUpdateFrame?.body).toEqual({
       request: "subscribe",
       streams: [{ feed: "feed-bob", mid: "1" }],
