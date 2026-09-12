@@ -8,7 +8,7 @@
 // why it doesn't (yet) reuse #322's useMembers().
 
 import { ChatRestClient } from "@devicehub/core";
-import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import styles from "./MessageComposer.module.css";
 import { MentionSuggestions } from "./MentionSuggestions.js";
@@ -51,11 +51,37 @@ export function MessageComposer({
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
   const mention = useMentionAutocomplete(communityId);
   const bodyInputRef = useRef<HTMLInputElement>(null);
+  // Issue #369 — a mention-suggestion pick needs to move the caret to
+  // right after the inserted "@login " (see selectMention()/
+  // handleBodyKeyDown() below), but that only works once the <input>'s
+  // DOM value actually reflects the new `body` — setSelectionRange() on
+  // the old value places the caret at a stale offset. The previous
+  // approach deferred that call via requestAnimationFrame, scheduled
+  // independently of React's own commit ordering; CI's test suite hit a
+  // scrambled-input failure here reproducibly (never locally, and not
+  // reproduced under a stubbed/delayed requestAnimationFrame either, so
+  // the exact mechanism on CI's runner isn't fully confirmed) that a RAF
+  // ordered independently of React is at least consistent with. A
+  // layout effect keyed on `body` is ordered relative to React's own
+  // commit instead of the browser's paint clock, which is the more
+  // correct tool for "run after this state update lands in the DOM"
+  // regardless — it removes a real source of scheduling uncertainty
+  // even though this specific CI failure's root cause wasn't nailed
+  // down with full certainty.
+  const pendingCursorPos = useRef<number | null>(null);
 
   const [body, setBody] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<{ id: number; filename: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (pendingCursorPos.current === null) {
+      return;
+    }
+    bodyInputRef.current?.setSelectionRange(pendingCursorPos.current, pendingCursorPos.current);
+    pendingCursorPos.current = null;
+  }, [body]);
 
   async function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
@@ -100,8 +126,8 @@ export function MessageComposer({
   function selectMention(login: string): void {
     const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
     const result = mention.applySuggestion(body, cursorPos, login);
+    pendingCursorPos.current = result.cursorPos;
     setBody(result.text);
-    requestAnimationFrame(() => bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos));
   }
 
   function handleBodyKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
@@ -118,10 +144,8 @@ export function MessageComposer({
       event.preventDefault();
       const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
       const result = mention.applyActive(body, cursorPos);
+      pendingCursorPos.current = result.cursorPos;
       setBody(result.text);
-      requestAnimationFrame(() =>
-        bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos),
-      );
     } else if (event.key === "Escape") {
       mention.dismiss();
     }
