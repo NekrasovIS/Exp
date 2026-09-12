@@ -200,6 +200,7 @@ CallManager::CallManager(ChatClient& chatClient, AudioInputDevice& audioInput, A
       audioOutput_(audioOutput),
       camera_(camera),
       screenCapture_(screenCapture) {
+    connect(&chatClient_, &ChatClient::callRosterReceived, this, &CallManager::onCallRoster);
     connect(&chatClient_, &ChatClient::callPeerJoined, this, &CallManager::onCallPeerJoined);
     connect(&chatClient_, &ChatClient::callPeerLeft, this, &CallManager::onCallPeerLeft);
     // Issue #312 — pure passthrough, no side effects to manage (unlike
@@ -664,6 +665,15 @@ void CallManager::attachTrack(PeerConnectionEntry& entry, const webrtc::scoped_r
         return;
     }
     sender = addTrackResult.value();
+}
+
+void CallManager::onCallRoster(const QStringList& participants) {
+    // Issue #362 — как и onCallPeerJoined() ниже, чисто информационно:
+    // реальное подключение к каждому из них полностью driven событиями
+    // Janus (publishers в ответе на собственный join), не этим ростером.
+    for (const QString& login : participants) {
+        emit participantJoined(login);
+    }
 }
 
 void CallManager::onCallPeerJoined(const QString& login) {
