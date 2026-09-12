@@ -7,6 +7,8 @@
 
 import { useEffect, useRef } from "react";
 
+import styles from "./VideoTile.module.css";
+
 interface VideoTileProps {
   stream: MediaStream;
   label: string;
@@ -26,7 +28,7 @@ export function VideoTile({ stream, label, muted = false }: VideoTileProps) {
   }, [stream]);
 
   return (
-    <figure>
+    <figure className={styles.tile}>
       <video ref={videoRef} autoPlay playsInline muted={muted} />
       <figcaption>{label}</figcaption>
     </figure>
