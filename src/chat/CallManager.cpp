@@ -48,6 +48,21 @@ QString publishConnectionLabel() {
     return QStringLiteral("__sfu_publish__");
 }
 
+/// Issue #373 — извлекает список stream `mid` одного элемента массива
+/// "publishers" из событий комнаты Janus (`{..., "streams": [{"mid": ...},
+/// ...]}`) — общий код для обеих веток (videoroom == "joined"/"event") в
+/// onJanusEvent(), которым нужен этот список для ensureSubscribeConnection().
+QStringList publisherStreamMids(const QJsonObject& publisher) {
+    QStringList mids;
+    for (const QJsonValue& streamValue : publisher.value(QStringLiteral("streams")).toArray()) {
+        const QString mid = streamValue.toObject().value(QStringLiteral("mid")).toString();
+        if (!mid.isEmpty()) {
+            mids.append(mid);
+        }
+    }
+    return mids;
+}
+
 /// Issue #364 — на некоторых реальных сетях (замечено: хост с несколькими
 /// виртуальными сетевыми адаптерами — Docker/VPN/WSL — рядом с настоящим)
 /// iceGatheringState никогда не доходит до kIceGatheringComplete: похоже,
@@ -790,24 +805,49 @@ void CallManager::ensurePublishConnection() {
     chatClient_.sendJanusAttach();
 }
 
-void CallManager::ensureSubscribeConnection(const QString& feedId, const QString& peerLogin) {
-    if (feedId.isEmpty() || peerLogin.isEmpty() || feedId == ownFeedId_ || peerLogin == localLogin_ ||
-        peers_.contains(peerLogin.toStdString())) {
+void CallManager::ensureSubscribeConnection(const QString& feedId, const QString& peerLogin,
+                                             const QStringList& mids) {
+    if (feedId.isEmpty() || peerLogin.isEmpty() || feedId == ownFeedId_ || peerLogin == localLogin_) {
+        return;
+    }
+    const auto it = peers_.find(peerLogin.toStdString());
+    if (it != peers_.end()) {
+        subscribeToNewStreams(it->second, feedId, mids);
         return;
     }
     if (pendingAttach_ != PendingJanusAttach::kNone) {
-        subscribeQueue_.emplace_back(feedId, peerLogin);
+        subscribeQueue_.emplace_back(feedId, peerLogin, mids);
         return;
     }
     pendingAttach_ = PendingJanusAttach::kSubscribe;
     pendingSubscribeFeedId_ = feedId;
     pendingSubscribePeerLogin_ = peerLogin;
+    pendingSubscribeMids_ = mids;
     chatClient_.sendJanusAttach();
+}
+
+void CallManager::subscribeToNewStreams(PeerConnectionEntry& entry, const QString& feedId,
+                                         const QStringList& mids) {
+    QStringList newMids;
+    for (const QString& mid : mids) {
+        if (!entry.subscribedMids.contains(mid)) {
+            newMids.append(mid);
+        }
+    }
+    if (newMids.isEmpty()) {
+        return;
+    }
+    QJsonArray streams;
+    for (const QString& mid : newMids) {
+        entry.subscribedMids.insert(mid);
+        streams.append(QJsonObject{{"feed", feedId}, {"mid", mid}});
+    }
+    chatClient_.sendJanusMessage(entry.janusHandle, QJsonObject{{"request", "subscribe"}, {"streams", streams}});
 }
 
 void CallManager::processNextQueuedSubscribe() {
     while (pendingAttach_ == PendingJanusAttach::kNone && !subscribeQueue_.empty()) {
-        const auto [feedId, peerLogin] = subscribeQueue_.front();
+        const auto [feedId, peerLogin, mids] = subscribeQueue_.front();
         subscribeQueue_.pop_front();
         if (peers_.contains(peerLogin.toStdString())) {
             continue;  // подписались за это время, пока ждали своей очереди — берём следующего
@@ -815,6 +855,7 @@ void CallManager::processNextQueuedSubscribe() {
         pendingAttach_ = PendingJanusAttach::kSubscribe;
         pendingSubscribeFeedId_ = feedId;
         pendingSubscribePeerLogin_ = peerLogin;
+        pendingSubscribeMids_ = mids;
         chatClient_.sendJanusAttach();
         return;
     }
@@ -842,9 +883,11 @@ void CallManager::onJanusAttached(qint64 handle) {
         case PendingJanusAttach::kSubscribe: {
             const QString feedId = pendingSubscribeFeedId_;
             const QString peerLogin = pendingSubscribePeerLogin_;
+            const QStringList mids = pendingSubscribeMids_;
             pendingAttach_ = PendingJanusAttach::kNone;
             pendingSubscribeFeedId_.clear();
             pendingSubscribePeerLogin_.clear();
+            pendingSubscribeMids_.clear();
 
             std::unique_ptr<PeerObserver> observer;
             const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection =
@@ -855,6 +898,7 @@ void CallManager::onJanusAttached(qint64 handle) {
                 entry.observer = std::move(observer);
                 entry.janusHandle = handle;
                 entry.sfuFeedId = feedId;
+                entry.subscribedMids = QSet<QString>(mids.begin(), mids.end());
                 peers_.emplace(peerLogin.toStdString(), std::move(entry));
                 chatClient_.sendJanusMessage(
                     handle, QJsonObject{{"request", "join"}, {"room", sfuRoom_}, {"ptype", "subscriber"}, {"feed", feedId}});
@@ -880,14 +924,16 @@ void CallManager::onJanusEvent(const QJsonObject& event) {
             for (const QJsonValue& publisherValue : data.value(QStringLiteral("publishers")).toArray()) {
                 const QJsonObject publisher = publisherValue.toObject();
                 ensureSubscribeConnection(publisher.value(QStringLiteral("id")).toString(),
-                                           publisher.value(QStringLiteral("display")).toString());
+                                           publisher.value(QStringLiteral("display")).toString(),
+                                           publisherStreamMids(publisher));
             }
             negotiateLocal(publishConnectionLabel());
         } else if (videoroom == QStringLiteral("event")) {
             for (const QJsonValue& publisherValue : data.value(QStringLiteral("publishers")).toArray()) {
                 const QJsonObject publisher = publisherValue.toObject();
                 ensureSubscribeConnection(publisher.value(QStringLiteral("id")).toString(),
-                                           publisher.value(QStringLiteral("display")).toString());
+                                           publisher.value(QStringLiteral("display")).toString(),
+                                           publisherStreamMids(publisher));
             }
             const QString leavingFeed = data.contains(QStringLiteral("leaving"))
                                              ? data.value(QStringLiteral("leaving")).toString()

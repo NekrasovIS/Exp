@@ -96,6 +96,20 @@ interface PeerEntry {
   connection: RTCPeerConnectionLike;
   janusHandle: number;
   feedId: string;
+  /** Issue #373 — which of this feed's Janus stream `mid`s this
+   * connection has already asked to receive, seeded from whatever the
+   * feed was publishing at subscribe time and grown by
+   * subscribeToNewStreams() whenever the feed later adds one (e.g. the
+   * peer turns their camera on after this side already subscribed to
+   * their audio-only feed) — see that method's own doc comment for why
+   * this bookkeeping is needed at all. */
+  subscribedMids: Set<string>;
+}
+
+interface PendingSubscribe {
+  feedId: string;
+  peerLogin: string;
+  mids: string[];
 }
 
 const kStunServers = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -149,8 +163,8 @@ export class CallManager {
   private videoKind: VideoKind | null = null;
   private readonly peers = new Map<string, PeerEntry>();
   private pendingAttach: PendingAttach = "none";
-  private pendingSubscribe: { feedId: string; peerLogin: string } | null = null;
-  private subscribeQueue: { feedId: string; peerLogin: string }[] = [];
+  private pendingSubscribe: PendingSubscribe | null = null;
+  private subscribeQueue: PendingSubscribe[] = [];
   private inCallState = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly listeners = new Map<keyof CallManagerEventMap, Set<(...args: any[]) => void>>();
@@ -386,23 +400,57 @@ export class CallManager {
     this.chatClient.sendJanusAttach();
   }
 
-  private ensureSubscribeConnection(feedId: string, peerLogin: string): void {
-    if (
-      feedId === "" ||
-      peerLogin === "" ||
-      feedId === this.ownFeedId ||
-      peerLogin === this.localLogin ||
-      this.peers.has(peerLogin)
-    ) {
+  private ensureSubscribeConnection(feedId: string, peerLogin: string, mids: string[]): void {
+    if (feedId === "" || peerLogin === "" || feedId === this.ownFeedId || peerLogin === this.localLogin) {
+      return;
+    }
+    const existing = this.peers.get(peerLogin);
+    if (existing !== undefined) {
+      this.subscribeToNewStreams(existing, feedId, mids);
       return;
     }
     if (this.pendingAttach !== "none") {
-      this.subscribeQueue.push({ feedId, peerLogin });
+      this.subscribeQueue.push({ feedId, peerLogin, mids });
       return;
     }
     this.pendingAttach = "subscribe";
-    this.pendingSubscribe = { feedId, peerLogin };
+    this.pendingSubscribe = { feedId, peerLogin, mids };
     this.chatClient.sendJanusAttach();
+  }
+
+  /** Issue #373 — Janus's feed-based subscribe (`ptype: "subscriber",
+   * feed: ...`, as opposed to its full multistream `streams: [...]`
+   * API) only hands a subscriber whatever the feed was already
+   * publishing at the moment it joined; it does not push a stream the
+   * feed adds later (e.g. the peer turns their camera on mid-call)
+   * to subscribers who joined before that — confirmed by raw signaling
+   * log: Janus's own room-wide "publishers updated" notification
+   * reaches every OTHER participant's *publish* handle just fine, but
+   * nothing ever arrives on the existing *subscribe* handle unless this
+   * side explicitly asks for the new stream. Without this, a peer who
+   * joined the call before you turned your camera on would simply never
+   * see your video — the tile exists (remoteStream already fired for
+   * audio) but its video track never arrives, forever.
+   *
+   * Sending `{request: "subscribe", streams: [{feed, mid}]}` on the
+   * *existing* subscribe handle is what actually triggers Janus to
+   * renegotiate — the resulting offer arrives back through the same
+   * generic per-peer branch in onJanusEvent() that already answers the
+   * very first subscribe offer, so no further changes are needed there:
+   * it never distinguished "first negotiation" from "renegotiation" to
+   * begin with. */
+  private subscribeToNewStreams(entry: PeerEntry, feedId: string, mids: string[]): void {
+    const newMids = mids.filter((mid) => !entry.subscribedMids.has(mid));
+    if (newMids.length === 0) {
+      return;
+    }
+    for (const mid of newMids) {
+      entry.subscribedMids.add(mid);
+    }
+    this.chatClient.sendJanusMessage(entry.janusHandle, {
+      request: "subscribe",
+      streams: newMids.map((mid) => ({ feed: feedId, mid })),
+    });
   }
 
   private processNextQueuedSubscribe(): void {
@@ -459,14 +507,14 @@ export class CallManager {
       return;
     }
     if (this.pendingAttach === "subscribe" && this.pendingSubscribe !== null) {
-      const { feedId, peerLogin } = this.pendingSubscribe;
+      const { feedId, peerLogin, mids } = this.pendingSubscribe;
       this.pendingAttach = "none";
       this.pendingSubscribe = null;
       const connection = this.pcFactory();
       connection.ontrack = (event) => {
         this.emit("remoteStream", peerLogin, event.streams[0] ?? new MediaStream([event.track]));
       };
-      this.peers.set(peerLogin, { connection, janusHandle: handle, feedId });
+      this.peers.set(peerLogin, { connection, janusHandle: handle, feedId, subscribedMids: new Set(mids) });
       this.chatClient.sendJanusMessage(handle, {
         request: "join",
         room: this.sfuRoom,
@@ -562,10 +610,15 @@ export class CallManager {
       return;
     }
     for (const publisherValue of publishers) {
-      const publisher = publisherValue as { id?: unknown; display?: unknown };
+      const publisher = publisherValue as { id?: unknown; display?: unknown; streams?: unknown };
       const id = typeof publisher.id === "string" ? publisher.id : String(publisher.id ?? "");
       const display = typeof publisher.display === "string" ? publisher.display : "";
-      this.ensureSubscribeConnection(id, display);
+      const mids = Array.isArray(publisher.streams)
+        ? publisher.streams
+            .map((stream) => (stream as { mid?: unknown }).mid)
+            .filter((mid): mid is string => typeof mid === "string")
+        : [];
+      this.ensureSubscribeConnection(id, display, mids);
     }
   }
 
