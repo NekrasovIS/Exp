@@ -305,6 +305,17 @@ ctest --test-dir build --output-on-failure
 корень), `services/auth-service`, `services/user-service` и
 `services/chat-service` — у каждого свой `vcpkg.json` и своя сборка.
 
+CORS (issue #354) — все три сервиса отправляют `Access-Control-Allow-Origin`
+на каждый ответ (включая ошибки — заголовок ставится в конструкторе
+`HttpServer`, до того как отработает конкретный маршрут) и отвечают 200
+на `OPTIONS`-preflight для любого пути, иначе браузерный веб-клиент
+(`apps/web`), обращающийся с другого origin (Vite dev server), не мог
+бы вызвать ни один REST-эндпоинт вообще — запрос блокировался бы самим
+браузером ещё до того, как дошёл бы до сервера (`curl` эту проверку не
+делает, поэтому раньше проблема не была замечена). Разрешённый origin —
+`CORS_ALLOWED_ORIGIN` (по умолчанию `http://localhost:5173`, адрес Vite
+dev server), одна и та же переменная окружения для всех трёх сервисов.
+
 ### user-service
 
 Владеет Postgres (пользователи: логин + Argon2id-хеш пароля, пароли в

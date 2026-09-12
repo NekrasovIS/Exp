@@ -141,6 +141,38 @@ TEST(HttpServerTest, TokenRouteRejectsMissingFieldsWith400) {
     EXPECT_EQ(result->status, 400);
 }
 
+// Issue #354 — CORS headers come from set_default_headers() in the
+// constructor, applied before any route handler runs, so even a 400
+// error response carries them — same reasoning as chat-service's own
+// copy of this test.
+TEST(HttpServerTest, CorsHeadersArePresentOnEveryResponseIncludingErrors) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);  // недоступен, не должен вызываться
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/auth/token", nlohmann::json{{"login", "alice"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+    EXPECT_EQ(result->get_header_value("Access-Control-Allow-Origin"), "http://localhost:5173");
+    EXPECT_FALSE(result->get_header_value("Access-Control-Allow-Methods").empty());
+    EXPECT_FALSE(result->get_header_value("Access-Control-Allow-Headers").empty());
+}
+
+TEST(HttpServerTest, OptionsPreflightSucceedsWithCorsHeaders) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);  // недоступен, не должен вызываться
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Options("/auth/token");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    EXPECT_EQ(result->get_header_value("Access-Control-Allow-Origin"), "http://localhost:5173");
+}
+
 TEST(HttpServerTest, TokenRouteRejectsMalformedJsonWith400) {
     const TokenService tokenService("test-secret");
     const UserServiceClient userServiceClient("127.0.0.1", 1);

@@ -25,11 +25,14 @@ int main() {
     const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
     const std::string authServiceHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
     const int authServicePort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    // Issue #354 — разрешённый origin для веб-клиента (apps/web); см.
+    // doc-комментарий HttpServer::HttpServer().
+    const std::string corsAllowedOrigin = envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:5173");
 
     user_service::UserRepository repository(connectionString);
     user_service::UserService service(repository);
     const user_service::AuthServiceClient authServiceClient(authServiceHost, authServicePort);
-    user_service::HttpServer server(service, authServiceClient);
+    user_service::HttpServer server(service, authServiceClient, corsAllowedOrigin);
 
     std::cout << "user-service listening on " << host << ":" << port << "\n";
     server.listen(host, port);

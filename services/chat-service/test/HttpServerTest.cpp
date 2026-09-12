@@ -267,6 +267,48 @@ TEST(HttpServerTest, EveryRouteRejectsMissingAuthorizationHeaderWith401) {
     }
 }
 
+// Issue #354 — CORS headers must be present on EVERY response, including
+// error responses (401 here) that never reach a route handler's own
+// logic: they come from set_default_headers() in the constructor, not
+// from anything a handleXxx() method writes, so a 401 is exactly as
+// good a probe as a 200 would be, and doesn't need real Postgres/
+// auth-service to construct — same reasoning as the test above.
+TEST(HttpServerTest, CorsHeadersArePresentOnEveryResponseIncludingErrors) {
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient("127.0.0.1", 1);  // недостижим, не должен вызываться
+    const ScopedServer server(chatService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/communities");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+    EXPECT_EQ(result->get_header_value("Access-Control-Allow-Origin"), "http://localhost:5173");
+    EXPECT_FALSE(result->get_header_value("Access-Control-Allow-Methods").empty());
+    EXPECT_FALSE(result->get_header_value("Access-Control-Allow-Headers").empty());
+}
+
+// Issue #354 — the browser's own preflight request for a cross-origin
+// POST/PATCH/etc never carries an Authorization header (that's the
+// whole point of a preflight — checking permission before sending the
+// real, possibly credentialed, request) — so OPTIONS must succeed on
+// every route unconditionally, not just the ones this test happens to
+// probe.
+TEST(HttpServerTest, OptionsPreflightSucceedsWithCorsHeadersAndNoAuthorization) {
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient("127.0.0.1", 1);  // недостижим, не должен вызываться
+    const ScopedServer server(chatService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Options("/communities/1/channels");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    EXPECT_EQ(result->get_header_value("Access-Control-Allow-Origin"), "http://localhost:5173");
+}
+
 TEST(HttpServerTest, CreateCommunityRejectsMissingNameWith400) {
     auto fixtureOpt = TestFixture::create("http-server-create-community-400");
     if (!fixtureOpt.has_value()) {

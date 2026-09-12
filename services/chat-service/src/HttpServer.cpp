@@ -140,8 +140,15 @@ std::optional<std::int64_t> parseMessageIdBody(const std::string& requestBody) {
 }  // namespace
 
 HttpServer::HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
-                        const UserServiceClient& userServiceClient)
+                        const UserServiceClient& userServiceClient, const std::string& corsAllowedOrigin)
     : chatService_(chatService), authServiceClient_(authServiceClient), userServiceClient_(userServiceClient) {
+    // Issue #354 — see HttpServer.h's doc-comment on corsAllowedOrigin.
+    server_.set_default_headers({
+        {"Access-Control-Allow-Origin", corsAllowedOrigin},
+        {"Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS"},
+        {"Access-Control-Allow-Headers", "Authorization, Content-Type"},
+    });
+    server_.Options(R"(.*)", [](const httplib::Request&, httplib::Response& response) { response.status = 200; });
     registerRoutes();
 }
 
