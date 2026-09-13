@@ -34,7 +34,7 @@ export function DirectMessageView({ threadId, otherLogin }: DirectMessageViewPro
         <DirectMessageList messages={messages} currentLogin={currentLogin} />
       </div>
       {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
-      <DirectMessageComposer onSend={sendMessage} onTyping={sendTyping} />
+      <DirectMessageComposer threadId={threadId} onSend={sendMessage} onTyping={sendTyping} />
     </section>
   );
 }
