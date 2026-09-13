@@ -2,6 +2,7 @@
 // rather than only via FriendsPanel's "Message" button each time.
 
 import { useDmThreads } from "./useDmThreads.js";
+import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import styles from "./DmThreadsList.module.css";
 
 interface DmThreadsListProps {
@@ -19,8 +20,7 @@ export function DmThreadsList({ selectedThreadId, onSelectThread, unreadCounts }
 
   return (
     <nav aria-label="Conversations" className={styles.nav}>
-      {loading && <p className={styles.mutedText}>Loading conversations…</p>}
-      {error !== null && <p role="alert">{error}</p>}
+      <AsyncListStatus loading={loading} error={error} loadingText="Loading conversations…" />
       <ul className={styles.list}>
         {threads.map((thread) => {
           const unreadCount = unreadCounts?.get(thread.id) ?? 0;
