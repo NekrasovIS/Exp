@@ -43,6 +43,10 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
                                          .telegramChatId = telegramChatIdEdit_->text()});
     });
 
+    twoFactorButton_ = new QPushButton(tr("Two-factor authentication..."), this);
+    twoFactorButton_->setObjectName(QStringLiteral("profileTwoFactorButton"));
+    connect(twoFactorButton_, &QPushButton::clicked, this, [this]() { emit twoFactorSettingsRequested(); });
+
     statusLabel_ = new QLabel(this);
     statusLabel_->setObjectName(QStringLiteral("profileStatusLabel"));
     statusLabel_->setWordWrap(true);
@@ -52,6 +56,7 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     layout->addWidget(emailEdit_);
     layout->addWidget(telegramChatIdEdit_);
     layout->addWidget(saveButton_);
+    layout->addWidget(twoFactorButton_);
     layout->addWidget(statusLabel_);
 }
 

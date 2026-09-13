@@ -49,6 +49,7 @@
 #include "ui/SearchDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
+#include "ui/TotpSetupDialog.h"
 
 namespace devicehub {
 
@@ -147,8 +148,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(loginWindow_, &LoginWindow::verifyCodeRequested, this, &MainWindow::onVerifyOtpCodeClicked);
     connect(loginWindow_, &LoginWindow::passwordSignInRequested, this, &MainWindow::onPasswordSignInClicked);
     connect(loginWindow_, &LoginWindow::registerRequested, this, &MainWindow::onRegisterClicked);
+    connect(loginWindow_, &LoginWindow::totpCodeSubmitted, this, &MainWindow::onTotpCodeSubmitted);
     connect(&authClient_, &AuthClient::otpRequested, this,
             [this](const QString& identifier) { loginWindow_->showCodeSent(identifier); });
+    connect(&authClient_, &AuthClient::totpChallengeRequired, this,
+            [this](const QString& pendingToken) { loginWindow_->showTotpChallenge(pendingToken); });
     // Закрытие окна входа (крестик/Escape) без завершённой авторизации
     // означает, что показывать интерфейс не для кого — приложение
     // завершается, а не остаётся висеть со скрытым пустым MainWindow
@@ -159,6 +163,22 @@ MainWindow::MainWindow(QWidget* parent)
     connect(footerBar_, &FooterBar::accountSettingsRequested, this, &MainWindow::onAccountSettingsClicked);
     connect(profileDialog_, &ProfileDialog::saveRequested, this,
             [this](const ProfileEdits& edits) { userProfileClient_.updateOwnProfile(lastToken_, edits); });
+    connect(profileDialog_, &ProfileDialog::twoFactorSettingsRequested, this,
+            &MainWindow::onTwoFactorSettingsRequested);
+    connect(totpSetupDialog_, &TotpSetupDialog::enableRequested, this,
+            [this]() { userProfileClient_.setupTotp(lastToken_); });
+    connect(totpSetupDialog_, &TotpSetupDialog::confirmRequested, this,
+            [this](const QString& code) { userProfileClient_.confirmTotp(lastToken_, code); });
+    connect(totpSetupDialog_, &TotpSetupDialog::disableRequested, this,
+            [this](const QString& code) { userProfileClient_.disableTotp(lastToken_, code); });
+    connect(&userProfileClient_, &UserProfileClient::totpStatusReceived, this,
+            [this](bool enabled) { totpSetupDialog_->showStatus(enabled); });
+    connect(&userProfileClient_, &UserProfileClient::totpSetupStarted, this,
+            [this](const TotpSetupInfo& setup) { totpSetupDialog_->showSetup(setup); });
+    connect(&userProfileClient_, &UserProfileClient::totpConfirmed, this,
+            [this](const QStringList& backupCodes) { totpSetupDialog_->showBackupCodes(backupCodes); });
+    connect(&userProfileClient_, &UserProfileClient::totpDisabled, this,
+            [this]() { totpSetupDialog_->showStatus(false); });
     connect(&userProfileClient_, &UserProfileClient::profileReceived, this, [this](const UserProfile& profile) {
         // fetchProfile() также используется, чтобы искать открытые
         // ключи участников зашифрованного канала (issue #138, см.
@@ -179,6 +199,13 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(&userProfileClient_, &UserProfileClient::errorOccurred, this, [this](const QString& message) {
         profileDialog_->statusLabel()->setText(tr("Error: %1").arg(message));
+        // Issue #390: TOTP-ошибки (неверный код при confirm/disable,
+        // TOTP уже включена и т.п.) должны быть видны в самом
+        // TotpSetupDialog, а не только в статус-лейбле ProfileDialog,
+        // который скрыт, пока открыт этот диалог.
+        if (totpSetupDialog_->isVisible()) {
+            totpSetupDialog_->showError(message);
+        }
         // Общий для профиля и заявок в друзья (issue #187) — в отличие
         // от статус-лейбла ProfileDialog, тост виден независимо от
         // того, открыт ли этот диалог, что важно именно для ошибок
@@ -1098,6 +1125,7 @@ void MainWindow::buildUi() {
 
     settingsDialog_ = new SettingsDialog(this);
     profileDialog_ = new ProfileDialog(this);
+    totpSetupDialog_ = new TotpSetupDialog(this);
     moderatorsDialog_ = new ModeratorsDialog(this);
     searchDialog_ = new SearchDialog(this);
     pinnedMessagesDialog_ = new PinnedMessagesDialog(this);
@@ -1183,6 +1211,11 @@ void MainWindow::onPasswordSignInClicked(const QString& login, const QString& pa
 void MainWindow::onRegisterClicked(const QString& login, const QString& password) {
     loginWindow_->statusLabel()->setText(tr("Registering..."));
     authClient_.registerUser(login, password);
+}
+
+void MainWindow::onTotpCodeSubmitted(const QString& pendingToken, const QString& code) {
+    loginWindow_->statusLabel()->setText(tr("Verifying code..."));
+    authClient_.verifyTotp(pendingToken, code);
 }
 
 void MainWindow::onSendChatMessageClicked() {
@@ -1370,6 +1403,16 @@ void MainWindow::onEditProfileClicked() {
     profileDialog_->show();
     profileDialog_->raise();
     profileDialog_->activateWindow();
+}
+
+void MainWindow::onTwoFactorSettingsRequested() {
+    // Всегда переспрашивает актуальный статус вместо того, чтобы
+    // помнить последний известный — диалог мог быть закрыт и открыт
+    // заново давно после последнего изменения.
+    userProfileClient_.fetchTotpStatus(lastToken_);
+    totpSetupDialog_->show();
+    totpSetupDialog_->raise();
+    totpSetupDialog_->activateWindow();
 }
 
 void MainWindow::onRequestOtpCodeClicked(const QString& identifier) {

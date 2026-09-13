@@ -1,4 +1,5 @@
 #include "auth/AuthClient.h"
+#include "user/UserProfileClient.h"
 
 #include <gtest/gtest.h>
 
@@ -6,6 +7,7 @@
 #include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageAuthenticationCode>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -385,6 +387,178 @@ TEST(AuthClientIntegrationTest, VerifyOtpWithWrongCodeEmitsError) {
                       << " — start it locally to run this test.";
     }
     EXPECT_TRUE(errorFired);
+}
+
+// Issue #389/#390 — та же маленькая копия RFC 4226/6238, что и в
+// UserProfileClientTest.cpp (своя на файл — тестовый хелпер, не часть
+// продакшен-кода, дублирование которого между тестовыми бинарями/
+// единицами трансляции не противоречит DRY тем же способом, что и
+// дублирование в реальном коде).
+QByteArray decodeBase32ForTotpTest(const QString& text) {
+    static const QString kAlphabet = QStringLiteral("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567");
+    QString bits;
+    for (const QChar rawChar : text) {
+        if (rawChar == QLatin1Char('=')) {
+            break;
+        }
+        const int index = kAlphabet.indexOf(rawChar.toUpper());
+        if (index < 0) {
+            continue;
+        }
+        bits += QString::number(index, 2).rightJustified(5, QLatin1Char('0'));
+    }
+    QByteArray bytes;
+    for (int i = 0; i + 8 <= bits.size(); i += 8) {
+        bytes.append(static_cast<char>(bits.mid(i, 8).toUShort(nullptr, 2)));
+    }
+    return bytes;
+}
+
+QString computeTotpCodeForAuthClientTest(const QString& base32Secret) {
+    const QByteArray key = decodeBase32ForTotpTest(base32Secret);
+    const auto counter = static_cast<uint64_t>(QDateTime::currentSecsSinceEpoch() / 30);
+
+    QByteArray counterBytes(8, '\0');
+    for (int i = 7; i >= 0; --i) {
+        counterBytes[i] = static_cast<char>((counter >> ((7 - i) * 8)) & 0xff);
+    }
+
+    QMessageAuthenticationCode hmacCode(QCryptographicHash::Sha1);
+    hmacCode.setKey(key);
+    hmacCode.addData(counterBytes);
+    const QByteArray digest = hmacCode.result();
+
+    const auto offset = static_cast<unsigned char>(digest[digest.size() - 1] & 0x0f);
+    const uint32_t truncated = ((static_cast<unsigned char>(digest[offset]) & 0x7f) << 24) |
+                                ((static_cast<unsigned char>(digest[offset + 1]) & 0xff) << 16) |
+                                ((static_cast<unsigned char>(digest[offset + 2]) & 0xff) << 8) |
+                                (static_cast<unsigned char>(digest[offset + 3]) & 0xff);
+    return QString::number(truncated % 1000000).rightJustified(6, QLatin1Char('0'));
+}
+
+TEST(AuthClientIntegrationTest, RequestTokenChallengesWithPendingTokenWhenTotpIsEnabledAndVerifyTotpCompletesLogin) {
+    const char* authUrlEnv = std::getenv("AUTH_SERVICE_URL");
+    const QUrl authBaseUrl(authUrlEnv != nullptr ? QString::fromLocal8Bit(authUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8080"));
+    const char* userUrlEnv = std::getenv("USER_SERVICE_URL");
+    const QUrl userBaseUrl(userUrlEnv != nullptr ? QString::fromLocal8Bit(userUrlEnv)
+                                                  : QStringLiteral("http://127.0.0.1:8081"));
+
+    const QString login = QStringLiteral("integration-totp-login-test-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager setupManager;
+    if (!registerTestUser(setupManager, userBaseUrl, login, password)) {
+        GTEST_SKIP() << "user-service not reachable at " << userBaseUrl.toString().toStdString()
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+
+    AuthClient client(authBaseUrl);
+    QString setupToken;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString&, qint64) {
+                              setupToken = token;
+                              loop.quit();
+                          });
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString&) { loop.quit(); });
+        client.requestToken(login, password);
+        loop.exec();
+    }
+    if (setupToken.isEmpty()) {
+        GTEST_SKIP() << "auth-service not reachable at " << authBaseUrl.toString().toStdString()
+                      << " — start it locally to run this test.";
+    }
+
+    UserProfileClient profileClient(userBaseUrl);
+    TotpSetupInfo setup;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&profileClient, &UserProfileClient::totpSetupStarted, &loop,
+                          [&](const TotpSetupInfo& info) {
+                              setup = info;
+                              loop.quit();
+                          });
+        profileClient.setupTotp(setupToken);
+        loop.exec();
+    }
+    ASSERT_FALSE(setup.secret.isEmpty());
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&profileClient, &UserProfileClient::totpConfirmed, &loop,
+                          [&](const QStringList&) { loop.quit(); });
+        profileClient.confirmTotp(setupToken, computeTotpCodeForAuthClientTest(setup.secret));
+        loop.exec();
+    }
+
+    // Первичный фактор (пароль) снова верен, но теперь у аккаунта
+    // включена TOTP — вместо tokenReceived() должен прийти
+    // totpChallengeRequired().
+    QString pendingToken;
+    bool tokenReceivedInstead = false;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::totpChallengeRequired, &loop, [&](const QString& token) {
+            pendingToken = token;
+            loop.quit();
+        });
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString&, const QString&, qint64) {
+                              tokenReceivedInstead = true;
+                              loop.quit();
+                          });
+        client.requestToken(login, password);
+        loop.exec();
+    }
+    EXPECT_FALSE(tokenReceivedInstead);
+    ASSERT_FALSE(pendingToken.isEmpty());
+
+    // Неверный код отклоняется без выдачи токена.
+    bool errorOnWrongCode = false;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::errorOccurred, &loop, [&](const QString&) {
+            errorOnWrongCode = true;
+            loop.quit();
+        });
+        client.verifyTotp(pendingToken, QStringLiteral("000000"));
+        loop.exec();
+    }
+    EXPECT_TRUE(errorOnWrongCode);
+
+    // Верный код завершает вход обычной парой токенов.
+    QString finalToken;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenReceived, &loop,
+                          [&](const QString& token, const QString&, qint64) {
+                              finalToken = token;
+                              loop.quit();
+                          });
+        client.verifyTotp(pendingToken, computeTotpCodeForAuthClientTest(setup.secret));
+        loop.exec();
+    }
+    ASSERT_FALSE(finalToken.isEmpty());
+
+    bool verified = false;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &AuthClient::tokenVerified, &loop, [&](bool valid, const QString&) {
+            verified = valid;
+            loop.quit();
+        });
+        client.verifyToken(finalToken);
+        loop.exec();
+    }
+    EXPECT_TRUE(verified);
 }
 
 TEST(AuthClientIntegrationTest, RegisterUserWithDuplicateLoginReportsNotRegistered) {

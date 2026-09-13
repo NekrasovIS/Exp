@@ -630,6 +630,7 @@ end note
 
 class LoginWindow {
   +showCodeSent(identifier: QString)
+  +showTotpChallenge(pendingToken: QString)
   +showError(message: QString)
   +reset()
   +identifierEdit() : QLineEdit*
@@ -637,13 +638,19 @@ class LoginWindow {
   +codeEdit() : QLineEdit*
   +verifyCodeButton() : QPushButton*
   +backButton() : QPushButton*
+  +totpCodeEdit() : QLineEdit*
+  +totpVerifyButton() : QPushButton*
+  +totpBackButton() : QPushButton*
   +statusLabel() : QLabel*
   -onRequestCodeClicked()
   -onVerifyCodeClicked()
   -onBackClicked()
+  -onTotpVerifyClicked()
+  -onTotpBackClicked()
   .. signals ..
   +requestCodeRequested(identifier: QString)
   +verifyCodeRequested(identifier: QString, code: QString)
+  +totpCodeSubmitted(pendingToken: QString, code: QString)
 }
 note bottom of LoginWindow
   issue #156: единственное видимое окно при
@@ -658,8 +665,15 @@ note bottom of LoginWindow
   registerButton()) заменил собой AccountMenu,
   который раньше жил в правом верхнем углу
   MainWindow — теперь удалён целиком.
+
+  Четвёртый шаг (issue #389/#390) —
+  showTotpChallenge()/totpCodeSubmitted() —
+  вставляется после успешного первичного
+  фактора (пароль или одноразовый код), если
+  AuthClient сигналит totpChallengeRequired()
+  вместо tokenReceived().
 end note
-MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
+MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested()/\ntotpCodeSubmitted() >
 
 class ChatMessageRow {
   ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "", canManageChannel: bool = false)
@@ -776,12 +790,60 @@ class ProfileDialog {
   +emailEdit() : QLineEdit*
   +telegramChatIdEdit() : QLineEdit*
   +saveButton() : QPushButton*
+  +twoFactorButton() : QPushButton*
   +statusLabel() : QLabel*
   .. signals ..
   +saveRequested(edits: ProfileEdits)
+  +twoFactorSettingsRequested()
 }
 ProfileDialog ..> UserProfile : setProfile() >
 ProfileDialog ..> ProfileEdits : saveRequested() >
+
+class TotpSetupDialog {
+  +showStatus(enabled: bool)
+  +showSetup(setup: TotpSetupInfo)
+  +showBackupCodes(backupCodes: QStringList)
+  +showError(message: QString)
+  +statusTextLabel() : QLabel*
+  +enableButton() : QPushButton*
+  +disableCodeEdit() : QLineEdit*
+  +disableButton() : QPushButton*
+  +qrLabel() : QLabel*
+  +secretLabel() : QLabel*
+  +confirmCodeEdit() : QLineEdit*
+  +confirmButton() : QPushButton*
+  +cancelSetupButton() : QPushButton*
+  +backupCodesLabel() : QLabel*
+  +backupCodesAcknowledgedButton() : QPushButton*
+  +statusLabel() : QLabel*
+  -onConfirmClicked()
+  -onCancelSetupClicked()
+  -onDisableClicked()
+  -onBackupCodesAcknowledgedClicked()
+  .. signals ..
+  +enableRequested()
+  +confirmRequested(code: QString)
+  +disableRequested(code: QString)
+}
+TotpSetupDialog ..> TotpSetupInfo : showSetup() >
+ProfileDialog ..> TotpSetupDialog : twoFactorSettingsRequested() >
+note bottom of TotpSetupDialog
+  issue #388/#390 — открывается кнопкой
+  ProfileDialog::twoFactorButton(). Три шага:
+  статус (Enable/Disable), настройка
+  (QR-код + секрет + код подтверждения) и
+  одноразовый показ backup-кодов. Чистое
+  представление, тот же паттерн, что и у
+  LoginWindow/ProfileDialog — MainWindow
+  владеет UserProfileClient.
+end note
+
+package "devicehub::qr_code_generator" <<Rectangle>> {
+  class QrCodeGenerator << (N,orchid) namespace >> {
+    +encode(text: QString, moduleSize: int = 6) : QImage
+  }
+}
+TotpSetupDialog ..> QrCodeGenerator : encode(setup.otpauthUrl) >
 
 class SettingsDialog {
   +outputCombo() : QComboBox*

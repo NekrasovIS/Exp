@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QUrl>
 
+class QJsonObject;
+
 namespace devicehub {
 
 /**
@@ -21,6 +23,14 @@ namespace devicehub {
  * на этом сервисе не ротируются, см. doc-комментарий TokenService — поэтому
  * он повторно испускает без изменений тот refresh-токен, что был передан на
  * вход, вместе со свежевыпущенным access-токеном/сроком действия.
+ *
+ * Двухфакторная аутентификация (issue #389/#390): если первичный фактор
+ * (requestToken()/verifyOtp()) успешен, но у аккаунта включена TOTP
+ * (issue #388), сервер вместо токенов отвечает
+ * {"totp_required": true, "pending_token"} — это сигналится через
+ * totpChallengeRequired(pendingToken) вместо tokenReceived(). Второй
+ * шаг — verifyTotp(pendingToken, code) — при успехе выдаёт токены так
+ * же, как и остальные способы входа, через tokenReceived().
  */
 class AuthClient : public QObject {
     Q_OBJECT
@@ -60,6 +70,13 @@ public:
     /// его через tokenReceived(), как и остальные способы входа.
     void verifyOtp(const QString& identifier, const QString& code);
 
+    /// Второй шаг входа с 2FA (issue #389/#390) — обменивает
+    /// @p pendingToken из totpChallengeRequired() на пару токенов через
+    /// POST {baseUrl}/auth/totp/verify, передавая TOTP- или backup-код
+    /// @p code (сервер сам определяет, какой из двух это). Отдаёт
+    /// результат через tokenReceived(), как и остальные способы входа.
+    void verifyTotp(const QString& pendingToken, const QString& code);
+
 signals:
     /// Испускается при успешном выпуске нового access-токена — из
     /// requestToken(), registerUser() (auto-login) или
@@ -82,7 +99,17 @@ signals:
     /// track it separately.
     void otpRequested(const QString& identifier);
 
+    /// Испускается вместо tokenReceived() из requestToken()/verifyOtp(),
+    /// когда у аккаунта включена TOTP (issue #388/#389) — @p pendingToken
+    /// передаётся в verifyTotp() для второго шага.
+    void totpChallengeRequired(const QString& pendingToken);
+
 private:
+    /// Общий для requestToken()/verifyOtp() случай ответа (issue #389):
+    /// true (и totpChallengeRequired() уже испущен), если @p object —
+    /// totp-challenge, а не пара токенов.
+    bool tryEmitTotpChallenge(const QJsonObject& object);
+
     QUrl baseUrl_;
     QNetworkAccessManager networkManager_;
 };

@@ -233,5 +233,78 @@ TEST(LoginWindowTest, ResetAlsoClearsPasswordFieldsAndReturnsFromPasswordStep) {
     EXPECT_TRUE(window.passwordEdit()->text().isEmpty());
 }
 
+// Issue #389/#390 — двухфакторная аутентификация (TOTP).
+
+TEST(LoginWindowTest, ShowTotpChallengeSwitchesToTheTotpStep) {
+    LoginWindow window;
+    window.usePasswordButton()->click();
+
+    EXPECT_TRUE(window.totpCodeEdit()->parentWidget()->isHidden());
+
+    window.showTotpChallenge(QStringLiteral("pending-token-1"));
+
+    EXPECT_FALSE(window.totpCodeEdit()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.passwordLoginEdit()->parentWidget()->isHidden());
+}
+
+TEST(LoginWindowTest, ClickingTotpVerifyWithEmptyCodeShowsStatusAndEmitsNothing) {
+    LoginWindow window;
+    window.showTotpChallenge(QStringLiteral("pending-token-1"));
+    QSignalSpy spy(&window, &LoginWindow::totpCodeSubmitted);
+
+    window.totpVerifyButton()->click();
+
+    EXPECT_EQ(spy.count(), 0);
+    EXPECT_FALSE(window.statusLabel()->text().isEmpty());
+}
+
+TEST(LoginWindowTest, ClickingTotpVerifyEmitsTotpCodeSubmittedWithThePendingTokenAndCode) {
+    LoginWindow window;
+    window.showTotpChallenge(QStringLiteral("pending-token-1"));
+    window.totpCodeEdit()->setText(QStringLiteral("123456"));
+    QSignalSpy spy(&window, &LoginWindow::totpCodeSubmitted);
+
+    window.totpVerifyButton()->click();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(0).toString(), QStringLiteral("pending-token-1"));
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("123456"));
+}
+
+TEST(LoginWindowTest, PressingEnterInTotpCodeEditEmitsTotpCodeSubmitted) {
+    LoginWindow window;
+    window.showTotpChallenge(QStringLiteral("pending-token-1"));
+    window.totpCodeEdit()->setText(QStringLiteral("654321"));
+    QSignalSpy spy(&window, &LoginWindow::totpCodeSubmitted);
+
+    emit window.totpCodeEdit()->returnPressed();
+
+    ASSERT_EQ(spy.count(), 1);
+    EXPECT_EQ(spy.at(0).at(1).toString(), QStringLiteral("654321"));
+}
+
+TEST(LoginWindowTest, TotpBackButtonReturnsToIdentifierStepAndClearsCode) {
+    LoginWindow window;
+    window.showTotpChallenge(QStringLiteral("pending-token-1"));
+    window.totpCodeEdit()->setText(QStringLiteral("111111"));
+
+    window.totpBackButton()->click();
+
+    EXPECT_TRUE(window.totpCodeEdit()->parentWidget()->isHidden());
+    EXPECT_FALSE(window.identifierEdit()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.totpCodeEdit()->text().isEmpty());
+}
+
+TEST(LoginWindowTest, ResetAlsoClearsTheTotpCodeAndReturnsFromTheTotpStep) {
+    LoginWindow window;
+    window.showTotpChallenge(QStringLiteral("pending-token-1"));
+    window.totpCodeEdit()->setText(QStringLiteral("111111"));
+
+    window.reset();
+
+    EXPECT_FALSE(window.identifierEdit()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.totpCodeEdit()->text().isEmpty());
+}
+
 }  // namespace
 }  // namespace devicehub

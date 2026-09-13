@@ -15,6 +15,7 @@ namespace {
 constexpr int kIdentifierStepIndex = 0;
 constexpr int kCodeStepIndex = 1;
 constexpr int kPasswordStepIndex = 2;
+constexpr int kTotpStepIndex = 3;
 }  // namespace
 
 LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
@@ -124,9 +125,36 @@ LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
     });
     passwordLayout->addWidget(backToCodeButton_);
 
+    auto* totpPage = new QWidget(stack_);
+    auto* totpLayout = new QVBoxLayout(totpPage);
+    totpLayout->setSpacing(ui_theme::kSpacingSm);
+
+    auto* totpHint = new QLabel(
+        tr("Enter the 6-digit code from your authenticator app, or one of your backup codes."), totpPage);
+    totpHint->setWordWrap(true);
+    totpLayout->addWidget(totpHint);
+
+    totpCodeEdit_ = new QLineEdit(totpPage);
+    totpCodeEdit_->setObjectName(QStringLiteral("loginTotpCodeEdit"));
+    totpCodeEdit_->setPlaceholderText(tr("Authentication code"));
+    connect(totpCodeEdit_, &QLineEdit::returnPressed, this, &LoginWindow::onTotpVerifyClicked);
+    totpLayout->addWidget(totpCodeEdit_);
+
+    totpVerifyButton_ = new QPushButton(tr("Verify"), totpPage);
+    totpVerifyButton_->setObjectName(QStringLiteral("totpVerifyButton"));
+    totpVerifyButton_->setProperty("accent", true);
+    connect(totpVerifyButton_, &QPushButton::clicked, this, &LoginWindow::onTotpVerifyClicked);
+    totpLayout->addWidget(totpVerifyButton_);
+
+    totpBackButton_ = new QPushButton(tr("Back"), totpPage);
+    totpBackButton_->setObjectName(QStringLiteral("totpBackButton"));
+    connect(totpBackButton_, &QPushButton::clicked, this, &LoginWindow::onTotpBackClicked);
+    totpLayout->addWidget(totpBackButton_);
+
     stack_->insertWidget(kIdentifierStepIndex, identifierPage);
     stack_->insertWidget(kCodeStepIndex, codePage);
     stack_->insertWidget(kPasswordStepIndex, passwordPage);
+    stack_->insertWidget(kTotpStepIndex, totpPage);
     stack_->setCurrentIndex(kIdentifierStepIndex);
     rootLayout->addWidget(stack_);
 
@@ -185,6 +213,23 @@ void LoginWindow::onRegisterClicked() {
     emit registerRequested(login, password);
 }
 
+void LoginWindow::onTotpVerifyClicked() {
+    const QString code = totpCodeEdit_->text().trimmed();
+    if (code.isEmpty()) {
+        statusLabel_->setText(tr("Enter your authenticator code."));
+        return;
+    }
+    statusLabel_->clear();
+    emit totpCodeSubmitted(pendingTotpToken_, code);
+}
+
+void LoginWindow::onTotpBackClicked() {
+    stack_->setCurrentIndex(kIdentifierStepIndex);
+    totpCodeEdit_->clear();
+    pendingTotpToken_.clear();
+    statusLabel_->clear();
+}
+
 void LoginWindow::showCodeSent(const QString& identifier) {
     pendingIdentifier_ = identifier;
     codeSentLabel_->setText(
@@ -193,6 +238,14 @@ void LoginWindow::showCodeSent(const QString& identifier) {
     statusLabel_->clear();
     stack_->setCurrentIndex(kCodeStepIndex);
     codeEdit_->setFocus();
+}
+
+void LoginWindow::showTotpChallenge(const QString& pendingToken) {
+    pendingTotpToken_ = pendingToken;
+    totpCodeEdit_->clear();
+    statusLabel_->clear();
+    stack_->setCurrentIndex(kTotpStepIndex);
+    totpCodeEdit_->setFocus();
 }
 
 void LoginWindow::showError(const QString& message) {
@@ -205,8 +258,10 @@ void LoginWindow::reset() {
     codeEdit_->clear();
     passwordLoginEdit_->clear();
     passwordEdit_->clear();
+    totpCodeEdit_->clear();
     statusLabel_->clear();
     pendingIdentifier_.clear();
+    pendingTotpToken_.clear();
 }
 
 }  // namespace devicehub

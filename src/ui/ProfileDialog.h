@@ -17,6 +17,10 @@ struct ProfileEdits;
  *        #151): отображаемое имя, URL аватара, email (issue #156) и
  *        Telegram chat_id (issue #174) — любой из последних двух
  *        включает вход по одноразовому коду через этот канал.
+ *        Кнопка "Two-factor authentication..." открывает отдельный
+ *        TotpSetupDialog (issue #388/#390), которым владеет
+ *        MainWindow — сам ProfileDialog не знает ничего о TOTP, кроме
+ *        того, что нужно испустить сигнал по клику.
  *
  * Чистое представление — MainWindow владеет UserProfileClient и всей
  * связующей логикой: он вызывает setProfile() для предзаполнения полей
@@ -42,10 +46,15 @@ public:
     [[nodiscard]] QLineEdit* emailEdit() const { return emailEdit_; }
     [[nodiscard]] QLineEdit* telegramChatIdEdit() const { return telegramChatIdEdit_; }
     [[nodiscard]] QPushButton* saveButton() const { return saveButton_; }
+    [[nodiscard]] QPushButton* twoFactorButton() const { return twoFactorButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
 signals:
     void saveRequested(const ProfileEdits& edits);
+
+    /// "Two-factor authentication..." нажата (issue #388/#390) —
+    /// открывает TotpSetupDialog, которым владеет MainWindow.
+    void twoFactorSettingsRequested();
 
 private:
     QLineEdit* displayNameEdit_ = nullptr;
@@ -53,6 +62,7 @@ private:
     QLineEdit* emailEdit_ = nullptr;
     QLineEdit* telegramChatIdEdit_ = nullptr;
     QPushButton* saveButton_ = nullptr;
+    QPushButton* twoFactorButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };
 

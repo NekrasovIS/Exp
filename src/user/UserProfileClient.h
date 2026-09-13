@@ -3,6 +3,7 @@
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QString>
 #include <QStringList>
 #include <QUrl>
 
@@ -51,9 +52,21 @@ struct FriendRequestInfo {
     QString createdAt;
 };
 
+/// Ответ POST /profile/totp/setup (issue #388/#390) — @p secret в
+/// base32 (для ручного ввода), @p otpauthUrl — полный otpauth://-URI
+/// для QR-кода. Ничего из этого не сохраняется сервером до успешного
+/// confirmTotp().
+struct TotpSetupInfo {
+    QString secret;
+    QString otpauthUrl;
+};
+
 /**
  * @brief REST-клиент для эндпоинтов профиля user-service:
- *        GET /users/{login}/profile, PATCH /users/me (issue #110).
+ *        GET /users/{login}/profile, PATCH /users/me (issue #110),
+ *        POST /profile/totp/setup, POST /profile/totp/confirm,
+ *        POST /profile/totp/disable, GET /profile/totp/status
+ *        (двухфакторная аутентификация, issue #388/#390).
  *
  * Намеренно отделён от AuthClient (auth-service) и ChatRestClient
  * (chat-service) — user-service владеет данными аккаунта/профиля, это
@@ -94,6 +107,30 @@ public:
     /// Расфрендить — работает в любую сторону пары.
     void removeFriend(const QString& token, const QString& login);
 
+    /// Начинает (или перезапускает, если ни разу не подтверждалась)
+    /// настройку TOTP (issue #388/#390) — вызывает totpSetupStarted()
+    /// с секретом/otpauth-URI. Ничего не включается, пока не будет
+    /// вызван confirmTotp() с верным кодом; errorOccurred() при 409,
+    /// если TOTP уже включена — сперва disableTotp().
+    void setupTotp(const QString& token);
+
+    /// Подтверждает настройку кодом из приложения-аутентификатора —
+    /// только теперь TOTP реально становится обязательной при входе.
+    /// Вызывает totpConfirmed() с 10 backup-кодами (issue #388),
+    /// которые показываются пользователю ровно один раз здесь — сервер
+    /// хранит только их хеши, полученные из этого ответа не
+    /// восстановить.
+    void confirmTotp(const QString& token, const QString& code);
+
+    /// Выключает TOTP — требует текущий TOTP- или backup-@p code,
+    /// чтобы угнанная, но ещё не разлогиненная сессия не могла молча
+    /// снять 2FA. Вызывает totpDisabled() при успехе.
+    void disableTotp(const QString& token, const QString& code);
+
+    /// Запрашивает, включена ли TOTP у вызывающего — вызывает
+    /// totpStatusReceived().
+    void fetchTotpStatus(const QString& token);
+
 signals:
     void profileReceived(const UserProfile& profile);
     void profileUpdated(const UserProfile& profile);
@@ -104,6 +141,11 @@ signals:
     void friendRequestDeclined(qint64 requestId);
     void friendsListed(const QStringList& logins);
     void friendRemoved(const QString& login);
+
+    void totpSetupStarted(const TotpSetupInfo& setup);
+    void totpConfirmed(const QStringList& backupCodes);
+    void totpDisabled();
+    void totpStatusReceived(bool enabled);
 
     void errorOccurred(const QString& message);
 

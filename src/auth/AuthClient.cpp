@@ -9,6 +9,14 @@ namespace devicehub {
 
 AuthClient::AuthClient(QUrl baseUrl, QObject* parent) : QObject(parent), baseUrl_(std::move(baseUrl)) {}
 
+bool AuthClient::tryEmitTotpChallenge(const QJsonObject& object) {
+    if (object.value("totp_required").toBool() && object.contains("pending_token")) {
+        emit totpChallengeRequired(object.value("pending_token").toString());
+        return true;
+    }
+    return false;
+}
+
 void AuthClient::requestToken(const QString& login, const QString& password) {
     QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/token"))));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -26,12 +34,19 @@ void AuthClient::requestToken(const QString& login, const QString& password) {
         }
 
         const QJsonDocument response = QJsonDocument::fromJson(reply->readAll());
-        if (!response.isObject() || !response.object().contains("token")) {
+        if (!response.isObject()) {
+            emit errorOccurred(QStringLiteral("Malformed response from auth-service"));
+            return;
+        }
+        const QJsonObject object = response.object();
+        if (tryEmitTotpChallenge(object)) {
+            return;
+        }
+        if (!object.contains("token")) {
             emit errorOccurred(QStringLiteral("Malformed response from auth-service"));
             return;
         }
 
-        const QJsonObject object = response.object();
         emit tokenReceived(object.value("token").toString(), object.value("refresh_token").toString(),
                             object.value("expires_at").toVariant().toLongLong());
     });
@@ -148,6 +163,41 @@ void AuthClient::verifyOtp(const QString& identifier, const QString& code) {
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
     const QJsonObject body{{"identifier", identifier}, {"code", code}};
+    QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const QJsonDocument errorBody = QJsonDocument::fromJson(reply->readAll());
+            const QString detail = errorBody.isObject() ? errorBody.object().value("error").toString() : QString();
+            emit errorOccurred(detail.isEmpty() ? reply->errorString() : detail);
+            return;
+        }
+
+        const QJsonDocument response = QJsonDocument::fromJson(reply->readAll());
+        if (!response.isObject()) {
+            emit errorOccurred(QStringLiteral("Malformed response from auth-service"));
+            return;
+        }
+        const QJsonObject object = response.object();
+        if (tryEmitTotpChallenge(object)) {
+            return;
+        }
+        if (!object.contains("token")) {
+            emit errorOccurred(QStringLiteral("Malformed response from auth-service"));
+            return;
+        }
+
+        emit tokenReceived(object.value("token").toString(), object.value("refresh_token").toString(),
+                            object.value("expires_at").toVariant().toLongLong());
+    });
+}
+
+void AuthClient::verifyTotp(const QString& pendingToken, const QString& code) {
+    QNetworkRequest request(baseUrl_.resolved(QUrl(QStringLiteral("/auth/totp/verify"))));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    const QJsonObject body{{"pending_token", pendingToken}, {"code", code}};
     QNetworkReply* reply = networkManager_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {

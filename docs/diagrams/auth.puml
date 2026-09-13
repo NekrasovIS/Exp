@@ -12,15 +12,17 @@ class AuthClient {
   +refreshAccessToken(refreshToken: QString)
   +requestOtp(identifier: QString)
   +verifyOtp(identifier: QString, code: QString)
+  +verifyTotp(pendingToken: QString, code: QString)
   .. signals ..
   +tokenReceived(token: QString, refreshToken: QString, expiresAt: qint64)
   +tokenVerified(valid: bool, subject: QString)
   +registrationCompleted(registered: bool)
   +errorOccurred(message: QString)
   +otpRequested(identifier: QString)
+  +totpChallengeRequired(pendingToken: QString)
 }
 AuthClient *-- QNetworkAccessManager : owns
-AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register,\nPOST /auth/refresh,\nPOST /auth/otp/request,\nPOST /auth/otp/verify
+AuthClient ..> "auth-service" : POST /auth/token,\nPOST /auth/verify,\nPOST /auth/register,\nPOST /auth/refresh,\nPOST /auth/otp/request,\nPOST /auth/otp/verify,\nPOST /auth/totp/verify
 
 note left of AuthClient
   registerUser() success also emits
@@ -60,5 +62,23 @@ note bottom of AuthClient
   (профиль на user-service) — своего
   passwordless-регистрационного flow нет.
 end note
+
+note as TotpNote
+  issue #389/#390 — двухфакторная
+  аутентификация (TOTP, issue #388).
+  Если у аккаунта включена TOTP, ответ
+  на requestToken()/verifyOtp() несёт
+  {"totp_required", "pending_token"}
+  вместо пары токенов — вместо
+  tokenReceived() эмитится
+  totpChallengeRequired(pendingToken).
+  verifyTotp(pendingToken, code) —
+  второй шаг, при успехе выдаёт
+  токены тем же путём (tokenReceived()),
+  что и остальные способы входа.
+  Аккаунты без TOTP не замечают
+  разницы — один шаг, как раньше.
+end note
+AuthClient .. TotpNote
 
 @enduml
