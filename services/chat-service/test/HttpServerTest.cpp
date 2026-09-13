@@ -2,6 +2,7 @@
 #include "ChatRepository.h"
 #include "ChatService.h"
 #include "HttpServer.h"
+#include "LinkPreviewService.h"
 #include "UserServiceClient.h"
 
 #include <gtest/gtest.h>
@@ -75,7 +76,7 @@ public:
 
     ScopedServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
                  const UserServiceClient& userServiceClient)
-        : server_(chatService, authServiceClient, userServiceClient),
+        : server_(chatService, authServiceClient, userServiceClient, defaultLinkPreviewService()),
           thread_([this] { server_.listen(kTestHost, kTestPort); }) {
         httplib::Client probe(kTestHost, kTestPort);
         probe.set_connection_timeout(0, 50000);
@@ -98,6 +99,15 @@ public:
 private:
     static const UserServiceClient& unreachableUserServiceClient() {
         static const UserServiceClient instance("127.0.0.1", 1);
+        return instance;
+    }
+
+    // Настоящий LinkPreviewService (не заглушка) — тестам на
+    // /link-preview (issue #396) не нужен отдельный экземпляр, реальный
+    // SSRF-guard как раз и есть то, что они проверяют; program lifetime,
+    // как и у unreachableUserServiceClient() выше.
+    static LinkPreviewService& defaultLinkPreviewService() {
+        static LinkPreviewService instance;
         return instance;
     }
 
@@ -1937,6 +1947,69 @@ TEST(HttpServerTest, MarkDmThreadReadRoundTripsThroughGetUnreadAndRejectsNonPart
     EXPECT_EQ(markResult->status, 200);
     ASSERT_TRUE(threadCount().has_value());
     EXPECT_EQ(*threadCount(), 0);
+}
+
+// Issue #396 — превью ссылок. Тесты успешного скачивания+разбора
+// og-тегов живут отдельно, в LinkPreviewFetcherTest.cpp (напрямую
+// строят LinkPreviewFetcher с разрешённой локальной фикстурой) — здесь
+// только маршрут: авторизация, валидация, и что реальный (не
+// заменённый на заглушку) SSRF-guard действительно отклоняет
+// приватные адреса даже пройдя через весь путь HTTP-маршрута.
+
+TEST(HttpServerTest, GetLinkPreviewRejectsMissingAuthorizationHeaderWith401) {
+    auto fixtureOpt = TestFixture::create("http-server-link-preview-401");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result result = client.Get("/link-preview?url=https://example.test/");
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, GetLinkPreviewRejectsMissingUrlParamWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-link-preview-400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result result =
+        client.Get("/link-preview", httplib::Headers{{"Authorization", bearer(fixture.ownerToken)}});
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+// Проходит через весь реальный путь (HttpServer -> LinkPreviewService ->
+// LinkPreviewFetcher с настоящим, не подменённым SSRF-guard'ом) —
+// подтверждает, что этот сервис не превращается в прокси во внутреннюю
+// сеть, даже если вызывающий уже прошёл авторизацию.
+TEST(HttpServerTest, GetLinkPreviewReturnsUnavailableForAPrivateNetworkTarget) {
+    auto fixtureOpt = TestFixture::create("http-server-link-preview-ssrf");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+
+    for (const std::string& target : {"http://127.0.0.1:1/", "http://169.254.169.254/latest/meta-data/",
+                                        "http://10.0.0.1/", "ftp://example.test/"}) {
+        const httplib::Result result = client.Get("/link-preview", httplib::Params{{"url", target}},
+                                                     httplib::Headers{{"Authorization", bearer(fixture.ownerToken)}});
+        ASSERT_TRUE(result) << target;
+        ASSERT_EQ(result->status, 200) << target;
+        const nlohmann::json body = nlohmann::json::parse(result->body);
+        EXPECT_FALSE(body.value("available", true)) << target;
+    }
 }
 
 }  // namespace

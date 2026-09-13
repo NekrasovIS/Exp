@@ -159,6 +159,16 @@ add_library(chat_service_core
     src/HttpServer.cpp
     src/WebSocketServer.h
     src/WebSocketServer.cpp
+    src/OpenGraphParser.h
+    src/OpenGraphParser.cpp
+    src/PrivateNetworkCheck.h
+    src/PrivateNetworkCheck.cpp
+    src/LinkPreviewFetcher.h
+    src/LinkPreviewFetcher.cpp
+    src/LinkPreviewCache.h
+    src/LinkPreviewCache.cpp
+    src/LinkPreviewService.h
+    src/LinkPreviewService.cpp
 )
 target_include_directories(chat_service_core PUBLIC src)
 target_link_libraries(chat_service_core PUBLIC
@@ -195,6 +205,10 @@ add_executable(chat_service_tests
     test/AuthServiceClientTest.cpp
     test/JanusClientTest.cpp
     test/UserServiceClientTest.cpp
+    test/OpenGraphParserTest.cpp
+    test/PrivateNetworkCheckTest.cpp
+    test/LinkPreviewCacheTest.cpp
+    test/LinkPreviewFetcherTest.cpp
 )
 target_link_libraries(chat_service_tests PRIVATE
     chat_service_core
