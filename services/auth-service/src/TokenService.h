@@ -34,13 +34,24 @@ struct Token {
  * issueToken() просто выпускает свежий access-токен, а сам refresh-токен
  * продолжает работать до истечения своего срока.
  *
+ * Третий вид — "totp-pending" токен (issue #389, `"typ": "totp-pending"`)
+ * — короткоживущий (по умолчанию 5 минут, то же окно, что и у
+ * OTP-кода), выдаётся issueTotpPendingToken() вместо обычной пары
+ * access/refresh, когда пароль/OTP-код уже проверены, но у аккаунта
+ * включён TOTP (issue #388): доказывает пройденный первый фактор, ничего
+ * больше. verifyToken()/verifyRefreshToken() оба его отклоняют, как и
+ * verifyTotpPendingToken() отклоняет обычные/refresh-токены — тем же
+ * механизмом раздельных "typ", что и у refresh-токена, только с третьим
+ * значением вместо второго bool.
+ *
  * Чистая логика, без сетевого взаимодействия: тестируется изолированно
  * от HttpServer.
  */
 class TokenService {
 public:
     explicit TokenService(std::string secret, std::chrono::seconds ttl = std::chrono::seconds{3600},
-                           std::chrono::seconds refreshTtl = std::chrono::seconds{30 * 24 * 3600});
+                           std::chrono::seconds refreshTtl = std::chrono::seconds{30 * 24 * 3600},
+                           std::chrono::seconds totpPendingTtl = std::chrono::seconds{300});
 
     /// Выдаёт новый access-токен для @p subject, действительный в
     /// течение (короткого) TTL этого сервиса.
@@ -63,14 +74,33 @@ public:
     ///         а не принимается молча.
     [[nodiscard]] std::optional<std::string> verifyRefreshToken(const std::string& token) const;
 
+    /// Выдаёт "totp-pending" токен для @p subject (issue #389) — см.
+    /// класс-level doc-комментарий выше.
+    [[nodiscard]] Token issueTotpPendingToken(const std::string& subject) const;
+
+    /// @return Субъект @p token, если это валидный, не истёкший
+    ///         "totp-pending" токен, выданный issueTotpPendingToken();
+    ///         иначе std::nullopt (в том числе для обычного access- или
+    ///         refresh-токена, которые здесь отклоняются, а не
+    ///         принимаются молча).
+    [[nodiscard]] std::optional<std::string> verifyTotpPendingToken(const std::string& token) const;
+
 private:
+    /// Три вида токенов, которые выдаёт этот сервис — различаются
+    /// значением "typ" в полезной нагрузке (см. класс-level
+    /// doc-комментарий): kAccess не пишет "typ" вовсе (совместимо с
+    /// форматом токена до issue #389), остальные два — пишут.
+    enum class TokenKind { kAccess, kRefresh, kTotpPending };
+
     [[nodiscard]] Token issueTokenInternal(const std::string& subject, std::chrono::seconds ttl,
-                                            bool isRefresh) const;
-    [[nodiscard]] std::optional<std::string> verifyTokenInternal(const std::string& token, bool expectRefresh) const;
+                                            TokenKind kind) const;
+    [[nodiscard]] std::optional<std::string> verifyTokenInternal(const std::string& token,
+                                                                   TokenKind expectedKind) const;
 
     std::string secret_;
     std::chrono::seconds ttl_;
     std::chrono::seconds refreshTtl_;
+    std::chrono::seconds totpPendingTtl_;
 };
 
 }  // namespace auth_service

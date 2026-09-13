@@ -35,17 +35,25 @@ std::vector<uint8_t> toBytes(const std::string& text) {
 
 }  // namespace
 
-TokenService::TokenService(std::string secret, std::chrono::seconds ttl, std::chrono::seconds refreshTtl)
-    : secret_(std::move(secret)), ttl_(ttl), refreshTtl_(refreshTtl) {}
+TokenService::TokenService(std::string secret, std::chrono::seconds ttl, std::chrono::seconds refreshTtl,
+                            std::chrono::seconds totpPendingTtl)
+    : secret_(std::move(secret)), ttl_(ttl), refreshTtl_(refreshTtl), totpPendingTtl_(totpPendingTtl) {}
 
-Token TokenService::issueTokenInternal(const std::string& subject, std::chrono::seconds ttl, bool isRefresh) const {
+Token TokenService::issueTokenInternal(const std::string& subject, std::chrono::seconds ttl, TokenKind kind) const {
     const auto expiresAt =
         std::chrono::duration_cast<std::chrono::seconds>((std::chrono::system_clock::now() + ttl).time_since_epoch())
             .count();
 
     nlohmann::json payload{{"sub", subject}, {"exp", expiresAt}};
-    if (isRefresh) {
-        payload["typ"] = "refresh";
+    switch (kind) {
+        case TokenKind::kAccess:
+            break;
+        case TokenKind::kRefresh:
+            payload["typ"] = "refresh";
+            break;
+        case TokenKind::kTotpPending:
+            payload["typ"] = "totp-pending";
+            break;
     }
     const std::string payloadB64 = base64_utils::encodeUrl(toBytes(payload.dump()));
     const std::string signatureB64 = base64_utils::encodeUrl(hmacSha256(secret_, payloadB64));
@@ -53,7 +61,8 @@ Token TokenService::issueTokenInternal(const std::string& subject, std::chrono::
     return Token{.value = payloadB64 + "." + signatureB64, .expiresAt = expiresAt};
 }
 
-std::optional<std::string> TokenService::verifyTokenInternal(const std::string& token, bool expectRefresh) const {
+std::optional<std::string> TokenService::verifyTokenInternal(const std::string& token,
+                                                               TokenKind expectedKind) const {
     const auto separator = token.find('.');
     if (separator == std::string::npos) {
         return std::nullopt;
@@ -84,12 +93,14 @@ std::optional<std::string> TokenService::verifyTokenInternal(const std::string& 
         return std::nullopt;
     }
 
-    const bool isRefresh = payload.contains("typ") && payload["typ"] == "refresh";
-    if (isRefresh != expectRefresh) {
-        // Access-токен предъявлен там, где ожидался refresh-токен, или
-        // наоборот — отклоняем, а не принимаем молча ни один из
-        // вариантов, даже несмотря на то, что оба подписаны одним и тем
-        // же секретом.
+    const std::string typ = payload.contains("typ") ? payload["typ"].get<std::string>() : std::string();
+    const TokenKind actualKind = typ == "refresh"        ? TokenKind::kRefresh
+                                  : typ == "totp-pending" ? TokenKind::kTotpPending
+                                                           : TokenKind::kAccess;
+    if (actualKind != expectedKind) {
+        // Один вид токена предъявлен там, где ожидался другой —
+        // отклоняем, а не принимаем молча ни один из вариантов, даже
+        // несмотря на то, что все три подписаны одним и тем же секретом.
         return std::nullopt;
     }
 
@@ -104,19 +115,27 @@ std::optional<std::string> TokenService::verifyTokenInternal(const std::string& 
 }
 
 Token TokenService::issueToken(const std::string& subject) const {
-    return issueTokenInternal(subject, ttl_, /*isRefresh=*/false);
+    return issueTokenInternal(subject, ttl_, TokenKind::kAccess);
 }
 
 std::optional<std::string> TokenService::verifyToken(const std::string& token) const {
-    return verifyTokenInternal(token, /*expectRefresh=*/false);
+    return verifyTokenInternal(token, TokenKind::kAccess);
 }
 
 Token TokenService::issueRefreshToken(const std::string& subject) const {
-    return issueTokenInternal(subject, refreshTtl_, /*isRefresh=*/true);
+    return issueTokenInternal(subject, refreshTtl_, TokenKind::kRefresh);
 }
 
 std::optional<std::string> TokenService::verifyRefreshToken(const std::string& token) const {
-    return verifyTokenInternal(token, /*expectRefresh=*/true);
+    return verifyTokenInternal(token, TokenKind::kRefresh);
+}
+
+Token TokenService::issueTotpPendingToken(const std::string& subject) const {
+    return issueTokenInternal(subject, totpPendingTtl_, TokenKind::kTotpPending);
+}
+
+std::optional<std::string> TokenService::verifyTotpPendingToken(const std::string& token) const {
+    return verifyTokenInternal(token, TokenKind::kTotpPending);
 }
 
 }  // namespace auth_service
