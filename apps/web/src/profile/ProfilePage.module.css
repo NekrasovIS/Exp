@@ -1,0 +1,71 @@
+.page {
+  display: flex;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-5);
+  overflow-y: auto;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-6);
+  align-self: flex-start;
+}
+
+.backLink {
+  display: inline-block;
+  margin-bottom: var(--space-3);
+  color: var(--color-text-secondary);
+}
+
+.title {
+  margin: 0 0 var(--space-5);
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+
+.mutedText {
+  color: var(--color-text-muted);
+}
+
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+/* Same gradient-circle convention as MembersSidebar's own .avatar
+   (issue #322), just bigger — this is the one place the avatar is the
+   focal point of the screen, not a small icon in a list row. */
+.avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong, var(--color-accent)));
+  color: var(--color-text-on-accent);
+  font-weight: 700;
+  font-size: var(--font-size-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatarLabel {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}

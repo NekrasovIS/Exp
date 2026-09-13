@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HomePage } from "../../src/pages/HomePage.js";
@@ -31,9 +32,11 @@ afterEach(() => {
 describe("HomePage", () => {
   it("starts in communities mode", () => {
     render(
-      <SessionProvider>
-        <HomePage />
-      </SessionProvider>,
+      <MemoryRouter>
+        <SessionProvider>
+          <HomePage />
+        </SessionProvider>
+      </MemoryRouter>,
     );
 
     expect(screen.getByText("Select a channel to start chatting.")).toBeInTheDocument();
@@ -41,9 +44,11 @@ describe("HomePage", () => {
 
   it("toggles to friends mode and back", async () => {
     render(
-      <SessionProvider>
-        <HomePage />
-      </SessionProvider>,
+      <MemoryRouter>
+        <SessionProvider>
+          <HomePage />
+        </SessionProvider>
+      </MemoryRouter>,
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Friends" }));
@@ -51,5 +56,17 @@ describe("HomePage", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Back to communities" }));
     expect(screen.getByText("Select a channel to start chatting.")).toBeInTheDocument();
+  });
+
+  it("links to the profile page (issue #385)", () => {
+    render(
+      <MemoryRouter>
+        <SessionProvider>
+          <HomePage />
+        </SessionProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/profile");
   });
 });
