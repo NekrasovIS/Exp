@@ -40,5 +40,35 @@ TEST(MessageFormattingTest, HandlesAnEmptyString) {
     EXPECT_EQ(message_formatting::highlightMentions(QStringLiteral("")), QStringLiteral(""));
 }
 
+// Issue #396/#398 — link previews.
+
+TEST(MessageFormattingTest, FindFirstUrlReturnsEmptyStringWhenThereIsNoUrl) {
+    EXPECT_EQ(message_formatting::findFirstUrl(QStringLiteral("just some plain text")), QString());
+}
+
+TEST(MessageFormattingTest, FindFirstUrlFindsAnHttpsUrlEmbeddedInASentence) {
+    EXPECT_EQ(message_formatting::findFirstUrl(QStringLiteral("check this out: https://example.test/article")),
+              QStringLiteral("https://example.test/article"));
+}
+
+TEST(MessageFormattingTest, FindFirstUrlFindsAnHttpUrl) {
+    EXPECT_EQ(message_formatting::findFirstUrl(QStringLiteral("http://example.test/")),
+              QStringLiteral("http://example.test/"));
+}
+
+TEST(MessageFormattingTest, FindFirstUrlReturnsOnlyTheFirstUrlWhenThereAreSeveral) {
+    EXPECT_EQ(message_formatting::findFirstUrl(QStringLiteral("https://a.test/ and https://b.test/")),
+              QStringLiteral("https://a.test/"));
+}
+
+TEST(MessageFormattingTest, FindFirstUrlStopsAtWhitespace) {
+    EXPECT_EQ(message_formatting::findFirstUrl(QStringLiteral("https://example.test/path first then more text")),
+              QStringLiteral("https://example.test/path"));
+}
+
+TEST(MessageFormattingTest, FindFirstUrlDoesNotMatchABareDomainWithoutAScheme) {
+    EXPECT_EQ(message_formatting::findFirstUrl(QStringLiteral("visit example.test today")), QString());
+}
+
 }  // namespace
 }  // namespace devicehub

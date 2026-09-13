@@ -685,4 +685,29 @@ void ChatRestClient::fetchDmThreadReadReceipts(const QString& token, qint64 thre
     });
 }
 
+void ChatRestClient::fetchLinkPreview(const QString& token, const QString& url) {
+    QUrl requestUrl = baseUrl_.resolved(QUrl(QStringLiteral("/link-preview")));
+    QUrlQuery urlQuery;
+    urlQuery.addQueryItem(QStringLiteral("url"), url);
+    requestUrl.setQuery(urlQuery);
+
+    QNetworkReply* reply = networkManager_.get(buildRequest(requestUrl, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        LinkPreviewInfo info;
+        info.available = object.value("available").toBool();
+        if (info.available) {
+            info.title = object.value("title").toString();
+            info.description = object.value("description").toString();
+            info.imageUrl = object.value("image_url").toString();
+        }
+        emit linkPreviewFetched(url, info);
+    });
+}
+
 }  // namespace devicehub

@@ -15,6 +15,7 @@
 #include <QPoint>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -42,6 +43,8 @@ constexpr qreal kMaxBubbleWidthFraction = 0.7;
 constexpr const char* kOwnTextColor = ui_theme::kAccentForeground;
 constexpr int kAttachmentPreviewMaxWidth = 240;
 constexpr int kAttachmentPreviewMaxHeight = 200;
+constexpr int kLinkPreviewImageSize = 64;
+constexpr int kLinkPreviewMaxWidth = 320;
 
 QString formatTime(const QString& rawSentAt) {
     const QDateTime parsed = chat_message_grouping::parseSentAt(rawSentAt);
@@ -202,6 +205,54 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         bubbleLayout->addWidget(quoteLabel);
     }
     bubbleLayout->addWidget(bodyLabel_);
+
+    // Превью ссылки (issue #396/#398) — обнаруживается прямо здесь, из
+    // того же тела сообщения, что уже отрендерено выше, а не передаётся
+    // отдельным полем ChatMessage: тот же принцип "ChatView проверяет
+    // те же исходные данные заново", что и у isImageAttachment() ниже.
+    // Карточка создаётся сразу, но остаётся скрытой — setLinkPreview()
+    // покажет её, если (и когда) ChatView получит ответ сервера с
+    // available true.
+    if (const QString linkPreviewUrl = message_formatting::findFirstUrl(message.body); !linkPreviewUrl.isEmpty()) {
+        linkPreviewFrame_ = new QWidget(bubble_);
+        linkPreviewFrame_->setObjectName(QStringLiteral("chatLinkPreview"));
+        linkPreviewFrame_->setVisible(false);
+        linkPreviewFrame_->setMaximumWidth(kLinkPreviewMaxWidth);
+        auto* previewLayout = new QHBoxLayout(linkPreviewFrame_);
+        previewLayout->setContentsMargins(0, 0, 0, 0);
+        previewLayout->setSpacing(spacing);
+
+        linkPreviewImageLabel_ = new QLabel(linkPreviewFrame_);
+        linkPreviewImageLabel_->setObjectName(QStringLiteral("chatLinkPreviewImage"));
+        linkPreviewImageLabel_->setFixedSize(kLinkPreviewImageSize, kLinkPreviewImageSize);
+        linkPreviewImageLabel_->setVisible(false);
+        previewLayout->addWidget(linkPreviewImageLabel_);
+
+        auto* textColumn = new QVBoxLayout;
+        textColumn->setSpacing(0);
+        linkPreviewTitleLabel_ = new QLabel(linkPreviewFrame_);
+        linkPreviewTitleLabel_->setObjectName(QStringLiteral("chatLinkPreviewTitle"));
+        linkPreviewTitleLabel_->setWordWrap(true);
+        linkPreviewTitleLabel_->setVisible(false);
+        textColumn->addWidget(linkPreviewTitleLabel_);
+
+        linkPreviewDescriptionLabel_ = new QLabel(linkPreviewFrame_);
+        linkPreviewDescriptionLabel_->setObjectName(QStringLiteral("chatLinkPreviewDescription"));
+        linkPreviewDescriptionLabel_->setWordWrap(true);
+        linkPreviewDescriptionLabel_->setVisible(false);
+        textColumn->addWidget(linkPreviewDescriptionLabel_);
+
+        // Домен — из URL, который уже есть на клиенте, не из ответа
+        // сервера (тот же приём, что и у веб-клиента) — задаётся сразу
+        // и никогда не меняется, поэтому отдельный указатель-член для
+        // него не нужен.
+        auto* domainLabel = new QLabel(QUrl(linkPreviewUrl).host(), linkPreviewFrame_);
+        domainLabel->setObjectName(QStringLiteral("mutedDescription"));
+        textColumn->addWidget(domainLabel);
+
+        previewLayout->addLayout(textColumn, /*stretch=*/1);
+        bubbleLayout->addWidget(linkPreviewFrame_);
+    }
 
     if (message.attachmentId >= 0 && isAudioAttachment(message.attachmentFilename)) {
         // Голосовое сообщение (issue #359) — Play/Pause вместо ссылки
@@ -421,6 +472,27 @@ void ChatMessageRow::setAttachmentPreview(const QImage& image) {
         kAttachmentPreviewMaxWidth, kAttachmentPreviewMaxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     attachmentPreviewLabel_->setText(QString());
     attachmentPreviewLabel_->setPixmap(scaled);
+}
+
+void ChatMessageRow::setLinkPreview(const LinkPreviewInfo& info) {
+    if (linkPreviewFrame_ == nullptr || !info.available) {
+        return;
+    }
+    linkPreviewTitleLabel_->setText(info.title);
+    linkPreviewTitleLabel_->setVisible(!info.title.isEmpty());
+    linkPreviewDescriptionLabel_->setText(info.description);
+    linkPreviewDescriptionLabel_->setVisible(!info.description.isEmpty());
+    linkPreviewFrame_->setVisible(true);
+}
+
+void ChatMessageRow::setLinkPreviewImage(const QImage& image) {
+    if (linkPreviewImageLabel_ == nullptr || image.isNull()) {
+        return;
+    }
+    const QPixmap scaled = QPixmap::fromImage(image).scaled(
+        kLinkPreviewImageSize, kLinkPreviewImageSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    linkPreviewImageLabel_->setPixmap(scaled);
+    linkPreviewImageLabel_->setVisible(true);
 }
 
 void ChatMessageRow::setAudioData(const QByteArray& data) {

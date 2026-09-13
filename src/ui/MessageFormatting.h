@@ -15,4 +15,12 @@ namespace devicehub::message_formatting {
 /// несёт риска, в отличие от пропущенного упоминания.
 [[nodiscard]] QString highlightMentions(const QString& body);
 
+/// Первый `http(s)://`-URL, найденный в @p body (issue #396/#398), или
+/// пустая строка, если такого нет — до этой задачи ни один клиент
+/// вообще не распознавал ссылки в тексте сообщений. Не отрезает
+/// естественную завершающую пунктуацию ("...: https://example.test."
+/// или "(https://example.test)") — редкий лишний "." или ")" в запросе
+/// предпочтительнее сложности угадывания, была ли она частью URL.
+[[nodiscard]] QString findFirstUrl(const QString& body);
+
 }  // namespace devicehub::message_formatting

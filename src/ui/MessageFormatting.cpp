@@ -13,12 +13,22 @@ const QRegularExpression& mentionPattern() {
     static const QRegularExpression pattern(QStringLiteral(R"((?<![\w.])@([A-Za-z0-9_-]+))"));
     return pattern;
 }
+
+const QRegularExpression& urlPattern() {
+    static const QRegularExpression pattern(QStringLiteral(R"(https?://[^\s<>"')]+)"));
+    return pattern;
+}
 }  // namespace
 
 QString highlightMentions(const QString& body) {
     QString result = body;
     result.replace(mentionPattern(), QStringLiteral("**@\\1**"));
     return result;
+}
+
+QString findFirstUrl(const QString& body) {
+    const QRegularExpressionMatch match = urlPattern().match(body);
+    return match.hasMatch() ? match.captured(0) : QString();
 }
 
 }  // namespace devicehub::message_formatting

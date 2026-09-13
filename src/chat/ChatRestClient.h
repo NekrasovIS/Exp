@@ -108,6 +108,18 @@ struct ReadReceipt {
     qint64 lastReadMessageId = 0;
 };
 
+/// Результат `GET /link-preview` (issue #396/#398) — @p available false
+/// означает, что сервер не смог получить превью для этого URL
+/// (невалидная схема, приватный адрес, таймаут, нет og-тегов и т.п.),
+/// а не что сам запрос провалился; title/description/imageUrl заданы,
+/// только когда @p available true.
+struct LinkPreviewInfo {
+    bool available = false;
+    QString title;
+    QString description;
+    QString imageUrl;
+};
+
 /**
  * @brief REST-клиент для управления сообществами/каналами chat-service:
  *        создание/список сообществ, вступление, создание/список каналов.
@@ -256,6 +268,14 @@ public:
     /// dmThreadReadReceiptsFetched().
     void fetchDmThreadReadReceipts(const QString& token, qint64 threadId);
 
+    /// Превью ссылки, найденной в тексте сообщения (issue #396/#398) —
+    /// @p url передаётся как есть, сервер сам решает, кэшировать
+    /// результат, скачивать/парсить страницу или отклонить SSRF-опасный
+    /// адрес. Вызывает linkPreviewFetched() с тем же @p url, чтобы
+    /// вызывающий код (ChatView) мог сопоставить ответ со строкой(-ами),
+    /// которые его ждут.
+    void fetchLinkPreview(const QString& token, const QString& url);
+
 signals:
     /// @p inviteCode (issue #186) — создатель сразу видит код, который
     /// предстоит раздавать, без отдельного запроса.
@@ -325,6 +345,10 @@ signals:
     /// Ответ на fetchChannelReadReceipts()/fetchDmThreadReadReceipts().
     void channelReadReceiptsFetched(qint64 channelId, const QList<ReadReceipt>& receipts);
     void dmThreadReadReceiptsFetched(qint64 threadId, const QList<ReadReceipt>& receipts);
+
+    /// Ответ на fetchLinkPreview() — @p url тот же, что был передан в
+    /// запрос (сервер сам ничего не нормализует/не переписывает его).
+    void linkPreviewFetched(const QString& url, const LinkPreviewInfo& info);
 
     void errorOccurred(const QString& message);
 

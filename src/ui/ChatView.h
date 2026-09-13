@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QList>
+#include <QNetworkAccessManager>
 #include <QPointer>
 #include <QWidget>
 
@@ -152,6 +153,16 @@ public:
     /// — ничего не делает, если та строка с тех пор исчезла, тот же
     /// принцип, что и у setAttachmentPreview() выше.
     void setVoiceMessageData(qint64 attachmentId, const QByteArray& data);
+
+    /// Передаёт полученное превью ссылки (issue #396/#398) дальше во
+    /// ВСЕ строки, которые её запросили (несколько сообщений могут
+    /// ссылаться на один и тот же URL) — ничего не делает для строк,
+    /// с тех пор исчезнувших. При @p info.available true и непустом
+    /// imageUrl дополнительно скачивает саму картинку отдельным
+    /// запросом (произвольный сторонний URL, не эндпоинт chat-service,
+    /// поэтому не через ChatRestClient) и передаёт её каждой строке
+    /// через setLinkPreviewImage().
+    void setLinkPreview(const QString& url, const LinkPreviewInfo& info);
 
     /// Прокручивает к строке @p id, если она сейчас показана (issue
     /// #118, переход к результату поиска) — @return false, если это
@@ -334,6 +345,12 @@ signals:
     /// обратно в setVoiceMessageData().
     void voicePlaybackRequested(qint64 attachmentId);
 
+    /// Испускается сразу при появлении строки с URL, найденным в теле
+    /// сообщения (issue #396/#398, см. message_formatting::findFirstUrl())
+    /// — MainWindow запускает ChatRestClient::fetchLinkPreview() и
+    /// передаёт результат обратно в setLinkPreview().
+    void linkPreviewRequested(const QString& url);
+
 protected:
     /// Перехватывает Enter/Tab/Escape у messageEdit_, пока всплывающий
     /// список автокомплита (issue #326) открыт, чтобы они выбирали
@@ -362,6 +379,14 @@ private:
     /// изменение проще и надёжнее точечного обновления, а собственных
     /// показанных сообщений всегда мало (страница истории ограничена).
     void recomputeSeenByForOwnMessages();
+
+    /// Если в теле @p message нашёлся http(s)-URL (issue #396/#398),
+    /// запоминает @p row в pendingLinkPreviewRows_ и испускает
+    /// linkPreviewRequested() — та же общая часть appendMessage()/
+    /// prependMessages(), что и у requestPreviewIfImageAttachment()
+    /// выше. Несколько сообщений с одним и тем же URL добавляют себя в
+    /// один и тот же список — все получат ответ, когда он придёт.
+    void requestLinkPreviewIfUrlPresent(const ChatMessage& message, ChatMessageRow* row);
 
     /// Возвращает копию @p message с заполненными replyToAuthor/
     /// replyToBodySnippet (issue #306), если message.replyToMessageId
@@ -455,6 +480,17 @@ private:
     /// pendingImagePreviewRows_ выше, но заполняется лениво по клику на
     /// "Play", а не сразу для каждой строки с голосовым сообщением.
     QHash<qint64, QPointer<ChatMessageRow>> pendingVoicePlaybackRows_;
+    /// Строки, ожидающие ответа на linkPreviewRequested() (issue
+    /// #396/#398) — ключ URL, а не id сообщения, поскольку несколько
+    /// сообщений могут ссылаться на один и тот же адрес и все должны
+    /// получить один и тот же ответ; тот же принцип QPointer, что и у
+    /// pendingImagePreviewRows_ выше.
+    QHash<QString, QList<QPointer<ChatMessageRow>>> pendingLinkPreviewRows_;
+    /// Скачивает саму картинку карточки превью ссылки (issue #396/#398)
+    /// — отдельный от ChatRestClient клиент, поскольку это произвольный
+    /// сторонний URL с чужого домена, а не эндпоинт chat-service (не
+    /// нужен токен авторизации, только сами байты).
+    QNetworkAccessManager linkPreviewImageNetworkManager_;
     /// Логины участников текущего сообщества (issue #326) — только для
     /// фильтрации автокомплита, см. setChannelMemberLogins().
     QStringList channelMemberLogins_;
