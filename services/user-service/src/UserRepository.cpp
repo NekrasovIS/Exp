@@ -241,4 +241,30 @@ bool UserRepository::areFriends(const std::string& loginA, const std::string& lo
     return !rows.empty();
 }
 
+void UserRepository::setAvatar(const std::string& login, const AvatarUpload& upload) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    transaction.exec(
+        "INSERT INTO user_avatars (login, content_type, data_base64, size_bytes) VALUES ($1, $2, $3, $4) "
+        "ON CONFLICT (login) DO UPDATE SET content_type = EXCLUDED.content_type, "
+        "data_base64 = EXCLUDED.data_base64, size_bytes = EXCLUDED.size_bytes, uploaded_at = now()",
+        pqxx::params{login, upload.contentType, upload.dataBase64, upload.sizeBytes});
+    transaction.exec("UPDATE users SET avatar_url = $1 WHERE login = $2",
+                      pqxx::params{"/users/" + login + "/avatar", login});
+    transaction.commit();
+}
+
+std::optional<AvatarData> UserRepository::findAvatar(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT content_type, data_base64 FROM user_avatars WHERE login = $1", pqxx::params{login});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return AvatarData{.contentType = rows[0][0].as<std::string>(), .dataBase64 = rows[0][1].as<std::string>()};
+}
+
 }  // namespace user_service

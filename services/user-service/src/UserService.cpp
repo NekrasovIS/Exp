@@ -57,4 +57,12 @@ bool UserService::areFriends(const std::string& loginA, const std::string& login
     return repository_.areFriends(loginA, loginB);
 }
 
+void UserService::setAvatar(const std::string& login, const AvatarUpload& upload) {
+    repository_.setAvatar(login, upload);
+}
+
+std::optional<AvatarData> UserService::getAvatar(const std::string& login) {
+    return repository_.findAvatar(login);
+}
+
 }  // namespace user_service
