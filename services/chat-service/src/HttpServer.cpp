@@ -140,8 +140,12 @@ std::optional<std::int64_t> parseMessageIdBody(const std::string& requestBody) {
 }  // namespace
 
 HttpServer::HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
-                        const UserServiceClient& userServiceClient, const std::string& corsAllowedOrigin)
-    : chatService_(chatService), authServiceClient_(authServiceClient), userServiceClient_(userServiceClient) {
+                        const UserServiceClient& userServiceClient, LinkPreviewService& linkPreviewService,
+                        const std::string& corsAllowedOrigin)
+    : chatService_(chatService),
+      authServiceClient_(authServiceClient),
+      userServiceClient_(userServiceClient),
+      linkPreviewService_(linkPreviewService) {
     // Issue #354 — see HttpServer.h's doc-comment on corsAllowedOrigin.
     server_.set_default_headers({
         {"Access-Control-Allow-Origin", corsAllowedOrigin},
@@ -274,6 +278,9 @@ void HttpServer::registerRoutes() {
                   });
     server_.Get("/unread", [this](const httplib::Request& request, httplib::Response& response) {
         handleGetUnreadCounts(request, response);
+    });
+    server_.Get("/link-preview", [this](const httplib::Request& request, httplib::Response& response) {
+        handleGetLinkPreview(request, response);
     });
 }
 
@@ -1097,6 +1104,31 @@ void HttpServer::handleGetUnreadCounts(const httplib::Request& request, httplib:
         threads.push_back(nlohmann::json{{"thread_id", count.threadId}, {"unread_count", count.unreadCount}});
     }
     response.set_content(nlohmann::json{{"channels", channels}, {"dm_threads", threads}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleGetLinkPreview(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+    if (!request.has_param("url")) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'url' query param"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const LinkPreviewResult result = linkPreviewService_.getPreview(request.get_param_value("url"));
+    if (!result.available) {
+        response.set_content(nlohmann::json{{"available", false}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(nlohmann::json{{"available", true},
+                                         {"title", result.metadata.title},
+                                         {"description", result.metadata.description},
+                                         {"image_url", result.metadata.imageUrl}}
+                              .dump(),
+                          kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

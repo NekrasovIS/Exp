@@ -7,6 +7,7 @@
 #include "ChatService.h"
 #include "HttpServer.h"
 #include "JanusClient.h"
+#include "LinkPreviewService.h"
 #include "UserServiceClient.h"
 #include "WebSocketServer.h"
 
@@ -46,6 +47,7 @@ int main() {
     const chat_service::AuthServiceClient authServiceClient(authServiceHost, authServicePort);
     const chat_service::UserServiceClient userServiceClient(userServiceHost, userServicePort);
     const chat_service::JanusClient janusClient(janusHost, janusPort);
+    chat_service::LinkPreviewService linkPreviewService;
 
     chat_service::WebSocketServer webSocketServer(chatService, authServiceClient, janusClient, wsPort, host);
     if (!webSocketServer.start()) {
@@ -54,7 +56,8 @@ int main() {
     }
     std::cout << "chat-service: WebSocket listening on " << host << ":" << wsPort << "\n";
 
-    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, corsAllowedOrigin);
+    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, linkPreviewService,
+                                         corsAllowedOrigin);
     std::cout << "chat-service: REST listening on " << host << ":" << restPort << "\n";
     httpServer.listen(host, restPort);
 

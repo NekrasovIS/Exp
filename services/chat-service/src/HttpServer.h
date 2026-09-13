@@ -7,6 +7,7 @@
 
 #include "AuthServiceClient.h"
 #include "ChatService.h"
+#include "LinkPreviewService.h"
 #include "UserServiceClient.h"
 
 namespace chat_service {
@@ -17,10 +18,10 @@ namespace chat_service {
  *        загрузка/скачивание вложений (issue #116), поиск сообщений
  *        (issue #118), обмен пер-участник ключами канала для E2E-
  *        шифрования (issue #138), приглашения в сообщество по коду
- *        (issue #186), личные диалоги (issue #187, Фаза 2) и отметки
+ *        (issue #186), личные диалоги (issue #187, Фаза 2), отметки
  *        "прочитано"/агрегированные счётчики непрочитанных (issue
- *        #310/#348). Каждый
- *        маршрут требует действительный заголовок
+ *        #310/#348) и превью ссылок из текста сообщений (issue #396).
+ *        Каждый маршрут требует действительный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через auth-service
  *        посредством AuthServiceClient.
  *
@@ -48,7 +49,7 @@ public:
     /// до того, как доходит до сервера. По умолчанию — адрес Vite dev
     /// server для локальной разработки.
     HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
-               const UserServiceClient& userServiceClient,
+               const UserServiceClient& userServiceClient, LinkPreviewService& linkPreviewService,
                const std::string& corsAllowedOrigin = "http://localhost:5173");
 
     /// Блокируется, обслуживая запросы, пока stop() не будет вызван из другого потока.
@@ -106,11 +107,16 @@ private:
     /// GET /unread (issue #310/#348) — агрегированные счётчики по всем
     /// каналам/диалогам вызывающего логина одним запросом.
     void handleGetUnreadCounts(const httplib::Request& request, httplib::Response& response);
+    /// GET /link-preview?url= (issue #396) — требует авторизации, как и
+    /// остальные клиентские маршруты (без неё сервис стал бы открытым
+    /// анонимным SSRF-прокси). См. doc-комментарий LinkPreviewService.
+    void handleGetLinkPreview(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;
     const UserServiceClient& userServiceClient_;
+    LinkPreviewService& linkPreviewService_;
     httplib::Server server_;
 };
 

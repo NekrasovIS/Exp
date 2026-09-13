@@ -2,7 +2,10 @@
   "name": "chat-service",
   "version": "0.1.0",
   "dependencies": [
-    "cpp-httplib",
+    {
+      "name": "cpp-httplib",
+      "features": ["openssl"]
+    },
     "ixwebsocket",
     "libpqxx",
     "nlohmann-json",
