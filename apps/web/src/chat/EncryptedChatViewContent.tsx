@@ -21,6 +21,7 @@ import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMentionInput } from "./useMentionInput.js";
 import { useMessages } from "./useMessages.js";
 import { usePinnedMessages } from "./usePinnedMessages.js";
+import { useReadReceipts } from "./useReadReceipts.js";
 
 interface EncryptedChatViewContentProps {
   channelId: number;
@@ -60,6 +61,7 @@ export function EncryptedChatViewContent({
     sendTyping,
   } = useMessages(channelId);
   const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
+  const { readPointers } = useReadReceipts({ channelId }, socket);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [decryptedPinned, setDecryptedPinned] = useState<PinnedMessageInfo[]>([]);
   const [body, setBody] = useState("");
@@ -197,6 +199,7 @@ export function EncryptedChatViewContent({
           pinnedIds={pinnedIds}
           currentLogin={currentLogin}
           isModerator={isModerator}
+          readPointers={readPointers}
           onEdit={handleEdit}
           onDelete={deleteMessage}
           onReply={handleReply}

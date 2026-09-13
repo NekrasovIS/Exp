@@ -20,6 +20,7 @@ import type {
   DirectMessageThreadInfo,
   MessageReactionInfo,
   PinnedMessageInfo,
+  ReadReceipt,
   ThreadUnreadCount,
 } from "./types.js";
 
@@ -123,6 +124,14 @@ function toDirectMessageInfo(body: DirectMessageBody): DirectMessageInfo {
 interface UnreadCountsBody {
   channels?: Array<{ channel_id: number; unread_count: number }>;
   dm_threads?: Array<{ thread_id: number; unread_count: number }>;
+}
+
+interface ReadReceiptsBody {
+  receipts?: Array<{ login: string; last_read_message_id: number }>;
+}
+
+function toReadReceipts(body: ReadReceiptsBody | undefined): ReadReceipt[] {
+  return (body?.receipts ?? []).map((entry) => ({ login: entry.login, lastReadMessageId: entry.last_read_message_id }));
 }
 
 function messagesQuery(limit: number, beforeId?: number): string {
@@ -564,6 +573,37 @@ export class ChatRestClient {
         unreadCount: entry.unread_count,
       })),
     };
+  }
+
+  // ---- Read receipts (issue #380) ----
+
+  /** Snapshot of every member's read pointer for one channel — seed a
+   * local `login -> lastReadMessageId` map with this on open, then keep
+   * it live via `ChatClient`'s `readReceiptChanged` event. A member who
+   * has never marked anything read is simply absent, not a zero entry. */
+  async fetchChannelReadReceipts(token: string, channelId: number): Promise<ReadReceipt[]> {
+    const res = await requestJson<ReadReceiptsBody>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, `/channels/${channelId}/read-receipts`),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return toReadReceipts(res.body);
+  }
+
+  /** Same contract as {@link fetchChannelReadReceipts}, for a DM thread. */
+  async fetchDmThreadReadReceipts(token: string, threadId: number): Promise<ReadReceipt[]> {
+    const res = await requestJson<ReadReceiptsBody>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, `/dm/threads/${threadId}/read-receipts`),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return toReadReceipts(res.body);
   }
 
   // ---- Shared response-shape helpers ----

@@ -45,6 +45,14 @@ interface ChatClientEventMap {
   // PinMessageResult doc comment).
   messagePinned: [id: number, pinnedBy: string, pinnedAt: string];
   messageUnpinned: [id: number];
+  // issue #380 — fires whenever login's read pointer genuinely advances
+  // (never for a stale/duplicate mark-read call, see chat-service's own
+  // HttpServer::handleMarkChannelRead()); no channel/thread id, same as
+  // reactionChanged/messagePinned above — this instance is already
+  // scoped to one subscription. lastReadMessageId is the raw pointer,
+  // not "which messages became seen" — the listener derives that itself
+  // against the roster it already has (see useReadReceipts.ts).
+  readReceiptChanged: [login: string, lastReadMessageId: number];
   error: [message: string];
   callRoster: [participants: string[]];
   // SFU room for the call (issue #221/#232) — same call_join response as
@@ -398,6 +406,13 @@ export class ChatClient {
       const unpinned = body.message_unpinned as { id?: unknown };
       if (typeof unpinned.id === "number") {
         this.emit("messageUnpinned", unpinned.id);
+        return;
+      }
+    }
+    if (typeof body.read_receipt === "object" && body.read_receipt !== null) {
+      const receipt = body.read_receipt as { login?: unknown; last_read_message_id?: unknown };
+      if (typeof receipt.login === "string" && typeof receipt.last_read_message_id === "number") {
+        this.emit("readReceiptChanged", receipt.login, receipt.last_read_message_id);
         return;
       }
     }

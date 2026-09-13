@@ -87,3 +87,16 @@ export interface ThreadUnreadCount {
   threadId: number;
   unreadCount: number;
 }
+
+/** One member's read pointer for a channel/thread (issue #380) — a raw
+ * `login -> lastReadMessageId` pair, not "has this member seen message
+ * X": the caller derives that itself (`lastReadMessageId >= message.id`)
+ * against the roster it already has, rather than the server computing
+ * "who has read message X" per message (explicitly called out as
+ * expensive on large channels in the issue). Mirrors chat-service's
+ * `GET /channels/{id}/read-receipts`/`GET /dm/threads/{id}/read-receipts`
+ * response and DeviceHub's `ChatRepository::ReadReceipt`. */
+export interface ReadReceipt {
+  login: string;
+  lastReadMessageId: number;
+}

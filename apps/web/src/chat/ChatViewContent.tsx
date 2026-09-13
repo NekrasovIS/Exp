@@ -17,6 +17,7 @@ import { MessageSearch } from "./MessageSearch.js";
 import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMessages } from "./useMessages.js";
 import { usePinnedMessages } from "./usePinnedMessages.js";
+import { useReadReceipts } from "./useReadReceipts.js";
 
 interface ChatViewContentProps {
   channelId: number;
@@ -53,6 +54,7 @@ export function ChatViewContent({
     sendTyping,
   } = useMessages(channelId);
   const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
+  const { readPointers } = useReadReceipts({ channelId }, socket);
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(false);
   // Reply target (issue #306/#331) — resolved from `messages` itself,
@@ -113,6 +115,7 @@ export function ChatViewContent({
           pinnedIds={pinnedIds}
           currentLogin={currentLogin}
           isModerator={isModerator}
+          readPointers={readPointers}
           onEdit={editMessage}
           onDelete={deleteMessage}
           onReply={handleReply}

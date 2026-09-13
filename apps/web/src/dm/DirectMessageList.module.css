@@ -1,0 +1,11 @@
+/* Issue #380 — own-message "Seen" indicator; same treatment as
+ * MessageList.module.css's .seenBy (channel chat), kept as its own
+ * copy rather than a cross-feature import (see MessageRow.module.css's
+ * doc comment on why that coupling was removed in issue #410). */
+
+.seenBy {
+  display: block;
+  font-size: var(--font-size-sm);
+  opacity: 0.7;
+  margin-top: var(--space-1);
+}
