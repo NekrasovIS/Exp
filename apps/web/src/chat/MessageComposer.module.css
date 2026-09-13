@@ -44,3 +44,27 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
+
+/* Issue #377 — dragging a file over the composer highlights its border
+   (accent, matching the "active" convention CallPanel's aria-pressed
+   toggles already use — see that file's own comment) instead of giving
+   no feedback at all until the drop actually lands. */
+.form[data-dragover="true"] {
+  border-top-color: var(--color-accent);
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+}
+
+.dropHint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  pointer-events: none;
+}
