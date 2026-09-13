@@ -35,7 +35,11 @@ namespace user_service {
  *        паттерном, что verify-credentials/resolve-otp-identifier:
  *        вызывается только auth-service при входе, никогда напрямую
  *        клиентами (у auth-service нет своего Bearer-токена для этого
- *        вызова — сам процесс входа ещё не завершён).
+ *        вызова — сам процесс входа ещё не завершён). Плюс
+ *        GET /internal/totp-status?login= (issue #389) — тем же
+ *        паттерном, что GET /internal/friendship: без аутентификации,
+ *        только для auth-service, чтобы решить, спрашивать ли TOTP-код
+ *        при входе этого логина, до выдачи вообще какого-либо токена.
  *
  * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
  * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
@@ -85,6 +89,7 @@ private:
     void handleTotpDisable(const httplib::Request& request, httplib::Response& response);
     void handleTotpStatus(const httplib::Request& request, httplib::Response& response);
     void handleVerifyTotp(const httplib::Request& request, httplib::Response& response);
+    void handleTotpStatusInternal(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

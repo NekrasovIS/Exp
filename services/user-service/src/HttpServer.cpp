@@ -179,6 +179,9 @@ void HttpServer::registerRoutes() {
     server_.Post("/users/verify-totp", [this](const httplib::Request& request, httplib::Response& response) {
         handleVerifyTotp(request, response);
     });
+    server_.Get("/internal/totp-status", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpStatusInternal(request, response);
+    });
 }
 
 void HttpServer::handleRegister(const httplib::Request& request, httplib::Response& response) {
@@ -583,6 +586,20 @@ void HttpServer::handleVerifyTotp(const httplib::Request& request, httplib::Resp
     const bool valid = userService_.verifyTotpOrBackupCode(body["login"].get<std::string>(),
                                                              body["code"].get<std::string>());
     response.set_content(nlohmann::json{{"valid", valid}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleTotpStatusInternal(const httplib::Request& request, httplib::Response& response) {
+    // Issue #389 — deliberately unauthenticated, same as
+    // /internal/friendship: called only by auth-service, before a
+    // login attempt has produced anything to authenticate with yet.
+    if (!request.has_param("login")) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'login' query param"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(
+        nlohmann::json{{"enabled", userService_.isTotpEnabled(request.get_param_value("login"))}}.dump(),
+        kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

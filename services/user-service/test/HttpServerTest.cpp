@@ -952,5 +952,55 @@ TEST(HttpServerTest, TotpSetupConfirmStatusDisableRoundTripAndVerifyTotpRouteWit
     EXPECT_FALSE(nlohmann::json::parse(statusFinalResult->body)["enabled"].get<bool>());
 }
 
+TEST(HttpServerTest, InternalTotpStatusRouteRejectsMissingLoginParamWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    // No Authorization header at all — deliberately unauthenticated,
+    // same as /internal/friendship.
+    const httplib::Result result = client.Get("/internal/totp-status");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, InternalTotpStatusRouteReflectsEnabledState) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-internal-totp-status");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+    const httplib::Result patchResult = client.Patch("/users/me", authHeader, "{}", "application/json");
+    ASSERT_TRUE(patchResult);
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+
+    const httplib::Result beforeResult = client.Get("/internal/totp-status?login=" + login);
+    ASSERT_TRUE(beforeResult);
+    EXPECT_FALSE(nlohmann::json::parse(beforeResult->body)["enabled"].get<bool>());
+
+    const httplib::Result setupResult = client.Post("/profile/totp/setup", authHeader, "", "application/json");
+    ASSERT_TRUE(setupResult);
+    const std::string secretBase32 = nlohmann::json::parse(setupResult->body)["secret"].get<std::string>();
+    const std::optional<std::string> rawSecret = base32::decode(secretBase32);
+    ASSERT_TRUE(rawSecret.has_value());
+    ASSERT_TRUE(client.Post("/profile/totp/confirm", authHeader,
+                             nlohmann::json{{"code", totp::totp(*rawSecret, nowUnixSeconds())}}.dump(),
+                             "application/json"));
+
+    const httplib::Result afterResult = client.Get("/internal/totp-status?login=" + login);
+    ASSERT_TRUE(afterResult);
+    EXPECT_TRUE(nlohmann::json::parse(afterResult->body)["enabled"].get<bool>());
+}
+
 }  // namespace
 }  // namespace user_service
