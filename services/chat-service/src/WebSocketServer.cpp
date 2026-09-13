@@ -850,4 +850,23 @@ void WebSocketServer::broadcastToDmThread(std::int64_t dmThreadId, const std::st
     }
 }
 
+void WebSocketServer::broadcastChannelReadReceipt(std::int64_t channelId, const std::string& login,
+                                                   std::int64_t lastReadMessageId) {
+    // Без excludeSocket, в отличие от рассылки обычных сообщений от их
+    // же автора — она нарочно ничего не исключает уже сегодня
+    // (ChatMessageIsBroadcastToAllSubscribersIncludingSender), и по той
+    // же причине здесь: у читающего может быть открыто два окна (issue
+    // #310), обоим нужно узнать о новом значении.
+    broadcastToChannel(channelId,
+                        nlohmann::json{{"read_receipt", {{"login", login}, {"last_read_message_id", lastReadMessageId}}}}
+                            .dump());
+}
+
+void WebSocketServer::broadcastDmThreadReadReceipt(std::int64_t dmThreadId, const std::string& login,
+                                                    std::int64_t lastReadMessageId) {
+    broadcastToDmThread(
+        dmThreadId,
+        nlohmann::json{{"read_receipt", {{"login", login}, {"last_read_message_id", lastReadMessageId}}}}.dump());
+}
+
 }  // namespace chat_service

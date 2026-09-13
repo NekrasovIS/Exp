@@ -2,6 +2,8 @@
 
 #include <httplib.h>
 
+#include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -11,6 +13,21 @@
 
 namespace chat_service {
 
+/// Мост к WebSocketServer::broadcastChannelReadReceipt()/
+/// broadcastDmThreadReadReceipt() (issue #380) — HttpServer и
+/// WebSocketServer не знают друг о друге (см. class-комментарий
+/// HttpServer: доставка в реальном времени — работа WebSocketServer, а
+/// не этого класса), поэтому связь — пара инъецируемых колбэков, а не
+/// прямая ссылка. По умолчанию — no-op, чтобы существующие тесты
+/// HttpServer не должны были поднимать WebSocketServer только ради
+/// этого; main.cpp подключает настоящие методы WebSocketServer.
+struct ReadReceiptBroadcaster {
+    std::function<void(std::int64_t channelId, const std::string& login, std::int64_t lastReadMessageId)>
+        onChannelRead = [](std::int64_t, const std::string&, std::int64_t) {};
+    std::function<void(std::int64_t threadId, const std::string& login, std::int64_t lastReadMessageId)>
+        onDmThreadRead = [](std::int64_t, const std::string&, std::int64_t) {};
+};
+
 /**
  * @brief REST-фронтенд для ChatService: сообщества, каналы, вступление,
  *        управление модераторами (issue #114), история сообщений,
@@ -19,7 +36,10 @@ namespace chat_service {
  *        шифрования (issue #138), приглашения в сообщество по коду
  *        (issue #186), личные диалоги (issue #187, Фаза 2) и отметки
  *        "прочитано"/агрегированные счётчики непрочитанных (issue
- *        #310/#348). Каждый
+ *        #310/#348), включая снимок "кто на каком сообщении" целиком
+ *        (issue #380 — сама рассылка изменений в реальном времени по-
+ *        прежнему уходит через WebSocketServer, см.
+ *        ReadReceiptBroadcaster ниже). Каждый
  *        маршрут требует действительный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через auth-service
  *        посредством AuthServiceClient.
@@ -49,7 +69,8 @@ public:
     /// server для локальной разработки.
     HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
                const UserServiceClient& userServiceClient,
-               const std::string& corsAllowedOrigin = "http://localhost:5173");
+               const std::string& corsAllowedOrigin = "http://localhost:5173",
+               ReadReceiptBroadcaster readReceiptBroadcaster = {});
 
     /// Блокируется, обслуживая запросы, пока stop() не будет вызван из другого потока.
     void listen(const std::string& host, int port);
@@ -106,11 +127,20 @@ private:
     /// GET /unread (issue #310/#348) — агрегированные счётчики по всем
     /// каналам/диалогам вызывающего логина одним запросом.
     void handleGetUnreadCounts(const httplib::Request& request, httplib::Response& response);
+    /// GET /channels/{id}/read-receipts (issue #380) — снимок
+    /// last_read_message_id всех участников канала, у кого есть хотя бы
+    /// одна отметка; клиент заполняет им свою карту при открытии канала,
+    /// дальше держит её в актуальном состоянии через WS-событие
+    /// "read_receipt" (WebSocketServer::broadcastChannelReadReceipt()).
+    void handleGetChannelReadReceipts(const httplib::Request& request, httplib::Response& response);
+    /// То же самое для личного диалога.
+    void handleGetDmThreadReadReceipts(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;
     const UserServiceClient& userServiceClient_;
+    ReadReceiptBroadcaster readReceiptBroadcaster_;
     httplib::Server server_;
 };
 

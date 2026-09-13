@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <utility>
 
 #include "AuthServiceClient.h"
 #include "ChatRepository.h"
@@ -54,7 +55,22 @@ int main() {
     }
     std::cout << "chat-service: WebSocket listening on " << host << ":" << wsPort << "\n";
 
-    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, corsAllowedOrigin);
+    // Issue #380 — HttpServer сам не знает о WebSocketServer (см.
+    // doc-комментарий ReadReceiptBroadcaster в HttpServer.h), поэтому
+    // здесь, единственном месте, где оба объекта существуют
+    // одновременно, и собирается мост между ними.
+    chat_service::ReadReceiptBroadcaster readReceiptBroadcaster{
+        .onChannelRead =
+            [&webSocketServer](std::int64_t channelId, const std::string& login, std::int64_t lastReadMessageId) {
+                webSocketServer.broadcastChannelReadReceipt(channelId, login, lastReadMessageId);
+            },
+        .onDmThreadRead =
+            [&webSocketServer](std::int64_t threadId, const std::string& login, std::int64_t lastReadMessageId) {
+                webSocketServer.broadcastDmThreadReadReceipt(threadId, login, lastReadMessageId);
+            },
+    };
+    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, corsAllowedOrigin,
+                                         std::move(readReceiptBroadcaster));
     std::cout << "chat-service: REST listening on " << host << ":" << restPort << "\n";
     httpServer.listen(host, restPort);
 
