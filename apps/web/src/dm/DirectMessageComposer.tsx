@@ -1,11 +1,16 @@
 // Issue #268 — DM threads' composer is text-only (no attachments,
 // unlike channel chat's MessageComposer, #267).
+//
+// The draft (issue #376) is persisted per thread via useMessageDraft(),
+// the same mechanism MessageComposer.tsx uses for channel chat.
 
-import { useState, type FormEvent } from "react";
+import { type FormEvent } from "react";
 
 import styles from "../chat/chatView.module.css";
+import { useMessageDraft } from "../chat/useMessageDraft.js";
 
 interface DirectMessageComposerProps {
+  threadId: number;
   onSend: (body: string) => void;
   /** Called on every keystroke (issue #313) — the hook (useDirectMessages)
    * is the one that throttles this down to a real WebSocket frame, this
@@ -14,8 +19,8 @@ interface DirectMessageComposerProps {
   onTyping?: () => void;
 }
 
-export function DirectMessageComposer({ onSend, onTyping }: DirectMessageComposerProps) {
-  const [body, setBody] = useState("");
+export function DirectMessageComposer({ threadId, onSend, onTyping }: DirectMessageComposerProps) {
+  const { draft: body, setDraft: setBody, clearDraft } = useMessageDraft(`dm:${threadId}`);
 
   function handleSubmit(event: FormEvent): void {
     event.preventDefault();
@@ -23,7 +28,7 @@ export function DirectMessageComposer({ onSend, onTyping }: DirectMessageCompose
       return;
     }
     onSend(body.trim());
-    setBody("");
+    clearDraft();
   }
 
   return (

@@ -10,6 +10,10 @@
 // Drag-and-drop (issue #377) is an alternate entry point onto the same
 // upload path as the "Attach a file" input — see uploadFile() below,
 // shared by both.
+//
+// The draft (issue #376) is the unsent `body` text, persisted per
+// channel via useMessageDraft() so it survives switching to another
+// channel and back (or a page reload) before Send.
 
 import { ChatRestClient } from "@devicehub/core";
 import {
@@ -25,6 +29,7 @@ import {
 import styles from "./MessageComposer.module.css";
 import { MentionSuggestions } from "./MentionSuggestions.js";
 import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
+import { useMessageDraft } from "./useMessageDraft.js";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -82,7 +87,7 @@ export function MessageComposer({
   // down with full certainty.
   const pendingCursorPos = useRef<number | null>(null);
 
-  const [body, setBody] = useState("");
+  const { draft: body, setDraft: setBody, clearDraft } = useMessageDraft(`channel:${channelId}`);
   const [pendingAttachment, setPendingAttachment] = useState<{ id: number; filename: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +164,7 @@ export function MessageComposer({
       return;
     }
     onSend(body.trim(), pendingAttachment?.id);
-    setBody("");
+    clearDraft();
     setPendingAttachment(null);
     onCancelReply?.();
   }
