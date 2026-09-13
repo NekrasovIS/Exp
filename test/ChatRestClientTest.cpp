@@ -641,5 +641,113 @@ TEST(ChatRestClientTest, PromoteModeratorByNonOwnerEmitsError) {
     EXPECT_FALSE(errorMessage.isEmpty());
 }
 
+TEST(ChatRestClientTest, FetchChannelReadReceiptsReturnsEmptyListWhenNoOneHasReadYet) {
+    const QString token = registerAndGetToken(QStringLiteral("chat-rest-read-receipts-empty"));
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
+    }
+
+    ChatRestClient client(chatRestUrl());
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        client.createCommunity(token, QStringLiteral("chat-rest-read-receipts-empty-parent"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        client.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    QList<ReadReceipt> receipts{ReadReceipt{.login = "placeholder-to-prove-it-gets-overwritten", .lastReadMessageId = 1}};
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&client, &ChatRestClient::channelReadReceiptsFetched, &loop,
+                      [&](qint64, const QList<ReadReceipt>& fetched) {
+                          receipts = fetched;
+                          loop.quit();
+                      });
+    client.fetchChannelReadReceipts(token, channelId);
+    loop.exec();
+
+    EXPECT_TRUE(receipts.isEmpty());
+}
+
+TEST(ChatRestClientTest, FetchChannelReadReceiptsReturnsReceiptsAfterMarkingRead) {
+    const QString token = registerAndGetToken(QStringLiteral("chat-rest-read-receipts"));
+    if (token.isEmpty()) {
+        GTEST_SKIP() << "auth-service/user-service not reachable — start the stack to run this test.";
+    }
+
+    ChatRestClient client(chatRestUrl());
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        client.createCommunity(token, QStringLiteral("chat-rest-read-receipts-parent"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        client.createChannel(token, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &ChatRestClient::channelMarkedRead, &loop, [&](qint64) { loop.quit(); });
+        // Ни markChannelRead(), ни handleMarkChannelRead() на стороне
+        // chat-service не проверяют, что сообщение с этим id реально
+        // существует (issue #380/#310) — произвольное значение подходит
+        // не хуже настоящего id, отправленного через ChatClient (WS).
+        client.markChannelRead(token, channelId, 42);
+        loop.exec();
+    }
+
+    QList<ReadReceipt> receipts;
+    QEventLoop loop;
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    QObject::connect(&client, &ChatRestClient::channelReadReceiptsFetched, &loop,
+                      [&](qint64, const QList<ReadReceipt>& fetched) {
+                          receipts = fetched;
+                          loop.quit();
+                      });
+    client.fetchChannelReadReceipts(token, channelId);
+    loop.exec();
+
+    ASSERT_EQ(receipts.size(), 1);
+    EXPECT_TRUE(receipts.first().login.contains(QStringLiteral("chat-rest-read-receipts")));
+    EXPECT_EQ(receipts.first().lastReadMessageId, 42);
+}
+
 }  // namespace
 }  // namespace devicehub

@@ -172,6 +172,15 @@ public:
     /// setAttachmentPreview() выше.
     void setAudioData(const QByteArray& data);
 
+    /// Обновляет строку "Seen by: ..." (issue #380) — @p logins это
+    /// ПОЛНЫЙ список тех, кто сейчас видел это сообщение (пересчитан
+    /// ChatView заново на каждое изменение read-указателей, не дельта),
+    /// пустой список скрывает строку целиком. Ничего не делает для
+    /// чужого сообщения (isOwnMessage false в конструкторе) — виджет
+    /// для него вообще не создаётся, видеть, кто прочитал СВОЁ
+    /// сообщение, есть смысл только у автора.
+    void setSeenBy(const QStringList& logins);
+
 signals:
     /// Выбор "Edit" в контекстном меню по правому клику (только для
     /// собственных сообщений, issue #107/#150) — @p currentBody
@@ -287,6 +296,10 @@ private:
     QLabel* avatarLabel_ = nullptr;
     QString author_;
     int avatarSize_ = 0;
+    /// "Seen by: ..." (issue #380) — создаётся в конструкторе только
+    /// для собственных сообщений (isOwnMessage true), изначально скрыт;
+    /// null для чужого сообщения, setSeenBy() тогда — no-op.
+    QLabel* seenByLabel_ = nullptr;
 };
 
 }  // namespace devicehub

@@ -119,6 +119,10 @@ void ChatClient::onTextMessageReceived(const QString& message) {
         }
         emit reactionChanged(changed.value("message_id").toVariant().toLongLong(), changed.value("emoji").toString(),
                               logins);
+    } else if (object.contains("read_receipt")) {
+        const QJsonObject receipt = object.value("read_receipt").toObject();
+        emit readReceiptChanged(receipt.value("login").toString(),
+                                 receipt.value("last_read_message_id").toVariant().toLongLong());
     } else if (object.contains("author") && object.contains("body")) {
         const QJsonValue attachmentIdValue = object.value("attachment_id");
         const QJsonValue replyToMessageIdValue = object.value("reply_to_message_id");

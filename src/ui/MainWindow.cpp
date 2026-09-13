@@ -405,6 +405,19 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(chatView_, &ChatView::reactionToggleRequested, this,
             [this](qint64 id, const QString& emoji) { chatClient_.sendToggleReaction(id, emoji); });
+    // Issue #380 — "Seen by": снимок целиком при открытии канала,
+    // дальше живьём по одному логину за раз.
+    connect(&chatRestClient_, &ChatRestClient::channelReadReceiptsFetched, this,
+            [this](qint64 channelId, const QList<ReadReceipt>& receipts) {
+                if (channelId != selectedChannelId_) {
+                    return;
+                }
+                chatView_->setReadReceipts(receipts);
+            });
+    connect(&chatClient_, &ChatClient::readReceiptChanged, this,
+            [this](const QString& login, qint64 lastReadMessageId) {
+                chatView_->applyReadReceiptChange(login, lastReadMessageId);
+            });
     connect(&chatClient_, &ChatClient::errorOccurred, this,
             [this](const QString& message) { chatView_->appendSystemLine(tr("-- error: %1 --").arg(message)); });
     connect(chatView_, &ChatView::typingRequested, this, [this]() { chatClient_.sendTyping(); });
@@ -1570,6 +1583,7 @@ void MainWindow::finishOpeningChannel(qint64 id) {
     chatClient_.connectToChannel(lastToken_, id);
     chatRestClient_.listMessages(lastToken_, id, kMessagePageSize);
     chatRestClient_.listPinnedMessages(lastToken_, id);
+    chatRestClient_.fetchChannelReadReceipts(lastToken_, id);
 }
 
 void MainWindow::closeChatView() {

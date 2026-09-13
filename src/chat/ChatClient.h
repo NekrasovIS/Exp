@@ -99,6 +99,12 @@ namespace devicehub {
  * диалогов, не тот же самый, что подписан на канал (нужен независимый
  * WebSocket, чтобы диалог не занимал место активной подписки на канал,
  * от которой также зависит групповой звонок в CallManager).
+ *
+ * readReceiptChanged() (issue #380) — приходит и для канала, и для
+ * диалога одинаково: рассылка о реальном продвижении read-указателя
+ * кого-то из подписчиков, инициированная REST-эндпоинтом "прочитано"
+ * (chat-service::HttpServer), а не WS-кадром отсюда — этот класс
+ * только слушает, никогда сам не отправляет ничего для этого события.
  */
 class ChatClient : public QObject {
     Q_OBJECT
@@ -228,6 +234,15 @@ signals:
     /// сервере), не дельта; пусто, если это было снятие последней
     /// реакции этой эмодзи.
     void reactionChanged(qint64 id, const QString& emoji, const QStringList& logins);
+
+    /// @p login продвинул свою отметку "прочитано" до @p
+    /// lastReadMessageId (issue #380) — никогда не для устаревшего/
+    /// повторного вызова, только для реального сдвига вперёд (сервер
+    /// сам это фильтрует, см. chat-service::HttpServer::
+    /// handleMarkChannelRead()). Без своего channel/thread id — как и
+    /// у reactionChanged()/messagePinned(), этот экземпляр уже
+    /// подписан ровно на один канал/диалог.
+    void readReceiptChanged(const QString& login, qint64 lastReadMessageId);
 
     void errorOccurred(const QString& message);
 

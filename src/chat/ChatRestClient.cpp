@@ -18,6 +18,17 @@ QNetworkRequest buildRequest(const QUrl& url, const QString& token) {
     return request;
 }
 
+QList<ReadReceipt> parseReadReceipts(const QJsonObject& object) {
+    QList<ReadReceipt> receipts;
+    for (const QJsonValue& value : object.value("receipts").toArray()) {
+        const QJsonObject entry = value.toObject();
+        receipts.push_back(ReadReceipt{.login = entry.value("login").toString(),
+                                        .lastReadMessageId =
+                                            entry.value("last_read_message_id").toVariant().toLongLong()});
+    }
+    return receipts;
+}
+
 QList<ChatItem> parseItemList(const QByteArray& jsonBytes) {
     QList<ChatItem> items;
     const QJsonDocument document = QJsonDocument::fromJson(jsonBytes);
@@ -643,6 +654,34 @@ void ChatRestClient::fetchUnreadCounts(const QString& token) {
                                                       entry.value("unread_count").toVariant().toLongLong()});
         }
         emit unreadCountsFetched(channels, threads);
+    });
+}
+
+void ChatRestClient::fetchChannelReadReceipts(const QString& token, qint64 channelId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/channels/%1/read-receipts").arg(channelId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit channelReadReceiptsFetched(channelId, parseReadReceipts(object));
+    });
+}
+
+void ChatRestClient::fetchDmThreadReadReceipts(const QString& token, qint64 threadId) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/dm/threads/%1/read-receipts").arg(threadId)));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, threadId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit dmThreadReadReceiptsFetched(threadId, parseReadReceipts(object));
     });
 }
 

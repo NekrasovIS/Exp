@@ -5,6 +5,7 @@
 #include <QPointer>
 #include <QWidget>
 
+#include "chat/ChatRestClient.h"
 #include "ui/ChatMessageRow.h"
 
 class QCompleter;
@@ -126,6 +127,19 @@ public:
     /// для @p emoji после переключения, как приходит из
     /// ChatClient::reactionChanged(), не дельта.
     void updateReactions(qint64 id, const QString& emoji, const QStringList& logins);
+
+    /// Заменяет снимок read-указателей целиком (issue #380) — вызывается
+    /// один раз при открытии канала, в ответ на
+    /// ChatRestClient::channelReadReceiptsFetched(); пересчитывает
+    /// "Seen by" для всех сейчас показанных собственных сообщений.
+    void setReadReceipts(const QList<ReadReceipt>& receipts);
+
+    /// Применяет одно живое продвижение read-указателя (issue #380) —
+    /// ChatClient::readReceiptChanged(), уже отфильтрованное сервером до
+    /// реальных сдвигов вперёд (см. doc-комментарий сигнала). Никогда не
+    /// двигает сохранённое значение назад — та же идемпотентность, что
+    /// и на сервере, на случай устаревшего/переупорядоченного кадра.
+    void applyReadReceiptChange(const QString& login, qint64 lastReadMessageId);
 
     /// Передаёт загруженное изображение вложения дальше в строку,
     /// которая его запросила (issue #188, см. previewAttachmentRequested())
@@ -341,6 +355,14 @@ private:
     /// prependMessages(), оба создают строки одинаково.
     void requestPreviewIfImageAttachment(const ChatMessage& message, ChatMessageRow* row);
 
+    /// Пересчитывает "Seen by" для каждого сейчас показанного
+    /// собственного сообщения из readPointers_/channelMemberLogins_
+    /// (issue #380) — вызывается и из setReadReceipts(), и из
+    /// applyReadReceiptChange(); пересчитывать всё целиком на каждое
+    /// изменение проще и надёжнее точечного обновления, а собственных
+    /// показанных сообщений всегда мало (страница истории ограничена).
+    void recomputeSeenByForOwnMessages();
+
     /// Возвращает копию @p message с заполненными replyToAuthor/
     /// replyToBodySnippet (issue #306), если message.replyToMessageId
     /// найден в messagesById_ — общая часть appendMessage()/
@@ -452,6 +474,12 @@ private:
     /// цели ответа). Не растёт неограниченно: очищается в clearLog() при
     /// каждом переключении канала, как и сам список показанных строк.
     QHash<qint64, ChatMessage> messagesById_;
+    /// login -> last_read_message_id (issue #380), заполняется целиком
+    /// setReadReceipts(), обновляется по одному логину
+    /// applyReadReceiptChange(); очищается в clearLog(), как и
+    /// messagesById_ выше. Логин без единой отметки просто отсутствует
+    /// в карте — value(login, -1) уже даёт корректный "ничего не видел".
+    QHash<QString, qint64> readPointers_;
 };
 
 }  // namespace devicehub

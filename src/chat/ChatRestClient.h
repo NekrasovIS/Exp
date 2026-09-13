@@ -100,6 +100,14 @@ struct ThreadUnreadCount {
     qint64 unreadCount = 0;
 };
 
+/// Один снимок "прочитано по" (issue #380) — login и его
+/// last_read_message_id для канала/диалога; логин без единой отметки
+/// просто отсутствует в списке (не отдельная запись с 0/null).
+struct ReadReceipt {
+    QString login;
+    qint64 lastReadMessageId = 0;
+};
+
 /**
  * @brief REST-клиент для управления сообществами/каналами chat-service:
  *        создание/список сообществ, вступление, создание/список каналов.
@@ -238,6 +246,16 @@ public:
     /// сайдбара без N+1 запросов. Вызывает unreadCountsFetched().
     void fetchUnreadCounts(const QString& token);
 
+    /// Снимок "прочитано по" целиком для канала (issue #380) — вызывать
+    /// при открытии канала, дальше держать актуальным через
+    /// ChatClient::readReceiptChanged(). Вызывает
+    /// channelReadReceiptsFetched().
+    void fetchChannelReadReceipts(const QString& token, qint64 channelId);
+
+    /// То же самое для личного диалога — вызывает
+    /// dmThreadReadReceiptsFetched().
+    void fetchDmThreadReadReceipts(const QString& token, qint64 threadId);
+
 signals:
     /// @p inviteCode (issue #186) — создатель сразу видит код, который
     /// предстоит раздавать, без отдельного запроса.
@@ -303,6 +321,10 @@ signals:
 
     /// Ответ на fetchUnreadCounts().
     void unreadCountsFetched(const QList<ChannelUnreadCount>& channels, const QList<ThreadUnreadCount>& threads);
+
+    /// Ответ на fetchChannelReadReceipts()/fetchDmThreadReadReceipts().
+    void channelReadReceiptsFetched(qint64 channelId, const QList<ReadReceipt>& receipts);
+    void dmThreadReadReceiptsFetched(qint64 threadId, const QList<ReadReceipt>& receipts);
 
     void errorOccurred(const QString& message);
 

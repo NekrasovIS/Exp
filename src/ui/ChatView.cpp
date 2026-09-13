@@ -566,6 +566,41 @@ void ChatView::updatePinned(qint64 id, bool isPinned) {
     }
 }
 
+void ChatView::setReadReceipts(const QList<ReadReceipt>& receipts) {
+    readPointers_.clear();
+    for (const ReadReceipt& receipt : receipts) {
+        readPointers_.insert(receipt.login, receipt.lastReadMessageId);
+    }
+    recomputeSeenByForOwnMessages();
+}
+
+void ChatView::applyReadReceiptChange(const QString& login, qint64 lastReadMessageId) {
+    if (lastReadMessageId <= readPointers_.value(login, -1)) {
+        return;
+    }
+    readPointers_.insert(login, lastReadMessageId);
+    recomputeSeenByForOwnMessages();
+}
+
+void ChatView::recomputeSeenByForOwnMessages() {
+    for (auto it = messagesById_.cbegin(); it != messagesById_.cend(); ++it) {
+        if (it->author != currentUserLogin_) {
+            continue;
+        }
+        ChatMessageRow* row = findMessageRow(messagesLayout_, it.key());
+        if (row == nullptr) {
+            continue;
+        }
+        QStringList seenBy;
+        for (const QString& login : channelMemberLogins_) {
+            if (login != currentUserLogin_ && readPointers_.value(login, -1) >= it.key()) {
+                seenBy.append(login);
+            }
+        }
+        row->setSeenBy(seenBy);
+    }
+}
+
 void ChatView::setPinnedMessagesCount(int count) {
     pinnedMessagesButton_->setText(tr("\U0001F4CC %1").arg(count));
     pinnedMessagesButton_->setVisible(count > 0);
@@ -751,6 +786,10 @@ void ChatView::clearLog() {
     canManageChannel_ = false;
     setPinnedMessagesCount(0);
     messagesById_.clear();
+    // Read-указатели тоже принадлежали только что очищенному каналу
+    // (issue #380) — MainWindow заново вызовет setReadReceipts() после
+    // fetchChannelReadReceipts() для нового канала.
+    readPointers_.clear();
 }
 
 }  // namespace devicehub
