@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -168,6 +168,60 @@ describe("MessageComposer", () => {
     await userEvent.upload(screen.getByLabelText("Attach a file"), file);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't upload/i);
+  });
+
+  function dataTransferWith(files: File[]): DataTransfer {
+    return { files, items: [], types: ["Files"] } as unknown as DataTransfer;
+  }
+
+  it("uploads a dropped file, then sends with the resulting attachment id (issue #377)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([[/\/attachments$/, () => jsonResponse(201, { id: 99, filename: "photo.png" })]]),
+    );
+    const { onSend } = renderComposer();
+    const file = new File(["fake-bytes"], "photo.png", { type: "image/png" });
+
+    const form = screen.getByLabelText("Message").closest("form")!;
+    fireEvent.drop(form, { dataTransfer: dataTransferWith([file]) });
+
+    expect(await screen.findByText(/Attached: photo\.png/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledWith("", 99);
+  });
+
+  it("shows a drop hint while dragging over, and clears it on drop or drag-leave (issue #377)", () => {
+    renderComposer();
+    const form = screen.getByLabelText("Message").closest("form")!;
+
+    fireEvent.dragOver(form);
+    expect(screen.getByText("Drop to attach")).toBeInTheDocument();
+
+    fireEvent.dragLeave(form);
+    expect(screen.queryByText("Drop to attach")).not.toBeInTheDocument();
+
+    fireEvent.dragOver(form);
+    expect(screen.getByText("Drop to attach")).toBeInTheDocument();
+    fireEvent.drop(form, { dataTransfer: dataTransferWith([]) });
+    expect(screen.queryByText("Drop to attach")).not.toBeInTheDocument();
+  });
+
+  it("does not clear the drop hint when the drag moves onto a child element", () => {
+    renderComposer();
+    const form = screen.getByLabelText("Message").closest("form")!;
+    const bodyInput = screen.getByLabelText("Message");
+
+    fireEvent.dragOver(form);
+    expect(screen.getByText("Drop to attach")).toBeInTheDocument();
+
+    // fireEvent.dragLeave()'s options don't reliably plumb relatedTarget
+    // through jsdom's DragEvent — set it directly on a raw Event instead.
+    const dragLeave = new Event("dragleave", { bubbles: true });
+    Object.defineProperty(dragLeave, "relatedTarget", { value: bodyInput });
+    fireEvent(form, dragLeave);
+
+    expect(screen.getByText("Drop to attach")).toBeInTheDocument();
   });
 
   it("persists the typed draft (debounced), and Send clears it (issue #376)", async () => {
