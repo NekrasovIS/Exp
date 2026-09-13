@@ -1,8 +1,12 @@
 #include "ui/PinnedMessagesDialog.h"
 
+#include <QColor>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QVBoxLayout>
+
+#include "ui/IconFactory.h"
+#include "ui/Theme.h"
 
 namespace devicehub {
 
@@ -25,8 +29,11 @@ PinnedMessagesDialog::PinnedMessagesDialog(QWidget* parent) : QDialog(parent) {
 void PinnedMessagesDialog::setPinnedMessages(const QList<PinnedMessageInfo>& pinned) {
     pinnedList_->clear();
     for (const PinnedMessageInfo& message : pinned) {
-        auto* item =
-            new QListWidgetItem(tr("%1: %2\n📌 by %3").arg(message.author, message.body, message.pinnedBy));
+        // Issue #418: значок канцелярской кнопки — в отдельном слоте
+        // QListWidgetItem::setIcon(), а не сырым эмодзи внутри текста
+        // (раньше "📌" стоял посреди второй строки).
+        auto* item = new QListWidgetItem(tr("%1: %2\nby %3").arg(message.author, message.body, message.pinnedBy));
+        item->setIcon(ui_icons::pinIcon(QColor(ui_theme::kMutedForeground)));
         item->setData(Qt::UserRole, message.id);
         pinnedList_->addItem(item);
     }

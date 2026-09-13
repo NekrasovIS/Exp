@@ -289,9 +289,12 @@ ChatView::ChatView(QWidget* parent) : QWidget(parent) {
     attachButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(attachButton_, &QPushButton::clicked, this, &ChatView::attachFileRequested);
 
-    recordVoiceButton_ = new QPushButton(QStringLiteral("\U0001F3A4"), composer);
+    recordVoiceButton_ = new QPushButton(composer);
     recordVoiceButton_->setObjectName(QStringLiteral("recordVoiceMessageButton"));
     recordVoiceButton_->setToolTip(tr("Record a voice message"));
+    recordVoiceButton_->setProperty("flatIconButton", true);
+    recordVoiceButton_->setIcon(ui_icons::micIcon(QColor(ui_theme::kMutedForeground)));
+    recordVoiceButton_->setIconSize(QSize(kComposerIconGlyphSize, kComposerIconGlyphSize));
     recordVoiceButton_->setFixedSize(kComposerIconButtonSize, kComposerIconButtonSize);
     connect(recordVoiceButton_, &QPushButton::clicked, this, &ChatView::recordVoiceToggleRequested);
 
@@ -355,7 +358,8 @@ void ChatView::setEncrypted(bool encrypted) {
 }
 
 void ChatView::setRecordingVoice(bool recording) {
-    recordVoiceButton_->setText(recording ? QStringLiteral("⏹") : QStringLiteral("\U0001F3A4"));
+    recordVoiceButton_->setIcon(recording ? ui_icons::stopIcon(QColor(ui_theme::kMutedForeground))
+                                           : ui_icons::micIcon(QColor(ui_theme::kMutedForeground)));
     recordVoiceButton_->setToolTip(recording ? tr("Stop recording") : tr("Record a voice message"));
 }
 

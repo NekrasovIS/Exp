@@ -161,18 +161,24 @@ TEST(ChatViewTest, ClickingRecordVoiceButtonEmitsRecordVoiceToggleRequested) {
     EXPECT_EQ(spy.count(), 1);
 }
 
-TEST(ChatViewTest, SetRecordingVoiceTogglesTheButtonBetweenIdleAndStopLabels) {
+// Issue #418: recordVoiceButton_ выводит значок (IconFactory::micIcon()/
+// stopIcon()), а не текст/эмодзи — сравниваются пиксели QIcon::pixmap()
+// одного и того же процесса/прогона (не "визуальная корректность
+// рендеринга" в широком смысле, которого тесты этого проекта избегают,
+// а просто "две разные программные отрисовки дали разные байты").
+TEST(ChatViewTest, SetRecordingVoiceTogglesTheButtonIcon) {
     ChatView view;
-    const QString idleText = view.recordVoiceButton()->text();
+    constexpr int kIconCheckSize = 18;
+    const QImage idleImage = view.recordVoiceButton()->icon().pixmap(kIconCheckSize, kIconCheckSize).toImage();
 
     view.setRecordingVoice(true);
-    const QString recordingText = view.recordVoiceButton()->text();
+    const QImage recordingImage = view.recordVoiceButton()->icon().pixmap(kIconCheckSize, kIconCheckSize).toImage();
 
-    EXPECT_NE(recordingText, idleText);
+    EXPECT_NE(recordingImage, idleImage);
 
     view.setRecordingVoice(false);
 
-    EXPECT_EQ(view.recordVoiceButton()->text(), idleText);
+    EXPECT_EQ(view.recordVoiceButton()->icon().pixmap(kIconCheckSize, kIconCheckSize).toImage(), idleImage);
 }
 
 TEST(ChatViewTest, ScrollToMessageReturnsTrueForALoadedMessageAndFalseOtherwise) {

@@ -865,6 +865,13 @@ package "devicehub::ui_icons" <<Rectangle>> {
     +sendIcon(fillColor: QColor) : QIcon
     +settingsIcon(fillColor: QColor) : QIcon
     +membersIcon(fillColor: QColor) : QIcon
+    +micIcon(fillColor: QColor) : QIcon
+    +stopIcon(fillColor: QColor) : QIcon
+    +pinIcon(fillColor: QColor) : QIcon
+    +playIcon(fillColor: QColor) : QIcon
+    +pauseIcon(fillColor: QColor) : QIcon
+    +videoIcon(fillColor: QColor) : QIcon
+    +iconHtml(icon: QIcon, sizePx: int) : QString
   }
 }
 note right of IconFactory
@@ -875,6 +882,16 @@ note right of IconFactory
   не зелёный акцент — иначе бейдж слился бы с
   фоном самого аватара) кружок с числом,
   "99+" при переполнении.
+
+  Issue #418: mic/stop/pin/play/pause/video
+  заменяют сырые emoji-глифы (ChatView's
+  recordVoiceButton_, ChatMessageRow's pinned-
+  индикатор/play-кнопка/video-заглушка,
+  PinnedMessagesDialog). iconHtml() — не значок,
+  а готовый <img> data-URI фрагмент для тех
+  мест, что рисуют иконку внутри rich-text
+  QLabel (нет штатного icon-слота, в отличие от
+  QPushButton/QListWidgetItem).
 end note
 
 package "src/devices" {
