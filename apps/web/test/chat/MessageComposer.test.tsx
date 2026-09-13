@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -168,5 +168,29 @@ describe("MessageComposer", () => {
     await userEvent.upload(screen.getByLabelText("Attach a file"), file);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't upload/i);
+  });
+
+  it("persists the typed draft (debounced), and Send clears it (issue #376)", async () => {
+    const { onSend } = renderComposer();
+
+    await userEvent.type(screen.getByLabelText("Message"), "hello there");
+    expect(localStorage.getItem("devicehub.web.draft.channel:7")).toBeNull();
+
+    // Real timers throughout — the debounce is genuinely 500ms of real
+    // wall-clock time here rather than faked, since faking it fights
+    // this test's other async machinery (the mention-autocomplete
+    // fetch on mount, userEvent's own internals).
+    await waitFor(() => expect(localStorage.getItem("devicehub.web.draft.channel:7")).toBe("hello there"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledWith("hello there", undefined);
+    expect(localStorage.getItem("devicehub.web.draft.channel:7")).toBeNull();
+  });
+
+  it("restores a previously saved draft for this channel on mount (issue #376)", () => {
+    localStorage.setItem("devicehub.web.draft.channel:7", "unsent draft");
+    renderComposer();
+
+    expect(screen.getByLabelText("Message")).toHaveValue("unsent draft");
   });
 });

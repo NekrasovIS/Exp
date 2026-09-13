@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,5 +71,38 @@ describe("DirectMessageView", () => {
     expect(screen.queryByText("bob is typing…")).not.toBeInTheDocument();
     act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
     expect(screen.getByText("bob is typing…")).toBeInTheDocument();
+  });
+
+  it("persists the typed draft (debounced), and Send clears it (issue #376)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+
+    render(
+      <SessionProvider>
+        <DirectMessageView threadId={9} otherLogin="bob" />
+      </SessionProvider>,
+    );
+
+    await userEvent.type(screen.getByLabelText("Message"), "hi there");
+    expect(localStorage.getItem("devicehub.web.draft.dm:9")).toBeNull();
+
+    // Real timers — see MessageComposer.test.tsx's identical test for
+    // why the debounce isn't faked here.
+    await waitFor(() => expect(localStorage.getItem("devicehub.web.draft.dm:9")).toBe("hi there"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(localStorage.getItem("devicehub.web.draft.dm:9")).toBeNull();
+  });
+
+  it("restores a previously saved draft for this thread on mount (issue #376)", async () => {
+    localStorage.setItem("devicehub.web.draft.dm:9", "unsent draft");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+
+    render(
+      <SessionProvider>
+        <DirectMessageView threadId={9} otherLogin="bob" />
+      </SessionProvider>,
+    );
+
+    expect(await screen.findByLabelText("Message")).toHaveValue("unsent draft");
   });
 });
