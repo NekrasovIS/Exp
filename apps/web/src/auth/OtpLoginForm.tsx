@@ -4,15 +4,16 @@
 // have an email and/or Telegram chat id set (same precondition as the
 // desktop client); there's no passwordless registration.
 
-import { AuthClient } from "@devicehub/core";
+import { AuthClient, isTotpChallenge } from "@devicehub/core";
 import { useMemo, useState, type FormEvent } from "react";
 
 import styles from "./authForm.module.css";
-import { describeAuthError } from "./describeAuthError.js";
+import { describeApiError } from "../describeApiError.js";
+import { TotpChallengeStep } from "./TotpChallengeStep.js";
 import { authServiceUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
-type Step = "identifier" | "code";
+type Step = "identifier" | "code" | "totp";
 
 export function OtpLoginForm() {
   const { signIn } = useSession();
@@ -23,6 +24,9 @@ export function OtpLoginForm() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Set only when the account has 2FA enabled (issue #389), alongside
+  // step === "totp".
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
 
   async function handleRequestCode(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -36,7 +40,7 @@ export function OtpLoginForm() {
       await authClient.requestOtp(identifier.trim());
       setStep("code");
     } catch (err) {
-      setError(describeAuthError(err));
+      setError(describeApiError(err));
     } finally {
       setSubmitting(false);
     }
@@ -51,13 +55,31 @@ export function OtpLoginForm() {
     setError(null);
     setSubmitting(true);
     try {
-      const tokens = await authClient.verifyOtp(identifier.trim(), code.trim());
-      signIn(tokens);
+      const result = await authClient.verifyOtp(identifier.trim(), code.trim());
+      if (isTotpChallenge(result)) {
+        setPendingToken(result.pendingToken);
+        setStep("totp");
+      } else {
+        signIn(result);
+      }
     } catch (err) {
-      setError(describeAuthError(err));
+      setError(describeApiError(err));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (step === "totp" && pendingToken !== null) {
+    return (
+      <TotpChallengeStep
+        pendingToken={pendingToken}
+        onVerified={signIn}
+        onBack={() => {
+          setPendingToken(null);
+          setStep("code");
+        }}
+      />
+    );
   }
 
   if (step === "code") {

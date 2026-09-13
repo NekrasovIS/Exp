@@ -1,0 +1,64 @@
+.section {
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.heading {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+.mutedText {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.setupForm,
+.disableForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.setupForm label,
+.disableForm label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.secret {
+  word-break: break-all;
+}
+
+.buttonRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.backupCodes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.warning {
+  margin: 0;
+  color: var(--color-warning, var(--color-text));
+  font-weight: 600;
+}
+
+.codeList {
+  margin: 0;
+  padding: var(--space-3);
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-1) var(--space-3);
+  background: var(--color-surface-alt, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, monospace);
+}

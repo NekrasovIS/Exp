@@ -8,10 +8,24 @@ export type { FetchLike } from "./http.js";
 export { AuthClient } from "./auth/AuthClient.js";
 export { SessionManager } from "./auth/SessionManager.js";
 export type { SessionManagerOptions } from "./auth/SessionManager.js";
-export type { AuthTokens, RegisterResult, VerifyTokenResult } from "./auth/types.js";
+export type {
+  AuthTokens,
+  LoginResult,
+  RegisterResult,
+  TotpChallenge,
+  VerifyTokenResult,
+} from "./auth/types.js";
+export { isTotpChallenge } from "./auth/types.js";
 
 export { UserServiceClient } from "./user/UserServiceClient.js";
-export type { FriendRequestInfo, ProfileEdits, SendFriendRequestStatus, UserProfile } from "./user/types.js";
+export type {
+  FriendRequestInfo,
+  ProfileEdits,
+  SendFriendRequestStatus,
+  TotpConfirmResult,
+  TotpSetupInfo,
+  UserProfile,
+} from "./user/types.js";
 
 export { ChatRestClient } from "./chat/ChatRestClient.js";
 export { ChatClient } from "./chat/ChatClient.js";

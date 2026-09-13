@@ -12,12 +12,16 @@ import {
   resolveUrl,
   type FetchLike,
 } from "../http.js";
-import type { AuthTokens, RegisterResult, VerifyTokenResult } from "./types.js";
+import type { AuthTokens, LoginResult, RegisterResult, VerifyTokenResult } from "./types.js";
 
 interface TokenResponseBody {
   token?: string;
   refresh_token?: string;
   expires_at?: number;
+  // Issue #389 — present instead of the three fields above when the
+  // account has TOTP enabled (issue #388).
+  totp_required?: boolean;
+  pending_token?: string;
 }
 
 interface VerifyResponseBody {
@@ -47,22 +51,32 @@ function toAuthTokens(body: TokenResponseBody): AuthTokens {
   };
 }
 
+/** Shared by requestToken()/verifyOtp() — both gate on TOTP the same
+ * way (issue #389), a totp_required body means the primary factor
+ * already succeeded, so it's checked before the "no token" error. */
+function toLoginResult(res: { status: number; body?: TokenResponseBody | undefined }): LoginResult {
+  if (res.body?.totp_required === true && res.body.pending_token !== undefined) {
+    return { totpRequired: true, pendingToken: res.body.pending_token };
+  }
+  if (res.body?.token === undefined) {
+    throw new ApiError(res.status, extractErrorMessage(res.body) ?? kMalformedResponse);
+  }
+  return toAuthTokens(res.body);
+}
+
 export class AuthClient {
   constructor(
     private readonly baseUrl: string,
     private readonly fetchImpl: FetchLike = fetch,
   ) {}
 
-  async requestToken(login: string, password: string): Promise<AuthTokens> {
+  async requestToken(login: string, password: string): Promise<LoginResult> {
     const res = await requestJson<TokenResponseBody>(
       this.fetchImpl,
       resolveUrl(this.baseUrl, "/auth/token"),
       jsonRequestInit("POST", undefined, { login, password }),
     );
-    if (res.body?.token === undefined) {
-      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kMalformedResponse);
-    }
-    return toAuthTokens(res.body);
+    return toLoginResult(res);
   }
 
   async verifyToken(token: string): Promise<VerifyTokenResult> {
@@ -138,11 +152,25 @@ export class AuthClient {
     }
   }
 
-  async verifyOtp(identifier: string, code: string): Promise<AuthTokens> {
+  async verifyOtp(identifier: string, code: string): Promise<LoginResult> {
     const res = await requestJson<TokenResponseBody>(
       this.fetchImpl,
       resolveUrl(this.baseUrl, "/auth/otp/verify"),
       jsonRequestInit("POST", undefined, { identifier, code }),
+    );
+    return toLoginResult(res);
+  }
+
+  /** Second step of a 2FA login (issue #389) — exchanges the
+   * `pendingToken` from a {@link TotpChallenge} for real tokens.
+   * @param code a TOTP code from an authenticator app, or one of the
+   * account's backup codes (issue #388) — user-service's
+   * `/users/verify-totp` accepts either. */
+  async verifyTotp(pendingToken: string, code: string): Promise<AuthTokens> {
+    const res = await requestJson<TokenResponseBody>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/auth/totp/verify"),
+      jsonRequestInit("POST", undefined, { pending_token: pendingToken, code }),
     );
     if (res.body?.token === undefined) {
       throw new ApiError(res.status, extractErrorMessage(res.body) ?? kMalformedResponse);

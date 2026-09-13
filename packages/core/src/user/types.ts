@@ -31,3 +31,19 @@ export interface FriendRequestInfo {
 }
 
 export type SendFriendRequestStatus = "sent" | "accepted";
+
+/** `POST /profile/totp/setup` response (issue #388) — `secret` is
+ * base32 (for manual entry), `otpauthUrl` is the full `otpauth://` URI
+ * an authenticator app's QR scanner expects. Neither is persisted
+ * anywhere by the server until `confirmTotp()` succeeds. */
+export interface TotpSetupInfo {
+  secret: string;
+  otpauthUrl: string;
+}
+
+/** `POST /profile/totp/confirm` response (issue #388) — shown to the
+ * user exactly once, immediately after this call: user-service stores
+ * only their hashes, so a code lost here can't be recovered later. */
+export interface TotpConfirmResult {
+  backupCodes: string[];
+}

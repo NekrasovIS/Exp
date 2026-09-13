@@ -74,4 +74,50 @@ describe("OtpLoginForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("invalid or expired code");
   });
+
+  it("challenges for a TOTP code when the account has 2FA enabled, then signs in on a correct code (issue #389)", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(200, { totp_required: true, pending_token: "pending-1" }))
+      .mockResolvedValueOnce(jsonResponse(200, { token: "t1", refresh_token: "r1", expires_at: 9999999999 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    renderForm();
+
+    await userEvent.type(screen.getByLabelText(/login, email, or telegram/i), "alice");
+    await userEvent.click(screen.getByRole("button", { name: "Send code" }));
+    await userEvent.type(await screen.findByLabelText(/6-digit code/i), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+    const totpInput = await screen.findByLabelText("Authentication code");
+    expect(screen.getByTestId("probe")).toHaveTextContent("signed-out");
+
+    await userEvent.type(totpInput, "654321");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+    expect(await screen.findByTestId("probe")).toHaveTextContent("signed-in");
+    expect(fetchSpy).toHaveBeenLastCalledWith(
+      expect.stringMatching(/\/auth\/totp\/verify$/),
+      expect.objectContaining({ body: JSON.stringify({ pending_token: "pending-1", code: "654321" }) }),
+    );
+  });
+
+  it("'Back' from the TOTP step returns to code entry without signing in", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(200, { totp_required: true, pending_token: "pending-1" }));
+    vi.stubGlobal("fetch", fetchSpy);
+    renderForm();
+
+    await userEvent.type(screen.getByLabelText(/login, email, or telegram/i), "alice");
+    await userEvent.click(screen.getByRole("button", { name: "Send code" }));
+    await userEvent.type(await screen.findByLabelText(/6-digit code/i), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+    await screen.findByLabelText("Authentication code");
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(await screen.findByLabelText(/6-digit code/i)).toBeInTheDocument();
+  });
 });

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PasswordAuthForm } from "../../src/auth/PasswordAuthForm.js";
 import { SessionProvider, useSession } from "../../src/session/SessionContext.js";
-import { jsonResponse } from "../testUtils.js";
+import { jsonResponse, routedFetch } from "../testUtils.js";
 
 function Probe() {
   const { isAuthenticated } = useSession();
@@ -78,6 +78,36 @@ describe("PasswordAuthForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/already taken/i);
     expect(screen.getByTestId("probe")).toHaveTextContent("signed-out");
+  });
+
+  it("challenges for a TOTP code when the account has 2FA enabled, then signs in on a correct code (issue #389)", async () => {
+    const fetchSpy = vi.fn(
+      routedFetch([
+        [/\/auth\/token$/, () => jsonResponse(200, { totp_required: true, pending_token: "pending-1" })],
+        [
+          /\/auth\/totp\/verify$/,
+          () => jsonResponse(200, { token: "t1", refresh_token: "r1", expires_at: 9999999999 }),
+        ],
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    renderForm();
+
+    await userEvent.type(screen.getByLabelText("Login"), "alice");
+    await userEvent.type(screen.getByLabelText("Password"), "correct-password");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    const codeInput = await screen.findByLabelText("Authentication code");
+    expect(screen.getByTestId("probe")).toHaveTextContent("signed-out");
+
+    await userEvent.type(codeInput, "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+    expect(await screen.findByTestId("probe")).toHaveTextContent("signed-in");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/\/auth\/totp\/verify$/),
+      expect.objectContaining({ body: JSON.stringify({ pending_token: "pending-1", code: "123456" }) }),
+    );
   });
 
   it("registering a fresh login signs in automatically", async () => {
