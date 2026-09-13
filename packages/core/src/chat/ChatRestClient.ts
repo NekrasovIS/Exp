@@ -18,6 +18,7 @@ import type {
   ChatMessageInfo,
   DirectMessageInfo,
   DirectMessageThreadInfo,
+  LinkPreview,
   MessageReactionInfo,
   PinnedMessageInfo,
   ThreadUnreadCount,
@@ -123,6 +124,13 @@ function toDirectMessageInfo(body: DirectMessageBody): DirectMessageInfo {
 interface UnreadCountsBody {
   channels?: Array<{ channel_id: number; unread_count: number }>;
   dm_threads?: Array<{ thread_id: number; unread_count: number }>;
+}
+
+interface LinkPreviewBody {
+  available?: boolean;
+  title?: string;
+  description?: string;
+  image_url?: string;
 }
 
 function messagesQuery(limit: number, beforeId?: number): string {
@@ -563,6 +571,33 @@ export class ChatRestClient {
         threadId: entry.thread_id,
         unreadCount: entry.unread_count,
       })),
+    };
+  }
+
+  /** Issue #396/#397 — @p url is whatever the caller found in a message
+   * body; the server itself decides (and fetches/parses/caches) whether
+   * a preview is available. A network/protocol failure of this call
+   * itself still throws ApiError, same as every other method here —
+   * `{available: false}` is a normal *successful* response meaning "no
+   * preview for this URL", not an error. */
+  async fetchLinkPreview(token: string, url: string): Promise<LinkPreview> {
+    const params = new URLSearchParams({ url });
+    const res = await requestJson<LinkPreviewBody>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, `/link-preview?${params.toString()}`),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok || res.body?.available === undefined) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    if (!res.body.available) {
+      return { available: false };
+    }
+    return {
+      available: true,
+      title: res.body.title ?? "",
+      description: res.body.description ?? "",
+      imageUrl: res.body.image_url ?? "",
     };
   }
 

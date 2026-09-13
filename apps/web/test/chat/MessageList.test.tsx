@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageList } from "../../src/chat/MessageList.js";
+import { SessionProvider } from "../../src/session/SessionContext.js";
 
 const kMessages = [
   { id: 1, author: "alice", body: "hi from alice", sentAt: "2026-01-01T00:00:00Z", reactions: [] },
@@ -11,20 +12,25 @@ const kMessages = [
 
 function renderList(overrides: Partial<Parameters<typeof MessageList>[0]> = {}) {
   return render(
-    <MessageList
-      messages={kMessages}
-      editedIds={new Set()}
-      pinnedIds={new Set()}
-      currentLogin="alice"
-      isModerator={false}
-      onEdit={vi.fn()}
-      onDelete={vi.fn()}
-      onReply={vi.fn()}
-      onToggleReaction={vi.fn()}
-      onPin={vi.fn()}
-      onUnpin={vi.fn()}
-      {...overrides}
-    />,
+    // LinkPreviewCard (issue #397) reads useSession() — none of the
+    // fixture messages contain a URL, so this never fetches anything;
+    // it's here only so mounting doesn't throw for lack of a provider.
+    <SessionProvider>
+      <MessageList
+        messages={kMessages}
+        editedIds={new Set()}
+        pinnedIds={new Set()}
+        currentLogin="alice"
+        isModerator={false}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onReply={vi.fn()}
+        onToggleReaction={vi.fn()}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        {...overrides}
+      />
+    </SessionProvider>,
   );
 }
 
@@ -207,19 +213,21 @@ describe("MessageList", () => {
       { id: 1, author: "alice", body: "hi @bob", sentAt: "2026-01-01T00:00:00Z", reactions: [] },
     ];
     render(
-      <MessageList
-        messages={messagesWithMention}
-        editedIds={new Set()}
-        pinnedIds={new Set()}
-        currentLogin="alice"
-        isModerator={false}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-        onReply={vi.fn()}
-        onToggleReaction={vi.fn()}
-        onPin={vi.fn()}
-        onUnpin={vi.fn()}
-      />,
+      <SessionProvider>
+        <MessageList
+          messages={messagesWithMention}
+          editedIds={new Set()}
+          pinnedIds={new Set()}
+          currentLogin="alice"
+          isModerator={false}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onReply={vi.fn()}
+          onToggleReaction={vi.fn()}
+          onPin={vi.fn()}
+          onUnpin={vi.fn()}
+        />
+      </SessionProvider>,
     );
 
     const item = screen.getAllByRole("listitem")[0]!;

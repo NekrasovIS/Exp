@@ -87,3 +87,11 @@ export interface ThreadUnreadCount {
   threadId: number;
   unreadCount: number;
 }
+
+/** Result of `GET /link-preview` (issue #396/#397) — `available: false`
+ * means the server couldn't produce a preview for that URL (invalid,
+ * private-network target, timeout, no og-tags, ...), not that the
+ * request itself failed; title/description/imageUrl are only present
+ * when available is true. */
+export type LinkPreview =
+  { available: true; title: string; description: string; imageUrl: string } | { available: false };

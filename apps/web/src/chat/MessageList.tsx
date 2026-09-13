@@ -28,6 +28,7 @@ import { useMemo, useState } from "react";
 
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
+import { LinkPreviewCard } from "./LinkPreviewCard.js";
 import { MessageBody } from "./MessageBody.js";
 
 const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
@@ -141,6 +142,7 @@ export function MessageList({
                   <span>
                     <MessageBody text={message.body} />
                   </span>
+                  <LinkPreviewCard text={message.body} />
                   {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
                   {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
                     <span className={styles.attachment}>
