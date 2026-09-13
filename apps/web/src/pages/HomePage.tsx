@@ -3,6 +3,7 @@
 // communities/channels/chat and friends/DMs.
 
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import styles from "./HomePage.module.css";
 import { CommunitiesMode } from "./CommunitiesMode.js";
@@ -25,9 +26,12 @@ export function HomePage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <h1 className={styles.title}>DeviceHub</h1>
-        <button type="button" onClick={() => setMode(mode === "communities" ? "friends" : "communities")}>
-          {mode === "communities" ? "Friends" : "Back to communities"}
-        </button>
+        <div className={styles.headerActions}>
+          <button type="button" onClick={() => setMode(mode === "communities" ? "friends" : "communities")}>
+            {mode === "communities" ? "Friends" : "Back to communities"}
+          </button>
+          <Link to="/profile">Profile</Link>
+        </div>
       </header>
       <div className={styles.body}>{mode === "communities" ? <CommunitiesMode /> : <FriendsMode />}</div>
     </div>

@@ -2,6 +2,7 @@
 // same endpoints/fields. Every method here requires a bearer token
 // (unlike AuthClient, which produces tokens rather than consuming them).
 
+import { toBase64 } from "../chat/base64.js";
 import {
   ApiError,
   extractErrorMessage,
@@ -101,6 +102,24 @@ export class UserServiceClient {
       throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
     }
     return toUserProfile(res.body);
+  }
+
+  /** Issue #384 — same base64-in-JSON upload shape as
+   * {@link ChatRestClient.uploadAttachment}, reusing the same
+   * dependency-free `toBase64()` helper. The server both stores the
+   * bytes and immediately updates the profile's own `avatar_url` to the
+   * returned path (`/users/<login>/avatar`) — callers don't need a
+   * separate `updateOwnProfile()` call to make it stick. */
+  async uploadAvatar(token: string, contentType: string, data: Uint8Array): Promise<{ avatarUrl: string }> {
+    const res = await requestJson<{ avatar_url?: string }>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/profile/avatar"),
+      jsonRequestInit("POST", token, { content_type: contentType, data_base64: toBase64(data) }),
+    );
+    if (!res.ok || res.body?.avatar_url === undefined) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return { avatarUrl: res.body.avatar_url };
   }
 
   async sendFriendRequest(token: string, recipientLogin: string): Promise<SendFriendRequestStatus> {
