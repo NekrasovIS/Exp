@@ -389,6 +389,62 @@ describe("ChatRestClient", () => {
     });
   });
 
+  describe("fetchLinkPreview", () => {
+    it("resolves with the parsed metadata when available", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, {
+          available: true,
+          title: "Example",
+          description: "A summary.",
+          image_url: "https://example.test/cover.png",
+        }),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchLinkPreview(kToken, "https://example.test/article")).resolves.toEqual({
+        available: true,
+        title: "Example",
+        description: "A summary.",
+        imageUrl: "https://example.test/cover.png",
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/link-preview?url=${encodeURIComponent("https://example.test/article")}`,
+        expect.objectContaining({ method: "GET" }),
+      );
+    });
+
+    it("resolves with available: false without treating it as an error", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { available: false }));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchLinkPreview(kToken, "https://example.test/")).resolves.toEqual({
+        available: false,
+      });
+    });
+
+    it("defaults missing string fields to empty strings when available", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { available: true }));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchLinkPreview(kToken, "https://example.test/")).resolves.toEqual({
+        available: true,
+        title: "",
+        description: "",
+        imageUrl: "",
+      });
+    });
+
+    it("rejects with ApiError when the request itself fails", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(401, { error: "unauthorized" }));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchLinkPreview(kToken, "https://example.test/")).rejects.toMatchObject({
+        status: 401,
+        message: "unauthorized",
+      });
+    });
+  });
+
   it("uses ApiError as the rejection type", async () => {
     const fetchImpl = fakeFetch(jsonResponse(401, { error: "unauthorized" }));
     const client = new ChatRestClient(kBaseUrl, fetchImpl);

@@ -23,6 +23,7 @@ export type {
   DirectMessageInfo,
   DirectMessageThreadInfo,
   IncomingChatMessage,
+  LinkPreview,
   MessageReactionInfo,
   PinnedMessageInfo,
   ThreadUnreadCount,
