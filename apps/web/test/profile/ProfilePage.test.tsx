@@ -39,16 +39,21 @@ describe("ProfilePage", () => {
   it("loads and prefills the display name field from the current profile", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        jsonResponse(200, {
-          login: "alice",
-          display_name: "Alice",
-          avatar_url: null,
-          public_key: null,
-          email: null,
-          telegram_chat_id: null,
-        }),
-      ),
+      routedFetch([
+        [/\/profile\/totp\/status$/, () => jsonResponse(200, { enabled: false })],
+        [
+          /\/users\/alice\/profile$/,
+          () =>
+            jsonResponse(200, {
+              login: "alice",
+              display_name: "Alice",
+              avatar_url: null,
+              public_key: null,
+              email: null,
+              telegram_chat_id: null,
+            }),
+        ],
+      ]),
     );
 
     renderPage();
@@ -64,6 +69,7 @@ describe("ProfilePage", () => {
     vi.stubGlobal(
       "fetch",
       routedFetch([
+        [/\/profile\/totp\/status$/, () => jsonResponse(200, { enabled: false })],
         [
           /\/users\/alice\/profile$/,
           () =>
@@ -104,6 +110,7 @@ describe("ProfilePage", () => {
     vi.stubGlobal(
       "fetch",
       routedFetch([
+        [/\/profile\/totp\/status$/, () => jsonResponse(200, { enabled: false })],
         [
           /\/users\/alice\/profile$/,
           () =>

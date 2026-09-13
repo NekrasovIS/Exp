@@ -204,6 +204,88 @@ describe("UserServiceClient", () => {
     });
   });
 
+  describe("setupTotp", () => {
+    it("resolves with the secret and otpauth URL", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, {
+          secret: "JBSWY3DPEHPK3PXP",
+          otpauth_url: "otpauth://totp/DeviceHub:alice?secret=JBSWY3DPEHPK3PXP",
+        }),
+      );
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.setupTotp(kToken)).resolves.toEqual({
+        secret: "JBSWY3DPEHPK3PXP",
+        otpauthUrl: "otpauth://totp/DeviceHub:alice?secret=JBSWY3DPEHPK3PXP",
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/profile/totp/setup`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("throws ApiError when TOTP is already enabled (409)", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(409, { error: "TOTP is already enabled" }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.setupTotp(kToken)).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe("confirmTotp", () => {
+    it("resolves with the one-time backup codes on a correct code", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { backup_codes: ["ABCD-2345", "EFGH-6789"] }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.confirmTotp(kToken, "123456")).resolves.toEqual({
+        backupCodes: ["ABCD-2345", "EFGH-6789"],
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/profile/totp/confirm`,
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ code: "123456" }) }),
+      );
+    });
+
+    it("throws ApiError on an invalid code (400)", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(400, { error: "invalid code" }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.confirmTotp(kToken, "000000")).rejects.toMatchObject({
+        status: 400,
+        message: "invalid code",
+      });
+    });
+  });
+
+  describe("disableTotp", () => {
+    it("resolves on a correct code", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { status: "disabled" }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.disableTotp(kToken, "123456")).resolves.toBeUndefined();
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/profile/totp/disable`,
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ code: "123456" }) }),
+      );
+    });
+
+    it("throws ApiError on an invalid code (400)", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(400, { error: "invalid code" }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.disableTotp(kToken, "000000")).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  describe("isTotpEnabled", () => {
+    it("resolves with the enabled flag", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { enabled: true }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.isTotpEnabled(kToken)).resolves.toBe(true);
+    });
+  });
+
   describe("sendFriendRequest", () => {
     it("resolves 'sent' for a fresh request", async () => {
       const fetchImpl = fakeFetch(jsonResponse(201, { status: "sent" }));

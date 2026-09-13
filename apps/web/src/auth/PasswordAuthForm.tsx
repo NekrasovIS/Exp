@@ -2,11 +2,12 @@
 // internal toggle switches which server call the same login/password
 // fields go to, mirroring DeviceHub's LoginWindow second step.
 
-import { AuthClient } from "@devicehub/core";
+import { AuthClient, isTotpChallenge } from "@devicehub/core";
 import { useMemo, useState, type FormEvent } from "react";
 
 import styles from "./authForm.module.css";
-import { describeAuthError } from "./describeAuthError.js";
+import { describeApiError } from "../describeApiError.js";
+import { TotpChallengeStep } from "./TotpChallengeStep.js";
 import { authServiceUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -21,6 +22,9 @@ export function PasswordAuthForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Set only when the account has 2FA enabled (issue #389) — signIn()
+  // is deferred until TotpChallengeStep resolves it with real tokens.
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -32,8 +36,12 @@ export function PasswordAuthForm() {
     setSubmitting(true);
     try {
       if (mode === "signIn") {
-        const tokens = await authClient.requestToken(login.trim(), password);
-        signIn(tokens);
+        const result = await authClient.requestToken(login.trim(), password);
+        if (isTotpChallenge(result)) {
+          setPendingToken(result.pendingToken);
+        } else {
+          signIn(result);
+        }
       } else {
         const result = await authClient.register(login.trim(), password);
         if (!result.registered) {
@@ -41,16 +49,28 @@ export function PasswordAuthForm() {
           return;
         }
         // Auto-login: a fresh registration also issues a token
-        // immediately (AuthClient.register()'s own doc comment).
+        // immediately (AuthClient.register()'s own doc comment). A
+        // fresh account can't have 2FA enabled yet, so this is always
+        // a plain AuthTokens, never a TotpChallenge.
         if (result.tokens !== undefined) {
           signIn(result.tokens);
         }
       }
     } catch (err) {
-      setError(describeAuthError(err));
+      setError(describeApiError(err));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (pendingToken !== null) {
+    return (
+      <TotpChallengeStep
+        pendingToken={pendingToken}
+        onVerified={signIn}
+        onBack={() => setPendingToken(null)}
+      />
+    );
   }
 
   return (

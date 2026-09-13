@@ -50,6 +50,16 @@ describe("AuthClient", () => {
         "Malformed response from auth-service",
       );
     });
+
+    it("resolves with a TotpChallenge instead of tokens when the account has 2FA enabled (issue #389)", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { totp_required: true, pending_token: "pending-1" }));
+      const client = new AuthClient(kBaseUrl, fetchImpl);
+
+      await expect(client.requestToken("alice", "hunter2")).resolves.toEqual({
+        totpRequired: true,
+        pendingToken: "pending-1",
+      });
+    });
   });
 
   describe("verifyToken", () => {
@@ -170,6 +180,46 @@ describe("AuthClient", () => {
       await expect(client.verifyOtp("alice", "000000")).rejects.toMatchObject({
         status: 401,
         message: "invalid or expired code",
+      });
+    });
+
+    it("resolves with a TotpChallenge instead of tokens when the account has 2FA enabled (issue #389)", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { totp_required: true, pending_token: "pending-1" }));
+      const client = new AuthClient(kBaseUrl, fetchImpl);
+
+      await expect(client.verifyOtp("alice", "123456")).resolves.toEqual({
+        totpRequired: true,
+        pendingToken: "pending-1",
+      });
+    });
+  });
+
+  describe("verifyTotp", () => {
+    it("resolves with tokens on a correct code, completing a 2FA login", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { token: "t1", refresh_token: "r1", expires_at: 1000 }));
+      const client = new AuthClient(kBaseUrl, fetchImpl);
+
+      await expect(client.verifyTotp("pending-1", "123456")).resolves.toEqual({
+        token: "t1",
+        refreshToken: "r1",
+        expiresAt: 1000,
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/auth/totp/verify`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ pending_token: "pending-1", code: "123456" }),
+        }),
+      );
+    });
+
+    it("rejects on a wrong code or an invalid/expired pending token (401)", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(401, { error: "invalid code" }));
+      const client = new AuthClient(kBaseUrl, fetchImpl);
+
+      await expect(client.verifyTotp("pending-1", "000000")).rejects.toMatchObject({
+        status: 401,
+        message: "invalid code",
       });
     });
   });

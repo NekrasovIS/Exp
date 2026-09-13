@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 
 import styles from "./ProfilePage.module.css";
 import { Avatar } from "./Avatar.js";
+import { TwoFactorSection } from "./TwoFactorSection.js";
 import { useProfile } from "./useProfile.js";
 import { useSession } from "../session/SessionContext.js";
 
@@ -76,6 +77,7 @@ export function ProfilePage() {
                 Save
               </button>
             </form>
+            <TwoFactorSection />
           </>
         )}
       </div>

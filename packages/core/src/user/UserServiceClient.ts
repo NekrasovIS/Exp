@@ -11,7 +11,14 @@ import {
   resolveUrl,
   type FetchLike,
 } from "../http.js";
-import type { FriendRequestInfo, ProfileEdits, SendFriendRequestStatus, UserProfile } from "./types.js";
+import type {
+  FriendRequestInfo,
+  ProfileEdits,
+  SendFriendRequestStatus,
+  TotpConfirmResult,
+  TotpSetupInfo,
+  UserProfile,
+} from "./types.js";
 
 interface ProfileResponseBody {
   login?: string;
@@ -120,6 +127,65 @@ export class UserServiceClient {
       throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
     }
     return { avatarUrl: res.body.avatar_url };
+  }
+
+  /** Issue #388/#391 — begins (or restarts, if never confirmed) TOTP
+   * setup. Nothing is enabled yet: the returned secret only takes
+   * effect once a valid code for it is submitted via
+   * {@link confirmTotp}. Rejects with a 409 {@link ApiError} if TOTP is
+   * already enabled — disable it first. */
+  async setupTotp(token: string): Promise<TotpSetupInfo> {
+    const res = await requestJson<{ secret?: string; otpauth_url?: string }>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/profile/totp/setup"),
+      jsonRequestInit("POST", token),
+    );
+    if (!res.ok || res.body?.secret === undefined || res.body.otpauth_url === undefined) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return { secret: res.body.secret, otpauthUrl: res.body.otpauth_url };
+  }
+
+  /** Confirms a pending {@link setupTotp} with a code from the
+   * authenticator app — only past this call is TOTP actually required
+   * to log in. The returned backup codes (issue #388) are shown to the
+   * user exactly once: user-service stores only their hashes. */
+  async confirmTotp(token: string, code: string): Promise<TotpConfirmResult> {
+    const res = await requestJson<{ backup_codes?: string[] }>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/profile/totp/confirm"),
+      jsonRequestInit("POST", token, { code }),
+    );
+    if (!res.ok || res.body?.backup_codes === undefined) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return { backupCodes: res.body.backup_codes };
+  }
+
+  /** @param code current TOTP code (or a backup code) — required so
+   * that a hijacked, still-signed-in session can't silently turn 2FA
+   * back off. */
+  async disableTotp(token: string, code: string): Promise<void> {
+    const res = await requestJson<{ error?: string }>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/profile/totp/disable"),
+      jsonRequestInit("POST", token, { code }),
+    );
+    if (!res.ok) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+  }
+
+  async isTotpEnabled(token: string): Promise<boolean> {
+    const res = await requestJson<{ enabled?: boolean }>(
+      this.fetchImpl,
+      resolveUrl(this.baseUrl, "/profile/totp/status"),
+      jsonRequestInit("GET", token),
+    );
+    if (!res.ok || res.body?.enabled === undefined) {
+      throw new ApiError(res.status, extractErrorMessage(res.body) ?? kGenericError);
+    }
+    return res.body.enabled;
   }
 
   async sendFriendRequest(token: string, recipientLogin: string): Promise<SendFriendRequestStatus> {
