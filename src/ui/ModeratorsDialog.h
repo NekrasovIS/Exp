@@ -42,6 +42,7 @@ public:
     [[nodiscard]] QLineEdit* loginEdit() const { return loginEdit_; }
     [[nodiscard]] QPushButton* promoteButton() const { return promoteButton_; }
     [[nodiscard]] QPushButton* demoteButton() const { return demoteButton_; }
+    [[nodiscard]] QPushButton* closeButton() const { return closeButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
 signals:
@@ -56,6 +57,7 @@ private:
     QLineEdit* loginEdit_ = nullptr;
     QPushButton* promoteButton_ = nullptr;
     QPushButton* demoteButton_ = nullptr;
+    QPushButton* closeButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     qint64 communityId_ = -1;
 };

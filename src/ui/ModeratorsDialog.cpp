@@ -1,5 +1,6 @@
 #include "ui/ModeratorsDialog.h"
 
+#include <QDialogButtonBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -42,14 +43,24 @@ ModeratorsDialog::ModeratorsDialog(QWidget* parent) : QDialog(parent) {
         }
     });
 
+    // Issue #416: нет единого "Ok" — Promote/Demote остаются
+    // независимыми действиями (диалог не закрывается после каждого),
+    // но видимой кнопки закрытия раньше не было вообще (только
+    // системное окно/Escape) — QDialogButtonBox::Close даёт её тем же
+    // способом, что и остальные диалоги приложения.
+    auto* buttonBox = new QDialogButtonBox(this);
+    buttonBox->addButton(promoteButton_, QDialogButtonBox::ActionRole);
+    buttonBox->addButton(demoteButton_, QDialogButtonBox::ActionRole);
+    closeButton_ = buttonBox->addButton(QDialogButtonBox::Close);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
     statusLabel_ = new QLabel(this);
     statusLabel_->setObjectName(QStringLiteral("moderatorsStatusLabel"));
     statusLabel_->setWordWrap(true);
 
     layout->addWidget(moderatorsList_, /*stretch=*/1);
     layout->addWidget(loginEdit_);
-    layout->addWidget(promoteButton_);
-    layout->addWidget(demoteButton_);
+    layout->addWidget(buttonBox);
     layout->addWidget(statusLabel_);
 }
 

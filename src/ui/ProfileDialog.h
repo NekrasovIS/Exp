@@ -42,6 +42,7 @@ public:
     [[nodiscard]] QLineEdit* emailEdit() const { return emailEdit_; }
     [[nodiscard]] QLineEdit* telegramChatIdEdit() const { return telegramChatIdEdit_; }
     [[nodiscard]] QPushButton* saveButton() const { return saveButton_; }
+    [[nodiscard]] QPushButton* cancelButton() const { return cancelButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
 signals:
@@ -53,6 +54,7 @@ private:
     QLineEdit* emailEdit_ = nullptr;
     QLineEdit* telegramChatIdEdit_ = nullptr;
     QPushButton* saveButton_ = nullptr;
+    QPushButton* cancelButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 };
 

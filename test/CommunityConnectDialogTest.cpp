@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QDialog>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -69,6 +70,23 @@ TEST(CommunityConnectDialogTest, PressingEnterInNameEditEmitsCreateRequested) {
     emit dialog.nameEdit()->returnPressed();
 
     EXPECT_EQ(spy.count(), 1);
+}
+
+// Issue #416: Cancel — новая кнопка, добавленная через QDialogButtonBox
+// (раньше диалог можно было закрыть только системным окном/Escape).
+
+TEST(CommunityConnectDialogTest, ClickingCancelClosesWithoutEmittingJoinOrCreateRequested) {
+    CommunityConnectDialog dialog;
+    dialog.inviteCodeEdit()->setText(QStringLiteral("ABC123"));
+    dialog.nameEdit()->setText(QStringLiteral("My Community"));
+    QSignalSpy joinSpy(&dialog, &CommunityConnectDialog::joinRequested);
+    QSignalSpy createSpy(&dialog, &CommunityConnectDialog::createRequested);
+
+    dialog.cancelButton()->click();
+
+    EXPECT_EQ(joinSpy.count(), 0);
+    EXPECT_EQ(createSpy.count(), 0);
+    EXPECT_EQ(dialog.result(), QDialog::Rejected);
 }
 
 }  // namespace

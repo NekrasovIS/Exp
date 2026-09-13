@@ -2,9 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <QDialog>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSignalSpy>
 
 namespace devicehub {
 namespace {
@@ -111,6 +113,23 @@ TEST(ModeratorsDialogTest, ClickingDemoteSelectedWithNoSelectionEmitsNothing) {
     emit dialog.demoteButton()->clicked();
 
     EXPECT_EQ(emitCount, 0);
+}
+
+// Issue #416: Close — новая кнопка, добавленная через QDialogButtonBox
+// (раньше диалог можно было закрыть только системным окном/Escape).
+
+TEST(ModeratorsDialogTest, ClickingCloseClosesWithoutEmittingPromoteOrDemoteRequested) {
+    ModeratorsDialog dialog;
+    dialog.setCommunity(7, QStringLiteral("Test Community"));
+    dialog.loginEdit()->setText(QStringLiteral("dave"));
+    QSignalSpy promoteSpy(&dialog, &ModeratorsDialog::promoteRequested);
+    QSignalSpy demoteSpy(&dialog, &ModeratorsDialog::demoteRequested);
+
+    emit dialog.closeButton()->clicked();
+
+    EXPECT_EQ(promoteSpy.count(), 0);
+    EXPECT_EQ(demoteSpy.count(), 0);
+    EXPECT_EQ(dialog.result(), QDialog::Rejected);
 }
 
 }  // namespace

@@ -29,6 +29,7 @@ public:
     [[nodiscard]] QPushButton* joinButton() const { return joinButton_; }
     [[nodiscard]] QLineEdit* nameEdit() const { return nameEdit_; }
     [[nodiscard]] QPushButton* createButton() const { return createButton_; }
+    [[nodiscard]] QPushButton* cancelButton() const { return cancelButton_; }
 
 signals:
     /// Клик по "Join" с непустым кодом — сам диалог не проверяет, что
@@ -46,6 +47,7 @@ private:
     QPushButton* joinButton_ = nullptr;
     QLineEdit* nameEdit_ = nullptr;
     QPushButton* createButton_ = nullptr;
+    QPushButton* cancelButton_ = nullptr;
 };
 
 }  // namespace devicehub
