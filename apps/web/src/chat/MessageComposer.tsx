@@ -6,9 +6,21 @@
 // @mention autocomplete (issue #326) is layered onto the same <input>
 // via useMentionAutocomplete() — see that hook's own doc comment for
 // why it doesn't (yet) reuse #322's useMembers().
+//
+// Drag-and-drop (issue #377) is an alternate entry point onto the same
+// upload path as the "Attach a file" input — see uploadFile() below,
+// shared by both.
 
 import { ChatRestClient } from "@devicehub/core";
-import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 
 import styles from "./MessageComposer.module.css";
 import { MentionSuggestions } from "./MentionSuggestions.js";
@@ -74,6 +86,7 @@ export function MessageComposer({
   const [pendingAttachment, setPendingAttachment] = useState<{ id: number; filename: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draggingOver, setDraggingOver] = useState(false);
 
   useLayoutEffect(() => {
     if (pendingCursorPos.current === null) {
@@ -83,12 +96,7 @@ export function MessageComposer({
     pendingCursorPos.current = null;
   }, [body]);
 
-  async function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (file === undefined) {
-      return;
-    }
+  async function uploadFile(file: File): Promise<void> {
     const token = getAccessToken();
     if (token === null) {
       return;
@@ -104,6 +112,45 @@ export function MessageComposer({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined) {
+      return;
+    }
+    await uploadFile(file);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLFormElement>): void {
+    // Required for the browser to treat this element as a valid drop
+    // target at all — without preventDefault() here, handleDrop()'s own
+    // preventDefault() never gets a chance to run; the browser instead
+    // navigates to/opens the dropped file.
+    event.preventDefault();
+    setDraggingOver(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLFormElement>): void {
+    // dragenter/dragleave fire per-element and bubble, so moving from
+    // the form onto one of its own children (the file input's label,
+    // the message input, …) fires a dragleave here too — only actually
+    // clear the highlight once the pointer leaves the form itself.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setDraggingOver(false);
+  }
+
+  async function handleDrop(event: DragEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setDraggingOver(false);
+    const file = event.dataTransfer.files[0];
+    if (file === undefined) {
+      return;
+    }
+    await uploadFile(file);
   }
 
   function handleSubmit(event: FormEvent): void {
@@ -170,7 +217,19 @@ export function MessageComposer({
           </button>
         </p>
       )}
-      <form onSubmit={handleSubmit} className={styles.form}>
+      <form
+        onSubmit={handleSubmit}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={(event) => void handleDrop(event)}
+        data-dragover={draggingOver}
+        className={styles.form}
+      >
+        {draggingOver && (
+          <p className={styles.dropHint} aria-hidden="true">
+            Drop to attach
+          </p>
+        )}
         <label htmlFor="message-attachment" className={styles.attachLabel}>
           Attach a file
         </label>
