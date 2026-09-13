@@ -14,6 +14,7 @@ import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
 import { useSession } from "../session/SessionContext.js";
 import { MentionSuggestions } from "./MentionSuggestions.js";
+import composerStyles from "./MessageComposer.module.css";
 import { MessageList, truncatedSnippet } from "./MessageList.js";
 import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
 import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
@@ -233,7 +234,7 @@ export function EncryptedChatViewContent({
         />
       </div>
       {replyTarget !== null && (
-        <p className={styles.statusText}>
+        <p className={composerStyles.replyBar}>
           Replying to <strong>{replyTarget.author}</strong>: {truncatedSnippet(replyTarget.body)}{" "}
           <button type="button" onClick={() => setReplyTarget(null)}>
             Cancel
