@@ -6,6 +6,7 @@
     "libpqxx",
     "libsodium",
     "nlohmann-json",
+    "openssl",
     "gtest"
   ]
 }

@@ -103,12 +103,19 @@ find_package(httplib CONFIG REQUIRED)
 find_package(libpqxx CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 add_library(user_service_core
     src/password_hash.h
     src/password_hash.cpp
     src/JsonGuard.h
     src/JsonGuard.cpp
+    src/base64.h
+    src/base64.cpp
+    src/base32.h
+    src/base32.cpp
+    src/totp.h
+    src/totp.cpp
     src/UserRepository.h
     src/UserRepository.cpp
     src/UserService.h
@@ -124,6 +131,7 @@ target_link_libraries(user_service_core PUBLIC
     libpqxx::pqxx
     unofficial-sodium::sodium
     nlohmann_json::nlohmann_json
+    OpenSSL::Crypto
 )
 
 add_executable(user-service src/main.cpp)
@@ -135,6 +143,9 @@ find_package(GTest CONFIG REQUIRED)
 add_executable(user_service_tests
     test/PasswordHashTest.cpp
     test/JsonGuardTest.cpp
+    test/Base64Test.cpp
+    test/Base32Test.cpp
+    test/TotpTest.cpp
     test/UserServiceIntegrationTest.cpp
     test/UserRepositoryTest.cpp
     test/HttpServerTest.cpp

@@ -241,4 +241,97 @@ bool UserRepository::areFriends(const std::string& loginA, const std::string& lo
     return !rows.empty();
 }
 
+BeginTotpSetupResult UserRepository::beginTotpSetup(const std::string& login, const std::string& secretBase64) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result enabledRows =
+        transaction.exec("SELECT 1 FROM user_totp WHERE login = $1 AND enabled", pqxx::params{login});
+    if (!enabledRows.empty()) {
+        return BeginTotpSetupResult::kAlreadyEnabled;
+    }
+
+    transaction.exec(
+        "INSERT INTO user_totp (login, secret_base64, enabled) VALUES ($1, $2, false) "
+        "ON CONFLICT (login) DO UPDATE SET secret_base64 = EXCLUDED.secret_base64, enabled = false, "
+        "created_at = now(), confirmed_at = NULL",
+        pqxx::params{login, secretBase64});
+    transaction.commit();
+    return BeginTotpSetupResult::kStarted;
+}
+
+std::optional<std::string> UserRepository::findTotpSecret(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT secret_base64 FROM user_totp WHERE login = $1", pqxx::params{login});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return rows[0][0].as<std::string>();
+}
+
+bool UserRepository::isTotpEnabled(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT 1 FROM user_totp WHERE login = $1 AND enabled", pqxx::params{login});
+    return !rows.empty();
+}
+
+void UserRepository::confirmTotpSecret(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    transaction.exec("UPDATE user_totp SET enabled = true, confirmed_at = now() WHERE login = $1",
+                      pqxx::params{login});
+    transaction.commit();
+}
+
+void UserRepository::disableTotp(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    transaction.exec("DELETE FROM user_totp_backup_codes WHERE login = $1", pqxx::params{login});
+    transaction.exec("DELETE FROM user_totp WHERE login = $1", pqxx::params{login});
+    transaction.commit();
+}
+
+void UserRepository::addBackupCodes(const std::string& login, const std::vector<std::string>& backupCodeHashes) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    for (const std::string& hash : backupCodeHashes) {
+        transaction.exec("INSERT INTO user_totp_backup_codes (login, code_hash) VALUES ($1, $2)",
+                          pqxx::params{login, hash});
+    }
+    transaction.commit();
+}
+
+std::vector<std::string> UserRepository::findUnusedBackupCodeHashes(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT code_hash FROM user_totp_backup_codes WHERE login = $1 AND used_at IS NULL", pqxx::params{login});
+    std::vector<std::string> hashes;
+    hashes.reserve(rows.size());
+    for (const auto& row : rows) {
+        hashes.push_back(row[0].as<std::string>());
+    }
+    return hashes;
+}
+
+void UserRepository::markBackupCodeUsed(const std::string& login, const std::string& codeHash) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    transaction.exec(
+        "UPDATE user_totp_backup_codes SET used_at = now() WHERE login = $1 AND code_hash = $2 AND used_at IS NULL",
+        pqxx::params{login, codeHash});
+    transaction.commit();
+}
+
 }  // namespace user_service

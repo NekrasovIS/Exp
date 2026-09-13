@@ -74,3 +74,37 @@ CREATE TABLE IF NOT EXISTS friendships (
 
 CREATE INDEX IF NOT EXISTS friend_requests_recipient_status_idx ON friend_requests (recipient_login, status);
 CREATE INDEX IF NOT EXISTS friendships_user_b_login_idx ON friendships (user_b_login);
+
+-- TOTP-секрет (issue #388) — base64 TEXT, тот же приём, что и у
+-- attachments chat-service/user_avatars этого сервиса (base64-as-TEXT
+-- сайдстепит binary-параметры libpqxx). enabled=false, пока
+-- POST /profile/totp/confirm не подтвердит первый код — секрет из
+-- /profile/totp/setup ещё не защищает вход, только ожидает
+-- подтверждения. Одна строка на пользователя: новый /setup полностью
+-- заменяет ещё неподтверждённый секрет (тот же UPSERT-приём, что и у
+-- user_avatars), но никогда не трогает уже enabled=true секрет — это
+-- работа исключительно /profile/totp/disable.
+CREATE TABLE IF NOT EXISTS user_totp (
+    login TEXT PRIMARY KEY REFERENCES users(login) ON DELETE CASCADE,
+    secret_base64 TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    confirmed_at TIMESTAMPTZ
+);
+
+-- Backup-коды (issue #388) — хешированные тем же password_hash
+-- (Argon2id), что и пароли пользователей, никогда в открытом виде;
+-- открытым текстом отдаются вызывающему ровно один раз, в самом ответе
+-- POST /profile/totp/confirm. Несколько строк на пользователя (10 за
+-- одно подтверждение) — used_at помечает использованный код, а не
+-- удаляет строку, чтобы UserRepository могло отличить "уже
+-- использован" от "неверный код" при отладке, хотя API отдаёт наружу
+-- только единый "invalid" результат в обоих случаях.
+CREATE TABLE IF NOT EXISTS user_totp_backup_codes (
+    id BIGSERIAL PRIMARY KEY,
+    login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    used_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS user_totp_backup_codes_login_idx ON user_totp_backup_codes (login);

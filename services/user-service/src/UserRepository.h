@@ -87,6 +87,15 @@ enum class SendFriendRequestResult {
     kCannotFriendSelf,
 };
 
+/// @see UserRepository::beginTotpSetup() (issue #388).
+enum class BeginTotpSetupResult {
+    kStarted,
+    /// TOTP уже включён для этого логина — вызывающая сторона должна
+    /// сначала его отключить (см. UserRepository::disableTotp()),
+    /// прежде чем начинать заново.
+    kAlreadyEnabled,
+};
+
 /// @see UserRepository::respondToFriendRequest().
 enum class RespondToFriendRequestResult {
     kAccepted,
@@ -156,6 +165,39 @@ public:
     /// GET /internal/friendship, чтобы chat-service мог разрешить
     /// открытие нового диалога личных сообщений только между друзьями.
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
+
+    /// Начинает (или перезапускает ещё не подтверждённую) настройку
+    /// TOTP для @p login — сохраняет @p secretBase64 с enabled=false
+    /// (issue #388). Не трогает уже enabled=true секрет.
+    [[nodiscard]] BeginTotpSetupResult beginTotpSetup(const std::string& login, const std::string& secretBase64);
+
+    /// Секрет @p login — ожидающий подтверждения ИЛИ уже включённый,
+    /// не различает эти два случая сама (см. вызывающую сторону:
+    /// confirmTotpSecret() ожидает ещё неподтверждённый, verify-путь —
+    /// уже enabled). @return std::nullopt, если настройка не начиналась.
+    [[nodiscard]] std::optional<std::string> findTotpSecret(const std::string& login);
+
+    /// @return True, если TOTP включён (подтверждён) для @p login.
+    [[nodiscard]] bool isTotpEnabled(const std::string& login);
+
+    /// Помечает секрет @p login включённым — вызывается после того, как
+    /// вызывающая сторона сама проверила код через totp::verify().
+    void confirmTotpSecret(const std::string& login);
+
+    /// Полностью удаляет TOTP-настройку (секрет + все backup-коды) для @p login.
+    void disableTotp(const std::string& login);
+
+    /// Сохраняет @p backupCodeHashes как новые неиспользованные
+    /// backup-коды для @p login — вызывается сразу после
+    /// confirmTotpSecret(), не удаляет предыдущие коды сама.
+    void addBackupCodes(const std::string& login, const std::vector<std::string>& backupCodeHashes);
+
+    /// Хеши ещё не использованных backup-кодов @p login — вызывающая
+    /// сторона сверяет их сама через password_hash::verify().
+    [[nodiscard]] std::vector<std::string> findUnusedBackupCodeHashes(const std::string& login);
+
+    /// Помечает backup-код с этим @p codeHash использованным.
+    void markBackupCodeUsed(const std::string& login, const std::string& codeHash);
 
 private:
     std::string connectionString_;

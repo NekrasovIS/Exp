@@ -26,7 +26,16 @@ namespace user_service {
  *        GET /internal/friendship?user_a=&user_b= (issue #187, Фаза 2) —
  *        без аутентификации, как и /users/resolve-otp-identifier: не
  *        вызывается напрямую клиентами, только chat-service, чтобы
- *        решить, можно ли открыть новый диалог личных сообщений.
+ *        решить, можно ли открыть новый диалог личных сообщений. Плюс
+ *        двухфакторная аутентификация (issue #388): POST
+ *        /profile/totp/setup, POST /profile/totp/confirm, POST
+ *        /profile/totp/disable, GET /profile/totp/status (все четыре —
+ *        `Authorization: Bearer`, как и остальные /profile/* маршруты),
+ *        и POST /users/verify-totp — без аутентификации, тем же
+ *        паттерном, что verify-credentials/resolve-otp-identifier:
+ *        вызывается только auth-service при входе, никогда напрямую
+ *        клиентами (у auth-service нет своего Bearer-токена для этого
+ *        вызова — сам процесс входа ещё не завершён).
  *
  * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
  * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
@@ -71,6 +80,11 @@ private:
     void handleListFriends(const httplib::Request& request, httplib::Response& response);
     void handleRemoveFriend(const httplib::Request& request, httplib::Response& response);
     void handleCheckFriendship(const httplib::Request& request, httplib::Response& response);
+    void handleTotpSetup(const httplib::Request& request, httplib::Response& response);
+    void handleTotpConfirm(const httplib::Request& request, httplib::Response& response);
+    void handleTotpDisable(const httplib::Request& request, httplib::Response& response);
+    void handleTotpStatus(const httplib::Request& request, httplib::Response& response);
+    void handleVerifyTotp(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

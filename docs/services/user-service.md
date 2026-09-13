@@ -40,6 +40,44 @@ E2E-шифрования, issue #136/#138/#217). Ещё один эндпоин�
 `{"found", "login", "email", "telegram_chat_id"}`, используется для
 входа по одноразовому коду.
 
+Двухфакторная аутентификация (TOTP, issue #388 — backend-часть
+зонтичной задачи #381; login-flow auth-service и UI обоих клиентов —
+отдельные подзадачи #389/#390/#391) — RFC 6238, HMAC-SHA1 (`openssl`,
+`HMAC()`/`EVP_sha1()` — тот же алгоритм, что и подавляющее большинство
+приложений-аутентификаторов; libsodium сознательно не даёт SHA-1 как
+устаревший примитив, поэтому для одной этой задачи добавлен `openssl`
+как зависимость user-service, ранее нужный только auth-service).
+Секрет/backup-коды никогда не покидают этот сервис — auth-service
+дёргает `POST /users/verify-totp`, не видя сам секрет, тем же паттерном,
+что и `POST /users/verify-credentials` для пароля. Секрет хранится как
+base64 TEXT в отдельной таблице `user_totp` (тот же приём, что и у
+attachments chat-service/`user_avatars`/аватаров этого сервиса —
+base64-as-TEXT сайдстепит binary-параметры libpqxx), backup-коды
+(`user_totp_backup_codes`) — хешированными тем же `password_hash`
+(Argon2id), что и пароли, никогда в открытом виде после первой выдачи.
+
+`POST /profile/totp/setup` (`Authorization: Bearer`) — генерирует новый
+20-байтовый секрет (`randombytes_buf`), сохраняет его ещё не
+включённым (409, если TOTP уже включён — сначала отключить), отвечает
+`{"secret", "otpauth_url"}` (секрет в base32 — формат, который реально
+принимают приложения-аутентификаторы для QR/ручного ввода, не base64;
+`otpauth_url` — `otpauth://totp/DeviceHub:<login>?secret=...&issuer=
+DeviceHub&algorithm=SHA1&digits=6&period=30`, QR-кодирование — забота
+клиента). `POST /profile/totp/confirm {"code"}` — проверяет код против
+этого ещё не включённого секрета (400 при несовпадении, 404, если
+`/setup` не вызывался); при совпадении включает TOTP и отдаёт 10
+одноразовых backup-кодов открытым текстом **один раз**
+(`{"backup_codes": [...]}`) — после этого хранятся только их хеши.
+`POST /profile/totp/disable {"code"}` — требует текущий валидный
+TOTP-код (не просто токен сессии), при совпадении удаляет секрет и все
+backup-коды. `GET /profile/totp/status` — `{"enabled"}`. `POST
+/users/verify-totp {"login", "code"}` — без авторизации, как и
+`verify-credentials`/`resolve-otp-identifier`: вызывается только
+auth-service мид-логина, когда у него самого ещё нет ничего, чем можно
+было бы аутентифицировать этого вызывающего; проверяет `code` сначала
+как текущий TOTP-код (окно ±1 шаг — терпимость к рассинхрону часов),
+затем как ещё не использованный backup-код, отвечает `{"valid"}`.
+
 Заявки в друзья (issue #187, Фаза 1 — backend, без UI; сама фича
 описана в [docs/FEATURES.md](../FEATURES.md)) — все требуют `Authorization:
 Bearer`: `POST /friends/requests {recipient_login}` (201 `"sent"`, либо
@@ -76,4 +114,3 @@ status = 'pending'` в `UserRepository::respondToFriendRequest()`) — не
 которую клиент публикует сюда; сам сервер её никак не использует,
 только хранит и отдаёт для того, чтобы другие клиенты могли
 шифровать этому пользователю.
-

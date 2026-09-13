@@ -570,5 +570,93 @@ TEST(UserRepositoryTest, AreFriendsReflectsCurrentFriendshipStateInEitherArgumen
     EXPECT_TRUE(repository.areFriends(loginB, loginA));
 }
 
+TEST(UserRepositoryTest, BeginTotpSetupThenConfirmRoundTrip) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-totp");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_FALSE(repository.isTotpEnabled(login));
+    EXPECT_FALSE(repository.findTotpSecret(login).has_value());
+
+    ASSERT_EQ(repository.beginTotpSetup(login, "c2VjcmV0Ynl0ZXM="), BeginTotpSetupResult::kStarted);
+    EXPECT_FALSE(repository.isTotpEnabled(login)) << "not enabled until confirmed";
+    ASSERT_TRUE(repository.findTotpSecret(login).has_value());
+    EXPECT_EQ(*repository.findTotpSecret(login), "c2VjcmV0Ynl0ZXM=");
+
+    repository.confirmTotpSecret(login);
+    EXPECT_TRUE(repository.isTotpEnabled(login));
+}
+
+TEST(UserRepositoryTest, BeginTotpSetupRejectsWhenAlreadyEnabled) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-totp-already");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    ASSERT_EQ(repository.beginTotpSetup(login, "c2VjcmV0"), BeginTotpSetupResult::kStarted);
+    repository.confirmTotpSecret(login);
+
+    EXPECT_EQ(repository.beginTotpSetup(login, "b3RoZXI="), BeginTotpSetupResult::kAlreadyEnabled);
+}
+
+TEST(UserRepositoryTest, DisableTotpRemovesSecretAndBackupCodes) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-totp-disable");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    ASSERT_EQ(repository.beginTotpSetup(login, "c2VjcmV0"), BeginTotpSetupResult::kStarted);
+    repository.confirmTotpSecret(login);
+    repository.addBackupCodes(login, {"hash-a", "hash-b"});
+    ASSERT_EQ(repository.findUnusedBackupCodeHashes(login).size(), 2U);
+
+    repository.disableTotp(login);
+
+    EXPECT_FALSE(repository.isTotpEnabled(login));
+    EXPECT_FALSE(repository.findTotpSecret(login).has_value());
+    EXPECT_TRUE(repository.findUnusedBackupCodeHashes(login).empty());
+}
+
+TEST(UserRepositoryTest, BackupCodesAreUsableOnceEach) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-totp-backup");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    repository.addBackupCodes(login, {"hash-a", "hash-b"});
+    ASSERT_EQ(repository.findUnusedBackupCodeHashes(login).size(), 2U);
+
+    repository.markBackupCodeUsed(login, "hash-a");
+
+    const std::vector<std::string> remaining = repository.findUnusedBackupCodeHashes(login);
+    ASSERT_EQ(remaining.size(), 1U);
+    EXPECT_EQ(remaining[0], "hash-b");
+}
+
 }  // namespace
 }  // namespace user_service
