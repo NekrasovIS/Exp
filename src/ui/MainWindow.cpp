@@ -48,6 +48,7 @@
 #include "ui/ProfileDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SettingsDialog.h"
+#include "ui/StatusLabel.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -175,10 +176,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&userProfileClient_, &UserProfileClient::profileUpdated, this, [this](const UserProfile& profile) {
         footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
         profileDialog_->setProfile(profile);
-        profileDialog_->statusLabel()->setText(tr("Saved"));
+        ui_status::setStatusText(profileDialog_->statusLabel(), tr("Saved"), ui_status::Variant::kSuccess);
     });
     connect(&userProfileClient_, &UserProfileClient::errorOccurred, this, [this](const QString& message) {
-        profileDialog_->statusLabel()->setText(tr("Error: %1").arg(message));
+        ui_status::setStatusText(profileDialog_->statusLabel(), tr("Error: %1").arg(message),
+                                  ui_status::Variant::kError);
         // Общий для профиля и заявок в друзья (issue #187) — в отличие
         // от статус-лейбла ProfileDialog, тост виден независимо от
         // того, открыт ли этот диалог, что важно именно для ошибок
@@ -190,23 +192,26 @@ MainWindow::MainWindow(QWidget* parent)
         settingsDialog_->micLevelBar()->setValue(static_cast<int>(level * 100.0f));
     });
     connect(&audioInput_, &AudioInputDevice::errorOccurred, this, [this](const QString& message) {
-        settingsDialog_->micStatusLabel()->setText(tr("Error: %1").arg(message));
+        ui_status::setStatusText(settingsDialog_->micStatusLabel(), tr("Error: %1").arg(message),
+                                  ui_status::Variant::kError);
     });
     connect(&voiceMessageRecorder_, &VoiceMessageRecorder::errorOccurred, this, [this](const QString& message) {
         chatView_->setRecordingVoice(false);
         showToast(tr("Couldn't record a voice message: %1").arg(message), ToastBanner::Variant::kError);
     });
     connect(&camera_, &CameraDevice::errorOccurred, this, [this](const QString& message) {
-        settingsDialog_->cameraStatusLabel()->setText(tr("Error: %1").arg(message));
+        ui_status::setStatusText(settingsDialog_->cameraStatusLabel(), tr("Error: %1").arg(message),
+                                  ui_status::Variant::kError);
     });
     connect(&screenCapture_, &ScreenCaptureDevice::errorOccurred, this, [this](const QString& message) {
-        settingsDialog_->screenStatusLabel()->setText(tr("Error: %1").arg(message));
+        ui_status::setStatusText(settingsDialog_->screenStatusLabel(), tr("Error: %1").arg(message),
+                                  ui_status::Variant::kError);
     });
     connect(&authClient_, &AuthClient::tokenReceived, this,
             [this](const QString& token, const QString& refreshToken, qint64 expiresAt) {
                 lastToken_ = token;
                 refreshToken_ = refreshToken;
-                loginWindow_->statusLabel()->setText(tr("Token received, verifying..."));
+                ui_status::setStatusText(loginWindow_->statusLabel(), tr("Token received, verifying..."));
                 authClient_.verifyToken(token);
 
                 // Незаметно обмениваем refresh-токен незадолго до
@@ -725,11 +730,13 @@ MainWindow::MainWindow(QWidget* parent)
         refreshCommunities();
     });
     connect(&chatRestClient_, &ChatRestClient::moderatorPromoted, this, [this](qint64 id, const QString& login) {
-        moderatorsDialog_->statusLabel()->setText(tr("Promoted '%1'").arg(login));
+        ui_status::setStatusText(moderatorsDialog_->statusLabel(), tr("Promoted '%1'").arg(login),
+                                  ui_status::Variant::kSuccess);
         chatRestClient_.listModerators(lastToken_, id);
     });
     connect(&chatRestClient_, &ChatRestClient::moderatorDemoted, this, [this](qint64 id, const QString& login) {
-        moderatorsDialog_->statusLabel()->setText(tr("Demoted '%1'").arg(login));
+        ui_status::setStatusText(moderatorsDialog_->statusLabel(), tr("Demoted '%1'").arg(login),
+                                  ui_status::Variant::kSuccess);
         chatRestClient_.listModerators(lastToken_, id);
     });
     connect(&chatRestClient_, &ChatRestClient::moderatorsListed, this,
@@ -1147,7 +1154,8 @@ void MainWindow::onToggleCameraClicked() {
     }
 
     if (settingsDialog_->cameraCombo()->currentIndex() < 0) {
-        settingsDialog_->cameraStatusLabel()->setText(tr("No camera available"));
+        ui_status::setStatusText(settingsDialog_->cameraStatusLabel(), tr("No camera available"),
+                                  ui_status::Variant::kError);
         return;
     }
 
@@ -1171,17 +1179,18 @@ void MainWindow::onToggleScreenCaptureClicked() {
         screenCapture_.start();
         settingsDialog_->toggleScreenCaptureButton()->setText(tr("Stop screen capture"));
     } else {
-        settingsDialog_->screenStatusLabel()->setText(tr("No screen available"));
+        ui_status::setStatusText(settingsDialog_->screenStatusLabel(), tr("No screen available"),
+                                  ui_status::Variant::kError);
     }
 }
 
 void MainWindow::onPasswordSignInClicked(const QString& login, const QString& password) {
-    loginWindow_->statusLabel()->setText(tr("Requesting token..."));
+    ui_status::setStatusText(loginWindow_->statusLabel(), tr("Requesting token..."));
     authClient_.requestToken(login, password);
 }
 
 void MainWindow::onRegisterClicked(const QString& login, const QString& password) {
-    loginWindow_->statusLabel()->setText(tr("Registering..."));
+    ui_status::setStatusText(loginWindow_->statusLabel(), tr("Registering..."));
     authClient_.registerUser(login, password);
 }
 

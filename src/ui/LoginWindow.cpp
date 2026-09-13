@@ -7,6 +7,7 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
+#include "ui/StatusLabel.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -139,7 +140,7 @@ LoginWindow::LoginWindow(QWidget* parent) : QDialog(parent) {
 void LoginWindow::onRequestCodeClicked() {
     const QString identifier = identifierEdit_->text().trimmed();
     if (identifier.isEmpty()) {
-        statusLabel_->setText(tr("Enter your login or email first."));
+        ui_status::setStatusText(statusLabel_, tr("Enter your login or email first."), ui_status::Variant::kError);
         return;
     }
     pendingIdentifier_ = identifier;
@@ -150,7 +151,7 @@ void LoginWindow::onRequestCodeClicked() {
 void LoginWindow::onVerifyCodeClicked() {
     const QString code = codeEdit_->text().trimmed();
     if (code.isEmpty()) {
-        statusLabel_->setText(tr("Enter the code we sent you."));
+        ui_status::setStatusText(statusLabel_, tr("Enter the code we sent you."), ui_status::Variant::kError);
         return;
     }
     statusLabel_->clear();
@@ -167,7 +168,7 @@ void LoginWindow::onPasswordSignInClicked() {
     const QString login = passwordLoginEdit_->text().trimmed();
     const QString password = passwordEdit_->text();
     if (login.isEmpty() || password.isEmpty()) {
-        statusLabel_->setText(tr("Enter both login and password."));
+        ui_status::setStatusText(statusLabel_, tr("Enter both login and password."), ui_status::Variant::kError);
         return;
     }
     statusLabel_->clear();
@@ -178,7 +179,7 @@ void LoginWindow::onRegisterClicked() {
     const QString login = passwordLoginEdit_->text().trimmed();
     const QString password = passwordEdit_->text();
     if (login.isEmpty() || password.isEmpty()) {
-        statusLabel_->setText(tr("Enter both login and password."));
+        ui_status::setStatusText(statusLabel_, tr("Enter both login and password."), ui_status::Variant::kError);
         return;
     }
     statusLabel_->clear();
@@ -196,7 +197,7 @@ void LoginWindow::showCodeSent(const QString& identifier) {
 }
 
 void LoginWindow::showError(const QString& message) {
-    statusLabel_->setText(tr("Error: %1").arg(message));
+    ui_status::setStatusText(statusLabel_, tr("Error: %1").arg(message), ui_status::Variant::kError);
 }
 
 void LoginWindow::reset() {
