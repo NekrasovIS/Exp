@@ -230,6 +230,27 @@ QString darkStyleSheet() {
             border-radius: 22px;
         }
 
+        /* Issue #419: reactionChip/ownReaction (ChatMessageRow, issue
+           #334/#335) — objectName и свойство существовали в коде с самого
+           начала, но не имели ни одного QSS-правила, поэтому чипы реакций
+           выглядели как обычные кнопки, а "своя" реакция никак не
+           выделялась среди чужих. */
+        QPushButton#reactionChip {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+
+        QPushButton#reactionChip[ownReaction="true"] {
+            background-color: rgba(52, 211, 153, 0.18);
+            border: 1px solid #34d399;
+            color: #34d399;
+        }
+
+        QPushButton#reactionChip[ownReaction="true"]:hover {
+            background-color: rgba(52, 211, 153, 0.28);
+        }
+
         QLineEdit, QComboBox, QPlainTextEdit {
             background-color: #17191c;
             color: #e3e6e8;
