@@ -3,6 +3,7 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <nlohmann/json.hpp>
 #include <string>
 
 #include "CodeDeliveryChannel.h"
@@ -40,16 +41,30 @@ namespace auth_service {
  * совпадении ещё действующего кода выдаёт пару токен/refresh-токен —
  * та же форма ответа, что у /auth/token.
  *
+ * Вход при включённой двухфакторной аутентификации (issue #389): если
+ * первичный фактор (пароль в /auth/token, одноразовый код в
+ * /auth/otp/verify) успешен, но у аккаунта включена TOTP
+ * (userServiceClient_.isTotpEnabled(), issue #388), вместо обычной пары
+ * токенов выдаётся {"totp_required": true, "pending_token": ...} —
+ * pending_token недолговечен (TokenService::issueTotpPendingToken(),
+ * отдельный вид токена, который не проходит verifyToken/verifyRefreshToken)
+ * и обменивается на обычную пару токенов через
+ * POST /auth/totp/verify {"pending_token", "code"} — @p code проверяется
+ * у user-service (POST /users/verify-totp, принимает и TOTP-, и
+ * backup-коды). Аккаунты без включённой TOTP получают токены как раньше,
+ * за один запрос — обратная совместимость не нарушена.
+ *
  * В остальном — тонкая обёртка над httplib::Server: вся логика токенов
  * живёт в TokenService, этот класс только переводит HTTP-запросы/ответы.
  *
- * /auth/token, /auth/register, /auth/otp/request и /auth/otp/verify (все
- * проверяющие учётные данные/код) ограничены по частоте на клиентский
- * адрес (issue #102) — /auth/verify и /auth/refresh нет: /auth/verify
- * легитимно вызывается chat-service на каждый обрабатываемый им запрос,
- * а /auth/refresh требует уже валидный подписанный refresh-токен, а не
- * угадываемые учётные данные, так что ни тот ни другой не должны
- * попадать под лимитер, предназначенный против перебора.
+ * /auth/token, /auth/register, /auth/otp/request, /auth/otp/verify и
+ * /auth/totp/verify (все проверяющие учётные данные/код) ограничены по
+ * частоте на клиентский адрес (issue #102) — /auth/verify и /auth/refresh
+ * нет: /auth/verify легитимно вызывается chat-service на каждый
+ * обрабатываемый им запрос, а /auth/refresh требует уже валидный
+ * подписанный refresh-токен, а не угадываемые учётные данные, так что ни
+ * тот ни другой не должны попадать под лимитер, предназначенный против
+ * перебора.
  */
 class HttpServer {
 public:
@@ -84,6 +99,18 @@ private:
     void handleRefresh(const httplib::Request& request, httplib::Response& response);
     void handleOtpRequest(const httplib::Request& request, httplib::Response& response);
     void handleOtpVerify(const httplib::Request& request, httplib::Response& response);
+    void handleTotpVerify(const httplib::Request& request, httplib::Response& response);
+
+    /// Формирует JSON с обычной парой токен/refresh-токен для @p login —
+    /// общий хвост для успешного /auth/token, /auth/register (напрямую,
+    /// без проверки 2FA — новый аккаунт не может иметь включённую TOTP),
+    /// /auth/otp/verify и /auth/totp/verify.
+    [[nodiscard]] nlohmann::json buildTokenPairResponse(const std::string& login) const;
+
+    /// Общий хвост для /auth/token и /auth/otp/verify после успешного
+    /// первичного фактора (issue #389, см. doc-комментарий класса выше):
+    /// либо обычная пара токенов, либо totp-pending challenge.
+    void issueLoginResponse(const std::string& login, httplib::Response& response);
 
     const TokenService& tokenService_;
     const UserServiceClient& userServiceClient_;

@@ -2,8 +2,14 @@
 
 #include <gtest/gtest.h>
 #include <httplib.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 
+#include <array>
+#include <cctype>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -127,6 +133,65 @@ std::string uniqueLogin(const std::string& prefix) {
            std::to_string(
                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
                    .count());
+}
+
+// Issue #389 — считает TOTP-код так же, как это делало бы
+// приложение-аутентификатор, чтобы тесты полного 2FA-флоу входа могли
+// подтвердить настройку TOTP и пройти POST /auth/totp/verify без
+// реального аутентификатора. Собственная маленькая копия RFC 4226/6238
+// (не user-service's totp.h/base32.h — разные сервисы, разные единицы
+// сборки собираются независимо), декодирует только то, что отдаёт
+// POST /profile/totp/setup ("secret" в base32), и не претендует на
+// переиспользование где-либо ещё.
+std::string decodeBase32ForTest(const std::string& text) {
+    static const std::string kAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    std::string bits;
+    for (const char c : text) {
+        if (c == '=') {
+            break;
+        }
+        const auto pos = kAlphabet.find(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        if (pos == std::string::npos) {
+            continue;
+        }
+        for (int bit = 4; bit >= 0; --bit) {
+            bits.push_back(((pos >> bit) & 1) != 0 ? '1' : '0');
+        }
+    }
+    std::string bytes;
+    for (std::size_t i = 0; i + 8 <= bits.size(); i += 8) {
+        bytes.push_back(static_cast<char>(std::stoi(bits.substr(i, 8), nullptr, 2)));
+    }
+    return bytes;
+}
+
+std::string computeTotpCodeForTest(const std::string& base32Secret) {
+    const std::string key = decodeBase32ForTest(base32Secret);
+    const auto now =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    auto counter = static_cast<uint64_t>(now / 30);
+
+    std::array<unsigned char, 8> counterBytes{};
+    for (int i = 7; i >= 0; --i) {
+        counterBytes[static_cast<std::size_t>(i)] = static_cast<unsigned char>(counter & 0xff);
+        counter >>= 8;
+    }
+
+    std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+    unsigned int digestLength = 0;
+    HMAC(EVP_sha1(), key.data(), static_cast<int>(key.size()), counterBytes.data(), counterBytes.size(),
+         digest.data(), &digestLength);
+
+    const unsigned char offset = digest[digestLength - 1] & 0x0f;
+    const uint32_t truncated = ((static_cast<uint32_t>(digest[offset]) & 0x7f) << 24) |
+                                ((static_cast<uint32_t>(digest[offset + 1]) & 0xff) << 16) |
+                                ((static_cast<uint32_t>(digest[offset + 2]) & 0xff) << 8) |
+                                (static_cast<uint32_t>(digest[offset + 3]) & 0xff);
+    const uint32_t code = truncated % 1000000;
+
+    std::array<char, 16> buffer{};
+    std::snprintf(buffer.data(), buffer.size(), "%06u", code);
+    return std::string(buffer.data());
 }
 
 TEST(HttpServerTest, TokenRouteRejectsMissingFieldsWith400) {
@@ -681,6 +746,205 @@ TEST(HttpServerTest, OtpRequestPrefersTelegramOverEmailWhenBothAreSet) {
     EXPECT_EQ(telegramChannel.lastDestination, chatId);
     EXPECT_FALSE(telegramChannel.lastCode.empty());
     EXPECT_TRUE(emailChannel.lastDestination.empty());
+}
+
+TEST(HttpServerTest, TotpVerifyRouteRejectsMissingFieldsWith400) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);  // недоступен, не должен вызываться
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result =
+        client.Post("/auth/totp/verify", nlohmann::json{{"pending_token", "x"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, TotpVerifyRouteRejectsMalformedJsonWith400) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/auth/totp/verify", "not json", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, TotpVerifyRouteRejectsAnInvalidPendingTokenWith401) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);  // недоступен — код до него дело не доходит
+    const ScopedServer server(tokenService, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/auth/totp/verify", nlohmann::json{{"pending_token", "not-a-real-token"}, {"code", "123456"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Тот же приём, что и у RefreshRouteRejectsAnAccessTokenPresentedAsARefreshTokenWith401 —
+// три вида токенов подписаны одним секретом, но не взаимозаменяемы:
+// обычный access-токен не должен приниматься там, где ожидается
+// totp-pending.
+TEST(HttpServerTest, TotpVerifyRouteRejectsAnAccessTokenPresentedAsAPendingTokenWith401) {
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    const Token accessToken = tokenService.issueToken("alice");
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/auth/totp/verify", nlohmann::json{{"pending_token", accessToken.value}, {"code", "123456"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, TotpVerifyRouteRejectsAnExpiredPendingTokenWith401) {
+    // totpPendingTtl = 0 — токен, выданный "сейчас", уже истёк к
+    // моменту проверки, тот же приём, что и
+    // ExpiredTotpPendingTokenIsRejected в TokenServiceTest, только на
+    // уровне HTTP-маршрута.
+    const TokenService tokenService("test-secret", std::chrono::seconds{3600}, std::chrono::seconds{3600},
+                                     std::chrono::seconds{0});
+    const UserServiceClient userServiceClient("127.0.0.1", 1);
+    const ScopedServer server(tokenService, userServiceClient);
+
+    const Token pendingToken = tokenService.issueTotpPendingToken("alice");
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/auth/totp/verify", nlohmann::json{{"pending_token", pendingToken.value}, {"code", "123456"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Полный флоу входа с 2FA (issue #389): пароль верный, но у аккаунта
+// включена TOTP (issue #388, настраивается через реально запущенный
+// user-service) — /auth/token не выдаёт токены сразу, а требует второй
+// шаг через /auth/totp/verify. Неверный код отклоняется, верный —
+// выдаёт обычную пару токенов.
+TEST(HttpServerTest, TokenRouteChallengesWithPendingTokenWhenTotpIsEnabledAndTotpVerifyCompletesLogin) {
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    if (!userServiceReachable(userServiceHost, userServicePort)) {
+        GTEST_SKIP() << "user-service not reachable at " << userServiceHost << ":" << userServicePort;
+    }
+
+    const std::string login = uniqueLogin("http-server-totp-login-test");
+    const std::string password = "integration-test-password";
+    httplib::Client userServiceSetup(userServiceHost, userServicePort);
+    const httplib::Result registerResult =
+        userServiceSetup.Post("/users/register", nlohmann::json{{"login", login}, {"password", password}}.dump(),
+                               "application/json");
+    ASSERT_TRUE(registerResult);
+    ASSERT_EQ(registerResult->status, 201);
+
+    // Тот же приём, что и в OtpRequestThenVerifyRoundTripsToAValidToken
+    // выше — /profile/totp/* у user-service проверяет токен через
+    // реально запущенный auth-service.exe, не через ScopedServer этого
+    // теста, поэтому секрет должен совпадать с тем, каким запущен тот
+    // отдельный процесс.
+    const TokenService realAuthServiceTokenService(envOrDefault("AUTH_SERVICE_SECRET", "dev-only-secret"));
+    const Token profileToken = realAuthServiceTokenService.issueToken(login);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + profileToken.value}};
+
+    const httplib::Result setupResult = userServiceSetup.Post(
+        "/profile/totp/setup", authHeader, nlohmann::json::object().dump(), "application/json");
+    ASSERT_TRUE(setupResult);
+    ASSERT_EQ(setupResult->status, 200);
+    const std::string secret = nlohmann::json::parse(setupResult->body)["secret"].get<std::string>();
+
+    const httplib::Result confirmResult = userServiceSetup.Post(
+        "/profile/totp/confirm", authHeader, nlohmann::json{{"code", computeTotpCodeForTest(secret)}}.dump(),
+        "application/json");
+    ASSERT_TRUE(confirmResult);
+    ASSERT_EQ(confirmResult->status, 200);
+
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const ScopedServer server(tokenService, userServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result tokenResult =
+        client.Post("/auth/token", nlohmann::json{{"login", login}, {"password", password}}.dump(),
+                     "application/json");
+    ASSERT_TRUE(tokenResult);
+    ASSERT_EQ(tokenResult->status, 200);
+    const nlohmann::json tokenBody = nlohmann::json::parse(tokenResult->body);
+    ASSERT_TRUE(tokenBody.value("totp_required", false));
+    const std::string pendingToken = tokenBody["pending_token"].get<std::string>();
+    EXPECT_FALSE(tokenBody.contains("token"));
+
+    const httplib::Result wrongCodeResult = client.Post(
+        "/auth/totp/verify", nlohmann::json{{"pending_token", pendingToken}, {"code", "000000"}}.dump(),
+        "application/json");
+    ASSERT_TRUE(wrongCodeResult);
+    EXPECT_EQ(wrongCodeResult->status, 401);
+
+    const httplib::Result verifyResult = client.Post(
+        "/auth/totp/verify", nlohmann::json{{"pending_token", pendingToken}, {"code", computeTotpCodeForTest(secret)}}.dump(),
+        "application/json");
+    ASSERT_TRUE(verifyResult);
+    ASSERT_EQ(verifyResult->status, 200);
+    const nlohmann::json verifyBody = nlohmann::json::parse(verifyResult->body);
+    EXPECT_FALSE(verifyBody["token"].get<std::string>().empty());
+    EXPECT_FALSE(verifyBody["refresh_token"].get<std::string>().empty());
+}
+
+// Регрессия: аккаунт без включённой TOTP по-прежнему логинится через
+// /auth/otp/verify за один шаг — issueLoginResponse() не должен
+// требовать 2FA-challenge там, где 2FA не настроена.
+TEST(HttpServerTest, OtpVerifyRouteStillLogsInDirectlyWhenTotpIsNotEnabled) {
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    if (!userServiceReachable(userServiceHost, userServicePort)) {
+        GTEST_SKIP() << "user-service not reachable at " << userServiceHost << ":" << userServicePort;
+    }
+
+    const std::string login = uniqueLogin("http-server-otp-no-totp-test");
+    const std::string email = login + "@example.test";
+    httplib::Client userServiceSetup(userServiceHost, userServicePort);
+    const httplib::Result registerResult = userServiceSetup.Post(
+        "/users/register", nlohmann::json{{"login", login}, {"password", "integration-test-password"}}.dump(),
+        "application/json");
+    ASSERT_TRUE(registerResult);
+    ASSERT_EQ(registerResult->status, 201);
+
+    const TokenService realAuthServiceTokenService(envOrDefault("AUTH_SERVICE_SECRET", "dev-only-secret"));
+    const TokenService tokenService("test-secret");
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const Token profileToken = realAuthServiceTokenService.issueToken(login);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + profileToken.value}};
+    const httplib::Result patchResult =
+        userServiceSetup.Patch("/users/me", authHeader, nlohmann::json{{"email", email}}.dump(), "application/json");
+    ASSERT_TRUE(patchResult);
+    ASSERT_EQ(patchResult->status, 200);
+
+    CapturingCodeDeliveryChannel codeDeliveryChannel;
+    const ScopedServer server(tokenService, userServiceClient, codeDeliveryChannel);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result requestResult =
+        client.Post("/auth/otp/request", nlohmann::json{{"identifier", email}}.dump(), "application/json");
+    ASSERT_TRUE(requestResult);
+    ASSERT_EQ(requestResult->status, 200);
+
+    const httplib::Result verifyResult = client.Post(
+        "/auth/otp/verify", nlohmann::json{{"identifier", login}, {"code", codeDeliveryChannel.lastCode}}.dump(),
+        "application/json");
+    ASSERT_TRUE(verifyResult);
+    ASSERT_EQ(verifyResult->status, 200);
+    const nlohmann::json verifyBody = nlohmann::json::parse(verifyResult->body);
+    EXPECT_FALSE(verifyBody["token"].get<std::string>().empty());
+    EXPECT_FALSE(verifyBody.contains("totp_required"));
 }
 
 }  // namespace

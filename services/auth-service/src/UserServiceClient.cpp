@@ -54,4 +54,36 @@ std::optional<OtpIdentity> UserServiceClient::resolveOtpIdentifier(const std::st
                                : std::nullopt};
 }
 
+bool UserServiceClient::isTotpEnabled(const std::string& login) const {
+    httplib::Client client(host_, port_);
+
+    const httplib::Params params{{"login", login}};
+    const httplib::Result result = client.Get("/internal/totp-status", params);
+    if (!result || result->status != 200) {
+        return false;
+    }
+
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded()) {
+        return false;
+    }
+    return response.value("enabled", false);
+}
+
+bool UserServiceClient::verifyTotp(const std::string& login, const std::string& code) const {
+    httplib::Client client(host_, port_);
+
+    const nlohmann::json body{{"login", login}, {"code", code}};
+    const httplib::Result result = client.Post("/users/verify-totp", body.dump(), "application/json");
+    if (!result || result->status != 200) {
+        return false;
+    }
+
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded()) {
+        return false;
+    }
+    return response.value("valid", false);
+}
+
 }  // namespace auth_service
