@@ -7,6 +7,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { HomePage } from "./pages/HomePage.js";
 import { JoinPage } from "./pages/JoinPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
+import { ProfilePage } from "./profile/ProfilePage.js";
 import { ProtectedRoute } from "./session/ProtectedRoute.js";
 import { SessionProvider } from "./session/SessionContext.js";
 
@@ -22,6 +23,7 @@ export function App() {
           <Route path="/join/:code" element={<JoinPage />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<HomePage />} />
+            <Route path="/profile" element={<ProfilePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

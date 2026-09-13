@@ -245,6 +245,28 @@ Drag-and-drop вложений (issue #377) — перетаскивание ф�
 микро-движении мыши внутри композера, поскольку `dragenter`/`dragleave`
 всплывают с каждого элемента отдельно.
 
+Страница профиля (issue #385, зависит от backend'а user-service issue
+#384) — первый экран редактирования профиля у веб-клиента, раньше не
+существовавший вовсе: `/profile` (ссылка "Profile" в шапке `HomePage`),
+редактирование display name (`useProfile.ts`, `UserServiceClient.
+updateOwnProfile()` — echo'ит обратно текущие avatar_url/email/
+telegram_chat_id, а не затирает их пустыми строками, тот же приём, что
+и `ProfileDialog::setProfile()` в DeviceHub) и загрузка аватара
+(`UserServiceClient.uploadAvatar()`, тот же base64-в-JSON путь и
+`toBase64()`-хелпер, что и у `ChatRestClient.uploadAttachment()`).
+Email/Telegram chat_id пока не редактируются на вебе — то же
+осознанное сужение объёма, что и в исходном описании задачи.
+
+Новый переиспользуемый `Avatar.tsx` рендерит `<img
+src="/users/<login>/avatar">` с откатом на буквенную заглушку по
+`onError` (эндпоинт публичный и детерминированный по логину — см.
+docs/services/user-service.md, — поэтому отдельного запроса "есть ли
+аватар" не нужно); `MembersSidebar` использует его вместо жёстко
+зашитой буквы. `versionKey`-параметр компонента — cache-busting query-
+параметр (`?v=`), нужный только `ProfilePage`'у для собственного
+только что загруженного аватара: URL не меняется между загрузками,
+поэтому без этого браузер показал бы закэшированную старую картинку.
+
 Требует Node.js ≥20 и pnpm (`corepack enable`, либо `npm install -g pnpm`
 — версия закреплена в `package.json`'s `packageManager`). Команды из
 корня репозитория:

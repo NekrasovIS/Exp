@@ -20,6 +20,12 @@
   font-weight: 600;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .body {
   flex: 1;
   min-height: 0;

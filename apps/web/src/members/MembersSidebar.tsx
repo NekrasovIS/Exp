@@ -2,7 +2,11 @@
 // DeviceHub's MemberListPanel (issue #182 for the list itself, #309 for
 // the presence dot). Renders nothing when no community is selected,
 // same convention ChannelsSidebar/CommunitiesSidebar use.
+//
+// Issue #385 — the avatar circle renders a real uploaded image (Avatar)
+// instead of always the letter placeholder.
 
+import { Avatar } from "../profile/Avatar.js";
 import styles from "./membersSidebar.module.css";
 import { useMembers } from "./useMembers.js";
 
@@ -31,7 +35,7 @@ export function MembersSidebar({ communityId, onlineLogins }: MembersSidebarProp
         {members.map((login) => (
           <li key={login} className={styles.row}>
             <span className={styles.avatar}>
-              {login.slice(0, 1).toUpperCase()}
+              <Avatar login={login} />
               {onlineLogins.has(login) && <span className={styles.onlineDot} title="Online" />}
             </span>
             <span className={styles.login}>{login}</span>

@@ -175,6 +175,35 @@ describe("UserServiceClient", () => {
     });
   });
 
+  describe("uploadAvatar", () => {
+    it("base64-encodes the bytes and resolves with the returned avatar_url", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, { avatar_url: "/users/alice/avatar" }));
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      const result = await client.uploadAvatar(kToken, "image/png", new Uint8Array([0x66, 0x6f, 0x6f]));
+
+      expect(result).toEqual({ avatarUrl: "/users/alice/avatar" });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `${kBaseUrl}/profile/avatar`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ content_type: "image/png", data_base64: "Zm9v" }),
+        }),
+      );
+    });
+
+    it("throws ApiError with the server's message on a rejected upload", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(400, { error: "'content_type' must be an image/* MIME type" }),
+      );
+      const client = new UserServiceClient(kBaseUrl, fetchImpl);
+
+      await expect(client.uploadAvatar(kToken, "text/html", new Uint8Array([1]))).rejects.toThrow(
+        "'content_type' must be an image/* MIME type",
+      );
+    });
+  });
+
   describe("sendFriendRequest", () => {
     it("resolves 'sent' for a fresh request", async () => {
       const fetchImpl = fakeFetch(jsonResponse(201, { status: "sent" }));
