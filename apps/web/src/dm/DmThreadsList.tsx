@@ -2,7 +2,7 @@
 // rather than only via FriendsPanel's "Message" button each time.
 
 import { useDmThreads } from "./useDmThreads.js";
-import styles from "./DmThreadsList.module.css";
+import styles from "../pages/sidebarNav.module.css";
 
 interface DmThreadsListProps {
   selectedThreadId: number | null;
