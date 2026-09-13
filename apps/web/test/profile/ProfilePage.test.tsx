@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,7 +53,11 @@ describe("ProfilePage", () => {
 
     renderPage();
 
-    expect(await screen.findByLabelText("Display name")).toHaveValue("Alice");
+    // findByLabelText only waits for the element to mount, not for its
+    // value to be prefilled — that happens a render pass later, in the
+    // useEffect keyed on `profile` — so this waits for the value itself
+    // (a real, if narrow, race this test caught in CI but not locally).
+    await waitFor(() => expect(screen.getByLabelText("Display name")).toHaveValue("Alice"));
   });
 
   it("saving a new display name sends it to the server", async () => {
