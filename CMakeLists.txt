@@ -48,6 +48,14 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets Networ
 find_package(unofficial-webrtc CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 
+# libqrencode (issue #390) не предоставляет CMake config-файл — только
+# обычные заголовок+библиотеку, поэтому find_path/find_library вместо
+# find_package(... CONFIG), как для остальных зависимостей выше.
+find_path(QRENCODE_INCLUDE_DIR NAMES qrencode.h)
+find_library(QRENCODE_LIBRARY_RELEASE NAMES qrencode)
+find_library(QRENCODE_LIBRARY_DEBUG NAMES qrencoded)
+set(QRENCODE_LIBRARIES optimized ${QRENCODE_LIBRARY_RELEASE} debug ${QRENCODE_LIBRARY_DEBUG})
+
 add_library(devicehub_core
     src/devices/DeviceEnumerator.h
     src/devices/DeviceEnumerator.cpp
@@ -122,6 +130,10 @@ add_library(devicehub_core
     src/ui/PinnedMessagesDialog.cpp
     src/ui/LoginWindow.h
     src/ui/LoginWindow.cpp
+    src/ui/TotpSetupDialog.h
+    src/ui/TotpSetupDialog.cpp
+    src/ui/QrCodeGenerator.h
+    src/ui/QrCodeGenerator.cpp
     src/ui/FooterBar.h
     src/ui/FooterBar.cpp
     src/ui/Theme.h
@@ -137,7 +149,7 @@ add_library(devicehub_core
     src/ui/DesktopNotifier.h
     src/ui/DesktopNotifier.cpp
 )
-target_include_directories(devicehub_core PUBLIC src)
+target_include_directories(devicehub_core PUBLIC src ${QRENCODE_INCLUDE_DIR})
 target_link_libraries(devicehub_core PUBLIC
     Qt6::Widgets
     Qt6::Multimedia
@@ -146,6 +158,7 @@ target_link_libraries(devicehub_core PUBLIC
     Qt6::WebSockets
     unofficial::webrtc::webrtc
     unofficial-sodium::sodium
+    ${QRENCODE_LIBRARIES}
 )
 
 # Захват экрана на Windows идёт напрямую через Windows.Graphics.Capture
@@ -298,6 +311,8 @@ add_executable(devicehub_tests
     test/SearchDialogTest.cpp
     test/PinnedMessagesDialogTest.cpp
     test/LoginWindowTest.cpp
+    test/TotpSetupDialogTest.cpp
+    test/QrCodeGeneratorTest.cpp
     test/AuthClientIntegrationTest.cpp
     test/ChatClientIntegrationTest.cpp
     test/ChatRestClientTest.cpp

@@ -13,6 +13,7 @@
     "qtwebsockets",
     "gtest",
     "webrtc",
-    "libsodium"
+    "libsodium",
+    "libqrencode"
   ]
 }

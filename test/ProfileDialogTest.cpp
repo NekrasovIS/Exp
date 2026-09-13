@@ -61,5 +61,16 @@ TEST(ProfileDialogTest, ClickingSaveEmitsSaveRequestedWithCurrentFieldText) {
     EXPECT_EQ(emitted.telegramChatId, QStringLiteral("987654321"));
 }
 
+// Issue #388/#390.
+TEST(ProfileDialogTest, ClickingTwoFactorButtonEmitsTwoFactorSettingsRequested) {
+    ProfileDialog dialog;
+    int emitCount = 0;
+    QObject::connect(&dialog, &ProfileDialog::twoFactorSettingsRequested, [&]() { ++emitCount; });
+
+    dialog.twoFactorButton()->click();
+
+    EXPECT_EQ(emitCount, 1);
+}
+
 }  // namespace
 }  // namespace devicehub

@@ -16,15 +16,20 @@ namespace devicehub {
  *        или зарегистрировался) либо не закроет его, завершив
  *        приложение.
  *
- * Три шага в QStackedWidget: вход по одноразовому коду (ввод логина/
+ * Четыре шага в QStackedWidget: вход по одноразовому коду (ввод логина/
  * email/Telegram chat_id -> код отправлен, поле для его ввода) — шаги
- * 0/1, и вход по паролю/регистрация — шаг 2, доступный по ссылке "Войти
- * по паролю" с первого шага. Чистое представление, тот же паттерн, что
- * и у ProfileDialog/SettingsDialog — MainWindow владеет AuthClient и
- * всей сетевой логикой: requestCodeRequested()/verifyCodeRequested()/
- * passwordSignInRequested()/registerRequested() сигналят наружу,
- * showCodeSent()/showError() вызываются MainWindow по результатам
- * AuthClient::otpRequested()/tokenReceived()/errorOccurred().
+ * 0/1, вход по паролю/регистрация — шаг 2, доступный по ссылке "Войти
+ * по паролю" с первого шага, и шаг 3 — код двухфакторной
+ * аутентификации (issue #389/#390), показываемый вместо обычного
+ * успешного входа, если у аккаунта включена TOTP: и вход по паролю
+ * (шаг 2), и по одноразовому коду (шаг 1) могут привести сюда.
+ * Чистое представление, тот же паттерн, что и у ProfileDialog/
+ * SettingsDialog — MainWindow владеет AuthClient и всей сетевой
+ * логикой: requestCodeRequested()/verifyCodeRequested()/
+ * passwordSignInRequested()/registerRequested()/totpCodeSubmitted()
+ * сигналят наружу, showCodeSent()/showTotpChallenge()/showError()
+ * вызываются MainWindow по результатам AuthClient::otpRequested()/
+ * totpChallengeRequired()/tokenReceived()/errorOccurred().
  */
 class LoginWindow : public QDialog {
     Q_OBJECT
@@ -35,6 +40,12 @@ public:
     /// Переключает на второй шаг (ввод кода) — вызывается после
     /// успешного AuthClient::otpRequested(@p identifier).
     void showCodeSent(const QString& identifier);
+
+    /// Переключает на шаг ввода TOTP/backup-кода (issue #389/#390) —
+    /// вызывается по AuthClient::totpChallengeRequired(@p pendingToken),
+    /// независимо от того, с какого предыдущего шага (пароль или
+    /// одноразовый код) пришёл успешный первичный фактор.
+    void showTotpChallenge(const QString& pendingToken);
 
     /// Показывает сообщение об ошибке (сетевая ошибка, неверный/
     /// просроченный код, занятый логин при регистрации и т.п.) — не
@@ -57,6 +68,9 @@ public:
     [[nodiscard]] QPushButton* passwordSignInButton() const { return passwordSignInButton_; }
     [[nodiscard]] QPushButton* registerButton() const { return registerButton_; }
     [[nodiscard]] QPushButton* backToCodeButton() const { return backToCodeButton_; }
+    [[nodiscard]] QLineEdit* totpCodeEdit() const { return totpCodeEdit_; }
+    [[nodiscard]] QPushButton* totpVerifyButton() const { return totpVerifyButton_; }
+    [[nodiscard]] QPushButton* totpBackButton() const { return totpBackButton_; }
     [[nodiscard]] QLabel* statusLabel() const { return statusLabel_; }
 
 signals:
@@ -73,12 +87,18 @@ signals:
     /// "Register" нажата на шаге пароля.
     void registerRequested(const QString& login, const QString& password);
 
+    /// "Verify" нажата на шаге TOTP-кода — @p pendingToken тот же, что
+    /// был передан в showTotpChallenge().
+    void totpCodeSubmitted(const QString& pendingToken, const QString& code);
+
 private:
     void onRequestCodeClicked();
     void onVerifyCodeClicked();
     void onBackClicked();
     void onPasswordSignInClicked();
     void onRegisterClicked();
+    void onTotpVerifyClicked();
+    void onTotpBackClicked();
 
     QStackedWidget* stack_ = nullptr;
     QLineEdit* identifierEdit_ = nullptr;
@@ -93,12 +113,19 @@ private:
     QPushButton* passwordSignInButton_ = nullptr;
     QPushButton* registerButton_ = nullptr;
     QPushButton* backToCodeButton_ = nullptr;
+    QLineEdit* totpCodeEdit_ = nullptr;
+    QPushButton* totpVerifyButton_ = nullptr;
+    QPushButton* totpBackButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     /// Последний identifier, на который реально запрашивался код —
     /// verifyCodeRequested() передаёт именно его, а не текущий текст
     /// identifierEdit_ (пользователь мог не менять его, но на втором
     /// шаге поле уже не видно).
     QString pendingIdentifier_;
+    /// pendingToken из последнего AuthClient::totpChallengeRequired() —
+    /// totpCodeSubmitted() передаёт именно его, а не текст какого-либо
+    /// поля (сам токен нигде не отображается пользователю).
+    QString pendingTotpToken_;
 };
 
 }  // namespace devicehub

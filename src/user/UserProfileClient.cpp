@@ -172,6 +172,68 @@ void UserProfileClient::listFriends(const QString& token) {
     });
 }
 
+void UserProfileClient::setupTotp(const QString& token) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/profile/totp/setup")));
+    QNetworkReply* reply = networkManager_.post(buildRequest(url, token), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit totpSetupStarted(TotpSetupInfo{.secret = object.value("secret").toString(),
+                                             .otpauthUrl = object.value("otpauth_url").toString()});
+    });
+}
+
+void UserProfileClient::confirmTotp(const QString& token, const QString& code) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/profile/totp/confirm")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token), QJsonDocument(QJsonObject{{"code", code}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        QStringList backupCodes;
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        for (const QJsonValue& value : object.value("backup_codes").toArray()) {
+            backupCodes.push_back(value.toString());
+        }
+        emit totpConfirmed(backupCodes);
+    });
+}
+
+void UserProfileClient::disableTotp(const QString& token, const QString& code) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/profile/totp/disable")));
+    QNetworkReply* reply = networkManager_.post(
+        buildRequest(url, token), QJsonDocument(QJsonObject{{"code", code}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        emit totpDisabled();
+    });
+}
+
+void UserProfileClient::fetchTotpStatus(const QString& token) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/profile/totp/status")));
+    QNetworkReply* reply = networkManager_.get(buildRequest(url, token));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit totpStatusReceived(object.value("enabled").toBool());
+    });
+}
+
 void UserProfileClient::removeFriend(const QString& token, const QString& login) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/%1").arg(login)));
     QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));

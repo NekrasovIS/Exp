@@ -43,6 +43,7 @@ class ProfileDialog;
 class SearchDialog;
 class PinnedMessagesDialog;
 class SettingsDialog;
+class TotpSetupDialog;
 
 /**
  * @brief Оболочка главного окна: боковая панель сообществ/каналов
@@ -115,9 +116,14 @@ private:
     void onPasswordSignInClicked(const QString& login, const QString& password);
     /// LoginWindow::registerRequested() — issue #156.
     void onRegisterClicked(const QString& login, const QString& password);
+    /// LoginWindow::totpCodeSubmitted() — issue #389/#390.
+    void onTotpCodeSubmitted(const QString& pendingToken, const QString& code);
     /// Клик по аватару в футере (issue #151) — показывает небольшое меню
     /// (Edit Profile / Sign Out), привязанное к аватару.
     void onAccountSettingsClicked();
+    /// ProfileDialog::twoFactorSettingsRequested() (issue #388/#390) —
+    /// запрашивает текущий статус TOTP и показывает TotpSetupDialog.
+    void onTwoFactorSettingsRequested();
     /// Очищает локальное состояние авторизации и возвращает UI в
     /// состояние "не авторизован" — эндпоинта отзыва токена на сервере
     /// пока не существует, поэтому это выход только на стороне клиента.
@@ -355,6 +361,7 @@ private:
     SettingsDialog* settingsDialog_ = nullptr;
     ModeratorsDialog* moderatorsDialog_ = nullptr;
     ProfileDialog* profileDialog_ = nullptr;
+    TotpSetupDialog* totpSetupDialog_ = nullptr;
     SearchDialog* searchDialog_ = nullptr;
     PinnedMessagesDialog* pinnedMessagesDialog_ = nullptr;
     LoginWindow* loginWindow_ = nullptr;

@@ -27,6 +27,11 @@ struct FriendRequestInfo {
   +createdAt: QString
 }
 
+struct TotpSetupInfo {
+  +secret: QString
+  +otpauthUrl: QString
+}
+
 class UserProfileClient {
   +fetchProfile(token: QString, login: QString)
   +updateOwnProfile(token: QString, edits: ProfileEdits)
@@ -37,6 +42,10 @@ class UserProfileClient {
   +declineFriendRequest(token: QString, requestId: qint64)
   +listFriends(token: QString)
   +removeFriend(token: QString, login: QString)
+  +setupTotp(token: QString)
+  +confirmTotp(token: QString, code: QString)
+  +disableTotp(token: QString, code: QString)
+  +fetchTotpStatus(token: QString)
   .. signals ..
   +profileReceived(profile: UserProfile)
   +profileUpdated(profile: UserProfile)
@@ -46,14 +55,29 @@ class UserProfileClient {
   +friendRequestDeclined(requestId: qint64)
   +friendsListed(logins: QStringList)
   +friendRemoved(login: QString)
+  +totpSetupStarted(setup: TotpSetupInfo)
+  +totpConfirmed(backupCodes: QStringList)
+  +totpDisabled()
+  +totpStatusReceived(enabled: bool)
   +errorOccurred(message: QString)
 }
 UserProfileClient *-- QNetworkAccessManager : owns
 UserProfileClient ..> UserProfile : emits
 UserProfileClient ..> ProfileEdits : updateOwnProfile() >
 UserProfileClient ..> FriendRequestInfo : emits (issue #187, Фаза 3)
+UserProfileClient ..> TotpSetupInfo : totpSetupStarted() >
 UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
 UserProfileClient ..> "user-service" : POST /friends/requests,\nGET /friends/requests,\nPOST /friends/requests/{id}/accept|decline,\nGET /friends, DELETE /friends/{login}\n(issue #187)
+UserProfileClient ..> "user-service" : POST /profile/totp/setup|confirm|disable,\nGET /profile/totp/status\n(issue #388/#390)
+note bottom of TotpSetupInfo
+  issue #388/#390: secret — base32,
+  для ручного ввода; otpauthUrl —
+  полный otpauth://-URI, из которого
+  TotpSetupDialog (src/ui) рисует
+  QR-код. Ничего не сохраняется на
+  сервере, пока не пройдёт
+  confirmTotp() с верным кодом.
+end note
 note bottom of ProfileEdits
   issue #156/#174: email/telegramChatId —
   заданы, значит, вход по одноразовому
