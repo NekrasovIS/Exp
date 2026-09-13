@@ -810,5 +810,144 @@ TEST(HttpServerTest, DeclineFriendRequestThenMutualRequestAndRemoveRoundTrip) {
     EXPECT_TRUE(nlohmann::json::parse(client.Get("/friends", requesterAuth)->body).empty());
 }
 
+TEST(HttpServerTest, UploadAvatarRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/profile/avatar", nlohmann::json{{"content_type", "image/png"}, {"data_base64", "Zm9v"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, UploadAvatarRouteRejectsNonImageContentTypeWith400) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-avatar-nonimage");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+    const httplib::Result result = client.Post(
+        "/profile/avatar", authHeader,
+        nlohmann::json{{"content_type", "text/html"}, {"data_base64", "Zm9v"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadAvatarRouteRejectsInvalidBase64With400) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-avatar-badbase64");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+    const httplib::Result result = client.Post(
+        "/profile/avatar", authHeader,
+        nlohmann::json{{"content_type", "image/png"}, {"data_base64", "not!valid$$$base64"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadAvatarRouteRejectsPayloadOverTwoMegabytesWith400) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-avatar-oversized");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    client.set_payload_max_length(8 * 1024 * 1024);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+    // "A" repeated decodes to all-zero bytes, no padding needed since
+    // the length below is already a multiple of 4 — 2,796,204 base64
+    // chars decode to 2,097,153 bytes, exactly one over the 2 MB limit.
+    const std::string oversizedBase64(2796204, 'A');
+    const httplib::Result result = client.Post(
+        "/profile/avatar", authHeader,
+        nlohmann::json{{"content_type", "image/png"}, {"data_base64", oversizedBase64}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, GetAvatarRouteReturnsNotFoundBeforeAnyUpload) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    // No Authorization header at all — GET .../avatar is deliberately
+    // unauthenticated (see HttpServer.h's doc comment).
+    const httplib::Result result = client.Get("/users/nobody-has-this-login/avatar");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
+TEST(HttpServerTest, UploadAvatarThenGetAvatarRoundTripsBytesAndContentTypeWithoutAuthentication) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-avatar-roundtrip");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+    const httplib::Result uploadResult = client.Post(
+        "/profile/avatar", authHeader,
+        nlohmann::json{{"content_type", "image/png"}, {"data_base64", "Zm9v"}}.dump(), "application/json");
+    ASSERT_TRUE(uploadResult);
+    ASSERT_EQ(uploadResult->status, 200);
+    const std::string avatarUrl = nlohmann::json::parse(uploadResult->body)["avatar_url"].get<std::string>();
+
+    // No Authorization header on the GET — an <img src="..."> request
+    // can't send one either (see HttpServer.h's own doc comment).
+    const httplib::Result getResult = client.Get(avatarUrl);
+    ASSERT_TRUE(getResult);
+    ASSERT_EQ(getResult->status, 200);
+    EXPECT_EQ(getResult->body, "foo");
+    EXPECT_EQ(getResult->get_header_value("Content-Type"), "image/png");
+
+    // issue #384 — the profile's avatar_url should already reflect the
+    // upload, without a separate PATCH /users/me. A no-op PATCH (same
+    // pattern as UpdateOwnProfileRoundTrips... above) is just the
+    // simplest way to read back this token's own login.
+    const httplib::Result patchResult = client.Patch("/users/me", authHeader, "{}", "application/json");
+    ASSERT_TRUE(patchResult);
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+    const httplib::Result profileResult = client.Get("/users/" + login + "/profile", authHeader);
+    ASSERT_TRUE(profileResult);
+    EXPECT_EQ(nlohmann::json::parse(profileResult->body)["avatar_url"].get<std::string>(), avatarUrl);
+}
+
 }  // namespace
 }  // namespace user_service

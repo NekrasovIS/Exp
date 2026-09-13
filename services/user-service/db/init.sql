@@ -74,3 +74,16 @@ CREATE TABLE IF NOT EXISTS friendships (
 
 CREATE INDEX IF NOT EXISTS friend_requests_recipient_status_idx ON friend_requests (recipient_login, status);
 CREATE INDEX IF NOT EXISTS friendships_user_b_login_idx ON friendships (user_b_login);
+
+-- Загруженный аватар (issue #384) — та же base64-в-TEXT схема хранения,
+-- что и у вложений chat-service (issue #116), не object storage. Одна
+-- строка на пользователя (login — PRIMARY KEY, не отдельный id с
+-- индексом): новая загрузка полностью заменяет старую (UPSERT в
+-- UserRepository::setAvatar()), а не копится история версий.
+CREATE TABLE IF NOT EXISTS user_avatars (
+    login TEXT PRIMARY KEY REFERENCES users(login) ON DELETE CASCADE,
+    content_type TEXT NOT NULL,
+    data_base64 TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

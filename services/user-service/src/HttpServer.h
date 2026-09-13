@@ -26,7 +26,15 @@ namespace user_service {
  *        GET /internal/friendship?user_a=&user_b= (issue #187, Фаза 2) —
  *        без аутентификации, как и /users/resolve-otp-identifier: не
  *        вызывается напрямую клиентами, только chat-service, чтобы
- *        решить, можно ли открыть новый диалог личных сообщений.
+ *        решить, можно ли открыть новый диалог личных сообщений. Плюс
+ *        POST /profile/avatar (аутентифицированный) и
+ *        GET /users/{login}/avatar (issue #384) — последний нарочно БЕЗ
+ *        аутентификации, единственное исключение в этом списке: это
+ *        конечная точка `<img src="...">`, а браузер не может приложить
+ *        заголовок Authorization к запросу картинки, инициированному
+ *        атрибутом src напрямую. Тот же уровень доверия, что и у
+ *        public_key в toPublicJson() — публично для любого, кто знает
+ *        логин.
  *
  * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
  * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
@@ -71,6 +79,8 @@ private:
     void handleListFriends(const httplib::Request& request, httplib::Response& response);
     void handleRemoveFriend(const httplib::Request& request, httplib::Response& response);
     void handleCheckFriendship(const httplib::Request& request, httplib::Response& response);
+    void handleUploadAvatar(const httplib::Request& request, httplib::Response& response);
+    void handleGetAvatar(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

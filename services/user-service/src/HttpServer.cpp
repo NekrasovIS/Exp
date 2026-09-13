@@ -1,6 +1,7 @@
 #include "HttpServer.h"
 
 #include "JsonGuard.h"
+#include "base64.h"
 
 #include <nlohmann/json.hpp>
 
@@ -12,6 +13,12 @@ namespace user_service {
 namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
+// Issue #384 — an avatar isn't a general-purpose file attachment (chat
+// -service's own attachments cap at 5 MB), it's a small image shown at
+// icon size everywhere; capping well below that limit keeps a single
+// bloated upload from making every member-list row (each fetching this
+// same endpoint) slow to render.
+constexpr std::size_t kMaxAvatarSizeBytes = 2 * 1024 * 1024;
 
 // Оба эндпоинта принимают одинаковую форму {"login", "password"}.
 struct Credentials {
@@ -150,6 +157,12 @@ void HttpServer::registerRoutes() {
     });
     server_.Get("/internal/friendship", [this](const httplib::Request& request, httplib::Response& response) {
         handleCheckFriendship(request, response);
+    });
+    server_.Post("/profile/avatar", [this](const httplib::Request& request, httplib::Response& response) {
+        handleUploadAvatar(request, response);
+    });
+    server_.Get(R"(/users/([^/]+)/avatar)", [this](const httplib::Request& request, httplib::Response& response) {
+        handleGetAvatar(request, response);
     });
 }
 
@@ -445,6 +458,79 @@ void HttpServer::handleCheckFriendship(const httplib::Request& request, httplib:
     const bool areFriends =
         userService_.areFriends(request.get_param_value("user_a"), request.get_param_value("user_b"));
     response.set_content(nlohmann::json{{"friends", areFriends}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleUploadAvatar(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("content_type") || !body["content_type"].is_string() ||
+        !body.contains("data_base64") || !body["data_base64"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'content_type', 'data_base64' strings"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const std::string contentType = body["content_type"].get<std::string>();
+    // An avatar is only ever rendered as <img>, never downloaded or
+    // executed — but accepting an arbitrary content_type would still
+    // let it get served back as, say, "text/html" to a browser that
+    // renders some non-image types inline when linked directly.
+    if (contentType.compare(0, 6, "image/") != 0) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'content_type' must be an image/* MIME type"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const std::string dataBase64 = body["data_base64"].get<std::string>();
+    const std::optional<std::string> decoded = base64::decode(dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'data_base64' is not valid base64"}}.dump(), kJsonContentType);
+        return;
+    }
+    if (decoded->size() > kMaxAvatarSizeBytes) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "avatar exceeds the 2 MB size limit"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    userService_.setAvatar(*login, AvatarUpload{.contentType = contentType,
+                                                 .dataBase64 = dataBase64,
+                                                 .sizeBytes = static_cast<std::int64_t>(decoded->size())});
+    response.set_content(nlohmann::json{{"avatar_url", "/users/" + *login + "/avatar"}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleGetAvatar(const httplib::Request& request, httplib::Response& response) {
+    // Deliberately unauthenticated — see this class's own doc comment
+    // for why (an <img src="..."> request can't carry a Bearer token).
+    const std::string login = request.matches[1].str();
+    const std::optional<AvatarData> avatar = userService_.getAvatar(login);
+    if (!avatar.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no avatar set"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> decoded = base64::decode(avatar->dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 500;
+        response.set_content(nlohmann::json{{"error", "stored avatar data is corrupt"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(*decoded, avatar->contentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {
