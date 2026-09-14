@@ -89,12 +89,6 @@
   font-weight: 400;
 }
 
-.mutedText {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-
 /* Invite-link block (issue #301) — CommunitiesSidebar only. */
 .inviteBlock {
   display: flex;
