@@ -1,5 +1,6 @@
 #include "ui/CommunityConnectDialog.h"
 
+#include <QDialogButtonBox>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -49,11 +50,19 @@ CommunityConnectDialog::CommunityConnectDialog(QWidget* parent) : QDialog(parent
     createRow->addWidget(nameEdit_, /*stretch=*/1);
     createRow->addWidget(createButton_);
 
+    // Issue #416: Join/Create остаются каждый своей строкой (accept()
+    // закрывает диалог сразу после успешного клика — общий Ok здесь не
+    // нужен), но видимой кнопки отмены раньше не было вообще.
+    auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
+    cancelButton_ = buttonBox->button(QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
     rootLayout->addWidget(joinLabel);
     rootLayout->addLayout(joinRow);
     rootLayout->addWidget(separator);
     rootLayout->addWidget(createLabel);
     rootLayout->addLayout(createRow);
+    rootLayout->addWidget(buttonBox);
 
     resize(360, 180);
 }

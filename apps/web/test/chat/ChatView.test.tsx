@@ -194,4 +194,68 @@ describe("ChatView", () => {
     act(() => socket.onmessage?.({ data: JSON.stringify({ user_typing: "bob" }) }));
     expect(screen.getByText("bob is typing…")).toBeInTheDocument();
   });
+
+  // Issue #409 — EncryptedChatViewContent used to reimplement the
+  // mention-autocomplete <input> wiring independently of
+  // MessageComposer.tsx, and never got issue #369's fix: picking a
+  // suggestion used to reposition the caret via requestAnimationFrame,
+  // scheduled independently of React's own commit ordering, which hit a
+  // reproducible input-scrambling failure on CI. The fix moved this to a
+  // useLayoutEffect keyed on the body text instead. Both composers now
+  // share useMentionInput(), which only ever uses the useLayoutEffect
+  // approach.
+  //
+  // This asserts the mechanism directly (requestAnimationFrame is never
+  // called) rather than the end symptom (garbled text after continued
+  // typing) — confirmed by testing against this file's own pre-#409 code
+  // that the symptom-level assertion passes even with the buggy
+  // requestAnimationFrame version in this jsdom/vitest environment (the
+  // same non-reproduction #369's own fix already ran into: "not
+  // reproduced under a stubbed/delayed requestAnimationFrame either").
+  // Asserting on the mechanism is what actually fails before this fix
+  // and passes after it.
+  it("picking a mention suggestion in the encrypted composer never uses requestAnimationFrame (issue #369's fix)", async () => {
+    const rafSpy = vi.spyOn(window, "requestAnimationFrame");
+    const sodium = await getSodium();
+    const identityKeyPair = sodium.crypto_box_keypair();
+    localStorage.setItem(
+      `devicehub.web.identityKeys.${kLogin}`,
+      JSON.stringify({
+        publicKey: sodium.to_base64(identityKeyPair.publicKey, sodium.base64_variants.ORIGINAL),
+        secretKey: sodium.to_base64(identityKeyPair.privateKey, sodium.base64_variants.ORIGINAL),
+      }),
+    );
+    const channelKey = await generateChannelKey();
+    const wrappedKey = await wrapKeyForRecipient(channelKey, identityKeyPair.publicKey);
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([
+        [/\/channels\/7\/keys\/me/, () => jsonResponse(200, { wrapped_key: wrappedKey })],
+        [/\/users\/me/, () => jsonResponse(200, { login: kLogin })],
+        [/\/channels\/7\/messages/, () => jsonResponse(200, [])],
+        [/\/communities\/1\/members/, () => jsonResponse(200, ["alice", "bob"])],
+      ]),
+    );
+
+    render(
+      <SessionProvider>
+        <ChatView channelId={7} communityId={1} isEncrypted={true} />
+      </SessionProvider>,
+    );
+    const input = await screen.findByLabelText("Message");
+
+    // Click path (selectMention()).
+    await userEvent.type(input, "hey @al");
+    await userEvent.click(await screen.findByRole("button", { name: "@alice" }));
+    expect(input).toHaveValue("hey @alice ");
+
+    // Keyboard path (handleKeyDown()'s Enter/Tab branch) — the old code
+    // had a second, separate requestAnimationFrame call here.
+    await userEvent.type(input, "@b");
+    await screen.findByRole("button", { name: "@bob" });
+    await userEvent.keyboard("{Enter}");
+    expect(input).toHaveValue("hey @alice @bob ");
+
+    expect(rafSpy).not.toHaveBeenCalled();
+  });
 });

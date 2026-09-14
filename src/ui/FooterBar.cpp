@@ -27,15 +27,21 @@ FooterBar::FooterBar(QWidget* parent) : QWidget(parent) {
                                 ui_theme::kSpacingSm);
     layout->setSpacing(ui_theme::kSpacingSm);
 
-    avatarLabel_ = new QLabel(QStringLiteral("?"), this);
+    avatarLabel_ = new QLabel(this);
     avatarLabel_->setObjectName(QStringLiteral("footerAvatar"));
     avatarLabel_->setFixedSize(kAvatarDiameter, kAvatarDiameter);
     avatarLabel_->setAlignment(Qt::AlignCenter);
+    // Issue #415: тот же IconFactory-градиентный круг, что и у остальных
+    // аватаров в приложении (CommunitiesPanel/MemberListPanel/
+    // ChatMessageRow/DesktopNotifier), вместо отдельного QSS-правила
+    // QLabel#footerAvatar — единая точка рисования вместо двух
+    // рассинхронизированных.
+    avatarLabel_->setPixmap(
+        ui_icons::communityAvatarIcon(QStringLiteral("?")).pixmap(kAvatarDiameter, kAvatarDiameter));
     // Clickable entry point for account settings (issue #151) — stays a
-    // QLabel (not a QPushButton) so its existing round-avatar styling
-    // and FooterBarTest's QLabel-based lookups keep working; an event
-    // filter is the least invasive way to add click handling to a
-    // QLabel without subclassing it.
+    // QLabel (not a QPushButton) so FooterBarTest's QLabel-based lookups
+    // keep working; an event filter is the least invasive way to add
+    // click handling to a QLabel without subclassing it.
     avatarLabel_->setCursor(Qt::PointingHandCursor);
     avatarLabel_->installEventFilter(this);
 
@@ -61,7 +67,8 @@ FooterBar::FooterBar(QWidget* parent) : QWidget(parent) {
 
 void FooterBar::setProfileText(const QString& text) {
     profileLabel_->setText(text);
-    avatarLabel_->setText(text.isEmpty() ? QStringLiteral("?") : text.left(1).toUpper());
+    const QString initial = text.isEmpty() ? QStringLiteral("?") : text.left(1).toUpper();
+    avatarLabel_->setPixmap(ui_icons::communityAvatarIcon(initial).pixmap(kAvatarDiameter, kAvatarDiameter));
 }
 
 bool FooterBar::eventFilter(QObject* watched, QEvent* event) {

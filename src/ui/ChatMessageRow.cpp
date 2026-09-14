@@ -55,6 +55,15 @@ bool hasAnyExtension(const QString& filename, std::initializer_list<const char*>
     return false;
 }
 
+/// Issue #419: 7 мест в конструкторе повторяли один и тот же
+/// setStyleSheet(QStringLiteral("color: %1;").arg(kOwnTextColor)) для
+/// каждого дочернего виджета бабла собственного сообщения — вынесено в
+/// одну функцию, а не потому что виджеты вообще-то разные (QLabel и
+/// QPushButton), общий у них только базовый QWidget::setStyleSheet().
+void applyOwnMessageTextColor(QWidget* widget) {
+    widget->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+}
+
 /// Фиксированный набор эмодзи, предлагаемых в подменю "React" (issue
 /// #334) — не настраиваемый пользователем список в этой версии, тот же
 /// подход, что и у пятёрки реакций во время звонка (issue #312,
@@ -130,7 +139,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bodyLabel_->setOpenExternalLinks(true);
     bodyLabel_->setTextInteractionFlags(Qt::TextBrowserInteraction);
     if (isOwnMessage) {
-        bodyLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        applyOwnMessageTextColor(bodyLabel_);
     }
 
     formattedSentAt_ = formatTime(message.sentAt);
@@ -147,7 +156,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         timeLabel_ = new QLabel(timeText, bubble_);
         timeLabel_->setObjectName(QStringLiteral("mutedDescription"));
         if (isOwnMessage) {
-            timeLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+            applyOwnMessageTextColor(timeLabel_);
         } else {
             headerRow->addStretch();
         }
@@ -165,7 +174,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     pinnedIndicatorLabel_->setObjectName(QStringLiteral("chatMessagePinnedIndicator"));
     pinnedIndicatorLabel_->setVisible(isPinned_);
     if (isOwnMessage) {
-        pinnedIndicatorLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+        applyOwnMessageTextColor(pinnedIndicatorLabel_);
     }
     bubbleLayout->addWidget(pinnedIndicatorLabel_);
 
@@ -183,7 +192,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         quoteLabel->setObjectName(QStringLiteral("chatMessageReplyQuote"));
         quoteLabel->setWordWrap(true);
         if (isOwnMessage) {
-            quoteLabel->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+            applyOwnMessageTextColor(quoteLabel);
         }
         bubbleLayout->addWidget(quoteLabel);
     }
@@ -198,7 +207,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         playButton_->setObjectName(QStringLiteral("playVoiceMessageButton"));
         playButton_->setIcon(ui_icons::playIcon(QColor(ui_theme::kMutedForeground)));
         if (isOwnMessage) {
-            playButton_->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+            applyOwnMessageTextColor(playButton_);
         }
         connect(playButton_, &QPushButton::clicked, this, [this]() {
             if (audioPlayer_ != nullptr) {
@@ -218,7 +227,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         auto* downloadButton = new QPushButton(tr("Download: %1").arg(message.attachmentFilename), bubble_);
         downloadButton->setObjectName(QStringLiteral("downloadAttachmentButton"));
         if (isOwnMessage) {
-            downloadButton->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+            applyOwnMessageTextColor(downloadButton);
         }
         const qint64 attachmentId = message.attachmentId;
         const QString attachmentFilename = message.attachmentFilename;
@@ -256,7 +265,7 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
                 bubble_);
             videoPlaceholder->setObjectName(QStringLiteral("chatAttachmentVideoPlaceholder"));
             if (isOwnMessage) {
-                videoPlaceholder->setStyleSheet(QStringLiteral("color: %1;").arg(QLatin1String(kOwnTextColor)));
+                applyOwnMessageTextColor(videoPlaceholder);
             }
             bubbleLayout->addWidget(videoPlaceholder);
         }

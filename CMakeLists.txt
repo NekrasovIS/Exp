@@ -136,6 +136,8 @@ add_library(devicehub_core
     src/ui/NotificationPolicy.cpp
     src/ui/DesktopNotifier.h
     src/ui/DesktopNotifier.cpp
+    src/ui/StatusLabel.h
+    src/ui/StatusLabel.cpp
 )
 target_include_directories(devicehub_core PUBLIC src)
 target_link_libraries(devicehub_core PUBLIC
@@ -290,6 +292,7 @@ add_executable(devicehub_tests
     test/ModeratorsDialogTest.cpp
     test/IconFactoryTest.cpp
     test/ThemeTest.cpp
+    test/StatusLabelTest.cpp
     test/ChatMessageGroupingTest.cpp
     test/ChatMessageRowMarkdownTest.cpp
     test/MessageFormattingTest.cpp

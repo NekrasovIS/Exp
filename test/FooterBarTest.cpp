@@ -11,23 +11,30 @@
 namespace devicehub {
 namespace {
 
-TEST(FooterBarTest, SetProfileTextUpdatesLabelAndAvatarInitial) {
+// Issue #415: аватар в футере теперь рисуется через
+// IconFactory::communityAvatarIcon() (тот же путь, что и остальные
+// аватары в приложении), а не выводится как текст QLabel — поэтому
+// здесь, как и в IconFactoryTest, проверяется только что иконка
+// действительно нарисована (непустой pixmap), без сэмплирования
+// пикселей.
+
+TEST(FooterBarTest, SetProfileTextUpdatesLabelAndRendersAvatarPixmap) {
     FooterBar bar;
 
     bar.setProfileText(QStringLiteral("alice"));
 
     EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerProfileLabel"))->text(), QStringLiteral("alice"));
-    EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerAvatar"))->text(), QStringLiteral("A"));
+    EXPECT_FALSE(bar.findChild<QLabel*>(QStringLiteral("footerAvatar"))->pixmap().isNull());
 }
 
-TEST(FooterBarTest, SetProfileTextWithEmptyStringFallsBackToQuestionMark) {
+TEST(FooterBarTest, SetProfileTextWithEmptyStringFallsBackToQuestionMarkAvatar) {
     FooterBar bar;
     bar.setProfileText(QStringLiteral("alice"));
 
     bar.setProfileText(QString());
 
     EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerProfileLabel"))->text(), QString());
-    EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerAvatar"))->text(), QStringLiteral("?"));
+    EXPECT_FALSE(bar.findChild<QLabel*>(QStringLiteral("footerAvatar"))->pixmap().isNull());
 }
 
 TEST(FooterBarTest, ClickingAvatarEmitsAccountSettingsRequested) {

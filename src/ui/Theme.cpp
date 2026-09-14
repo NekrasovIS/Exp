@@ -144,6 +144,20 @@ QString darkStyleSheet() {
             font-size: 12px;
         }
 
+        /* Issue #417: статусные подписи (ProfileDialog/ModeratorsDialog/
+           LoginWindow/SettingsDialog — StatusLabel.h) раньше всегда были
+           обычным текстом QLabel, даже сообщая об ошибке или успехе, — те
+           же цвета, что уже использует ToastBanner для variant="success"/
+           "error", здесь применяются через ту же схему свойства-на-виджете
+           ([sectionTitle="true"] выше, [ownReaction="true"] у reactionChip). */
+        QLabel[statusVariant="success"] {
+            color: #6ee7b7;
+        }
+
+        QLabel[statusVariant="error"] {
+            color: #f09595;
+        }
+
         QLabel[chatAuthor="true"] {
             font-weight: 600;
         }
@@ -176,14 +190,8 @@ QString darkStyleSheet() {
             font-weight: 600;
         }
 
-        QLabel#footerAvatar, QLabel#chatChannelTitle[sectionTitle="true"] {
+        QLabel#chatChannelTitle[sectionTitle="true"] {
             font-weight: 700;
-        }
-
-        QLabel#footerAvatar {
-            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #34d399, stop:1 #059669);
-            color: #ffffff;
-            border-radius: 14px;
         }
 
         QPushButton {
@@ -228,6 +236,27 @@ QString darkStyleSheet() {
            QPushButton[accent="true"] выше. */
         QPushButton#createCommunityButton {
             border-radius: 22px;
+        }
+
+        /* Issue #419: reactionChip/ownReaction (ChatMessageRow, issue
+           #334/#335) — objectName и свойство существовали в коде с самого
+           начала, но не имели ни одного QSS-правила, поэтому чипы реакций
+           выглядели как обычные кнопки, а "своя" реакция никак не
+           выделялась среди чужих. */
+        QPushButton#reactionChip {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+
+        QPushButton#reactionChip[ownReaction="true"] {
+            background-color: rgba(52, 211, 153, 0.18);
+            border: 1px solid #34d399;
+            color: #34d399;
+        }
+
+        QPushButton#reactionChip[ownReaction="true"]:hover {
+            background-color: rgba(52, 211, 153, 0.28);
         }
 
         QLineEdit, QComboBox, QPlainTextEdit {

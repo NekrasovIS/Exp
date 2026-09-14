@@ -22,6 +22,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Navigate } from "react-router-dom";
 
+import styles from "./pageLayout.module.css";
 import { setPendingInviteCode } from "../communities/pendingInvite.js";
 import { useCommunities } from "../communities/useCommunities.js";
 import { useSession } from "../session/SessionContext.js";
@@ -62,7 +63,7 @@ export function JoinPage() {
   }
   return (
     <main>
-      <p>Joining…</p>
+      <p className={styles.placeholder}>Joining…</p>
       {status === "error" && <p role="alert">That invite link doesn't work anymore.</p>}
     </main>
   );

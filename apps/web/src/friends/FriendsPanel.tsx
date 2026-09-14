@@ -6,6 +6,7 @@
 import { useState, type FormEvent } from "react";
 
 import { useFriends } from "./useFriends.js";
+import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import styles from "./FriendsPanel.module.css";
 
 interface FriendsPanelProps {
@@ -46,8 +47,7 @@ export function FriendsPanel({ onOpenThreadWith }: FriendsPanelProps) {
 
   return (
     <nav aria-label="Friends" className={styles.nav}>
-      {loading && <p className={styles.mutedText}>Loading friends…</p>}
-      {error !== null && <p role="alert">{error}</p>}
+      <AsyncListStatus loading={loading} error={error} loadingText="Loading friends…" />
 
       <h2 className={styles.sectionTitle}>Incoming requests</h2>
       <ul className={styles.list}>
@@ -58,7 +58,7 @@ export function FriendsPanel({ onOpenThreadWith }: FriendsPanelProps) {
               <button type="button" onClick={() => void acceptRequest(request.id)}>
                 Accept
               </button>
-              <button type="button" onClick={() => void declineRequest(request.id)}>
+              <button type="button" data-variant="danger" onClick={() => void declineRequest(request.id)}>
                 Decline
               </button>
             </span>
@@ -75,7 +75,7 @@ export function FriendsPanel({ onOpenThreadWith }: FriendsPanelProps) {
               <button type="button" onClick={() => onOpenThreadWith(login)}>
                 Message
               </button>
-              <button type="button" onClick={() => void removeFriend(login)}>
+              <button type="button" data-variant="danger" onClick={() => void removeFriend(login)}>
                 Remove
               </button>
             </span>

@@ -16,19 +16,11 @@
 // channel and back (or a page reload) before Send.
 
 import { ChatRestClient } from "@devicehub/core";
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent,
-  type FormEvent,
-  type KeyboardEvent,
-} from "react";
+import { useMemo, useState, type DragEvent, type FormEvent } from "react";
 
 import styles from "./MessageComposer.module.css";
 import { MentionSuggestions } from "./MentionSuggestions.js";
-import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
+import { useMentionInput } from "./useMentionInput.js";
 import { useMessageDraft } from "./useMessageDraft.js";
 import { chatServiceRestUrl } from "../config.js";
 import { useSession } from "../session/SessionContext.js";
@@ -66,40 +58,12 @@ export function MessageComposer({
 }: MessageComposerProps) {
   const { getAccessToken } = useSession();
   const client = useMemo(() => new ChatRestClient(chatServiceRestUrl), []);
-  const mention = useMentionAutocomplete(communityId);
-  const bodyInputRef = useRef<HTMLInputElement>(null);
-  // Issue #369 — a mention-suggestion pick needs to move the caret to
-  // right after the inserted "@login " (see selectMention()/
-  // handleBodyKeyDown() below), but that only works once the <input>'s
-  // DOM value actually reflects the new `body` — setSelectionRange() on
-  // the old value places the caret at a stale offset. The previous
-  // approach deferred that call via requestAnimationFrame, scheduled
-  // independently of React's own commit ordering; CI's test suite hit a
-  // scrambled-input failure here reproducibly (never locally, and not
-  // reproduced under a stubbed/delayed requestAnimationFrame either, so
-  // the exact mechanism on CI's runner isn't fully confirmed) that a RAF
-  // ordered independently of React is at least consistent with. A
-  // layout effect keyed on `body` is ordered relative to React's own
-  // commit instead of the browser's paint clock, which is the more
-  // correct tool for "run after this state update lands in the DOM"
-  // regardless — it removes a real source of scheduling uncertainty
-  // even though this specific CI failure's root cause wasn't nailed
-  // down with full certainty.
-  const pendingCursorPos = useRef<number | null>(null);
-
   const { draft: body, setDraft: setBody, clearDraft } = useMessageDraft(`channel:${channelId}`);
+  const mentionInput = useMentionInput(communityId, body, setBody);
   const [pendingAttachment, setPendingAttachment] = useState<{ id: number; filename: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draggingOver, setDraggingOver] = useState(false);
-
-  useLayoutEffect(() => {
-    if (pendingCursorPos.current === null) {
-      return;
-    }
-    bodyInputRef.current?.setSelectionRange(pendingCursorPos.current, pendingCursorPos.current);
-    pendingCursorPos.current = null;
-  }, [body]);
 
   async function uploadFile(file: File): Promise<void> {
     const token = getAccessToken();
@@ -172,35 +136,10 @@ export function MessageComposer({
   function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
     setBody(event.target.value);
     onTyping?.();
-    mention.handleTextChange(event.target.value, event.target.selectionStart ?? event.target.value.length);
-  }
-
-  function selectMention(login: string): void {
-    const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
-    const result = mention.applySuggestion(body, cursorPos, login);
-    pendingCursorPos.current = result.cursorPos;
-    setBody(result.text);
-  }
-
-  function handleBodyKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (mention.suggestions.length === 0) {
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      mention.moveActive(1);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      mention.moveActive(-1);
-    } else if (event.key === "Enter" || event.key === "Tab") {
-      event.preventDefault();
-      const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
-      const result = mention.applyActive(body, cursorPos);
-      pendingCursorPos.current = result.cursorPos;
-      setBody(result.text);
-    } else if (event.key === "Escape") {
-      mention.dismiss();
-    }
+    mentionInput.notifyTextChanged(
+      event.target.value,
+      event.target.selectionStart ?? event.target.value.length,
+    );
   }
 
   return (
@@ -249,16 +188,16 @@ export function MessageComposer({
         </label>
         <input
           id="message-body"
-          ref={bodyInputRef}
+          ref={mentionInput.bodyInputRef}
           className={styles.bodyInput}
           value={body}
           onChange={handleBodyChange}
-          onKeyDown={handleBodyKeyDown}
+          onKeyDown={mentionInput.handleKeyDown}
         />
         <MentionSuggestions
-          suggestions={mention.suggestions}
-          activeIndex={mention.activeIndex}
-          onSelect={selectMention}
+          suggestions={mentionInput.suggestions}
+          activeIndex={mentionInput.activeIndex}
+          onSelect={mentionInput.selectMention}
         />
         <button type="submit" disabled={uploading}>
           Send

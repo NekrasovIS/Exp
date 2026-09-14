@@ -14,6 +14,9 @@ PinnedMessagesDialog::PinnedMessagesDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Pinned Messages"));
 
     auto* rootLayout = new QVBoxLayout(this);
+    // Issue #419: недостающий setSpacing() — тот же ui_theme::kSpacingSm,
+    // что уже использует SearchDialog для своего rootLayout.
+    rootLayout->setSpacing(ui_theme::kSpacingSm);
 
     pinnedList_ = new QListWidget(this);
     pinnedList_->setObjectName(QStringLiteral("pinnedMessagesList"));

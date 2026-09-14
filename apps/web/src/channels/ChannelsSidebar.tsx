@@ -9,6 +9,7 @@ import type { ChatItem } from "@devicehub/core";
 import { useState, type FormEvent } from "react";
 
 import { useChannels } from "./useChannels.js";
+import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import { useEncryptedChannelSetup } from "../crypto/useEncryptedChannelSetup.js";
 import { useIdentityKeys } from "../crypto/useIdentityKeys.js";
 import styles from "../pages/sidebarNav.module.css";
@@ -80,8 +81,7 @@ export function ChannelsSidebar({
 
   return (
     <nav aria-label="Channels" className={styles.nav}>
-      {loading && <p className={styles.mutedText}>Loading channels…</p>}
-      {error !== null && <p role="alert">{error}</p>}
+      <AsyncListStatus loading={loading} error={error} loadingText="Loading channels…" />
       <ul className={styles.list}>
         {channels.map((channel) => {
           const unreadCount = unreadCounts?.get(channel.id) ?? 0;
