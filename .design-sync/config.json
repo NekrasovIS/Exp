@@ -1,0 +1,7 @@
+{
+  "projectId": "500e5607-3b34-4aef-b7d4-78f9e7b3a252",
+  "shape": "package",
+  "pkg": "@devicehub/ui",
+  "cssEntry": "src/theme.css",
+  "readmeHeader": ".design-sync/conventions.md"
+}

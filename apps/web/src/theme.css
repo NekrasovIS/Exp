@@ -1,81 +1,14 @@
 /*
- * Design tokens (issue #281) — single source of truth for color/spacing/
- * typography across the web client. Every other stylesheet in apps/web
- * reads these custom properties instead of hardcoding literals, so a
- * future palette/scale change happens here once, not per-component.
- *
- * Dark, grey-green theme (issue #303 follow-up) — carried over from the
- * desktop client's own palette (src/ui/Theme.cpp's darkStyleSheet()) so
- * both clients read as the same product: neutral dark-slate surfaces
- * (#1c1e21/#202327/#17191c) with an emerald gradient accent
- * (#34d399 -> #059669). Kept as flat tokens here rather than a real CSS
- * gradient — that's still expressed per-component (see
- * button[data-variant="primary"] below), matching how the desktop QSS
- * repeats its own gradient stops per widget state rather than factoring
- * them out.
+ * App-shell layout on top of @devicehub/ui's design tokens/base element
+ * resets (issue #435 — moved there so packages/ui's own component
+ * previews, including claude.ai/design's synced ones, render styled
+ * without needing this app at all). Everything a *component* might
+ * render (buttons, inputs, [role="alert"], the token :root block
+ * itself) lives in the imported file now; this file keeps only what's
+ * specific to being the top-level web app shell.
  */
 
-:root {
-  /* Accent — the desktop client's emerald gradient stops, matched here
-     so "primary action" reads the same color language on both clients.
-     Hover goes lighter (not darker) to stay legible against the dark
-     surfaces below — same convention the desktop QSS uses for both its
-     neutral and accent buttons. */
-  --color-accent: #34d399;
-  --color-accent-strong: #059669;
-  --color-accent-hover: #4ade80;
-  --color-accent-hover-strong: #10b981;
-  --color-accent-contrast: #ffffff;
-
-  /* Surfaces — the desktop client's three dark-slate layers: page
-     background, raised panel (sidebars/header), and the deepest layer
-     (reserved for composer/inset elements, mirroring the desktop's
-     footer/icon-rail tone). */
-  --color-bg: #1c1e21;
-  --color-surface: #202327;
-  --color-surface-raised: #17191c;
-  --color-border: #2a2d31;
-  --color-border-strong: #383c41;
-
-  /* Text */
-  --color-text: #e3e6e8;
-  --color-text-secondary: #b3b9c2;
-  --color-text-muted: #8b939c;
-  --color-text-on-accent: #ffffff;
-
-  /* Status — matches the desktop toast banner's error variant. */
-  --color-danger: #f09595;
-  --color-danger-bg: #3f1616;
-  --color-danger-border: #a32d2d;
-
-  /* Spacing scale (px) */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-
-  /* Typography */
-  --font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-size-sm: 0.8125rem;
-  --font-size-base: 0.9375rem;
-  --font-size-lg: 1.125rem;
-  --font-size-xl: 1.375rem;
-  --line-height-base: 1.5;
-
-  /* Shape */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 1px rgb(0 0 0 / 0.2);
-  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.35);
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+@import "@devicehub/ui/theme.css";
 
 html,
 body,
@@ -90,95 +23,4 @@ body {
   font-family: var(--font-family);
   font-size: var(--font-size-base);
   line-height: var(--line-height-base);
-}
-
-button,
-input {
-  font-family: inherit;
-  font-size: inherit;
-}
-
-/* Baseline element resets shared by every screen — component-specific
-   look (hover/focus states, layout) stays in each component's own CSS
-   module, this only removes the browser's unstyled defaults so a plain
-   <button>/<input> anywhere doesn't clash with styled siblings. */
-
-button {
-  cursor: pointer;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  padding: var(--space-2) var(--space-4);
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--color-accent);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-/* Same diagonal gradient (and hover/pressed stops) as the desktop
-   client's QPushButton[accent="true"] — see src/ui/Theme.cpp. */
-button[type="submit"],
-button[data-variant="primary"] {
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong));
-  border-color: transparent;
-  color: var(--color-text-on-accent);
-  font-weight: 600;
-}
-
-button[type="submit"]:hover:not(:disabled),
-button[data-variant="primary"]:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--color-accent-hover), var(--color-accent-hover-strong));
-  border-color: transparent;
-}
-
-button[type="submit"]:active:not(:disabled),
-button[data-variant="primary"]:active:not(:disabled) {
-  background: var(--color-accent-strong);
-}
-
-/* Destructive-ish actions (issue #414) — a quiet danger outline at
-   rest, warming up only on hover/press, never default-red on a row of
-   otherwise-neutral buttons. Was CallPanel.module.css's own
-   .leaveButton (issue #221); promoted here once Delete/Decline/Remove
-   needed the exact same treatment elsewhere. */
-button[data-variant="danger"] {
-  color: var(--color-danger);
-  border-color: var(--color-danger-border);
-}
-
-button[data-variant="danger"]:hover:not(:disabled) {
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger-border);
-}
-
-input {
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  padding: var(--space-2) var(--space-3);
-}
-
-input:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-[role="alert"] {
-  color: var(--color-danger);
-  background: var(--color-danger-bg);
-  border: 1px solid var(--color-danger-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
 }
