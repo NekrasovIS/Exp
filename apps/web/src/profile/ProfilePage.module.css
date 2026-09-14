@@ -40,21 +40,14 @@
   margin-bottom: var(--space-5);
 }
 
-/* Same gradient-circle convention as MembersSidebar's own .avatar
-   (issue #322), just bigger — this is the one place the avatar is the
-   focal point of the screen, not a small icon in a list row. */
+/* Same gradient-circle convention as MembersSidebar's own .avatar,
+   composed with the shared components/avatarPlaceholder.module.css
+   (issue #413) — just bigger, since this is the one place the avatar
+   is the focal point of the screen, not a small icon in a list row. */
 .avatar {
   width: 72px;
   height: 72px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong, var(--color-accent)));
-  color: var(--color-text-on-accent);
-  font-weight: 700;
   font-size: var(--font-size-lg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 
 .avatarLabel {
