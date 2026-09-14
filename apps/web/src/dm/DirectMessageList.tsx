@@ -4,7 +4,8 @@
 
 import type { DirectMessageInfo } from "@devicehub/core";
 
-import styles from "../chat/MessageList.module.css";
+import { MessageRow } from "../components/MessageRow.js";
+import rowStyles from "../components/MessageRow.module.css";
 
 interface DirectMessageListProps {
   messages: DirectMessageInfo[];
@@ -13,16 +14,13 @@ interface DirectMessageListProps {
 
 export function DirectMessageList({ messages, currentLogin }: DirectMessageListProps) {
   return (
-    <ul className={styles.list}>
+    <ul className={rowStyles.list}>
       {messages.map((message) => {
         const isOwn = message.author === currentLogin;
         return (
-          <li key={message.id} className={`${styles.row} ${isOwn ? styles.rowOwn : ""}`}>
-            <div className={`${styles.bubble} ${isOwn ? styles.bubbleOwn : ""}`}>
-              <strong className={styles.author}>{message.author}</strong>
-              <span>{message.body}</span>
-            </div>
-          </li>
+          <MessageRow key={message.id} isOwn={isOwn} author={message.author}>
+            <span>{message.body}</span>
+          </MessageRow>
         );
       })}
     </ul>
