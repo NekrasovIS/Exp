@@ -176,14 +176,8 @@ QString darkStyleSheet() {
             font-weight: 600;
         }
 
-        QLabel#footerAvatar, QLabel#chatChannelTitle[sectionTitle="true"] {
+        QLabel#chatChannelTitle[sectionTitle="true"] {
             font-weight: 700;
-        }
-
-        QLabel#footerAvatar {
-            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #34d399, stop:1 #059669);
-            color: #ffffff;
-            border-radius: 14px;
         }
 
         QPushButton {
