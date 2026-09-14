@@ -1,9 +1,10 @@
 /*
  * Shared "list of items + create/join form" sidebar shape (issue #283)
- * — CommunitiesSidebar/ChannelsSidebar (and FriendsPanel/DmThreadsList,
- * same shape, styled separately in #285/#286 since they're a different
- * sub-issue) all render a <nav> with a <ul> of selectable buttons and a
- * form underneath, so the look lives here once.
+ * — CommunitiesSidebar/ChannelsSidebar/DmThreadsList (issue #411; was a
+ * byte-identical duplicate in its own DmThreadsList.module.css, kept
+ * separate only because #283/#285 were independent, unmerged sibling
+ * PRs at the time) all render a <nav> with a <ul> of selectable buttons
+ * and a form underneath, so the look lives here once.
  */
 
 .nav {

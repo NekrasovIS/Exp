@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import styles from "./ProfilePage.module.css";
 import { Avatar } from "./Avatar.js";
 import { useProfile } from "./useProfile.js";
+import avatarPlaceholderStyles from "../components/avatarPlaceholder.module.css";
 import { useSession } from "../session/SessionContext.js";
 
 export function ProfilePage() {
@@ -49,7 +50,7 @@ export function ProfilePage() {
         {!loading && currentLogin !== null && (
           <>
             <div className={styles.avatarRow}>
-              <span className={styles.avatar}>
+              <span className={`${avatarPlaceholderStyles.avatarPlaceholder} ${styles.avatar}`}>
                 <Avatar login={currentLogin} versionKey={avatarVersion} />
               </span>
               <div>

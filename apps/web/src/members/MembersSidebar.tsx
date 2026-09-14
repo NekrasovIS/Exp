@@ -6,6 +6,7 @@
 // Issue #385 — the avatar circle renders a real uploaded image (Avatar)
 // instead of always the letter placeholder.
 
+import avatarPlaceholderStyles from "../components/avatarPlaceholder.module.css";
 import { Avatar } from "../profile/Avatar.js";
 import styles from "./membersSidebar.module.css";
 import { useMembers } from "./useMembers.js";
@@ -34,7 +35,7 @@ export function MembersSidebar({ communityId, onlineLogins }: MembersSidebarProp
       <ul className={styles.list}>
         {members.map((login) => (
           <li key={login} className={styles.row}>
-            <span className={styles.avatar}>
+            <span className={`${avatarPlaceholderStyles.avatarPlaceholder} ${styles.avatar}`}>
               <Avatar login={login} />
               {onlineLogins.has(login) && <span className={styles.onlineDot} title="Online" />}
             </span>

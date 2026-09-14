@@ -29,6 +29,8 @@ import { useMemo, useState } from "react";
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
 import { MessageBody } from "./MessageBody.js";
+import { MessageRow } from "../components/MessageRow.js";
+import rowStyles from "../components/MessageRow.module.css";
 
 const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
 
@@ -88,140 +90,133 @@ export function MessageList({
   }
 
   return (
-    <ul className={styles.list}>
+    <ul className={rowStyles.list}>
       {messages.map((message) => {
         const isOwn = message.author === currentLogin;
         const isPinned = pinnedIds.has(message.id);
         return (
-          <li
-            key={message.id}
-            id={`message-${message.id}`}
-            className={`${styles.row} ${isOwn ? styles.rowOwn : ""}`}
-          >
-            <div className={`${styles.bubble} ${isOwn ? styles.bubbleOwn : ""}`}>
-              <strong className={styles.author}>{message.author}</strong>
-              {editingId === message.id ? (
-                <>
-                  <input
-                    className={styles.editInput}
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                  />
-                  <div className={styles.actions}>
+          <MessageRow key={message.id} id={`message-${message.id}`} isOwn={isOwn} author={message.author}>
+            {editingId === message.id ? (
+              <>
+                <input
+                  className={styles.editInput}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    onClick={() => commitEdit(message.id)}
+                  >
+                    Save
+                  </button>
+                  <button type="button" className={styles.actionButton} onClick={() => setEditingId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {isPinned && <span className={styles.pinned}>📌 Pinned</span>}
+                {message.replyToMessageId !== undefined &&
+                  (() => {
+                    const original = messagesById.get(message.replyToMessageId);
+                    return (
+                      <span className={styles.quote}>
+                        {original !== undefined ? (
+                          <>
+                            <strong>{original.author}</strong>: {truncatedSnippet(original.body)}
+                          </>
+                        ) : (
+                          <em>Message unavailable</em>
+                        )}
+                      </span>
+                    );
+                  })()}
+                <span>
+                  <MessageBody text={message.body} />
+                </span>
+                {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
+                {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
+                  <span className={styles.attachment}>
+                    <AttachmentDownloadLink
+                      attachmentId={message.attachmentId}
+                      filename={message.attachmentFilename}
+                    />
+                  </span>
+                )}
+                <div className={styles.reactions}>
+                  {message.reactions.map((reaction) => (
+                    <button
+                      key={reaction.emoji}
+                      type="button"
+                      className={styles.reactionChip}
+                      title={reaction.logins.join(", ")}
+                      onClick={() => onToggleReaction(message.id, reaction.emoji)}
+                    >
+                      {reaction.emoji} {reaction.logins.length}
+                    </button>
+                  ))}
+                  {reactingId === message.id ? (
+                    <span className={styles.reactPicker}>
+                      {kReactionEmojis.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className={styles.reactPickerEmoji}
+                          onClick={() => pickReaction(message.id, emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </span>
+                  ) : (
                     <button
                       type="button"
                       className={styles.actionButton}
-                      onClick={() => commitEdit(message.id)}
+                      onClick={() => setReactingId(message.id)}
                     >
-                      Save
+                      React
                     </button>
-                    <button type="button" className={styles.actionButton} onClick={() => setEditingId(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {isPinned && <span className={styles.pinned}>📌 Pinned</span>}
-                  {message.replyToMessageId !== undefined &&
-                    (() => {
-                      const original = messagesById.get(message.replyToMessageId);
-                      return (
-                        <span className={styles.quote}>
-                          {original !== undefined ? (
-                            <>
-                              <strong>{original.author}</strong>: {truncatedSnippet(original.body)}
-                            </>
-                          ) : (
-                            <em>Message unavailable</em>
-                          )}
-                        </span>
-                      );
-                    })()}
-                  <span>
-                    <MessageBody text={message.body} />
-                  </span>
-                  {editedIds.has(message.id) && <em className={styles.edited}>(edited)</em>}
-                  {message.attachmentId !== undefined && message.attachmentFilename !== undefined && (
-                    <span className={styles.attachment}>
-                      <AttachmentDownloadLink
-                        attachmentId={message.attachmentId}
-                        filename={message.attachmentFilename}
-                      />
-                    </span>
                   )}
-                  <div className={styles.reactions}>
-                    {message.reactions.map((reaction) => (
-                      <button
-                        key={reaction.emoji}
-                        type="button"
-                        className={styles.reactionChip}
-                        title={reaction.logins.join(", ")}
-                        onClick={() => onToggleReaction(message.id, reaction.emoji)}
-                      >
-                        {reaction.emoji} {reaction.logins.length}
-                      </button>
-                    ))}
-                    {reactingId === message.id ? (
-                      <span className={styles.reactPicker}>
-                        {kReactionEmojis.map((emoji) => (
-                          <button
-                            key={emoji}
-                            type="button"
-                            className={styles.reactPickerEmoji}
-                            onClick={() => pickReaction(message.id, emoji)}
-                          >
-                            {emoji}
-                          </button>
-                        ))}
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className={styles.actionButton}
-                        onClick={() => setReactingId(message.id)}
-                      >
-                        React
-                      </button>
-                    )}
-                  </div>
-                  <div className={styles.actions}>
-                    <button type="button" className={styles.actionButton} onClick={() => onReply(message.id)}>
-                      Reply
+                </div>
+                <div className={styles.actions}>
+                  <button type="button" className={styles.actionButton} onClick={() => onReply(message.id)}>
+                    Reply
+                  </button>
+                  {isOwn && (
+                    <button
+                      type="button"
+                      className={styles.actionButton}
+                      onClick={() => startEditing(message)}
+                    >
+                      Edit
                     </button>
-                    {isOwn && (
-                      <button
-                        type="button"
-                        className={styles.actionButton}
-                        onClick={() => startEditing(message)}
-                      >
-                        Edit
-                      </button>
-                    )}
-                    {isModerator && (
-                      <button
-                        type="button"
-                        className={styles.actionButton}
-                        onClick={() => (isPinned ? onUnpin(message.id) : onPin(message.id))}
-                      >
-                        {isPinned ? "Unpin" : "Pin"}
-                      </button>
-                    )}
-                    {(isOwn || isModerator) && (
-                      <button
-                        type="button"
-                        className={styles.actionButton}
-                        data-variant="danger"
-                        onClick={() => onDelete(message.id)}
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </li>
+                  )}
+                  {isModerator && (
+                    <button
+                      type="button"
+                      className={styles.actionButton}
+                      onClick={() => (isPinned ? onUnpin(message.id) : onPin(message.id))}
+                    >
+                      {isPinned ? "Unpin" : "Pin"}
+                    </button>
+                  )}
+                  {(isOwn || isModerator) && (
+                    <button
+                      type="button"
+                      className={styles.actionButton}
+                      data-variant="danger"
+                      onClick={() => onDelete(message.id)}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </MessageRow>
         );
       })}
     </ul>
