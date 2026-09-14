@@ -38,8 +38,8 @@
 
 /* Same border-in-surface trick as DeviceHub's IconFactory::
    memberAvatarIcon() — the dot reads as "cut out of" the avatar rather
-   than stacked on top. Composed with components/avatarPlaceholder.module.css
-   for the shared gradient-circle look (issue #413) — this only adds
+   than stacked on top. Composed with @devicehub/ui's avatarPlaceholder.module.css
+   (issue #413, relocated to the package in #433) for the shared gradient-circle look — this only adds
    what's specific to this size/context. */
 .avatar {
   position: relative;

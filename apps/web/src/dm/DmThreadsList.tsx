@@ -1,8 +1,9 @@
 // Issue #268 — existing conversations, so one can be reopened directly
 // rather than only via FriendsPanel's "Message" button each time.
 
+import { AsyncListStatus } from "@devicehub/ui";
+
 import { useDmThreads } from "./useDmThreads.js";
-import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import styles from "../pages/sidebarNav.module.css";
 
 interface DmThreadsListProps {

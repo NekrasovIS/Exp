@@ -3,9 +3,7 @@
 // useDirectMessages.ts's doc comment).
 
 import type { DirectMessageInfo } from "@devicehub/core";
-
-import { MessageRow } from "../components/MessageRow.js";
-import rowStyles from "../components/MessageRow.module.css";
+import { MessageRow, messageRowStyles as rowStyles } from "@devicehub/ui";
 
 interface DirectMessageListProps {
   messages: DirectMessageInfo[];

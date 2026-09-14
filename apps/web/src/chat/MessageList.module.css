@@ -75,8 +75,8 @@
 }
 
 /* Issue #431 — this used to be a ".bubbleOwn .reactionChip" descendant
-   selector, but .bubbleOwn moved to components/MessageRow.module.css
-   in issue #410: CSS Modules scope class names per file, so that
+   selector, but .bubbleOwn moved to @devicehub/ui's MessageRow.module.css
+   in issue #410 (relocated again in #433): CSS Modules scope class names per file, so that
    selector's ".bubbleOwn" token no longer matches the one actually in
    the DOM and the rule silently did nothing. A local modifier class,
    applied directly by MessageList.tsx from the same `isOwn` boolean

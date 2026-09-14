@@ -26,6 +26,10 @@ apps/
 packages/
   core/      общий TypeScript-слой доступа к бэкенду — клиенты auth/user/
              chat-service (issue #248/#249/#250)
+  ui/        общие React-компоненты веб-клиента (issue #433) — только
+             исходники (JSX/CSS Modules), без своей сборки в dist/: их
+             обрабатывает vite/vitest самого apps/web, а не tsc, в
+             отличие от чистого TS в packages/core
 ```
 
 `apps/web` — Vite + React + react-router-dom. `SessionProvider`

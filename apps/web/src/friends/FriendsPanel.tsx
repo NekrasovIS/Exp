@@ -3,10 +3,10 @@
 // reopens — openDmThread() is idempotent) the DM thread with them,
 // handled by the caller (HomePage) via onOpenThreadWith.
 
+import { AsyncListStatus } from "@devicehub/ui";
 import { useState, type FormEvent } from "react";
 
 import { useFriends } from "./useFriends.js";
-import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import styles from "./FriendsPanel.module.css";
 
 interface FriendsPanelProps {

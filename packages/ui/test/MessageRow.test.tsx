@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { MessageRow } from "../../src/components/MessageRow.js";
+import { MessageRow } from "../src/MessageRow.js";
 
 describe("MessageRow", () => {
   it("renders the author and children inside the bubble", () => {

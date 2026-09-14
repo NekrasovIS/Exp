@@ -24,13 +24,12 @@
 // shows just because the viewer happens to be the author.
 
 import type { ChatMessageInfo } from "@devicehub/core";
+import { MessageRow, messageRowStyles as rowStyles } from "@devicehub/ui";
 import { useMemo, useState } from "react";
 
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
 import { MessageBody } from "./MessageBody.js";
-import { MessageRow } from "../components/MessageRow.js";
-import rowStyles from "../components/MessageRow.module.css";
 
 const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
 
