@@ -7,6 +7,7 @@
 // instead of always the letter placeholder.
 
 import { AsyncListStatus } from "../components/AsyncListStatus.js";
+import avatarPlaceholderStyles from "../components/avatarPlaceholder.module.css";
 import { Avatar } from "../profile/Avatar.js";
 import styles from "./membersSidebar.module.css";
 import { useMembers } from "./useMembers.js";
@@ -34,7 +35,7 @@ export function MembersSidebar({ communityId, onlineLogins }: MembersSidebarProp
       <ul className={styles.list}>
         {members.map((login) => (
           <li key={login} className={styles.row}>
-            <span className={styles.avatar}>
+            <span className={`${avatarPlaceholderStyles.avatarPlaceholder} ${styles.avatar}`}>
               <Avatar login={login} />
               {onlineLogins.has(login) && <span className={styles.onlineDot} title="Online" />}
             </span>

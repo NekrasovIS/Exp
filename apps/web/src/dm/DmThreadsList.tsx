@@ -3,7 +3,7 @@
 
 import { useDmThreads } from "./useDmThreads.js";
 import { AsyncListStatus } from "../components/AsyncListStatus.js";
-import styles from "./DmThreadsList.module.css";
+import styles from "../pages/sidebarNav.module.css";
 
 interface DmThreadsListProps {
   selectedThreadId: number | null;

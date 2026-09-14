@@ -58,7 +58,7 @@ export function FriendsPanel({ onOpenThreadWith }: FriendsPanelProps) {
               <button type="button" onClick={() => void acceptRequest(request.id)}>
                 Accept
               </button>
-              <button type="button" onClick={() => void declineRequest(request.id)}>
+              <button type="button" data-variant="danger" onClick={() => void declineRequest(request.id)}>
                 Decline
               </button>
             </span>
@@ -75,7 +75,7 @@ export function FriendsPanel({ onOpenThreadWith }: FriendsPanelProps) {
               <button type="button" onClick={() => onOpenThreadWith(login)}>
                 Message
               </button>
-              <button type="button" onClick={() => void removeFriend(login)}>
+              <button type="button" data-variant="danger" onClick={() => void removeFriend(login)}>
                 Remove
               </button>
             </span>
