@@ -467,9 +467,8 @@ class CallWindow {
   +localScreenShareVideoWidget() : QVideoWidget*
   #closeEvent(event: QCloseEvent*)
   -updateVideoStripVisibility()
-  -nextTileCascadePosition() : QPoint
-  -placeTile(tile: DraggableVideoTile*)
-  -relocateAllTiles()
+  -ensureGridLayout(host: QWidget*) : QGridLayout*
+  -relayoutVideoGrid()
   .. signals ..
   +muteToggleRequested()
   +videoToggleRequested()
@@ -477,8 +476,7 @@ class CallWindow {
   +leaveCallRequested()
   +minimizeRequested()
 }
-CallWindow "1" *-- "0..*" DraggableVideoTile : owns, wraps each local/remote\nvideo widget (issue #185)
-CallWindow ..> FloatingCallTilesOverlay : detachTilesTo(canvas())\n(issue #215, ownership follows\nsetParent(), not duplicated)
+CallWindow ..> FloatingCallTilesOverlay : detachTilesTo(canvas())\n(issue #215, QGridLayout::addWidget()\nreparents each active widget, issue #437)
 note right of CallWindow
   Issue #185: реальное отдельное top-level окно
   (setWindowFlag(Qt::Window, true) поверх
@@ -503,62 +501,37 @@ note right of CallWindow
   по login — камера и демонстрация экрана одного
   участника получают разные плитки.
 
-  videoStrip_ (issue #185, последняя часть) —
-  canvas-QWidget без layout'а, а не QHBoxLayout:
-  каждая плитка внутри — DraggableVideoTile (см.
-  ниже), сама решающая своё место и размер по
-  перетаскиванию мышью. nextRemoteTileCascadePosition()
-  даёт только стартовую позицию новой удалённой
-  плитке (по диагонали, с переносом каждые 8 штук),
-  а не финальную — пользователь может перетащить
-  куда угодно сразу после появления.
+  videoStrip_ (issue #185, последняя часть; issue
+  #437 — заменена модель раскладки) — QWidget,
+  на котором relayoutVideoGrid() лениво заводит
+  QGridLayout (ensureGridLayout()) и раскладывает в
+  нём сами виджеты содержимого (QVideoWidget для
+  локальных превью, QLabel для удалённых плиток,
+  issue #91) напрямую, без промежуточной обёртки.
+  Число колонок = ceil(sqrt(число активных плиток)) —
+  грид остаётся примерно квадратным при любом их
+  числе, а сам Qt-layout гарантирует отсутствие
+  перекрытий и корректный reflow при resize окна.
+  Раньше каждая плитка была обёрнута в
+  DraggableVideoTile и свободно перетаскивалась/
+  растягивалась мышью — убрано (issue #437): ручной
+  диагональный каскад давал точное перекрытие после
+  8-й плитки подряд и не умел перестроиться при
+  изменении размера окна; трейд-офф — плитки больше
+  нельзя вручную перетащить или увеличить.
 
   Issue #215 (сворачивание): tileHost_/currentTileSize_
   запоминают, куда сейчас класть плитки и какого они
   размера — videoStrip_/kVideoTileSize в обычном
   состоянии, canvas() FloatingCallTilesOverlay/
   kMiniVideoTileSize, пока свёрнуто. detachTilesTo()/
-  reattachTiles() переносят (setParent(), не
-  пересоздают) обе локальные и все удалённые плитки
-  через общий relocateAllTiles()/placeTile(); новая
-  плитка, впервые созданная уже после сворачивания,
-  тоже попадает сразу в текущий tileHost_. closeEvent()
-  игнорирует закрытие окна и эмитит minimizeRequested()
-  вместо него — тот же путь, что и кнопка "Minimize".
-end note
-
-class DraggableVideoTile {
-  +content() : QWidget*
-  +resizeGrip() : QWidget*
-  #resizeEvent(event: QResizeEvent*)
-  #eventFilter(watched: QObject*, event: QEvent*) : bool
-  -handleMouseEvent(watched: QObject*, event: QEvent*) : bool
-}
-note right of DraggableVideoTile
-  Issue #185: универсальная обёртка вокруг любого
-  content (QVideoWidget для локальных превью,
-  QLabel для удалённых плиток, issue #91) — сама
-  не знает, что внутри. content() растягивается на
-  весь клиентский прямоугольник плитки; маленький
-  resizeGrip() в правом нижнем углу лежит поверх
-  ОТДЕЛЬНЫМ дочерним виджетом, а не рисуется через
-  paintEvent() поверх content() — content() обычно
-  композитится (особенно QVideoWidget) и перекрыл
-  бы обычную QPainter-отрисовку родителя.
-
-  Перетаскивание/resize реализованы через
-  installEventFilter() на content()/resizeGrip()
-  (тот же приём, что уже использует FooterBar для
-  кликабельного avatarLabel_), а не переопределением
-  mousePress/Move/ReleaseEvent() у самой плитки —
-  иначе события мыши получал бы только тот из двух
-  виджетов, что реально под курсором, и до плитки
-  они бы не доходили. Resize считает новый размер
-  от глобальной позиции курсора (устойчиво к
-  собственному изменению размера между кадрами
-  событий), move — от локальной (совпадает у
-  content() и у плитки, поскольку content() всегда
-  стоит в (0, 0) её координат).
+  reattachTiles() переносят все активные плитки в новый
+  грид через relayoutVideoGrid() (QGridLayout::addWidget()
+  реparent'ит их автоматически); новая плитка, впервые
+  созданная уже после сворачивания, тоже попадает сразу в
+  текущий tileHost_. closeEvent() игнорирует закрытие окна
+  и эмитит minimizeRequested() вместо него — тот же путь,
+  что и кнопка "Minimize".
 end note
 
 class FloatingCallTilesOverlay {
@@ -571,10 +544,10 @@ note right of FloatingCallTilesOverlay
   Issue #215: лёгкий контейнер, показываемый
   MainWindow вместо CallWindow, пока звонок свёрнут
   — сам не хранит и не создаёт никаких плиток, только
-  canvas() без layout'а (тот же паттерн, что и
-  videoStrip_ у CallWindow), куда CallWindow
-  переносит (detachTilesTo()) уже существующие
-  DraggableVideoTile. Отдельное top-level окно
+  canvas() (тот же паттерн, что и videoStrip_ у
+  CallWindow) — CallWindow лениво заводит на нём
+  QGridLayout и переносит туда (detachTilesTo())
+  уже существующие плитки. Отдельное top-level окно
   (setWindowFlag(Qt::Window, true)), как и сама
   CallWindow. Клик restoreButton() → restoreRequested()
   → MainWindow::onCallRestoreRequested() вызывает
@@ -1115,9 +1088,9 @@ note right of MainWindow
   CameraDevice::frameAvailable() (рядом с
   превью в SettingsDialog — сигнал рассчитан
   на несколько подписчиков сразу). Тайлы
-  участников — по DraggableVideoTile на пару
-  "пир + вид (камера/экран)", создаются лениво
-  в showRemoteVideoFrame(). Выход из звонка
+  участников — по QLabel на пару "пир + вид
+  (камера/экран)", создаются лениво в
+  showRemoteVideoFrame(). Выход из звонка
   (leaveCallIfActive() -> resetForNewCall())
   сбрасывает все плитки разом — видео не
   переживает звонок, которому принадлежит.

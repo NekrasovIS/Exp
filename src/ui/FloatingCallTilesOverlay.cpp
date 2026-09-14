@@ -29,9 +29,10 @@ FloatingCallTilesOverlay::FloatingCallTilesOverlay(QWidget* parent) : QWidget(pa
     restoreButton_->setObjectName(QStringLiteral("restoreCallWindowButton"));
     connect(restoreButton_, &QPushButton::clicked, this, &FloatingCallTilesOverlay::restoreRequested);
 
-    // Canvas без layout'а (тот же приём, что и CallWindow::videoStrip_) —
-    // CallWindow репарентит сюда свои DraggableVideoTile и сам
-    // расставляет их каскадом, это окно их геометрией не управляет.
+    // Обычный QWidget без layout'а на момент создания (тот же приём, что
+    // и CallWindow::videoStrip_ до первого detachTilesTo()) — CallWindow
+    // лениво заводит на нём QGridLayout (issue #437) и сам добавляет
+    // туда свои плитки, это окно их геометрией не управляет.
     canvas_ = new QWidget(this);
 
     rootLayout->addWidget(restoreButton_);
