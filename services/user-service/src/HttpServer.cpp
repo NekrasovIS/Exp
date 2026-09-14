@@ -85,6 +85,19 @@ std::optional<std::string> parseRecipientLogin(const std::string& body) {
     return json["recipient_login"].get<std::string>();
 }
 
+/// Issue #388 — shared by confirm/disable/verify-totp, all three of
+/// which take exactly `{"code"}`.
+std::optional<std::string> parseTotpCode(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("code") || !json["code"].is_string()) {
+        return std::nullopt;
+    }
+    return json["code"].get<std::string>();
+}
+
 nlohmann::json toJson(const FriendRequestInfo& request) {
     return nlohmann::json{
         {"id", request.id}, {"requester_login", request.requesterLogin}, {"created_at", request.createdAt}};
@@ -150,6 +163,24 @@ void HttpServer::registerRoutes() {
     });
     server_.Get("/internal/friendship", [this](const httplib::Request& request, httplib::Response& response) {
         handleCheckFriendship(request, response);
+    });
+    server_.Post("/profile/totp/setup", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpSetup(request, response);
+    });
+    server_.Post("/profile/totp/confirm", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpConfirm(request, response);
+    });
+    server_.Post("/profile/totp/disable", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpDisable(request, response);
+    });
+    server_.Get("/profile/totp/status", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpStatus(request, response);
+    });
+    server_.Post("/users/verify-totp", [this](const httplib::Request& request, httplib::Response& response) {
+        handleVerifyTotp(request, response);
+    });
+    server_.Get("/internal/totp-status", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpStatusInternal(request, response);
     });
 }
 
@@ -445,6 +476,130 @@ void HttpServer::handleCheckFriendship(const httplib::Request& request, httplib:
     const bool areFriends =
         userService_.areFriends(request.get_param_value("user_a"), request.get_param_value("user_b"));
     response.set_content(nlohmann::json{{"friends", areFriends}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleTotpSetup(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const std::optional<TotpSetupInfo> setup = userService_.setupTotp(*login);
+    if (!setup.has_value()) {
+        response.status = 409;
+        response.set_content(
+            nlohmann::json{{"error", "TOTP is already enabled — disable it before setting up again"}}.dump(),
+            kJsonContentType);
+        return;
+    }
+    response.set_content(
+        nlohmann::json{{"secret", setup->secretBase32}, {"otpauth_url", setup->otpauthUrl}}.dump(),
+        kJsonContentType);
+}
+
+void HttpServer::handleTotpConfirm(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+    const std::optional<std::string> code = parseTotpCode(request.body);
+    if (!code.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'code' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const ConfirmTotpOutcome outcome = userService_.confirmTotp(*login, *code);
+    switch (outcome.result) {
+        case ConfirmTotpResult::kConfirmed:
+            response.set_content(nlohmann::json{{"backup_codes", outcome.backupCodes}}.dump(), kJsonContentType);
+            return;
+        case ConfirmTotpResult::kInvalidCode:
+            response.status = 400;
+            response.set_content(nlohmann::json{{"error", "invalid code"}}.dump(), kJsonContentType);
+            return;
+        case ConfirmTotpResult::kNoPendingSetup:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no pending TOTP setup"}}.dump(), kJsonContentType);
+            return;
+    }
+}
+
+void HttpServer::handleTotpDisable(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+    const std::optional<std::string> code = parseTotpCode(request.body);
+    if (!code.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'code' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    switch (userService_.disableTotp(*login, *code)) {
+        case DisableTotpResult::kDisabled:
+            response.set_content(nlohmann::json{{"status", "disabled"}}.dump(), kJsonContentType);
+            return;
+        case DisableTotpResult::kInvalidCode:
+            response.status = 400;
+            response.set_content(nlohmann::json{{"error", "invalid code"}}.dump(), kJsonContentType);
+            return;
+        case DisableTotpResult::kNotEnabled:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "TOTP is not enabled"}}.dump(), kJsonContentType);
+            return;
+    }
+}
+
+void HttpServer::handleTotpStatus(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+    response.set_content(nlohmann::json{{"enabled", userService_.isTotpEnabled(*login)}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleVerifyTotp(const httplib::Request& request, httplib::Response& response) {
+    // Issue #388 — deliberately unauthenticated, same as
+    // verify-credentials/resolve-otp-identifier: called only by
+    // auth-service mid-login, before it has anything to authenticate
+    // this caller with (that's the whole point of this call).
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("login") || !body["login"].is_string() || !body.contains("code") ||
+        !body["code"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'login' and 'code' strings"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const bool valid = userService_.verifyTotpOrBackupCode(body["login"].get<std::string>(),
+                                                             body["code"].get<std::string>());
+    response.set_content(nlohmann::json{{"valid", valid}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleTotpStatusInternal(const httplib::Request& request, httplib::Response& response) {
+    // Issue #389 — deliberately unauthenticated, same as
+    // /internal/friendship: called only by auth-service, before a
+    // login attempt has produced anything to authenticate with yet.
+    if (!request.has_param("login")) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected a 'login' query param"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(
+        nlohmann::json{{"enabled", userService_.isTotpEnabled(request.get_param_value("login"))}}.dump(),
+        kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

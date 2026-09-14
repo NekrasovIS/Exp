@@ -16,6 +16,8 @@
 #include "AuthServiceClient.h"
 #include "UserRepository.h"
 #include "UserService.h"
+#include "base32.h"
+#include "totp.h"
 
 // Тесты уровня маршрутов для HttpServer, обращающиеся к реальному экземпляру
 // httplib::Server через loopback HTTP. Требуют работающий Postgres (см.
@@ -808,6 +810,196 @@ TEST(HttpServerTest, DeclineFriendRequestThenMutualRequestAndRemoveRoundTrip) {
     ASSERT_TRUE(removeResult);
     EXPECT_EQ(removeResult->status, 200);
     EXPECT_TRUE(nlohmann::json::parse(client.Get("/friends", requesterAuth)->body).empty());
+}
+
+std::int64_t nowUnixSeconds() {
+    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+TEST(HttpServerTest, TotpSetupRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/profile/totp/setup", "", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, TotpStatusRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/profile/totp/status");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, VerifyTotpRouteRejectsMalformedBodyWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    // No Authorization header at all — this route is deliberately
+    // unauthenticated (see HttpServer.h's own doc comment), so a
+    // missing/malformed body is the only way to get it to reject.
+    const httplib::Result result = client.Post("/users/verify-totp", nlohmann::json{{"login", "alice"}}.dump(),
+                                                 "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, VerifyTotpRouteReturnsFalseWhenNotEnabled) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post(
+        "/users/verify-totp", nlohmann::json{{"login", "nobody-has-totp-enabled"}, {"code", "123456"}}.dump(),
+        "application/json");
+
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    EXPECT_FALSE(nlohmann::json::parse(result->body)["valid"].get<bool>());
+}
+
+TEST(HttpServerTest, TotpSetupConfirmStatusDisableRoundTripAndVerifyTotpRouteWithoutAuthentication) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-totp-test");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+
+    const httplib::Result statusBeforeResult = client.Get("/profile/totp/status", authHeader);
+    ASSERT_TRUE(statusBeforeResult);
+    EXPECT_FALSE(nlohmann::json::parse(statusBeforeResult->body)["enabled"].get<bool>());
+
+    const httplib::Result setupResult = client.Post("/profile/totp/setup", authHeader, "", "application/json");
+    ASSERT_TRUE(setupResult);
+    ASSERT_EQ(setupResult->status, 200);
+    const nlohmann::json setupBody = nlohmann::json::parse(setupResult->body);
+    const std::string secretBase32 = setupBody["secret"].get<std::string>();
+    EXPECT_NE(setupBody["otpauth_url"].get<std::string>().find(secretBase32), std::string::npos);
+
+    const std::optional<std::string> rawSecret = base32::decode(secretBase32);
+    ASSERT_TRUE(rawSecret.has_value());
+    const std::string currentCode = totp::totp(*rawSecret, nowUnixSeconds());
+
+    const httplib::Result confirmWrongResult = client.Post(
+        "/profile/totp/confirm", authHeader, nlohmann::json{{"code", "000000"}}.dump(), "application/json");
+    ASSERT_TRUE(confirmWrongResult);
+    EXPECT_EQ(confirmWrongResult->status, 400);
+
+    const httplib::Result confirmResult = client.Post(
+        "/profile/totp/confirm", authHeader, nlohmann::json{{"code", currentCode}}.dump(), "application/json");
+    ASSERT_TRUE(confirmResult);
+    ASSERT_EQ(confirmResult->status, 200);
+    const nlohmann::json confirmBody = nlohmann::json::parse(confirmResult->body);
+    ASSERT_TRUE(confirmBody["backup_codes"].is_array());
+    EXPECT_EQ(confirmBody["backup_codes"].size(), 10U);
+
+    const httplib::Result statusAfterResult = client.Get("/profile/totp/status", authHeader);
+    ASSERT_TRUE(statusAfterResult);
+    EXPECT_TRUE(nlohmann::json::parse(statusAfterResult->body)["enabled"].get<bool>());
+
+    // The token itself isn't the login — resolve it the same way other
+    // tests in this file do, via a no-op PATCH (its response echoes it
+    // back, see UpdateOwnProfileRoundTrips... above).
+    const httplib::Result patchResult = client.Patch("/users/me", authHeader, "{}", "application/json");
+    ASSERT_TRUE(patchResult);
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+
+    // issue #388/#389 — this is the exact call auth-service will make
+    // mid-login, without any Authorization header of its own.
+    const httplib::Result verifyResult = client.Post(
+        "/users/verify-totp", nlohmann::json{{"login", login}, {"code", currentCode}}.dump(), "application/json");
+    ASSERT_TRUE(verifyResult);
+    EXPECT_TRUE(nlohmann::json::parse(verifyResult->body)["valid"].get<bool>());
+
+    const httplib::Result disableWrongResult = client.Post(
+        "/profile/totp/disable", authHeader, nlohmann::json{{"code", "000000"}}.dump(), "application/json");
+    ASSERT_TRUE(disableWrongResult);
+    EXPECT_EQ(disableWrongResult->status, 400);
+
+    const httplib::Result disableResult = client.Post(
+        "/profile/totp/disable", authHeader,
+        nlohmann::json{{"code", totp::totp(*rawSecret, nowUnixSeconds())}}.dump(), "application/json");
+    ASSERT_TRUE(disableResult);
+    EXPECT_EQ(disableResult->status, 200);
+
+    const httplib::Result statusFinalResult = client.Get("/profile/totp/status", authHeader);
+    ASSERT_TRUE(statusFinalResult);
+    EXPECT_FALSE(nlohmann::json::parse(statusFinalResult->body)["enabled"].get<bool>());
+}
+
+TEST(HttpServerTest, InternalTotpStatusRouteRejectsMissingLoginParamWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    // No Authorization header at all — deliberately unauthenticated,
+    // same as /internal/friendship.
+    const httplib::Result result = client.Get("/internal/totp-status");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, InternalTotpStatusRouteReflectsEnabledState) {
+    const std::string token = registerViaAuthServiceAndGetToken("http-server-internal-totp-status");
+    if (token.empty()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeader{{"Authorization", "Bearer " + token}};
+    const httplib::Result patchResult = client.Patch("/users/me", authHeader, "{}", "application/json");
+    ASSERT_TRUE(patchResult);
+    const std::string login = nlohmann::json::parse(patchResult->body)["login"].get<std::string>();
+
+    const httplib::Result beforeResult = client.Get("/internal/totp-status?login=" + login);
+    ASSERT_TRUE(beforeResult);
+    EXPECT_FALSE(nlohmann::json::parse(beforeResult->body)["enabled"].get<bool>());
+
+    const httplib::Result setupResult = client.Post("/profile/totp/setup", authHeader, "", "application/json");
+    ASSERT_TRUE(setupResult);
+    const std::string secretBase32 = nlohmann::json::parse(setupResult->body)["secret"].get<std::string>();
+    const std::optional<std::string> rawSecret = base32::decode(secretBase32);
+    ASSERT_TRUE(rawSecret.has_value());
+    ASSERT_TRUE(client.Post("/profile/totp/confirm", authHeader,
+                             nlohmann::json{{"code", totp::totp(*rawSecret, nowUnixSeconds())}}.dump(),
+                             "application/json"));
+
+    const httplib::Result afterResult = client.Get("/internal/totp-status?login=" + login);
+    ASSERT_TRUE(afterResult);
+    EXPECT_TRUE(nlohmann::json::parse(afterResult->body)["enabled"].get<bool>());
 }
 
 }  // namespace
