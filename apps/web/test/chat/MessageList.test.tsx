@@ -141,7 +141,9 @@ describe("MessageList", () => {
       messages: [{ ...kMessages[0]!, reactions: [{ emoji: "👍", logins: ["bob", "carol"] }] }],
     });
 
-    const chip = screen.getByRole("button", { name: "👍 2" });
+    // Issue #444 — accessible name is now the aria-label ("Thumbs up, 2"),
+    // not the visible "👍 2" text.
+    const chip = screen.getByRole("button", { name: "Thumbs up, 2" });
     expect(chip).toHaveAttribute("title", "bob, carol");
   });
 
@@ -157,8 +159,8 @@ describe("MessageList", () => {
       ],
     });
 
-    expect(screen.getByRole("button", { name: "👍 1" }).className).toMatch(/reactionChipOwn/);
-    expect(screen.getByRole("button", { name: "🎉 1" }).className).not.toMatch(/reactionChipOwn/);
+    expect(screen.getByRole("button", { name: "Thumbs up, 1" }).className).toMatch(/reactionChipOwn/);
+    expect(screen.getByRole("button", { name: "Party popper, 1" }).className).not.toMatch(/reactionChipOwn/);
   });
 
   it("clicking an existing chip toggles that reaction", async () => {
@@ -168,7 +170,7 @@ describe("MessageList", () => {
       onToggleReaction,
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "👍 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Thumbs up, 1" }));
 
     expect(onToggleReaction).toHaveBeenCalledWith(1, "👍");
   });
@@ -178,10 +180,12 @@ describe("MessageList", () => {
     renderList({ onToggleReaction });
 
     await userEvent.click(screen.getAllByRole("button", { name: "React" })[0]!);
-    await userEvent.click(screen.getByRole("button", { name: "❤️" }));
+    // Issue #444 — picker buttons are emoji-only with an aria-label
+    // ("Heart"), not the raw glyph, as their accessible name.
+    await userEvent.click(screen.getByRole("button", { name: "Heart" }));
 
     expect(onToggleReaction).toHaveBeenCalledWith(1, "❤️");
-    expect(screen.queryByRole("button", { name: "❤️" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Heart" })).not.toBeInTheDocument();
   });
 
   it("does not show a Pin/Unpin button for a non-moderator, even on their own message", () => {

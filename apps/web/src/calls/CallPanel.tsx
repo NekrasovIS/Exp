@@ -9,6 +9,7 @@ import { ChatClient } from "@devicehub/core";
 import styles from "./CallPanel.module.css";
 import { kCallReactionEmojis, useCall } from "./useCall.js";
 import { VideoTile } from "./VideoTile.js";
+import { reactionEmojiName } from "../reactionEmojiNames.js";
 
 interface CallPanelProps {
   chatClient: ChatClient;
@@ -57,6 +58,7 @@ export function CallPanel({ chatClient, localLogin }: CallPanelProps) {
             key={emoji}
             type="button"
             className={styles.reactionButton}
+            aria-label={reactionEmojiName(emoji)}
             onClick={() => actions.sendReaction(emoji)}
           >
             {emoji}

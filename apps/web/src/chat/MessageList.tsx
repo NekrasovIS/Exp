@@ -30,8 +30,7 @@ import { useMemo, useState } from "react";
 import styles from "./MessageList.module.css";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink.js";
 import { MessageBody } from "./MessageBody.js";
-
-const kReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
+import { kReactionEmojis, reactionEmojiName } from "../reactionEmojiNames.js";
 
 const kReplySnippetMaxChars = 60;
 
@@ -152,6 +151,7 @@ export function MessageList({
                       type="button"
                       className={`${styles.reactionChip} ${isOwn ? styles.reactionChipOwn : ""}`}
                       title={reaction.logins.join(", ")}
+                      aria-label={`${reactionEmojiName(reaction.emoji)}, ${reaction.logins.length}`}
                       onClick={() => onToggleReaction(message.id, reaction.emoji)}
                     >
                       {reaction.emoji} {reaction.logins.length}
@@ -164,6 +164,7 @@ export function MessageList({
                           key={emoji}
                           type="button"
                           className={styles.reactPickerEmoji}
+                          aria-label={reactionEmojiName(emoji)}
                           onClick={() => pickReaction(message.id, emoji)}
                         >
                           {emoji}

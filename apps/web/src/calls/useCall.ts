@@ -7,11 +7,15 @@ import { ChatClient } from "@devicehub/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CallManager } from "./CallManager.js";
+import { kReactionEmojis } from "../reactionEmojiNames.js";
 
 /** The fixed emoji set for quick in-call reactions (issue #312/#328) —
  * same list as DeviceHub's own CallWindow::reactionEmojis(), so a user
- * sees identical choices on either client. */
-export const kCallReactionEmojis = ["👍", "❤️", "😂", "🎉", "👏"];
+ * sees identical choices on either client. Re-exported under this name
+ * (issue #444 moved the actual list to reactionEmojiNames.ts, shared
+ * with MessageList.tsx's own reaction picker) so existing importers
+ * don't need to change. */
+export const kCallReactionEmojis = kReactionEmojis;
 
 /** How long a received reaction stays visible before auto-hiding
  * (issue #312/#328) — matches DeviceHub's CallWindow
