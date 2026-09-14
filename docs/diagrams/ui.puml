@@ -963,7 +963,7 @@ MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestC
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
 CommunitiesPanel ..> IconFactory : plusIcon()/communityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon() >
-FooterBar ..> IconFactory : settingsIcon() >
+FooterBar ..> IconFactory : settingsIcon()/communityAvatarIcon() >
 ChatView ..> IconFactory : plusIcon()/sendIcon()/membersIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >

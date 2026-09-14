@@ -6,6 +6,8 @@
 // Issue #385 — the avatar circle renders a real uploaded image (Avatar)
 // instead of always the letter placeholder.
 
+import { AsyncListStatus } from "../components/AsyncListStatus.js";
+import avatarPlaceholderStyles from "../components/avatarPlaceholder.module.css";
 import { Avatar } from "../profile/Avatar.js";
 import styles from "./membersSidebar.module.css";
 import { useMembers } from "./useMembers.js";
@@ -29,12 +31,11 @@ export function MembersSidebar({ communityId, onlineLogins }: MembersSidebarProp
   return (
     <nav aria-label="Members" className={styles.nav}>
       <p className={styles.title}>MEMBERS — {members.length}</p>
-      {loading && <p className={styles.mutedText}>Loading members…</p>}
-      {error !== null && <p role="alert">{error}</p>}
+      <AsyncListStatus loading={loading} error={error} loadingText="Loading members…" />
       <ul className={styles.list}>
         {members.map((login) => (
           <li key={login} className={styles.row}>
-            <span className={styles.avatar}>
+            <span className={`${avatarPlaceholderStyles.avatarPlaceholder} ${styles.avatar}`}>
               <Avatar login={login} />
               {onlineLogins.has(login) && <span className={styles.onlineDot} title="Online" />}
             </span>

@@ -15,6 +15,7 @@
 import { useState, type FormEvent } from "react";
 
 import { useCommunities } from "./useCommunities.js";
+import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import styles from "../pages/sidebarNav.module.css";
 import { useSession } from "../session/SessionContext.js";
 
@@ -85,8 +86,7 @@ export function CommunitiesSidebar({
 
   return (
     <nav aria-label="Communities" className={styles.nav}>
-      {loading && <p className={styles.mutedText}>Loading communities…</p>}
-      {error !== null && <p role="alert">{error}</p>}
+      <AsyncListStatus loading={loading} error={error} loadingText="Loading communities…" />
       <ul className={styles.list}>
         {communities.map((community) => {
           const unreadCount = unreadCounts?.get(community.id) ?? 0;

@@ -1,0 +1,18 @@
+/*
+ * Issue #413 — the gradient-circle-with-initial look was declared
+ * identically (only size/font-size differed) in both
+ * members/membersSidebar.module.css and profile/ProfilePage.module.css.
+ * Each caller composes this with its own local class for size/font-size
+ * (and anything else specific to its layout, e.g. MembersSidebar's own
+ * `position: relative` for the online-status dot).
+ */
+.avatarPlaceholder {
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong, var(--color-accent)));
+  color: var(--color-text-on-accent);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
