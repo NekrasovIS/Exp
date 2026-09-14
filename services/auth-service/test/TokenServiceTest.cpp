@@ -125,5 +125,40 @@ TEST(TokenServiceTest, ExpiredRefreshTokenIsRejected) {
     EXPECT_FALSE(service.verifyRefreshToken(refreshToken.value).has_value());
 }
 
+TEST(TokenServiceTest, IssuedTotpPendingTokenVerifiesWithSameSubject) {
+    const TokenService service("test-secret");
+    const Token pendingToken = service.issueTotpPendingToken("alice");
+
+    const std::optional<std::string> subject = service.verifyTotpPendingToken(pendingToken.value);
+
+    ASSERT_TRUE(subject.has_value());
+    EXPECT_EQ(*subject, "alice");
+}
+
+TEST(TokenServiceTest, TotpPendingTokenIsRejectedAsAnAccessOrRefreshToken) {
+    const TokenService service("test-secret");
+    const Token pendingToken = service.issueTotpPendingToken("alice");
+
+    EXPECT_FALSE(service.verifyToken(pendingToken.value).has_value());
+    EXPECT_FALSE(service.verifyRefreshToken(pendingToken.value).has_value());
+}
+
+TEST(TokenServiceTest, AccessAndRefreshTokensAreRejectedAsATotpPendingToken) {
+    const TokenService service("test-secret");
+    const Token accessToken = service.issueToken("alice");
+    const Token refreshToken = service.issueRefreshToken("alice");
+
+    EXPECT_FALSE(service.verifyTotpPendingToken(accessToken.value).has_value());
+    EXPECT_FALSE(service.verifyTotpPendingToken(refreshToken.value).has_value());
+}
+
+TEST(TokenServiceTest, ExpiredTotpPendingTokenIsRejected) {
+    const TokenService service("test-secret", std::chrono::seconds{3600}, std::chrono::seconds{30 * 24 * 3600},
+                                std::chrono::seconds{0});
+    const Token pendingToken = service.issueTotpPendingToken("alice");
+
+    EXPECT_FALSE(service.verifyTotpPendingToken(pendingToken.value).has_value());
+}
+
 }  // namespace
 }  // namespace auth_service

@@ -18,12 +18,13 @@ struct OtpIdentity {
 
 /**
  * @brief Вызывает user-service: POST /users/verify-credentials,
- *        POST /users/register и POST /users/resolve-otp-identifier
- *        (issue #156).
+ *        POST /users/register, POST /users/resolve-otp-identifier
+ *        (issue #156), GET /internal/totp-status и
+ *        POST /users/verify-totp (issue #388/#389).
  *
  * Fail closed: любая сетевая/протокольная ошибка трактуется как "не
- * подтверждено"/"не зарегистрировано"/"не найдено", а не пробрасывает
- * исключение в обработчик запроса.
+ * подтверждено"/"не зарегистрировано"/"не найдено"/"выключено"/"неверный
+ * код", а не пробрасывает исключение в обработчик запроса.
  */
 class UserServiceClient {
 public:
@@ -41,6 +42,18 @@ public:
     /// std::nullopt, если такого пользователя нет или у него не задано
     /// ни одного канала доставки.
     [[nodiscard]] std::optional<OtpIdentity> resolveOtpIdentifier(const std::string& identifier) const;
+
+    /// Вызывает GET /internal/totp-status?login= (issue #388/#389) —
+    /// без аутентификации, как и /internal/friendship: спрашивает от
+    /// имени ещё не аутентифицированного пользователя, которому
+    /// нечем себя авторизовать. Fail closed в сторону "выключено": сетевая
+    /// ошибка не должна заблокировать вход пользователям без 2FA.
+    [[nodiscard]] bool isTotpEnabled(const std::string& login) const;
+
+    /// Вызывает POST /users/verify-totp — @p code принимается и как
+    /// TOTP-код, и как backup-код (issue #388). Fail closed: сетевая
+    /// ошибка трактуется как неверный код, а не как "пропустить проверку".
+    [[nodiscard]] bool verifyTotp(const std::string& login, const std::string& code) const;
 
 private:
     std::string host_;

@@ -107,6 +107,34 @@ TEST(UserServiceClientIntegrationTest, FailsClosedWhenUserServiceIsUnreachable) 
     EXPECT_FALSE(client.verifyCredentials("alice", "password"));
     EXPECT_FALSE(client.registerUser("alice", "password"));
     EXPECT_FALSE(client.resolveOtpIdentifier("alice").has_value());
+    EXPECT_FALSE(client.isTotpEnabled("alice"));
+    EXPECT_FALSE(client.verifyTotp("alice", "123456"));
+}
+
+TEST(UserServiceClientIntegrationTest, IsTotpEnabledIsFalseForAnAccountWithoutTotpSetup) {
+    const std::string host = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int port = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+
+    const std::string login =
+        "auth-service-totp-status-test-" +
+        std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    const std::string password = "integration-test-password";
+
+    httplib::Client setupClient(host, port);
+    const httplib::Result registerResult =
+        setupClient.Post("/users/register", nlohmann::json{{"login", login}, {"password", password}}.dump(),
+                          "application/json");
+    if (!registerResult) {
+        GTEST_SKIP() << "user-service not reachable at " << host << ":" << port
+                      << " — start docker-compose + user-service locally to run this test.";
+    }
+    ASSERT_EQ(registerResult->status, 201);
+
+    const UserServiceClient client(host, port);
+    EXPECT_FALSE(client.isTotpEnabled(login));
+    EXPECT_FALSE(client.verifyTotp(login, "123456"));
 }
 
 TEST(UserServiceClientIntegrationTest, ResolveOtpIdentifierFindsUserByLoginOrEmailOnceSet) {

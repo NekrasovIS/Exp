@@ -54,6 +54,26 @@ void HttpServer::registerRoutes() {
     server_.Post("/auth/otp/verify", [this](const httplib::Request& request, httplib::Response& response) {
         handleOtpVerify(request, response);
     });
+    server_.Post("/auth/totp/verify", [this](const httplib::Request& request, httplib::Response& response) {
+        handleTotpVerify(request, response);
+    });
+}
+
+nlohmann::json HttpServer::buildTokenPairResponse(const std::string& login) const {
+    const Token token = tokenService_.issueToken(login);
+    const Token refreshToken = tokenService_.issueRefreshToken(login);
+    return nlohmann::json{
+        {"token", token.value}, {"expires_at", token.expiresAt}, {"refresh_token", refreshToken.value}};
+}
+
+void HttpServer::issueLoginResponse(const std::string& login, httplib::Response& response) {
+    if (userServiceClient_.isTotpEnabled(login)) {
+        const Token pending = tokenService_.issueTotpPendingToken(login);
+        response.set_content(nlohmann::json{{"totp_required", true}, {"pending_token", pending.value}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+    response.set_content(buildTokenPairResponse(login).dump(), kJsonContentType);
 }
 
 void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Response& response) {
@@ -85,11 +105,7 @@ void HttpServer::handleIssueToken(const httplib::Request& request, httplib::Resp
         return;
     }
 
-    const Token token = tokenService_.issueToken(login);
-    const Token refreshToken = tokenService_.issueRefreshToken(login);
-    const nlohmann::json responseBody{
-        {"token", token.value}, {"expires_at", token.expiresAt}, {"refresh_token", refreshToken.value}};
-    response.set_content(responseBody.dump(), kJsonContentType);
+    issueLoginResponse(login, response);
 }
 
 void HttpServer::handleVerifyToken(const httplib::Request& request, httplib::Response& response) {
@@ -247,13 +263,46 @@ void HttpServer::handleOtpVerify(const httplib::Request& request, httplib::Respo
         return;
     }
 
-    const std::string& login = resolved->login;
-    const Token token = tokenService_.issueToken(login);
-    const Token refreshToken = tokenService_.issueRefreshToken(login);
-    response.set_content(
-        nlohmann::json{{"token", token.value}, {"expires_at", token.expiresAt}, {"refresh_token", refreshToken.value}}
-            .dump(),
-        kJsonContentType);
+    issueLoginResponse(resolved->login, response);
+}
+
+void HttpServer::handleTotpVerify(const httplib::Request& request, httplib::Response& response) {
+    if (!rateLimiter_.allow(request.remote_addr)) {
+        response.status = 429;
+        response.set_content(nlohmann::json{{"error", "too many requests, try again later"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("pending_token") || !body.contains("code") ||
+        !body["pending_token"].is_string() || !body["code"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'pending_token' and 'code' strings"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> login =
+        tokenService_.verifyTotpPendingToken(body["pending_token"].get<std::string>());
+    if (!login.has_value()) {
+        response.status = 401;
+        response.set_content(nlohmann::json{{"error", "invalid or expired pending token"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    if (!userServiceClient_.verifyTotp(*login, body["code"].get<std::string>())) {
+        response.status = 401;
+        response.set_content(nlohmann::json{{"error", "invalid code"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    response.set_content(buildTokenPairResponse(*login).dump(), kJsonContentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {
