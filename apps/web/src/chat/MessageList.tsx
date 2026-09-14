@@ -151,7 +151,7 @@ export function MessageList({
                     <button
                       key={reaction.emoji}
                       type="button"
-                      className={styles.reactionChip}
+                      className={`${styles.reactionChip} ${isOwn ? styles.reactionChipOwn : ""}`}
                       title={reaction.logins.join(", ")}
                       onClick={() => onToggleReaction(message.id, reaction.emoji)}
                     >

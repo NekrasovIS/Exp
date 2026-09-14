@@ -74,7 +74,14 @@
   color: inherit;
 }
 
-.bubbleOwn .reactionChip {
+/* Issue #431 — this used to be a ".bubbleOwn .reactionChip" descendant
+   selector, but .bubbleOwn moved to components/MessageRow.module.css
+   in issue #410: CSS Modules scope class names per file, so that
+   selector's ".bubbleOwn" token no longer matches the one actually in
+   the DOM and the rule silently did nothing. A local modifier class,
+   applied directly by MessageList.tsx from the same `isOwn` boolean
+   MessageRow itself uses, avoids reaching across module boundaries. */
+.reactionChipOwn {
   background: rgb(255 255 255 / 0.15);
   border-color: transparent;
 }
