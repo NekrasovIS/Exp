@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QFont>
 #include <QIODevice>
+#include <QImage>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
@@ -12,9 +13,30 @@
 #include <QPixmap>
 #include <QString>
 
+#include <algorithm>
+
 #include "ui/Theme.h"
 
 namespace devicehub::ui_icons {
+
+namespace {
+/// Общая часть realAvatarIcon()/realMemberAvatarIcon() (issue #384/
+/// #442) — обрезает @p image по центру до квадрата по короткой
+/// стороне (тот же эффект, что CSS-ное object-fit: cover, иначе
+/// неквадратное фото сжалось бы в эллипс) и рисует его в текущий
+/// клип-путь @p painter (круг размера @p size x @p size, уже
+/// установленный вызывающей стороной).
+void drawClippedSquareImage(QPainter& painter, const QImage& image, int size) {
+    QPainterPath clipPath;
+    clipPath.addEllipse(QRectF(0, 0, size, size));
+    painter.setClipPath(clipPath);
+
+    const int cropSide = std::min(image.width(), image.height());
+    const QImage square =
+        image.copy((image.width() - cropSide) / 2, (image.height() - cropSide) / 2, cropSide, cropSide);
+    painter.drawImage(QRectF(0, 0, size, size), square);
+}
+}  // namespace
 
 QIcon plusIcon(const QColor& strokeColor) {
     constexpr int kSize = 24;
@@ -113,6 +135,55 @@ QIcon memberAvatarIcon(const QString& label, bool online) {
     painter.drawText(QRectF(0, 0, kSize, kSize), Qt::AlignCenter, label);
 
     if (online) {
+        const QRectF dotRect(kSize - kDotDiameter - 1, kSize - kDotDiameter - 1, kDotDiameter, kDotDiameter);
+        painter.setPen(QPen(QColor(devicehub::ui_theme::kSidebarBackground), kDotBorder));
+        painter.setBrush(QColor(devicehub::ui_theme::kAccentGradientStart));
+        painter.drawEllipse(dotRect);
+    }
+
+    return QIcon(pixmap);
+}
+
+QIcon realAvatarIcon(const QImage& image) {
+    constexpr int kSize = 40;
+    constexpr qreal kDevicePixelRatio = 2.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    drawClippedSquareImage(painter, image, kSize);
+
+    return QIcon(pixmap);
+}
+
+QIcon realMemberAvatarIcon(const QImage& image, bool online) {
+    constexpr int kSize = 40;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    // Same dot geometry as memberAvatarIcon() — kept in sync manually
+    // since there are now two independent drawers of it (gradient+letter
+    // vs. real photo content).
+    constexpr qreal kDotDiameter = 13;
+    constexpr qreal kDotBorder = 2.5;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    drawClippedSquareImage(painter, image, kSize);
+
+    if (online) {
+        // The dot sits outside the avatar's own circular clip (bottom-right
+        // corner falls outside drawClippedSquareImage()'s ellipse), so it
+        // must be drawn after lifting that clip — otherwise it would be
+        // silently clipped away too.
+        painter.setClipping(false);
         const QRectF dotRect(kSize - kDotDiameter - 1, kSize - kDotDiameter - 1, kDotDiameter, kDotDiameter);
         painter.setPen(QPen(QColor(devicehub::ui_theme::kSidebarBackground), kDotBorder));
         painter.setBrush(QColor(devicehub::ui_theme::kAccentGradientStart));

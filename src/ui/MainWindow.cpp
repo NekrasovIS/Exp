@@ -169,6 +169,7 @@ MainWindow::MainWindow(QWidget* parent)
         if (profile.login == currentUserLogin_) {
             footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
             profileDialog_->setProfile(profile);
+            applyOwnAvatarIfLoaded();
         }
         wrapPendingEncryptedChannelKeyForMember(profile.login, profile.publicKey);
         finishGrantingChannelKeyAccess(profile.login, profile.publicKey);
@@ -176,7 +177,27 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&userProfileClient_, &UserProfileClient::profileUpdated, this, [this](const UserProfile& profile) {
         footerBar_->setProfileText(profile.displayName.isEmpty() ? currentUserLogin_ : profile.displayName);
         profileDialog_->setProfile(profile);
+        applyOwnAvatarIfLoaded();
         ui_status::setStatusText(profileDialog_->statusLabel(), tr("Saved"), ui_status::Variant::kSuccess);
+    });
+    // Issue #384/#442 — та же оптимистичная логика, что и в ProfileDialog::
+    // handleChooseAvatarFileClicked() (предпросмотр уже показан из
+    // локальных байт до этого ответа): после подтверждённой загрузки
+    // сбрасывает кэш для своего login (иначе только что загруженный
+    // аватар не отрисовался бы, не будь его раньше — imageFor() увидела
+    // бы прежнюю "неудачу"/пустой кэш и не запустила бы новый fetch,
+    // пока invalidate() не снимет эту отметку) и перезапрашивает полный
+    // профиль, чтобы avatarUrlEdit_ тоже отразил новый путь.
+    connect(&userProfileClient_, &UserProfileClient::avatarUploaded, this, [this](const QString&) {
+        avatarCache_.invalidate(currentUserLogin_);
+        userProfileClient_.fetchProfile(lastToken_, currentUserLogin_);
+    });
+    connect(profileDialog_, &ProfileDialog::chooseAvatarFileRequested, this,
+            &MainWindow::onChooseAvatarFileClicked);
+    connect(&avatarCache_, &AvatarCache::avatarReady, this, [this](const QString& login) {
+        if (login == currentUserLogin_) {
+            applyOwnAvatarIfLoaded();
+        }
     });
     connect(&userProfileClient_, &UserProfileClient::errorOccurred, this, [this](const QString& message) {
         ui_status::setStatusText(profileDialog_->statusLabel(), tr("Error: %1").arg(message),
@@ -1066,6 +1087,9 @@ void MainWindow::buildUi() {
     sidebarLayout->addWidget(channelsHost, /*stretch=*/1);
 
     chatView_ = new ChatView(central);
+    // Issue #384/#442 — общий кэш реальных изображений аватара,
+    // используется для аватаров авторов сообщений в чате.
+    chatView_->setAvatarCache(&avatarCache_);
     directMessageView_ = new DirectMessageView(central);
     contentStack_ = new QStackedWidget(central);
     contentStack_->addWidget(chatView_);
@@ -1089,6 +1113,8 @@ void MainWindow::buildUi() {
     // что и список каналов.
     memberListPanel_ = new MemberListPanel(central);
     memberListPanel_->setFixedWidth(240);
+    // Issue #384/#442 — тот же общий кэш, что и у chatView_.
+    memberListPanel_->setAvatarCache(&avatarCache_);
 
     auto* middleLayout = new QHBoxLayout;
     middleLayout->setContentsMargins(0, 0, 0, 0);
@@ -1254,6 +1280,36 @@ void MainWindow::onAttachFileClicked() {
     chatRestClient_.uploadAttachment(lastToken_, selectedChannelId_, QFileInfo(path).fileName(), contentType, data);
 }
 
+void MainWindow::onChooseAvatarFileClicked() {
+    const QString path = QFileDialog::getOpenFileName(this, tr("Choose Avatar Image"), QString(),
+                                                        tr("Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        showToast(tr("Failed to read file"), ToastBanner::Variant::kError);
+        return;
+    }
+    const QByteArray fileBytes = file.readAll();
+    // Определяется по содержимому файла, а не только по расширению
+    // (QMimeDatabase::mimeTypeForFile() уже так делает без
+    // дополнительного кода) — тот же content-type сервер потом
+    // провалидирует сам (issue #384), но лучше отправить верный сразу,
+    // чем полагаться на угадывание по имени файла.
+    const QString contentType = QMimeDatabase().mimeTypeForFile(path).name();
+
+    QImage preview;
+    if (preview.loadFromData(fileBytes)) {
+        // Оптимистичный локальный предпросмотр (issue #442) — не ждёт
+        // подтверждения от сервера; avatarUploaded() ниже всё равно
+        // перезапросит профиль и вызовет applyOwnAvatarIfLoaded() снова
+        // после того, как сервер подтвердит загрузку.
+        profileDialog_->setAvatarImage(preview);
+    }
+    userProfileClient_.uploadAvatar(lastToken_, contentType, fileBytes);
+}
+
 void MainWindow::onRecordVoiceToggleClicked() {
     if (voiceMessageRecorder_.isRecording()) {
         const QByteArray wavData = voiceMessageRecorder_.stop();
@@ -1405,6 +1461,16 @@ void MainWindow::onAccountSettingsClicked() {
     connect(signOutAction, &QAction::triggered, this, &MainWindow::signOut);
 
     menu->popup(footerBar_->avatarLabel()->mapToGlobal(QPoint(0, 0)) - QPoint(0, menu->sizeHint().height()));
+}
+
+void MainWindow::applyOwnAvatarIfLoaded() {
+    if (currentUserLogin_.isEmpty()) {
+        return;
+    }
+    if (const std::optional<QImage> image = avatarCache_.imageFor(currentUserLogin_); image.has_value()) {
+        footerBar_->setAvatarImage(*image);
+        profileDialog_->setAvatarImage(*image);
+    }
 }
 
 void MainWindow::signOut() {

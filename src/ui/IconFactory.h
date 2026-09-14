@@ -3,6 +3,7 @@
 #include <QIcon>
 
 class QColor;
+class QImage;
 class QString;
 
 namespace devicehub::ui_icons {
@@ -33,6 +34,21 @@ QIcon communityAvatarIcon(const QString& label, qint64 unreadCount = 0);
 /// где presence не имеет смысла — общий параметр там был бы всегда
 /// false и только шумел бы в каждом вызове.
 QIcon memberAvatarIcon(const QString& label, bool online);
+
+/// Настоящее фото профиля вместо буквы-заглушки (issue #384/#442) — та
+/// же круглая маска и базовый размер, что и у communityAvatarIcon()/
+/// memberAvatarIcon(), но содержимое — центрированный по короткой
+/// стороне и отмасштабированный @p image, а не градиент с буквой.
+/// Вызывающая сторона сама решает, когда есть реальное изображение
+/// (AvatarCache::imageFor()) и когда стоит откатиться на
+/// communityAvatarIcon()/memberAvatarIcon() — эта функция всегда
+/// рисует то, что ей передали, сама ничего не загружает.
+QIcon realAvatarIcon(const QImage& image);
+
+/// Тот же комбинированный "аватар + presence-точка", что и
+/// memberAvatarIcon(), но содержимое круга — настоящее фото (issue
+/// #384/#442), как у realAvatarIcon(), а не градиент с буквой.
+QIcon realMemberAvatarIcon(const QImage& image, bool online);
 
 /// Стрелка отправки (бумажный самолётик) — рисуется вручную по той же
 /// причине, что и plusIcon() (нет SVG icon-engine в статической сборке

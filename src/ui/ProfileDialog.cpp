@@ -1,15 +1,22 @@
 #include "ui/ProfileDialog.h"
 
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include "ui/IconFactory.h"
 #include "ui/Theme.h"
 #include "user/UserProfileClient.h"
 
 namespace devicehub {
+
+namespace {
+constexpr int kAvatarPreviewDiameter = 48;
+}  // namespace
 
 ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Edit Profile"));
@@ -21,6 +28,29 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     displayNameEdit_ = new QLineEdit(this);
     displayNameEdit_->setObjectName(QStringLiteral("profileDisplayNameEdit"));
     displayNameEdit_->setPlaceholderText(tr("Display name"));
+
+    // Issue #384/#442: предпросмотр + выбор файла рядом с прежним
+    // текстовым полем avatarUrlEdit_ (сохранено — можно и вручную задать
+    // внешний URL, например Gravatar; выбор файла — быстрый путь через
+    // POST /profile/avatar, оба остаются рабочими одновременно).
+    avatarPreviewLabel_ = new QLabel(this);
+    avatarPreviewLabel_->setObjectName(QStringLiteral("profileAvatarPreviewLabel"));
+    avatarPreviewLabel_->setFixedSize(kAvatarPreviewDiameter, kAvatarPreviewDiameter);
+    avatarPreviewLabel_->setPixmap(
+        ui_icons::communityAvatarIcon(QStringLiteral("?")).pixmap(kAvatarPreviewDiameter, kAvatarPreviewDiameter));
+
+    chooseAvatarFileButton_ = new QPushButton(tr("Choose file…"), this);
+    chooseAvatarFileButton_->setObjectName(QStringLiteral("profileChooseAvatarFileButton"));
+    // Issue #384/#442: не открывает QFileDialog сама — тот же паттерн,
+    // что и ChatView::attachFileRequested()/MainWindow::
+    // onAttachFileClicked(), см. doc-комментарий chooseAvatarFileRequested().
+    connect(chooseAvatarFileButton_, &QPushButton::clicked, this, &ProfileDialog::chooseAvatarFileRequested);
+
+    auto* avatarRow = new QHBoxLayout;
+    avatarRow->setSpacing(ui_theme::kSpacingSm);
+    avatarRow->addWidget(avatarPreviewLabel_);
+    avatarRow->addWidget(chooseAvatarFileButton_);
+    avatarRow->addStretch(1);
 
     avatarUrlEdit_ = new QLineEdit(this);
     avatarUrlEdit_->setObjectName(QStringLiteral("profileAvatarUrlEdit"));
@@ -63,6 +93,7 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     statusLabel_->setWordWrap(true);
 
     layout->addWidget(displayNameEdit_);
+    layout->addLayout(avatarRow);
     layout->addWidget(avatarUrlEdit_);
     layout->addWidget(emailEdit_);
     layout->addWidget(telegramChatIdEdit_);
@@ -83,6 +114,11 @@ void ProfileDialog::setProfile(const UserProfile& profile) {
     if (!telegramChatIdEdit_->hasFocus()) {
         telegramChatIdEdit_->setText(profile.telegramChatId);
     }
+}
+
+void ProfileDialog::setAvatarImage(const QImage& image) {
+    avatarPreviewLabel_->setPixmap(
+        ui_icons::realAvatarIcon(image).pixmap(kAvatarPreviewDiameter, kAvatarPreviewDiameter));
 }
 
 }  // namespace devicehub

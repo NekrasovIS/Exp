@@ -3,8 +3,11 @@
 #include <gtest/gtest.h>
 
 #include <QDialog>
+#include <QImage>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSignalSpy>
 
 #include "user/UserProfileClient.h"
 
@@ -60,6 +63,32 @@ TEST(ProfileDialogTest, ClickingSaveEmitsSaveRequestedWithCurrentFieldText) {
     EXPECT_EQ(emitted.avatarUrl, QStringLiteral("https://example.test/bob.png"));
     EXPECT_EQ(emitted.email, QStringLiteral("bob@example.test"));
     EXPECT_EQ(emitted.telegramChatId, QStringLiteral("987654321"));
+}
+
+// Issue #384/#442 — выбор файла аватара. Диалог сам не открывает
+// QFileDialog (см. doc-комментарий ProfileDialog::chooseAvatarFileRequested()) —
+// клик по кнопке только эмитит сигнал, MainWindow делает всё остальное,
+// поэтому тест здесь не блокируется на реальном системном диалоге.
+
+TEST(ProfileDialogTest, ClickingChooseAvatarFileButtonEmitsChooseAvatarFileRequested) {
+    ProfileDialog dialog;
+    QSignalSpy spy(&dialog, &ProfileDialog::chooseAvatarFileRequested);
+
+    dialog.chooseAvatarFileButton()->click();
+
+    EXPECT_EQ(spy.count(), 1);
+}
+
+TEST(ProfileDialogTest, SetAvatarImageReplacesTheLetterPreviewWithARealPhoto) {
+    ProfileDialog dialog;
+    const QImage letterPixmap = dialog.avatarPreviewLabel()->pixmap().toImage();
+
+    QImage realPhoto(64, 64, QImage::Format_ARGB32);
+    realPhoto.fill(Qt::red);
+    dialog.setAvatarImage(realPhoto);
+
+    EXPECT_FALSE(dialog.avatarPreviewLabel()->pixmap().isNull());
+    EXPECT_NE(dialog.avatarPreviewLabel()->pixmap().toImage(), letterPixmap);
 }
 
 // Issue #416: Cancel — новая кнопка, добавленная через QDialogButtonBox

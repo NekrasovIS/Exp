@@ -3,16 +3,45 @@
 #include <gtest/gtest.h>
 
 #include <QAction>
+#include <QBuffer>
+#include <QByteArray>
 #include <QImage>
 #include <QLabel>
 #include <QMenu>
 #include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QUrl>
 #include <QWidget>
+
+#include "user/AvatarCache.h"
+#include "user/UserProfileClient.h"
 
 namespace devicehub {
 namespace {
+
+QByteArray encodeTinyRedPng() {
+    QImage image(64, 64, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+/// Единственный QLabel без имени/свойства "chatAuthor" среди строки с
+/// showHeader true — тот же приём различения, что и в
+/// NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels ниже (аватар
+/// умышленно безымянный).
+QLabel* findAvatarLabel(const ChatMessageRow& row) {
+    for (QLabel* label : row.findChildren<QLabel*>()) {
+        if (label->objectName().isEmpty() && !label->property("chatAuthor").toBool()) {
+            return label;
+        }
+    }
+    return nullptr;
+}
 
 ChatMessage sampleMessage() {
     return ChatMessage{.author = "alice", .body = "hello", .sentAt = "2026-08-05 09:00:00"};
@@ -67,6 +96,48 @@ TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
         }
     }
     EXPECT_EQ(authorLabelCount, 1);
+}
+
+// Issue #384/#442 — реальное фото автора вместо буквы-заглушки.
+
+TEST(ChatMessageRowTest, AvatarUsesTheLetterPlaceholderWhenNoAvatarCacheIsGiven) {
+    // avatarCache по умолчанию nullptr — прежнее поведение, важное для
+    // всех остальных тестов этого файла, которые не передают его вовсе.
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    QLabel* avatarLabel = findAvatarLabel(row);
+    ASSERT_NE(avatarLabel, nullptr);
+    EXPECT_FALSE(avatarLabel->pixmap().isNull());
+}
+
+TEST(ChatMessageRowTest, AvatarShowsARealPhotoAlreadyCachedForTheAuthorAtConstruction) {
+    UserProfileClient client(QUrl(QStringLiteral("http://127.0.0.1:1")));
+    AvatarCache cache(client);
+    client.avatarFetched(QStringLiteral("alice"), encodeTinyRedPng(), QStringLiteral("image/png"));
+
+    ChatMessageRow rowWithCache(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, QString(),
+                                 /*canManageChannel=*/false, &cache);
+    ChatMessageRow rowWithoutCache(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    QLabel* withCache = findAvatarLabel(rowWithCache);
+    QLabel* withoutCache = findAvatarLabel(rowWithoutCache);
+    ASSERT_NE(withCache, nullptr);
+    ASSERT_NE(withoutCache, nullptr);
+    EXPECT_NE(withCache->pixmap().toImage(), withoutCache->pixmap().toImage());
+}
+
+TEST(ChatMessageRowTest, AvatarSwapsInTheRealPhotoOnceTheCacheLoadsItAfterConstruction) {
+    UserProfileClient client(QUrl(QStringLiteral("http://127.0.0.1:1")));
+    AvatarCache cache(client);
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false, QString(),
+                        /*canManageChannel=*/false, &cache);
+    QLabel* avatarLabel = findAvatarLabel(row);
+    ASSERT_NE(avatarLabel, nullptr);
+    const QImage letterPixmap = avatarLabel->pixmap().toImage();
+
+    client.avatarFetched(QStringLiteral("alice"), encodeTinyRedPng(), QStringLiteral("image/png"));
+
+    EXPECT_NE(avatarLabel->pixmap().toImage(), letterPixmap);
 }
 
 TEST(ChatMessageRowTest, OwnMessageWithHeaderHasNoAuthorLabel) {

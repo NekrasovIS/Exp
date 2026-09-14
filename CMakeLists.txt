@@ -80,6 +80,8 @@ add_library(devicehub_core
     src/chat/CallManager.cpp
     src/user/UserProfileClient.h
     src/user/UserProfileClient.cpp
+    src/user/AvatarCache.h
+    src/user/AvatarCache.cpp
     src/user/IdentityKeyStore.h
     src/user/IdentityKeyStore.cpp
     src/ui/CommunitiesPanel.h
@@ -284,6 +286,7 @@ add_executable(devicehub_tests
     test/DesktopNotifierTest.cpp
     test/ProfileDialogTest.cpp
     test/UserProfileClientTest.cpp
+    test/AvatarCacheTest.cpp
     test/IdentityKeyStoreTest.cpp
     test/ChannelCryptoTest.cpp
     test/ModeratorsDialogTest.cpp

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QObject>
@@ -94,9 +95,36 @@ public:
     /// Расфрендить — работает в любую сторону пары.
     void removeFriend(const QString& token, const QString& login);
 
+    /// Загружает изображение аватара вызывающего (issue #384/#442) —
+    /// тот же base64+content-type контракт, что и у веб-клиента
+    /// (packages/core's UserServiceClient.uploadAvatar()). Сервер сам
+    /// обновляет avatar_url профиля как побочный эффект — этот вызов не
+    /// нужно сопровождать отдельным updateOwnProfile().
+    void uploadAvatar(const QString& token, const QString& contentType, const QByteArray& data);
+
+    /// Скачивает сохранённый аватар @p login (issue #384/#442) — без
+    /// токена: сам эндпоинт публичный, тот же доступ, что и у
+    /// avatar_url в GET .../profile.
+    void fetchAvatar(const QString& login);
+
 signals:
     void profileReceived(const UserProfile& profile);
     void profileUpdated(const UserProfile& profile);
+
+    /// Успешная uploadAvatar() — @p avatarUrl тот же
+    /// "/users/<login>/avatar", что сервер только что записал в
+    /// avatar_url профиля.
+    void avatarUploaded(const QString& avatarUrl);
+    /// Успешная fetchAvatar() — @p data не декодирован (уже сырые
+    /// байты изображения, не base64 — сервер отдаёт их напрямую, см.
+    /// docs/services/user-service.md), @p contentType из заголовка
+    /// ответа.
+    void avatarFetched(const QString& login, const QByteArray& data, const QString& contentType);
+    /// fetchAvatar() не нашла аватар (404) или сеть отказала —
+    /// намеренно отдельный сигнал, а не errorOccurred(): у пользователя
+    /// без загруженного аватара это ожидаемый, частый случай (не
+    /// каждая ошибка), реагировать на который тостом было бы шумно.
+    void avatarFetchFailed(const QString& login);
 
     void friendRequestSent(const QString& recipientLogin, const QString& status);
     void incomingFriendRequestsListed(const QList<FriendRequestInfo>& requests);
