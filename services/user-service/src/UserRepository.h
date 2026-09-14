@@ -87,6 +87,24 @@ enum class SendFriendRequestResult {
     kCannotFriendSelf,
 };
 
+/// Тело загрузки аватара (issue #384) — то же группирование
+/// content_type/dataBase64/sizeBytes, что и chat_service's
+/// AttachmentUpload, по той же причине (правило CLAUDE.md про
+/// количество параметров).
+struct AvatarUpload {
+    std::string contentType;
+    std::string dataBase64;
+    std::int64_t sizeBytes = 0;
+};
+
+/// То, что отдаёт GET /users/{login}/avatar (issue #384) — без
+/// sizeBytes, он не нужен на этапе отдачи (только Content-Type и сами
+/// байты).
+struct AvatarData {
+    std::string contentType;
+    std::string dataBase64;
+};
+
 /// @see UserRepository::respondToFriendRequest().
 enum class RespondToFriendRequestResult {
     kAccepted,
@@ -156,6 +174,19 @@ public:
     /// GET /internal/friendship, чтобы chat-service мог разрешить
     /// открытие нового диалога личных сообщений только между друзьями.
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
+
+    /// Заменяет (или создаёт впервые) аватар @p login — предыдущее
+    /// изображение, если было, полностью перезаписывается (issue #384).
+    /// В той же транзакции обновляет avatar_url самого профиля на
+    /// канонический путь отдачи (`/users/<login>/avatar`), чтобы
+    /// GET .../profile сразу отражал новый аватар без отдельного PATCH.
+    /// @p login гарантированно существует (вызывается только после
+    /// authenticate() в HttpServer) — внешний ключ на users(login)
+    /// физически не даст записать чужой/несуществующий логин.
+    void setAvatar(const std::string& login, const AvatarUpload& upload);
+
+    /// @return Аватар @p login, либо std::nullopt, если ещё не загружен.
+    [[nodiscard]] std::optional<AvatarData> findAvatar(const std::string& login);
 
 private:
     std::string connectionString_;

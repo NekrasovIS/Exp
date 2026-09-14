@@ -46,6 +46,11 @@ public:
     /// См. UserRepository::areFriends() (issue #187, Фаза 2).
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
 
+    /// См. UserRepository::setAvatar() (issue #384).
+    void setAvatar(const std::string& login, const AvatarUpload& upload);
+    /// См. UserRepository::findAvatar() (issue #384).
+    [[nodiscard]] std::optional<AvatarData> getAvatar(const std::string& login);
+
 private:
     UserRepository& repository_;
 };

@@ -570,5 +570,55 @@ TEST(UserRepositoryTest, AreFriendsReflectsCurrentFriendshipStateInEitherArgumen
     EXPECT_TRUE(repository.areFriends(loginB, loginA));
 }
 
+TEST(UserRepositoryTest, SetAvatarStoresItAndUpdatesProfileAvatarUrl) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-avatar");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_FALSE(repository.findAvatar(login).has_value());
+
+    repository.setAvatar(login, AvatarUpload{.contentType = "image/png", .dataBase64 = "Zm9v", .sizeBytes = 3});
+
+    const std::optional<AvatarData> avatar = repository.findAvatar(login);
+    ASSERT_TRUE(avatar.has_value());
+    EXPECT_EQ(avatar->contentType, "image/png");
+    EXPECT_EQ(avatar->dataBase64, "Zm9v");
+
+    // issue #384 — the profile's own avatar_url should immediately point
+    // at the serving endpoint, without a separate PATCH /users/me.
+    const std::optional<Profile> profile = repository.findProfile(login);
+    ASSERT_TRUE(profile.has_value());
+    ASSERT_TRUE(profile->avatarUrl.has_value());
+    EXPECT_EQ(*profile->avatarUrl, "/users/" + login + "/avatar");
+}
+
+TEST(UserRepositoryTest, SetAvatarReplacesAPreviousUpload) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-avatar-replace");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    repository.setAvatar(login, AvatarUpload{.contentType = "image/png", .dataBase64 = "AAAA", .sizeBytes = 3});
+    repository.setAvatar(login, AvatarUpload{.contentType = "image/jpeg", .dataBase64 = "////", .sizeBytes = 3});
+
+    const std::optional<AvatarData> avatar = repository.findAvatar(login);
+    ASSERT_TRUE(avatar.has_value());
+    EXPECT_EQ(avatar->contentType, "image/jpeg");
+    EXPECT_EQ(avatar->dataBase64, "////");
+}
+
 }  // namespace
 }  // namespace user_service
