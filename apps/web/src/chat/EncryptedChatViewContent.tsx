@@ -157,7 +157,10 @@ export function EncryptedChatViewContent({
   function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
     setBody(event.target.value);
     sendTyping();
-    mentionInput.notifyTextChanged(event.target.value, event.target.selectionStart ?? event.target.value.length);
+    mentionInput.notifyTextChanged(
+      event.target.value,
+      event.target.selectionStart ?? event.target.value.length,
+    );
   }
 
   function handleReply(id: number): void {

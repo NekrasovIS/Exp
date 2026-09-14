@@ -136,7 +136,10 @@ export function MessageComposer({
   function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
     setBody(event.target.value);
     onTyping?.();
-    mentionInput.notifyTextChanged(event.target.value, event.target.selectionStart ?? event.target.value.length);
+    mentionInput.notifyTextChanged(
+      event.target.value,
+      event.target.selectionStart ?? event.target.value.length,
+    );
   }
 
   return (
