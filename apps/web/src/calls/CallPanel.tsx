@@ -43,7 +43,7 @@ export function CallPanel({ chatClient, localLogin }: CallPanelProps) {
         <button type="button" aria-pressed={state.screenShareEnabled} onClick={actions.toggleScreenShare}>
           {state.screenShareEnabled ? "Stop sharing" : "Share screen"}
         </button>
-        <button type="button" className={styles.leaveButton} onClick={actions.leave}>
+        <button type="button" data-variant="danger" onClick={actions.leave}>
           Leave call
         </button>
       </div>

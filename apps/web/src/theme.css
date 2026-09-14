@@ -145,6 +145,21 @@ button[data-variant="primary"]:active:not(:disabled) {
   background: var(--color-accent-strong);
 }
 
+/* Destructive-ish actions (issue #414) — a quiet danger outline at
+   rest, warming up only on hover/press, never default-red on a row of
+   otherwise-neutral buttons. Was CallPanel.module.css's own
+   .leaveButton (issue #221); promoted here once Delete/Decline/Remove
+   needed the exact same treatment elsewhere. */
+button[data-variant="danger"] {
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+button[data-variant="danger"]:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+
 input {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);

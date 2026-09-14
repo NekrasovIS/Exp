@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QDialog>
 #include <QLineEdit>
 #include <QPushButton>
 
@@ -59,6 +60,22 @@ TEST(ProfileDialogTest, ClickingSaveEmitsSaveRequestedWithCurrentFieldText) {
     EXPECT_EQ(emitted.avatarUrl, QStringLiteral("https://example.test/bob.png"));
     EXPECT_EQ(emitted.email, QStringLiteral("bob@example.test"));
     EXPECT_EQ(emitted.telegramChatId, QStringLiteral("987654321"));
+}
+
+// Issue #416: Cancel — новая кнопка, добавленная через QDialogButtonBox
+// (раньше диалог можно было закрыть только системным окном/Escape).
+
+TEST(ProfileDialogTest, ClickingCancelClosesWithoutEmittingSaveRequested) {
+    ProfileDialog dialog;
+    dialog.displayNameEdit()->setText(QStringLiteral("Bob"));
+
+    int emitCount = 0;
+    QObject::connect(&dialog, &ProfileDialog::saveRequested, [&](const ProfileEdits&) { ++emitCount; });
+
+    dialog.cancelButton()->click();
+
+    EXPECT_EQ(emitCount, 0);
+    EXPECT_EQ(dialog.result(), QDialog::Rejected);
 }
 
 }  // namespace

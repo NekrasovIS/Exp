@@ -112,6 +112,7 @@ class CommunityConnectDialog {
   +joinButton() : QPushButton*
   +nameEdit() : QLineEdit*
   +createButton() : QPushButton*
+  +cancelButton() : QPushButton*
   -onJoinClicked()
   -onCreateClicked()
   .. signals ..
@@ -776,6 +777,7 @@ class ProfileDialog {
   +emailEdit() : QLineEdit*
   +telegramChatIdEdit() : QLineEdit*
   +saveButton() : QPushButton*
+  +cancelButton() : QPushButton*
   +statusLabel() : QLabel*
   .. signals ..
   +saveRequested(edits: ProfileEdits)
@@ -808,6 +810,7 @@ class ModeratorsDialog {
   +loginEdit() : QLineEdit*
   +promoteButton() : QPushButton*
   +demoteButton() : QPushButton*
+  +closeButton() : QPushButton*
   +statusLabel() : QLabel*
   .. signals ..
   +promoteRequested(communityId: int64, login: QString)
@@ -988,7 +991,7 @@ MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestC
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
 CommunitiesPanel ..> IconFactory : plusIcon()/communityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon() >
-FooterBar ..> IconFactory : settingsIcon() >
+FooterBar ..> IconFactory : settingsIcon()/communityAvatarIcon() >
 ChatView ..> IconFactory : plusIcon()/sendIcon()/membersIcon() >
 ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >

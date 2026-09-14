@@ -6,7 +6,7 @@
 // #138's ChannelCrypto has no story for attachment bytes at all).
 
 import type { ChatMessageInfo, PinnedMessageInfo } from "@devicehub/core";
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
@@ -14,9 +14,10 @@ import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
 import { useSession } from "../session/SessionContext.js";
 import { MentionSuggestions } from "./MentionSuggestions.js";
+import composerStyles from "./MessageComposer.module.css";
 import { MessageList, truncatedSnippet } from "./MessageList.js";
 import { PinnedMessagesPanel } from "./PinnedMessagesPanel.js";
-import { useMentionAutocomplete } from "./useMentionAutocomplete.js";
+import { useMentionInput } from "./useMentionInput.js";
 import { useMessages } from "./useMessages.js";
 import { usePinnedMessages } from "./usePinnedMessages.js";
 
@@ -63,8 +64,7 @@ export function EncryptedChatViewContent({
   const [body, setBody] = useState("");
   // Issue #326 — mentions are typed/matched against the plaintext body
   // before encryptMessage() ever runs on it in handleSend() below.
-  const mention = useMentionAutocomplete(communityId);
-  const bodyInputRef = useRef<HTMLInputElement>(null);
+  const mentionInput = useMentionInput(communityId, body, setBody);
   // Reply target (issue #306/#331) — resolved from decryptedMessages
   // (below), not the raw ciphertext messages, so the "Replying to ..."
   // bar shows readable text; the id sent over the wire is unaffected
@@ -158,37 +158,10 @@ export function EncryptedChatViewContent({
   function handleBodyChange(event: React.ChangeEvent<HTMLInputElement>): void {
     setBody(event.target.value);
     sendTyping();
-    mention.handleTextChange(event.target.value, event.target.selectionStart ?? event.target.value.length);
-  }
-
-  function selectMention(login: string): void {
-    const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
-    const result = mention.applySuggestion(body, cursorPos, login);
-    setBody(result.text);
-    requestAnimationFrame(() => bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos));
-  }
-
-  function handleBodyKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (mention.suggestions.length === 0) {
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      mention.moveActive(1);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      mention.moveActive(-1);
-    } else if (event.key === "Enter" || event.key === "Tab") {
-      event.preventDefault();
-      const cursorPos = bodyInputRef.current?.selectionStart ?? body.length;
-      const result = mention.applyActive(body, cursorPos);
-      setBody(result.text);
-      requestAnimationFrame(() =>
-        bodyInputRef.current?.setSelectionRange(result.cursorPos, result.cursorPos),
-      );
-    } else if (event.key === "Escape") {
-      mention.dismiss();
-    }
+    mentionInput.notifyTextChanged(
+      event.target.value,
+      event.target.selectionStart ?? event.target.value.length,
+    );
   }
 
   function handleReply(id: number): void {
@@ -233,7 +206,7 @@ export function EncryptedChatViewContent({
         />
       </div>
       {replyTarget !== null && (
-        <p className={styles.statusText}>
+        <p className={composerStyles.replyBar}>
           Replying to <strong>{replyTarget.author}</strong>: {truncatedSnippet(replyTarget.body)}{" "}
           <button type="button" onClick={() => setReplyTarget(null)}>
             Cancel
@@ -245,15 +218,15 @@ export function EncryptedChatViewContent({
         <label htmlFor="encrypted-message-body">Message</label>
         <input
           id="encrypted-message-body"
-          ref={bodyInputRef}
+          ref={mentionInput.bodyInputRef}
           value={body}
           onChange={handleBodyChange}
-          onKeyDown={handleBodyKeyDown}
+          onKeyDown={mentionInput.handleKeyDown}
         />
         <MentionSuggestions
-          suggestions={mention.suggestions}
-          activeIndex={mention.activeIndex}
-          onSelect={selectMention}
+          suggestions={mentionInput.suggestions}
+          activeIndex={mentionInput.activeIndex}
+          onSelect={mentionInput.selectMention}
         />
         <button type="submit">Send</button>
       </form>

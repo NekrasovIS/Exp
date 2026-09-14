@@ -23,6 +23,12 @@ constexpr const char* kAccentGradientStart = "#34d399";
 constexpr const char* kAccentGradientEnd = "#059669";
 constexpr const char* kAccentForeground = "#ffffff";
 constexpr const char* kBubbleOtherBackground = "#2a2d31";
+/// Основной цвет текста (issue #419) — та же строка, что и обычный
+/// `QLabel { color: ...; }` в QSS ниже, вынесена как константа по той же
+/// причине, что и kMutedForeground/kSidebarBackground: CommunitiesPanel
+/// рисовала friendsIcon() этим же цветом собственным hex-литералом
+/// прямо на месте вызова, вместо общей константы.
+constexpr const char* kForeground = "#e3e6e8";
 /// Приглушённый серый, уже используемый в QSS для служебного текста
 /// (issue #182) — вынесен как константа,
 /// чтобы QPainter-рисование (IconFactory) могло взять тот же цвет, что и

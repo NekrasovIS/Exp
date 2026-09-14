@@ -61,7 +61,7 @@ CommunitiesPanel::CommunitiesPanel(QWidget* parent) : QWidget(parent) {
     friendsButton_ = new QPushButton(this);
     friendsButton_->setObjectName(QStringLiteral("friendsButton"));
     friendsButton_->setToolTip(tr("Friends"));
-    friendsButton_->setIcon(ui_icons::friendsIcon(QColor(QStringLiteral("#e3e6e8"))));
+    friendsButton_->setIcon(ui_icons::friendsIcon(QColor(ui_theme::kForeground)));
     friendsButton_->setIconSize(QSize(kIconButtonIconSize, kIconButtonIconSize));
     friendsButton_->setFixedSize(kIconButtonSize, kIconButtonSize);
     friendsButton_->setProperty("iconOnly", true);
