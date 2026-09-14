@@ -6,8 +6,8 @@
 // Issue #385 — the avatar circle renders a real uploaded image (Avatar)
 // instead of always the letter placeholder.
 
-import { AsyncListStatus } from "../components/AsyncListStatus.js";
-import avatarPlaceholderStyles from "../components/avatarPlaceholder.module.css";
+import { AsyncListStatus, avatarPlaceholderStyles } from "@devicehub/ui";
+
 import { Avatar } from "../profile/Avatar.js";
 import styles from "./membersSidebar.module.css";
 import { useMembers } from "./useMembers.js";

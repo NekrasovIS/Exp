@@ -12,10 +12,10 @@
 // The link itself is just `${origin}/join/${code}` — JoinPage.tsx is
 // the other half of this feature.
 
+import { AsyncListStatus } from "@devicehub/ui";
 import { useState, type FormEvent } from "react";
 
 import { useCommunities } from "./useCommunities.js";
-import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import styles from "../pages/sidebarNav.module.css";
 import { useSession } from "../session/SessionContext.js";
 

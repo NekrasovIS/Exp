@@ -3,13 +3,13 @@
 // DeviceHub's ProfileDialog scope-for-scope (email/telegram_chat_id
 // stay desktop-only for now, same as this issue's own description).
 
+import { avatarPlaceholderStyles } from "@devicehub/ui";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import styles from "./ProfilePage.module.css";
 import { Avatar } from "./Avatar.js";
 import { useProfile } from "./useProfile.js";
-import avatarPlaceholderStyles from "../components/avatarPlaceholder.module.css";
 import { useSession } from "../session/SessionContext.js";
 
 export function ProfilePage() {

@@ -41,8 +41,8 @@
 }
 
 /* Same gradient-circle convention as MembersSidebar's own .avatar,
-   composed with the shared components/avatarPlaceholder.module.css
-   (issue #413) — just bigger, since this is the one place the avatar
+   composed with the shared @devicehub/ui's avatarPlaceholder.module.css
+   (issue #413, relocated to the package in #433) — just bigger, since this is the one place the avatar
    is the focal point of the screen, not a small icon in a list row. */
 .avatar {
   width: 72px;

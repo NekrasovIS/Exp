@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { AsyncListStatus } from "../../src/components/AsyncListStatus.js";
+import { AsyncListStatus } from "../src/AsyncListStatus.js";
 
 describe("AsyncListStatus", () => {
   it("renders nothing when not loading and there is no error", () => {

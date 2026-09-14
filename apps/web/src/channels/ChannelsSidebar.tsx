@@ -6,10 +6,10 @@
 // looks like.
 
 import type { ChatItem } from "@devicehub/core";
+import { AsyncListStatus } from "@devicehub/ui";
 import { useState, type FormEvent } from "react";
 
 import { useChannels } from "./useChannels.js";
-import { AsyncListStatus } from "../components/AsyncListStatus.js";
 import { useEncryptedChannelSetup } from "../crypto/useEncryptedChannelSetup.js";
 import { useIdentityKeys } from "../crypto/useIdentityKeys.js";
 import styles from "../pages/sidebarNav.module.css";
