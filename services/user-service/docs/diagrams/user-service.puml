@@ -85,6 +85,30 @@ enum RespondToFriendRequestResult {
   kNotYourRequest
 }
 
+struct AvatarData {
+  +contentType: string
+  +dataBase64: string
+}
+note bottom of AvatarData
+  Issue #384: байты уже в base64, как
+  и хранятся (тот же приём, что и
+  AttachmentData у chat-service) —
+  HttpServer декодирует перед записью
+  тела HTTP-ответа.
+end note
+
+namespace base64 {
+  class base64 <<namespace>> {
+    +{static} decode(text: string) : optional<string>
+  }
+}
+note bottom of base64.base64
+  Issue #384: своя копия, а не
+  переиспользование chat-service's —
+  каждый микросервис независим
+  (CLAUDE.md), общего пакета нет.
+end note
+
 class UserRepository {
   +createUser(login: string, passwordHash: string) : bool
   +findPasswordHash(login: string) : optional<string>
@@ -97,6 +121,8 @@ class UserRepository {
   +listFriends(login: string) : vector<string>
   +removeFriend(loginA: string, loginB: string) : bool
   +areFriends(loginA: string, loginB: string) : bool
+  +saveAvatar(login: string, contentType: string, dataBase64: string, avatarUrl: string) : bool
+  +findAvatar(login: string) : optional<AvatarData>
 }
 UserRepository ..> PqxxConnection : opens per call
 UserRepository ..> Profile : creates
@@ -106,6 +132,7 @@ UserRepository ..> OtpIdentity : returns
 UserRepository ..> FriendRequestInfo : returns
 UserRepository ..> SendFriendRequestResult : returns
 UserRepository ..> RespondToFriendRequestResult : returns
+UserRepository ..> AvatarData : returns
 
 class UserService {
   +registerUser(login: string, password: string) : bool
@@ -119,6 +146,8 @@ class UserService {
   +listFriends(login: string) : vector<string>
   +removeFriend(loginA: string, loginB: string) : bool
   +areFriends(loginA: string, loginB: string) : bool
+  +saveAvatar(login: string, contentType: string, dataBase64: string, avatarUrl: string) : bool
+  +findAvatar(login: string) : optional<AvatarData>
 }
 note bottom of UserService
   issue #187, Фаза 2: areFriends()
@@ -158,12 +187,15 @@ class HttpServer {
   -handleListFriends(request, response)
   -handleRemoveFriend(request, response)
   -handleCheckFriendship(request, response)
+  -handleUploadAvatar(request, response)
+  -handleGetAvatar(request, response)
 }
 HttpServer --> UserService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
 HttpServer *-- HttplibServer : owns
 HttpServer ..> Json : encodes responses as
 HttpServer ..> json_guard.json_guard : guards parse() with (issue #129)
+HttpServer ..> base64.base64 : decodes upload/download bytes with (issue #384)
 
 note right of HttpServer
   Routes:
@@ -215,6 +247,21 @@ note right of HttpServer
                                         для chat-service, см.
                                         UserServiceClient в chat-service;
                                         отвечает {friends: bool})
+  POST  /profile/avatar             -> handleUploadAvatar (issue #384,
+                                        authenticated; {content_type,
+                                        data_base64} — content_type
+                                        должен начинаться с "image/",
+                                        размер декодированных байт <=
+                                        2 МБ; сохраняет байты и обновляет
+                                        avatar_url вызывающего на
+                                        /users/<login>/avatar, отвечает
+                                        {avatar_url})
+  GET   /users/{login}/avatar       -> handleGetAvatar (issue #384,
+                                        unauthenticated — тот же публичный
+                                        доступ, что и у avatar_url в
+                                        GET .../profile; отдаёт сохранённые
+                                        байты с их content_type, 404 если
+                                        аватар не загружен)
 end note
 
 note right of HttpServer

@@ -27,6 +27,14 @@ namespace user_service {
  *        без аутентификации, как и /users/resolve-otp-identifier: не
  *        вызывается напрямую клиентами, только chat-service, чтобы
  *        решить, можно ли открыть новый диалог личных сообщений.
+ *        POST /profile/avatar (issue #384, аутентифицированный) —
+ *        загружает изображение аватара вызывающего, тот же
+ *        base64+content_type паттерн, что и POST
+ *        /channels/{id}/attachments у chat-service. GET
+ *        /users/{login}/avatar — без аутентификации (тот же публичный
+ *        доступ, что и у самого изображения в любом другом чате/
+ *        клиенте): отдаёт сохранённые байты или 404, если аватар не
+ *        загружен.
  *
  * PATCH /users/me всегда пишет в аккаунт, чей login зашит в токене —
  * login в URL/теле запроса, если есть, игнорируется, поэтому вызывающая
@@ -71,6 +79,8 @@ private:
     void handleListFriends(const httplib::Request& request, httplib::Response& response);
     void handleRemoveFriend(const httplib::Request& request, httplib::Response& response);
     void handleCheckFriendship(const httplib::Request& request, httplib::Response& response);
+    void handleUploadAvatar(const httplib::Request& request, httplib::Response& response);
+    void handleGetAvatar(const httplib::Request& request, httplib::Response& response);
 
     UserService& userService_;
     const AuthServiceClient& authServiceClient_;

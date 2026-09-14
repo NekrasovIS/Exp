@@ -74,3 +74,19 @@ CREATE TABLE IF NOT EXISTS friendships (
 
 CREATE INDEX IF NOT EXISTS friend_requests_recipient_status_idx ON friend_requests (recipient_login, status);
 CREATE INDEX IF NOT EXISTS friendships_user_b_login_idx ON friendships (user_b_login);
+
+-- Реальное изображение аватара (issue #384, backend-часть зонтичной
+-- #378) — отдельная таблица, а не BYTEA/новая колонка в users, тот же
+-- приём, что и attachments у chat-service (см. её doc-комментарий):
+-- base64 TEXT сайдстепает binary-параметры libpqxx, и не раздувает
+-- саму запись users данными, которые читаются только при отдаче
+-- аватара, а не при обычных профильных запросах. PRIMARY KEY по login
+-- (не BIGSERIAL id) — у пользователя не может быть больше одного
+-- текущего аватара, повторная загрузка обновляет ту же строку
+-- (UPSERT), а не копится историей.
+CREATE TABLE IF NOT EXISTS user_avatars (
+    login TEXT PRIMARY KEY REFERENCES users(login) ON DELETE CASCADE,
+    content_type TEXT NOT NULL,
+    data_base64 TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

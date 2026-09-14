@@ -109,6 +109,8 @@ add_library(user_service_core
     src/password_hash.cpp
     src/JsonGuard.h
     src/JsonGuard.cpp
+    src/base64.h
+    src/base64.cpp
     src/UserRepository.h
     src/UserRepository.cpp
     src/UserService.h
@@ -135,6 +137,7 @@ find_package(GTest CONFIG REQUIRED)
 add_executable(user_service_tests
     test/PasswordHashTest.cpp
     test/JsonGuardTest.cpp
+    test/Base64Test.cpp
     test/UserServiceIntegrationTest.cpp
     test/UserRepositoryTest.cpp
     test/HttpServerTest.cpp

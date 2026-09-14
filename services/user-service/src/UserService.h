@@ -46,6 +46,14 @@ public:
     /// См. UserRepository::areFriends() (issue #187, Фаза 2).
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
 
+    /// См. UserRepository::saveAvatar() (issue #384) — @p avatarUrl
+    /// вычисляет вызывающая сторона (HttpServer), сама эта функция
+    /// формат пути не определяет.
+    [[nodiscard]] bool saveAvatar(const std::string& login, const std::string& contentType,
+                                   const std::string& dataBase64, const std::string& avatarUrl);
+    /// См. UserRepository::findAvatar().
+    [[nodiscard]] std::optional<AvatarData> findAvatar(const std::string& login);
+
 private:
     UserRepository& repository_;
 };
