@@ -5,7 +5,9 @@ import { AsyncListStatus } from "../../src/components/AsyncListStatus.js";
 
 describe("AsyncListStatus", () => {
   it("renders nothing when not loading and there is no error", () => {
-    const { container } = render(<AsyncListStatus loading={false} error={null} loadingText="Loading things…" />);
+    const { container } = render(
+      <AsyncListStatus loading={false} error={null} loadingText="Loading things…" />,
+    );
 
     expect(container).toBeEmptyDOMElement();
   });
