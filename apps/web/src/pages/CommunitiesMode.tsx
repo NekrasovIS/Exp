@@ -12,8 +12,10 @@ import { useChannels } from "../channels/useChannels.js";
 import { CommunitiesSidebar } from "../communities/CommunitiesSidebar.js";
 import { MembersSidebar } from "../members/MembersSidebar.js";
 import styles from "./pageLayout.module.css";
+import { useIsNarrowViewport } from "./useIsNarrowViewport.js";
 
 export function CommunitiesMode() {
+  const isNarrow = useIsNarrowViewport();
   const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
   const [selectedChannel, setSelectedChannel] = useState<ChatItem | null>(null);
   // Issue #322 — owned here, not by MembersSidebar itself: it's a
@@ -94,39 +96,69 @@ export function CommunitiesMode() {
     clearChannelLocally(channel.id);
   }
 
+  // Issue #439 — on a narrow viewport, exactly one of these four panels
+  // is shown at a time (the drill-down level the user is currently at),
+  // instead of all four fixed-width columns side by side. On a wide
+  // viewport every condition below is true, unchanged from before.
+  const showCommunitiesSidebar = !isNarrow || selectedCommunityId === null;
+  const showChannelsSidebar = !isNarrow || (selectedCommunityId !== null && selectedChannel === null);
+  const showMain = !isNarrow || selectedChannel !== null;
+  // Members is a secondary, read-only panel with no drill-down path of
+  // its own — simplest correct narrow behavior is to hide it rather than
+  // give it a level in the back-button chain.
+  const showMembersSidebar = !isNarrow;
+
   return (
     <div className={styles.row}>
-      <div className={styles.sidebarColumn}>
-        <CommunitiesSidebar
-          selectedCommunityId={selectedCommunityId}
-          onSelectCommunity={handleSelectCommunity}
-          unreadCounts={communityCounts}
-        />
-      </div>
-      <div className={styles.sidebarColumn}>
-        <ChannelsSidebar
-          communityId={selectedCommunityId}
-          selectedChannelId={selectedChannel?.id ?? null}
-          onSelectChannel={handleSelectChannel}
-          unreadCounts={channelCounts}
-        />
-      </div>
-      <main className={styles.mainColumn}>
-        {selectedChannel === null || selectedCommunityId === null ? (
-          <p className={styles.placeholder}>Select a channel to start chatting.</p>
-        ) : (
-          <ChatView
-            channelId={selectedChannel.id}
-            communityId={selectedCommunityId}
-            isEncrypted={selectedChannel.isEncrypted}
-            onOnlineMembers={handleOnlineMembers}
-            onPresenceChanged={handlePresenceChanged}
+      {showCommunitiesSidebar && (
+        <div className={styles.sidebarColumn}>
+          <CommunitiesSidebar
+            selectedCommunityId={selectedCommunityId}
+            onSelectCommunity={handleSelectCommunity}
+            unreadCounts={communityCounts}
           />
-        )}
-      </main>
-      <div className={styles.sidebarColumn}>
-        <MembersSidebar communityId={selectedCommunityId} onlineLogins={onlineLogins} />
-      </div>
+        </div>
+      )}
+      {showChannelsSidebar && (
+        <div className={styles.sidebarColumn}>
+          {isNarrow && (
+            <button type="button" className={styles.backButton} onClick={() => setSelectedCommunityId(null)}>
+              ← Communities
+            </button>
+          )}
+          <ChannelsSidebar
+            communityId={selectedCommunityId}
+            selectedChannelId={selectedChannel?.id ?? null}
+            onSelectChannel={handleSelectChannel}
+            unreadCounts={channelCounts}
+          />
+        </div>
+      )}
+      {showMain && (
+        <main className={styles.mainColumn}>
+          {isNarrow && (
+            <button type="button" className={styles.backButton} onClick={() => setSelectedChannel(null)}>
+              ← Channels
+            </button>
+          )}
+          {selectedChannel === null || selectedCommunityId === null ? (
+            <p className={styles.placeholder}>Select a channel to start chatting.</p>
+          ) : (
+            <ChatView
+              channelId={selectedChannel.id}
+              communityId={selectedCommunityId}
+              isEncrypted={selectedChannel.isEncrypted}
+              onOnlineMembers={handleOnlineMembers}
+              onPresenceChanged={handlePresenceChanged}
+            />
+          )}
+        </main>
+      )}
+      {showMembersSidebar && (
+        <div className={styles.sidebarColumn}>
+          <MembersSidebar communityId={selectedCommunityId} onlineLogins={onlineLogins} />
+        </div>
+      )}
     </div>
   );
 }

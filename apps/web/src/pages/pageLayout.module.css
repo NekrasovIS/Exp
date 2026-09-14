@@ -13,6 +13,16 @@
   min-height: 0;
 }
 
+/* Issue #439 — wraps .row in FriendsMode only, so .narrowTabs can sit
+   above it as a sibling instead of inside it (the tabs aren't a
+   sidebar/main column themselves). */
+.stack {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .sidebarColumn {
   flex: 0 0 240px;
   min-width: 0;
@@ -32,4 +42,59 @@
 .placeholder {
   margin: auto;
   color: var(--color-text-muted);
+}
+
+/* Issue #439 — below this width, CommunitiesMode/FriendsMode render only
+   one .sidebarColumn/.mainColumn at a time (see useIsNarrowViewport()),
+   so the fixed 240px never applies to more than one column on screen —
+   let that one column fill the available width instead of staying
+   pinned to a desktop-sized sidebar. Kept in sync with
+   kNarrowViewportBreakpointPx in useIsNarrowViewport.ts. */
+@media (max-width: 768px) {
+  .sidebarColumn {
+    flex: 1 1 auto;
+    width: 100%;
+    border-right: none;
+  }
+}
+
+.backButton {
+  flex-shrink: 0;
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+}
+
+.backButton:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+}
+
+/* Issue #439 — the "Friends"/"Messages" tab switcher shown in
+   FriendsMode on a narrow viewport, while no thread is open (see
+   FriendsMode.tsx) — same row shape as tab bars elsewhere, not reused
+   from anywhere else since this is the only two-way tab toggle in the
+   web client so far. */
+.narrowTabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.narrowTab {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  text-align: center;
+}
+
+.narrowTab[aria-pressed="true"] {
+  background: var(--color-surface-raised);
+  font-weight: 600;
 }
