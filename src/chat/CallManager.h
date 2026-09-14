@@ -19,6 +19,7 @@
 #include <QImage>
 #include <QJsonObject>
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVideoFrame>
@@ -27,6 +28,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -266,12 +268,30 @@ private:
         /// publishConnection_ — handle публикации; для записи в peers_ —
         /// handle подписки на конкретный чужой feed.
         qint64 janusHandle = -1;
+        /// Issue #364 — идемпотентный барьер между реальным
+        /// PeerObserver::OnIceGatheringChange() (kIceGatheringComplete) и
+        /// таймаутом ожидания в handleIceGatheringComplete(): сбрасывается
+        /// в false каждый раз, когда negotiateLocal() запускает новый
+        /// раунд SetLocalDescription(), и выставляется в true, как только
+        /// offer/answer действительно ушёл Janus'у — какой бы из двух
+        /// путей ни сработал первым, второй должен стать no-op, а не
+        /// отправить тот же (или более поздний) SDP повторно.
+        bool iceGatheringMessageSent = false;
         /// Только для subscribe-записей в peers_ (janusHandle >= 0) — id
         /// чужого Janus-feed, на который подписана эта запись; нужен,
         /// чтобы найти нужную запись по feedId, когда комната сообщает об
         /// уходе участника ("leaving"/"unpublished" несёт feedId, не
         /// login — Janus логинов не знает).
         QString sfuFeedId;
+        /// Issue #373 — какие Janus stream `mid` этого feed'а эта запись
+        /// уже запросила: заполняется исходным списком в
+        /// onJanusAttached() (тем, что feed публиковал на момент подписки)
+        /// и пополняется subscribeToNewStreams(), когда feed добавляет
+        /// поток позже (например, собеседник включает камеру уже после
+        /// того, как эта сторона на него подписалась) — см. doc-комментарий
+        /// subscribeToNewStreams() про то, почему это вообще нужно
+        /// отслеживать отдельно.
+        QSet<QString> subscribedMids;
     };
 
     /// Issue #362 — начальный ростер уже находящихся в звонке участников
@@ -312,10 +332,34 @@ private:
     /// (issue #232).
     void ensurePublishConnection();
     /// Гарантирует, что для чужого Janus-feed @p feedId (объявленного
-    /// как @p peerLogin) существует subscribe-соединение в peers_
-    /// (issue #232) — один слот на peerLogin. No-op, если это наш
-    /// собственный feed (ownFeedId_) или peerLogin уже есть в peers_.
-    void ensureSubscribeConnection(const QString& feedId, const QString& peerLogin);
+    /// как @p peerLogin, публикующего сейчас потоки с id из @p mids)
+    /// существует subscribe-соединение в peers_ (issue #232) — один слот
+    /// на peerLogin. Если подписка уже есть, вместо создания новой
+    /// делегирует в subscribeToNewStreams() (issue #373) — feed мог
+    /// добавить поток (например, включить камеру) уже после того, как
+    /// эта сторона на него подписалась.
+    void ensureSubscribeConnection(const QString& feedId, const QString& peerLogin, const QStringList& mids);
+    /// Issue #373 — Janus-подписка по @p feedId (`ptype: "subscriber",
+    /// feed: ...`, в отличие от полного multistream API с явным списком
+    /// `streams`) отдаёт подписчику только то, что feed публиковал на
+    /// момент самой подписки — сам не проталкивает поток, добавленный
+    /// позже (например, собеседник включил камеру уже после того, как
+    /// эта сторона подписалась на его аудио) — подтверждено сырым логом
+    /// сигналинга: широковещательное "publishers обновились" от Janus
+    /// доходит до publish-хендла КАЖДОГО участника нормально, но на уже
+    /// существующий subscribe-хендл ничего не приходит, пока эта сторона
+    /// сама не запросит новый поток. Без этого фикса собеседник, зашедший
+    /// в звонок до того, как включили камеру, никогда не увидел бы видео
+    /// вообще — запись в peers_ существует (remoteStream уже сработал на
+    /// аудио), но видеотрек не приходит никогда.
+    ///
+    /// Отправка `{"request":"subscribe","streams":[{feed,mid}]}` на уже
+    /// существующий subscribe-хендл — именно то, что заставляет Janus
+    /// пересогласовать соединение; получившийся offer возвращается через
+    /// ту же общую ветку в onJanusEvent(), что уже отвечает на самый
+    /// первый subscribe-offer, так что там менять ничего не нужно — она
+    /// никогда и не различала "первое согласование" и "пересогласование".
+    void subscribeToNewStreams(PeerConnectionEntry& entry, const QString& feedId, const QStringList& mids);
     /// Начинает следующий отложенный attach из subscribeQueue_, если
     /// сейчас ничего не в полёте — см. doc-комментарий pendingAttach_.
     void processNextQueuedSubscribe();
@@ -440,8 +484,13 @@ private:
     PendingJanusAttach pendingAttach_ = PendingJanusAttach::kNone;
     QString pendingSubscribeFeedId_;
     QString pendingSubscribePeerLogin_;
-    /// (feedId, peerLogin) пар, ждущих своей очереди на attach — issue #232.
-    std::deque<std::pair<QString, QString>> subscribeQueue_;
+    /// Issue #373 — какие stream `mid` feedId публиковал на момент этого
+    /// отложенного subscribe-запроса; становится PeerConnectionEntry::
+    /// subscribedMids новой записи в onJanusAttached().
+    QStringList pendingSubscribeMids_;
+    /// (feedId, peerLogin, mids) троек, ждущих своей очереди на attach —
+    /// issue #232/#373.
+    std::deque<std::tuple<QString, QString, QStringList>> subscribeQueue_;
 };
 
 }  // namespace devicehub

@@ -2,7 +2,7 @@ import { ChatClient } from "@devicehub/core";
 import type { WebSocketFactory, WebSocketLike } from "@devicehub/core";
 import { describe, expect, it, vi } from "vitest";
 
-import { CallManager } from "../../src/calls/CallManager.js";
+import { CallManager, kIceGatheringTimeoutMs } from "../../src/calls/CallManager.js";
 import type { RTCPeerConnectionLike } from "../../src/calls/CallManager.js";
 
 /** Several negotiatePublish()/answerSubscribe() steps below run
@@ -200,6 +200,60 @@ describe("CallManager", () => {
     expect(connections[0]?.localDescription?.type).toBe("offer");
   });
 
+  // Issue #364 — some real networks never fire iceGatheringState
+  // "complete" at all (observed: a host with several virtual network
+  // adapters alongside the real one, where at least one interface's own
+  // STUN query never resolves). Waiting unconditionally for "complete"
+  // before sending the offer meant the call never published anything on
+  // such a network — negotiatePublish() just hung forever, silently,
+  // before ever reaching the "configure" send. This fake connection
+  // never reports "complete" on its own (no onicegatheringstatechange
+  // call), mirroring that hang; without the bounded timeout in
+  // waitForIceGatheringComplete(), advancing past kIceGatheringTimeoutMs
+  // would never produce a "configure" frame.
+  it("still sends 'configure' after a timeout if iceGatheringState never reaches 'complete'", async () => {
+    vi.useFakeTimers();
+    try {
+      const { socket, manager, connections } = setup();
+      await manager.joinCall();
+      socket.simulateMessage(JSON.stringify({ call_roster: [], sfu_room: "room-1" }));
+
+      const publishConnection = connections[0];
+      expect(publishConnection).toBeDefined();
+      if (publishConnection) {
+        publishConnection.iceGatheringState = "checking";
+      }
+
+      socket.simulateMessage(JSON.stringify({ janus_attached: { handle: 10 } }));
+      socket.simulateMessage(
+        JSON.stringify({
+          janus_event: {
+            sender: 10,
+            plugindata: { data: { videoroom: "joined", id: "feed-alice", publishers: [] } },
+          },
+        }),
+      );
+      await flushAsync();
+
+      const hasConfigureBeforeTimeout = socket
+        .framesNamed("janus_message")
+        .map((f) => (f as { janus_message: { body: { request: string } } }).janus_message)
+        .some((m) => m.body.request === "configure");
+      expect(hasConfigureBeforeTimeout).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(kIceGatheringTimeoutMs);
+      await flushAsync();
+
+      const configureFrame = socket
+        .framesNamed("janus_message")
+        .map((f) => (f as { janus_message: { body: { request: string } } }).janus_message)
+        .find((m) => m.body.request === "configure");
+      expect(configureFrame).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("subscribes to an existing publisher listed in the 'joined' event", async () => {
     const { socket, manager, connections } = setup();
     await manager.joinCall();
@@ -229,6 +283,78 @@ describe("CallManager", () => {
       room: "room-1",
       ptype: "subscriber",
       feed: "feed-bob",
+    });
+  });
+
+  // Issue #373 — Janus's feed-based subscribe (`ptype: "subscriber", feed:
+  // ...`) only hands a subscriber whatever the feed was publishing at
+  // subscribe time; it doesn't push a stream the feed adds later (e.g.
+  // the peer turns their camera on after this side already subscribed
+  // to their audio-only feed) to an already-subscribed handle. Confirmed
+  // by raw signaling log: Janus's own "publishers updated" notification
+  // reaches every other participant's publish handle fine, but nothing
+  // arrives on the existing subscribe handle unless this side explicitly
+  // asks for the new stream. Without this, a peer who joined the call
+  // before the other side turned their camera on would never see their
+  // video at all — the tile exists (remoteStream already fired for
+  // audio), but the video track never arrives.
+  it("asks Janus to add a stream to an existing subscription when the feed's publisher list grows", async () => {
+    const { socket, manager, connections } = setup();
+    await manager.joinCall();
+    socket.simulateMessage(JSON.stringify({ call_roster: [], sfu_room: "room-1" }));
+    socket.simulateMessage(JSON.stringify({ janus_attached: { handle: 10 } }));
+    socket.simulateMessage(
+      JSON.stringify({
+        janus_event: {
+          sender: 10,
+          plugindata: {
+            data: {
+              videoroom: "joined",
+              id: "feed-alice",
+              publishers: [{ id: "feed-bob", display: "bob", streams: [{ mid: "0", type: "audio" }] }],
+            },
+          },
+        },
+      }),
+    );
+    socket.simulateMessage(JSON.stringify({ janus_attached: { handle: 11 } })); // subscribe to bob
+
+    // Bob turns his camera on — Janus broadcasts the updated publisher
+    // list (now including a video stream) to every other participant's
+    // *publish* handle, same as it did when bob first joined.
+    socket.simulateMessage(
+      JSON.stringify({
+        janus_event: {
+          sender: 10,
+          plugindata: {
+            data: {
+              videoroom: "event",
+              publishers: [
+                {
+                  id: "feed-bob",
+                  display: "bob",
+                  streams: [
+                    { mid: "0", type: "audio" },
+                    { mid: "1", type: "video" },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+
+    // No new attach/connection — this reuses the existing subscribe
+    // handle (11) rather than creating a second one for the same peer.
+    expect(connections).toHaveLength(2);
+    const subscribeUpdateFrame = socket
+      .framesNamed("janus_message")
+      .map((f) => (f as { janus_message: { handle: number; body: unknown } }).janus_message)
+      .find((m) => m.handle === 11 && (m.body as { request?: string }).request === "subscribe");
+    expect(subscribeUpdateFrame?.body).toEqual({
+      request: "subscribe",
+      streams: [{ feed: "feed-bob", mid: "1" }],
     });
   });
 

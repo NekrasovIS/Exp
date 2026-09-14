@@ -654,6 +654,195 @@ TEST(CallManagerIntegrationTest, SfuPublishAndSubscribeOfferAnswerRoundTrip) {
     callManagerB.leaveCall();
 }
 
+// Issue #373 — регрессия на то, что видео, включённое ПОСЛЕ того, как
+// собеседник уже подписался на аудио-фид (обычный сценарий: сначала
+// звонок целиком голосом, камера включается позже), никогда до него не
+// доходило. Причина не в самом обмене SDP — Janus-подписка по feedId
+// отдаёт только то, что feed публиковал на момент самой подписки, и сама
+// не проталкивает поток, добавленный позже; подписчик должен явно
+// запросить его отдельным "subscribe" на уже существующий handle. Тест
+// воспроизводит ровно этот порядок (оба вступают голосом, ждут взаимной
+// подписки, ТОЛЬКО ПОТОМ B включает камеру) и проверяет, что A всё равно
+// получает видеокадры B — до фикса ensureSubscribeConnection()/
+// onJanusEvent() просто не реагировали на то, что список потоков B
+// изменился, раз подписка на B уже существовала.
+TEST(CallManagerIntegrationTest, LateVideoReachesAPeerAlreadySubscribedToAudio) {
+    const QUrl authUrl(QString::fromStdString(envOrDefault("AUTH_SERVICE_URL", "http://127.0.0.1:8080")));
+    const QUrl userUrl(QString::fromStdString(envOrDefault("USER_SERVICE_URL", "http://127.0.0.1:8081")));
+    const QUrl chatRestUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_URL", "http://127.0.0.1:8082")));
+    const QUrl chatWsUrl(QString::fromStdString(envOrDefault("CHAT_SERVICE_WS_URL", "ws://127.0.0.1:8083")));
+    const QUrl janusUrl(QString::fromStdString(envOrDefault("JANUS_URL", "http://127.0.0.1:8088/janus")));
+
+    const qint64 suffix = QDateTime::currentMSecsSinceEpoch();
+    const QString loginA = QStringLiteral("late-video-test-a-%1").arg(suffix);
+    const QString loginB = QStringLiteral("late-video-test-b-%1").arg(suffix);
+    const QString password = QStringLiteral("integration-test-password");
+
+    QNetworkAccessManager manager;
+    if (!registerTestUser(manager, userUrl, loginA, password) ||
+        !registerTestUser(manager, userUrl, loginB, password)) {
+        GTEST_SKIP() << "user-service not reachable — start the full stack to run this test.";
+    }
+
+    AuthClient authClientA(authUrl);
+    AuthClient authClientB(authUrl);
+    const std::optional<QString> tokenA = requestToken(authClientA, loginA, password);
+    const std::optional<QString> tokenB = requestToken(authClientB, loginB, password);
+    if (!tokenA.has_value() || !tokenB.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable.";
+    }
+
+    ChatRestClient chatRestClient(chatRestUrl);
+    qint64 communityId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityCreated, &loop, [&](qint64 id, const QString&) {
+            communityId = id;
+            loop.quit();
+        });
+        chatRestClient.createCommunity(*tokenA, QStringLiteral("late-video-test"));
+        loop.exec();
+    }
+    ASSERT_GT(communityId, 0);
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::communityJoined, &loop, [&](qint64) { loop.quit(); });
+        chatRestClient.joinCommunity(*tokenB, communityId);
+        loop.exec();
+    }
+
+    qint64 channelId = 0;
+    {
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(&chatRestClient, &ChatRestClient::channelCreated, &loop, [&](qint64 id, const QString&) {
+            channelId = id;
+            loop.quit();
+        });
+        chatRestClient.createChannel(*tokenA, communityId, QStringLiteral("general"));
+        loop.exec();
+    }
+    ASSERT_GT(channelId, 0);
+
+    if (postJsonSync(manager, janusUrl, QJsonObject{{"janus", "create"}}).value(QStringLiteral("janus")).toString() !=
+        QStringLiteral("success")) {
+        GTEST_SKIP() << "Janus not reachable — run `docker compose --profile sfu up -d janus` to run this test.";
+    }
+
+    ChatClient chatClientA(chatWsUrl);
+    ChatClient chatClientB(chatWsUrl);
+    for (auto* client : {&chatClientA, &chatClientB}) {
+        bool subscribed = false;
+        QEventLoop loop;
+        QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+        QObject::connect(client, &ChatClient::subscribed, &loop, [&](qint64) {
+            subscribed = true;
+            loop.quit();
+        });
+        client->connectToChannel(client == &chatClientA ? *tokenA : *tokenB, channelId);
+        loop.exec();
+        ASSERT_TRUE(subscribed);
+    }
+
+    DeviceEnumerator enumerator;
+    const QList<QCameraDevice> cameras = enumerator.cameras();
+    if (cameras.isEmpty()) {
+        GTEST_SKIP() << "No camera available on this machine.";
+    }
+    const QCameraDevice cameraDevice = cameras.first();
+
+    AudioInputDevice audioInputA;
+    AudioOutputDevice audioOutputA;
+    AudioInputDevice audioInputB;
+    AudioOutputDevice audioOutputB;
+    CameraDevice cameraA;
+    CameraDevice cameraB;
+    ScreenCaptureDevice screenCaptureA;
+    ScreenCaptureDevice screenCaptureB;
+
+    CallManager callManagerA(chatClientA, audioInputA, audioOutputA, cameraA, screenCaptureA);
+    CallManager callManagerB(chatClientB, audioInputB, audioOutputB, cameraB, screenCaptureB);
+    callManagerA.setLocalLogin(loginA);
+    callManagerB.setLocalLogin(loginB);
+
+    QStringList errorsA;
+    QObject::connect(&callManagerA, &CallManager::callError, [&](const QString& message) { errorsA << message; });
+
+    bool frameReceived = false;
+    QObject::connect(&callManagerA, &CallManager::remoteVideoFrameReceived,
+                      [&](const QString& peerLogin, const QImage& frame, bool isScreenShare) {
+                          if (peerLogin == loginB && !frame.isNull() && !isScreenShare) {
+                              frameReceived = true;
+                          }
+                      });
+
+    // Null-устройства ввода/вывода звука (см. doc-комментарий joinCall() и
+    // прецедент в SfuThreeParticipantPublishAndSubscribeRoundTrip выше) —
+    // сигналинг и ICE идут как обычно; реальный захват звука здесь не
+    // нужен и намеренно исключён, чтобы не столкнуться с уже
+    // задокументированной там же хрупкостью синхронизации реального
+    // захвата микрофона под несколькими одновременными
+    // PeerConnectionFactory, никак не связанной с тем, что проверяет этот
+    // тест.
+    callManagerA.joinCall(QAudioDevice(), QAudioDevice());
+    {
+        // Даём A время самому опубликоваться, как и в тесте выше.
+        QEventLoop loop;
+        QTimer::singleShot(4000, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+    callManagerB.joinCall(QAudioDevice(), QAudioDevice());
+    {
+        // Обе публикации (аудио) + обе взаимные подписки должны полностью
+        // устаканиться ДО того, как B включит камеру — иначе тест не
+        // отличит "видео дошло, потому что подписка была создана уже
+        // после того, как B стал публиковать видео" (что и без фикса
+        // работало бы) от заявленного в issue #373 сценария. Щедрее, чем
+        // в сестринском тесте выше (8с) — если B вызовет enableVideo(),
+        // пока его собственный аудио-offer ещё в полёте (signaling_state
+        // ещё не вернулся в kStable после ответа Janus), negotiateLocal()
+        // намеренно ничего не делает (см. её же doc-комментарий про
+        // защиту от наложения второго offer на первый) — и видео-конфигурация
+        // просто теряется без единой ошибки. Живое тестирование
+        // подтвердило это как реальную причину нестабильности именно
+        // этого теста, не связанную с логикой issue #373 самой по себе.
+        QEventLoop loop;
+        QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+
+    callManagerB.enableVideo(cameraDevice);
+    {
+        // Генерозный запас: этот путь — три независимых ICE-раунда поверх
+        // уже устаканившихся двух аудио-раундов (B публикует видео,
+        // subscribe-update на A, A отвечает) — и на этой машине один
+        // раунд может упереться в весь kIceGatheringTimeoutMs (8000ms, см.
+        // doc-комментарий у него самого), если сбор кандидатов не
+        // завершится естественным путём раньше.
+        QEventLoop loop;
+        QTimer::singleShot(20000, &loop, &QEventLoop::quit);
+        QObject::connect(&callManagerA, &CallManager::remoteVideoFrameReceived, &loop, [&](const QString&, const QImage&, bool) {
+            if (frameReceived) {
+                loop.quit();
+            }
+        });
+        loop.exec();
+    }
+
+    // Null-устройства (см. doc-комментарий выше) сами по себе дают ровно
+    // два ожидаемых предупреждения (нет микрофона, нет вывода) — тот же
+    // счёт, что и в SfuThreeParticipantPublishAndSubscribeRoundTrip; важно
+    // отсутствие ДОПОЛНИТЕЛЬНЫХ ошибок, не общее их отсутствие.
+    EXPECT_EQ(errorsA.size(), 2) << errorsA.join(QStringLiteral("; ")).toStdString();
+    EXPECT_TRUE(frameReceived) << "A never received a video frame from B, even though B enabled its camera well "
+                                  "after A had already subscribed to B's audio-only feed (issue #373).";
+
+    callManagerA.leaveCall();
+    callManagerB.leaveCall();
+}
+
 // issue #233: #232 заменил mesh на SFU, но собственное условие issue #233
 // на удаление mesh-кода — не "теоретическая замена", а подтверждённый
 // работающий SFU-звонок минимум с 3 участниками (тем количеством, где
