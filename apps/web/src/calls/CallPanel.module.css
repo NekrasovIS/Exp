@@ -9,6 +9,7 @@
  */
 
 .container {
+  position: relative; /* anchors .reactionFeed (issue #444) */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -51,8 +52,8 @@
 }
 
 .reactionButton {
-  width: 32px;
-  height: 32px;
+  width: var(--space-6);
+  height: var(--space-6);
   padding: 0;
   display: flex;
   align-items: center;
@@ -62,18 +63,28 @@
   border-radius: 50%;
 }
 
+/* Issue #444 — taken out of flow (was a plain <p> in the normal
+   document flow, appearing/disappearing with each reaction and
+   shoving .videoGrid down/up on every toggle) so a received reaction
+   reads as the transient toast it is, not a layout-affecting element. */
 .reactionFeed {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-4);
   margin: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
+  pointer-events: none;
 }
 
 /* A horizontal filmstrip, not a full-bleed hero — this sits above the
    message list in the same scrolling column (see chatView.module.css's
    .section), so a tall video grid would shove the conversation below
-   the fold. Wrapping instead of a fixed row lets a handful of
-   participants stay visible without scrolling; overflow-x covers the
-   rest for a larger call. */
+   the fold. flex-wrap lets a handful of participants reflow onto
+   additional rows instead of forcing a horizontal scrollbar. */
 .videoGrid {
   display: flex;
   flex-wrap: wrap;

@@ -78,7 +78,9 @@ describe("CallPanel", () => {
 
     render(<CallPanel chatClient={client} localLogin="alice" />);
     await userEvent.click(screen.getByRole("button", { name: "Join call" }));
-    await userEvent.click(await screen.findByRole("button", { name: "👍" }));
+    // Issue #444 — the button's accessible name is now its aria-label
+    // ("Thumbs up"), not the raw emoji glyph.
+    await userEvent.click(await screen.findByRole("button", { name: "Thumbs up" }));
 
     expect(socket?.sent.map((frame) => JSON.parse(frame))).toContainEqual({ call_reaction: "👍" });
   });
