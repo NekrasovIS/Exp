@@ -1,5 +1,6 @@
 #include "ui/ProfileDialog.h"
 
+#include <QDialogButtonBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -43,6 +44,20 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
                                          .telegramChatId = telegramChatIdEdit_->text()});
     });
 
+    // Issue #416: раньше единственным способом закрыть диалог без
+    // сохранения было системное окно закрытия (или Escape, о котором
+    // пользователь мог не догадаться) — теперь есть видимая кнопка
+    // Cancel, тот же QDialogButtonBox, что уже используют другие
+    // диалоги приложения (например, ChannelsPanel::showAddDialog()).
+    // saveButton_ добавлен как ActionRole, а не Ok — клик по нему не
+    // должен закрывать диалог (сохранение асинхронное, MainWindow сам
+    // решает, когда диалог закрыть), поведение стандартной роли Ok
+    // здесь не подходит.
+    auto* buttonBox = new QDialogButtonBox(this);
+    buttonBox->addButton(saveButton_, QDialogButtonBox::ActionRole);
+    cancelButton_ = buttonBox->addButton(QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
     statusLabel_ = new QLabel(this);
     statusLabel_->setObjectName(QStringLiteral("profileStatusLabel"));
     statusLabel_->setWordWrap(true);
@@ -51,7 +66,7 @@ ProfileDialog::ProfileDialog(QWidget* parent) : QDialog(parent) {
     layout->addWidget(avatarUrlEdit_);
     layout->addWidget(emailEdit_);
     layout->addWidget(telegramChatIdEdit_);
-    layout->addWidget(saveButton_);
+    layout->addWidget(buttonBox);
     layout->addWidget(statusLabel_);
 }
 
