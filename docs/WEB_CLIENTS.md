@@ -26,10 +26,14 @@ apps/
 packages/
   core/      общий TypeScript-слой доступа к бэкенду — клиенты auth/user/
              chat-service (issue #248/#249/#250)
-  ui/        общие React-компоненты веб-клиента (issue #433) — только
-             исходники (JSX/CSS Modules), без своей сборки в dist/: их
-             обрабатывает vite/vitest самого apps/web, а не tsc, в
-             отличие от чистого TS в packages/core
+  ui/        общие React-компоненты и design-токены веб-клиента
+             (issue #433/#435) — только исходники (JSX/CSS Modules),
+             без своей сборки в dist/: их обрабатывает vite/vitest
+             самого apps/web, а не tsc, в отличие от чистого TS в
+             packages/core. theme.css (issue #435) — единственный
+             источник токенов/базовых стилей элементов; apps/web/src/
+             theme.css просто @import'ит его и добавляет только
+             app-shell-специфику (html/body/#root)
 ```
 
 `apps/web` — Vite + React + react-router-dom. `SessionProvider`

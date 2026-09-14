@@ -21,6 +21,12 @@ export default tseslint.config(
       "build-*/**",
       "**/dist/**",
       "**/node_modules/**",
+      // claude.ai/design sync (issue #435) — staged converter scripts
+      // (.ds-sync/) and the generated component bundle (ds-bundle/),
+      // same rationale as vcpkg/ above: vendored/generated JS ESLint
+      // has no business parsing.
+      "ds-bundle/**",
+      ".ds-sync/**",
     ],
   },
   js.configs.recommended,
