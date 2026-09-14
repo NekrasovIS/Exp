@@ -75,7 +75,7 @@ export function CallPanel({ chatClient, localLogin }: CallPanelProps) {
           <VideoTile stream={state.localCameraStream} label="You (camera)" muted />
         )}
         {state.localScreenShareStream !== null && (
-          <VideoTile stream={state.localScreenShareStream} label="You (screen)" muted />
+          <VideoTile stream={state.localScreenShareStream} label="You (screen)" muted kind="screen" />
         )}
         {[...state.remoteStreams.entries()].map(([peerLogin, stream]) => (
           <VideoTile key={peerLogin} stream={stream} label={peerLogin} />

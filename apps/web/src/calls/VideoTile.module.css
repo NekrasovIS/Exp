@@ -27,6 +27,27 @@
   display: block;
 }
 
+/* Issue #446 — a real desktop capture is almost always wider than 4:3
+   (16:9, ultrawide); object-fit: cover in the narrower camera aspect
+   ratio would crop meaningful content (side panels/windows). Only ever
+   applied to the local screen-share tile — see VideoTile.tsx's own doc
+   comment on why remote tiles can't reliably tell camera from screen
+   share apart at all. */
+.tile[data-kind="screen"] {
+  width: 320px;
+  aspect-ratio: 16 / 9;
+}
+
+.tile[data-kind="screen"] video {
+  object-fit: contain;
+  /* Letterbox bars around a contained (non-cropped) capture read as
+     "video player black", the universal convention for this — not
+     themed with a --color-* token, since a slate app-surface color
+     here would look like a mismatched-theme bug rather than a
+     deliberate letterbox. */
+  background: #000;
+}
+
 .tile figcaption {
   position: absolute;
   left: 0;
