@@ -207,8 +207,11 @@ void CallWindow::relayoutVideoGrid() {
     // Убираем все ячейки (не виджеты — QLayout::takeAt() не трогает
     // родителя), чтобы заново расставить их с нуля по актуальному
     // набору и числу колонок ниже, а не пытаться вычислить дельту.
+    // takeAt() передаёт вызывающему владение самим QLayoutItem-обёрткой
+    // (не виджетом внутри неё) — без explicit delete здесь была бы
+    // утечка QLayoutItem на каждый вызов relayoutVideoGrid().
     while (grid->count() > 0) {
-        grid->takeAt(0);
+        delete grid->takeAt(0);
     }
 
     QList<QWidget*> activeWidgets;
