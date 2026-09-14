@@ -207,6 +207,7 @@ export function MessageList({
                     <button
                       type="button"
                       className={styles.actionButton}
+                      data-variant="danger"
                       onClick={() => onDelete(message.id)}
                     >
                       Delete

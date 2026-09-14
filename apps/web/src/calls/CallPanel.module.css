@@ -39,20 +39,6 @@
   color: var(--color-text-on-accent);
 }
 
-/* Leave call is destructive-ish — a quiet danger outline at rest (never
-   default-red on a row of otherwise-neutral buttons; only warms up on
-   hover/press, mirroring how every other button here only accents on
-   interaction). */
-.leaveButton {
-  color: var(--color-danger);
-  border-color: var(--color-danger-border);
-}
-
-.leaveButton:hover:not(:disabled) {
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger-border);
-}
-
 .participants {
   margin: 0;
   font-size: var(--font-size-sm);
