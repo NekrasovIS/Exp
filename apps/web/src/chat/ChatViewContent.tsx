@@ -4,6 +4,7 @@
 // never calls useMessages/useChatSocket) for one.
 
 import type { ChatMessageInfo } from "@devicehub/core";
+import { AsyncListStatus } from "@devicehub/ui";
 import { useEffect, useState } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
@@ -100,8 +101,7 @@ export function ChatViewContent({
       {pinnedOpen && <PinnedMessagesPanel pinned={pinned} />}
 
       <div className={styles.scrollArea}>
-        {loading && <p className={styles.statusText}>Loading messages…</p>}
-        {error !== null && <p role="alert">{error}</p>}
+        <AsyncListStatus loading={loading} error={error} loadingText="Loading messages…" />
         {hasMore && !loading && (
           <button type="button" className={styles.loadOlderButton} onClick={() => void loadOlder()}>
             Load older messages
