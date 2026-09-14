@@ -144,6 +144,20 @@ QString darkStyleSheet() {
             font-size: 12px;
         }
 
+        /* Issue #417: статусные подписи (ProfileDialog/ModeratorsDialog/
+           LoginWindow/SettingsDialog — StatusLabel.h) раньше всегда были
+           обычным текстом QLabel, даже сообщая об ошибке или успехе, — те
+           же цвета, что уже использует ToastBanner для variant="success"/
+           "error", здесь применяются через ту же схему свойства-на-виджете
+           ([sectionTitle="true"] выше, [ownReaction="true"] у reactionChip). */
+        QLabel[statusVariant="success"] {
+            color: #6ee7b7;
+        }
+
+        QLabel[statusVariant="error"] {
+            color: #f09595;
+        }
+
         QLabel[chatAuthor="true"] {
             font-weight: 600;
         }

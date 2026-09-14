@@ -861,6 +861,32 @@ package "devicehub::notification_policy" <<Rectangle>> {
 }
 DesktopNotifier ..> NotificationPolicy : shouldNotify() >
 
+package "devicehub::ui_status" <<Rectangle>> {
+  class StatusVariant << (E,lightgreen) enum >> {
+    kNeutral
+    kSuccess
+    kError
+  }
+  class StatusLabel << (N,orchid) namespace >> {
+    +setStatusText(label: QLabel*, text: QString, variant: StatusVariant = kNeutral)
+  }
+  StatusLabel ..> StatusVariant
+}
+note right of StatusLabel
+  Issue #417: ProfileDialog/ModeratorsDialog/
+  LoginWindow/SettingsDialog статусные QLabel'ы
+  раньше всегда были одного цвета, даже сообщая
+  об ошибке/успехе. setStatusText() задаёт Qt-
+  property "statusVariant" (тот же приём, что
+  и sectionTitle/ownReaction) и делает
+  unpolish()/polish() — обязательно, в отличие
+  от reactionChip, эти виджеты живут дольше
+  одного сообщения и меняют вариант повторно.
+  Theme.cpp красит по этому свойству теми же
+  цветами, что уже использует ToastBanner для
+  variant="success"/"error".
+end note
+
 package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
@@ -942,6 +968,8 @@ MainWindow ..> ChatRestClient : joinedCommunityByCode()\ninviteCodeRegenerated()
 MainWindow ..> CallManager : participantJoined()/Left()\ncallError() >
 MainWindow ..> CallManager : remoteVideoFrameReceived()\nremoteVideoTrackRemoved() >
 MainWindow ..> ToastBanner : showMessage() >
+MainWindow ..> StatusLabel : setStatusText() (Profile/Moderators\nDialog/SettingsDialog status labels) >
+LoginWindow ..> StatusLabel : setStatusText() >
 MainWindow ..> UserProfileClient : profileReceived()/Updated()\nerrorOccurred() (issue #110) >
 MainWindow ..> UserProfileClient : sendFriendRequest()/listFriends()\naccept|declineFriendRequest()/removeFriend()\n(issue #187, Фаза 3) >
 MainWindow ..> ChatRestClient : openDmThread()/listDmThreads()\nsendDirectMessage()/listDirectMessages()\n(issue #187, Фаза 3) >
