@@ -2,13 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <QGridLayout>
 #include <QImage>
 #include <QLabel>
+#include <QPair>
 #include <QPushButton>
+#include <QSet>
 #include <QSignalSpy>
 #include <QVideoWidget>
-
-#include "ui/DraggableVideoTile.h"
 
 namespace devicehub {
 namespace {
@@ -32,23 +33,16 @@ TEST(CallWindowTest, SetMutedTogglesButtonLabel) {
     EXPECT_EQ(window.muteToggleButton()->text(), QStringLiteral("Mute"));
 }
 
-// Видимость переключается на обёртке DraggableVideoTile, а не на самом
-// localVideoWidget()/localScreenShareVideoWidget() (issue #185, часть
-// про перетаскиваемые плитки) — content_->isHidden() не отражает
-// скрытие родителя (Qt не выставляет этот флаг на детях, когда прячет
-// сам контейнер), поэтому эти тесты проверяют parentWidget()
-// (саму плитку), а не сам видео-виджет.
-
 TEST(CallWindowTest, SetVideoEnabledTogglesButtonLabelAndLocalPreviewVisibility) {
     CallWindow window;
 
     window.setVideoEnabled(true);
     EXPECT_EQ(window.videoToggleButton()->text(), QStringLiteral("Disable Video"));
-    EXPECT_FALSE(window.localVideoWidget()->parentWidget()->isHidden());
+    EXPECT_FALSE(window.localVideoWidget()->isHidden());
 
     window.setVideoEnabled(false);
     EXPECT_EQ(window.videoToggleButton()->text(), QStringLiteral("Enable Video"));
-    EXPECT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.localVideoWidget()->isHidden());
 }
 
 TEST(CallWindowTest, SetScreenShareEnabledTogglesButtonLabelAndLocalPreviewVisibility) {
@@ -56,11 +50,11 @@ TEST(CallWindowTest, SetScreenShareEnabledTogglesButtonLabelAndLocalPreviewVisib
 
     window.setScreenShareEnabled(true);
     EXPECT_EQ(window.screenShareToggleButton()->text(), QStringLiteral("Stop Sharing"));
-    EXPECT_FALSE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 
     window.setScreenShareEnabled(false);
     EXPECT_EQ(window.screenShareToggleButton()->text(), QStringLiteral("Share Screen"));
-    EXPECT_TRUE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.localScreenShareVideoWidget()->isHidden());
 }
 
 TEST(CallWindowTest, VideoAndScreenShareLocalPreviewsAreIndependent) {
@@ -71,21 +65,12 @@ TEST(CallWindowTest, VideoAndScreenShareLocalPreviewsAreIndependent) {
 
     window.setVideoEnabled(true);
     window.setScreenShareEnabled(true);
-    EXPECT_FALSE(window.localVideoWidget()->parentWidget()->isHidden());
-    EXPECT_FALSE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
+    EXPECT_FALSE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 
     window.setVideoEnabled(false);
-    EXPECT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
-    EXPECT_FALSE(window.localScreenShareVideoWidget()->parentWidget()->isHidden());
-}
-
-TEST(CallWindowTest, LocalPreviewTilesAreDraggable) {
-    // issue #185: обе локальные плитки — DraggableVideoTile, а не голый
-    // QVideoWidget напрямую в layout'е.
-    CallWindow window;
-
-    EXPECT_NE(qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget()), nullptr);
-    EXPECT_NE(qobject_cast<DraggableVideoTile*>(window.localScreenShareVideoWidget()->parentWidget()), nullptr);
+    EXPECT_TRUE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 }
 
 TEST(CallWindowTest, SetCallParticipantsShowsJoinedNames) {
@@ -146,6 +131,35 @@ TEST(CallWindowTest, RemoveRemoteVideoDropsThatParticipantsTile) {
     window.removeRemoteVideo(QStringLiteral("alice"), /*isScreenShare=*/false);
 
     EXPECT_EQ(window.findChild<QLabel*>(QStringLiteral("remoteVideoTile")), nullptr);
+}
+
+TEST(CallWindowTest, NineRemoteTilesDoNotOverlapInTheSameGridCell) {
+    // issue #437, регрессия найденного в аудите бага: старая каскадная
+    // модель (nextTileCascadePosition(), kCascadeMaxSteps == 8) отдавала
+    // 9-й плитке координаты, идентичные 1-й — плитки садились друг на
+    // друга ровно в одной точке без какого-либо сигнала об этом. Реальный
+    // QGridLayout не может разместить два виджета в одной ячейке, так что
+    // с любым числом плиток каждая должна получить свою уникальную
+    // (row, column).
+    CallWindow window;
+    for (int i = 0; i < 9; ++i) {
+        window.showRemoteVideoFrame(QStringLiteral("peer%1").arg(i), QImage(4, 4, QImage::Format_ARGB32),
+                                     /*isScreenShare=*/false);
+    }
+
+    auto* grid = window.findChild<QGridLayout*>();
+    ASSERT_NE(grid, nullptr);
+    QSet<QPair<int, int>> occupiedCells;
+    for (int i = 0; i < grid->count(); ++i) {
+        int row = 0;
+        int column = 0;
+        int rowSpan = 0;
+        int columnSpan = 0;
+        grid->getItemPosition(i, &row, &column, &rowSpan, &columnSpan);
+        EXPECT_FALSE(occupiedCells.contains({row, column}));
+        occupiedCells.insert({row, column});
+    }
+    EXPECT_EQ(occupiedCells.size(), 9);
 }
 
 TEST(CallWindowTest, ResetForNewCallClearsRemoteTilesAndParticipants) {
@@ -273,29 +287,30 @@ TEST(CallWindowTest, ClosingTheWindowEmitsMinimizeRequestedInsteadOfClosing) {
 }
 
 TEST(CallWindowTest, DetachTilesToMovesActiveTilesToNewHostAndShrinksThem) {
-    // issue #215: свёрнутое состояние — плитки переносятся (setParent), а
-    // не пересоздаются, и уменьшаются до компактного размера.
+    // issue #215/#437: свёрнутое состояние — активные плитки переносятся
+    // (addWidget() на новый QGridLayout реparent'ит их) и уменьшаются до
+    // компактного размера.
     CallWindow window;
     QWidget overlayCanvas;
     window.setVideoEnabled(true);
     window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
                                  /*isScreenShare=*/false);
-    auto* localTile = qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget());
-    auto* remoteTile = qobject_cast<DraggableVideoTile*>(
-        window.findChild<QLabel*>(QStringLiteral("remoteVideoTile"))->parentWidget());
-    const int fullSize = localTile->width();
+    QWidget* localTile = window.localVideoWidget();
+    QWidget* remoteTile = window.findChild<QLabel*>(QStringLiteral("remoteVideoTile"));
+    const int fullSize = localTile->minimumWidth();
 
     window.detachTilesTo(&overlayCanvas);
 
     EXPECT_EQ(localTile->parentWidget(), &overlayCanvas);
     EXPECT_EQ(remoteTile->parentWidget(), &overlayCanvas);
-    EXPECT_LT(localTile->width(), fullSize);
-    EXPECT_LT(remoteTile->width(), fullSize);
+    EXPECT_LT(localTile->minimumWidth(), fullSize);
+    EXPECT_LT(remoteTile->minimumWidth(), fullSize);
 }
 
 TEST(CallWindowTest, DetachTilesToKeepsActiveLocalTileVisible) {
-    // issue #287: QWidget::setParent() внутри placeTile() неявно
-    // скрывает виджет как побочный эффект смены родителя — до фикса
+    // issue #287 (и снова актуально для issue #437's грида):
+    // QWidget::setParent(), вызванный неявно внутри QGridLayout::addWidget(),
+    // скрывает виджет как побочный эффект смены родителя — до фикса #287
     // это молча "выключало" уже включённую камеру/демонстрацию экрана
     // при каждом сворачивании звонка, хотя setVideoEnabled(true) явно
     // просил её показывать. Соседний тест
@@ -306,29 +321,27 @@ TEST(CallWindowTest, DetachTilesToKeepsActiveLocalTileVisible) {
     QWidget overlayCanvas;
     window.setVideoEnabled(true);
     window.setScreenShareEnabled(true);
-    auto* localCameraTile = qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget());
-    auto* localScreenShareTile =
-        qobject_cast<DraggableVideoTile*>(window.localScreenShareVideoWidget()->parentWidget());
-    ASSERT_FALSE(localCameraTile->isHidden());
-    ASSERT_FALSE(localScreenShareTile->isHidden());
+    ASSERT_FALSE(window.localVideoWidget()->isHidden());
+    ASSERT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 
     window.detachTilesTo(&overlayCanvas);
 
-    EXPECT_FALSE(localCameraTile->isHidden());
-    EXPECT_FALSE(localScreenShareTile->isHidden());
+    EXPECT_FALSE(window.localVideoWidget()->isHidden());
+    EXPECT_FALSE(window.localScreenShareVideoWidget()->isHidden());
 }
 
 TEST(CallWindowTest, DetachTilesToPreservesDisabledLocalTileVisibility) {
     // issue #215: участник без активного видео не должен внезапно
     // "появиться" только оттого, что звонок свернули — detachTilesTo()
-    // переносит плитки как есть, не форсируя их видимыми.
+    // не добавляет неактивные локальные виджеты в новый грид и не
+    // форсирует их видимыми.
     CallWindow window;
     QWidget overlayCanvas;
-    ASSERT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
+    ASSERT_TRUE(window.localVideoWidget()->isHidden());
 
     window.detachTilesTo(&overlayCanvas);
 
-    EXPECT_TRUE(window.localVideoWidget()->parentWidget()->isHidden());
+    EXPECT_TRUE(window.localVideoWidget()->isHidden());
 }
 
 TEST(CallWindowTest, ReattachTilesRestoresVideoStripAsHostAndFullSize) {
@@ -337,19 +350,18 @@ TEST(CallWindowTest, ReattachTilesRestoresVideoStripAsHostAndFullSize) {
     window.setVideoEnabled(true);
     window.showRemoteVideoFrame(QStringLiteral("alice"), QImage(4, 4, QImage::Format_ARGB32),
                                  /*isScreenShare=*/false);
-    auto* localTile = qobject_cast<DraggableVideoTile*>(window.localVideoWidget()->parentWidget());
-    auto* remoteTile = qobject_cast<DraggableVideoTile*>(
-        window.findChild<QLabel*>(QStringLiteral("remoteVideoTile"))->parentWidget());
-    const int fullSize = localTile->width();
+    QWidget* localTile = window.localVideoWidget();
+    QWidget* remoteTile = window.findChild<QLabel*>(QStringLiteral("remoteVideoTile"));
+    const int fullSize = localTile->minimumWidth();
     window.detachTilesTo(&overlayCanvas);
-    ASSERT_LT(localTile->width(), fullSize);
+    ASSERT_LT(localTile->minimumWidth(), fullSize);
 
     window.reattachTiles();
 
     EXPECT_NE(localTile->parentWidget(), &overlayCanvas);
     EXPECT_NE(remoteTile->parentWidget(), &overlayCanvas);
-    EXPECT_EQ(localTile->width(), fullSize);
-    EXPECT_EQ(remoteTile->width(), fullSize);
+    EXPECT_EQ(localTile->minimumWidth(), fullSize);
+    EXPECT_EQ(remoteTile->minimumWidth(), fullSize);
     // Инвариант удалённых плиток (см. removeRemoteVideo()) — всегда видны,
     // пока существуют, независимо от свёрнутого/развёрнутого состояния.
     EXPECT_FALSE(remoteTile->isHidden());
@@ -366,11 +378,11 @@ TEST(CallWindowTest, TilesCreatedWhileMinimizedGoStraightToTheOverlayHost) {
     window.showRemoteVideoFrame(QStringLiteral("bob"), QImage(4, 4, QImage::Format_ARGB32),
                                  /*isScreenShare=*/false);
 
-    // Плитка теперь живёт под overlayCanvas, а не под window (setParent()
-    // в placeTile() переносит её из дерева CallWindow), поэтому искать
-    // нужно там же.
-    auto* remoteTile = qobject_cast<DraggableVideoTile*>(
-        overlayCanvas.findChild<QLabel*>(QStringLiteral("remoteVideoTile"))->parentWidget());
+    // Плитка теперь живёт под overlayCanvas, а не под window
+    // (QGridLayout::addWidget() внутри relayoutVideoGrid() реparent'ит
+    // её из дерева CallWindow), поэтому искать нужно там же.
+    QLabel* remoteTile = overlayCanvas.findChild<QLabel*>(QStringLiteral("remoteVideoTile"));
+    ASSERT_NE(remoteTile, nullptr);
     EXPECT_EQ(remoteTile->parentWidget(), &overlayCanvas);
 }
 

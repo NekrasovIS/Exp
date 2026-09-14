@@ -13,14 +13,15 @@ namespace devicehub {
  *        демонстрация экрана, видео удалённых участников) оставалось
  *        видимым в компактном виде, как picture-in-picture.
  *
- * Сама не владеет никакими DraggableVideoTile и не знает про звонок —
- * вся эта логика (какие плитки существуют, куда их переносить, каким
+ * Сама не владеет никакими видео-виджетами и не знает про звонок — вся
+ * эта логика (какие плитки существуют, куда их переносить, каким
  * размером) остаётся в CallWindow (см. её detachTilesTo()/
  * reattachTiles()), это окно только предоставляет canvas() — обычный
- * QWidget без layout'а, куда CallWindow репарентит свои плитки, и
- * кнопку возврата. Тот же принцип "чистого представления", что и у
- * CallWindow/ChatView — MainWindow решает, когда это окно показать/
- * скрыть, оно само не решает.
+ * QWidget, на котором CallWindow лениво заводит свой QGridLayout (issue
+ * #437) и туда добавляет свои плитки, и кнопку возврата. Тот же
+ * принцип "чистого представления", что и у CallWindow/ChatView —
+ * MainWindow решает, когда это окно показать/скрыть, оно само не
+ * решает.
  */
 class FloatingCallTilesOverlay : public QWidget {
     Q_OBJECT
@@ -28,10 +29,9 @@ class FloatingCallTilesOverlay : public QWidget {
 public:
     explicit FloatingCallTilesOverlay(QWidget* parent = nullptr);
 
-    /// Canvas без layout'а — DraggableVideoTile-плитки внутри него
-    /// позиционируются и перетаскиваются так же, как и в
-    /// CallWindow::videoStrip_ (тот же класс плиток, просто другой
-    /// текущий родитель).
+    /// Canvas, на котором CallWindow заводит свой QGridLayout при первом
+    /// detachTilesTo() (issue #437) — те же виджеты содержимого, что и в
+    /// CallWindow::videoStrip_, просто другой текущий родитель/грид.
     [[nodiscard]] QWidget* canvas() const { return canvas_; }
     [[nodiscard]] QPushButton* restoreButton() const { return restoreButton_; }
 

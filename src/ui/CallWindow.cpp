@@ -1,6 +1,7 @@
 #include "ui/CallWindow.h"
 
 #include <QCloseEvent>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
@@ -9,9 +10,9 @@
 #include <QVBoxLayout>
 #include <QVideoWidget>
 
+#include <cmath>
 #include <utility>
 
-#include "ui/DraggableVideoTile.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -22,12 +23,21 @@ constexpr int kVideoTileSize = 160;
 /// меньше, чтобы FloatingCallTilesOverlay реально выглядел как
 /// picture-in-picture, а не уменьшенная копия CallWindow.
 constexpr int kMiniVideoTileSize = 96;
-constexpr int kCascadeStep = 28;
-constexpr int kCascadeMaxSteps = 8;
 /// Issue #312 — тот же порядок величины, что kTypingIndicatorHideMs у
 /// ChatView, только короче: реакция — мгновенный жест, а не состояние,
 /// которое имеет смысл держать на экране несколько секунд подряд.
 constexpr int kReactionFeedHideMs = 2500;
+
+/// Число колонок грида для @p tileCount активных плиток (issue #437) —
+/// ближайший верхний квадратный корень, чтобы грид оставался примерно
+/// квадратным при любом количестве участников, а не растягивался в одну
+/// длинную строку/столбец.
+int gridColumnsFor(int tileCount) {
+    if (tileCount <= 1) {
+        return 1;
+    }
+    return static_cast<int>(std::ceil(std::sqrt(static_cast<double>(tileCount))));
+}
 
 /// Фиксированный набор быстрых реакций (issue #312) — эмодзи вне
 /// Basic Multilingual Plane (нужен суррогатная пара в UTF-16) записаны
@@ -119,32 +129,27 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     callParticipantsLabel_->setWordWrap(true);
     callParticipantsLabel_->setVisible(false);
 
-    // Canvas без layout'а (issue #185) — каждая плитка внутри свободно
-    // перетаскивается/растягивается мышью (DraggableVideoTile), а не
-    // выстраивается сама по QHBoxLayout, как раньше.
+    // Grid-хост (issue #437) — колонки/строки пересчитываются от
+    // текущего числа активных плиток в relayoutVideoGrid(), сам layout
+    // создаётся лениво через ensureGridLayout() при первом обращении.
     videoStrip_ = new QWidget(this);
     videoStrip_->setVisible(false);
     tileHost_ = videoStrip_;
     currentTileSize_ = kVideoTileSize;
+    ensureGridLayout(videoStrip_);
 
-    localVideoWidget_ = new QVideoWidget();
+    localVideoWidget_ = new QVideoWidget(this);
     localVideoWidget_->setObjectName(QStringLiteral("localVideoWidget"));
-    localCameraTile_ = new DraggableVideoTile(localVideoWidget_, videoStrip_);
-    localCameraTile_->resize(kVideoTileSize, kVideoTileSize);
-    localCameraTile_->move(ui_theme::kSpacingSm, ui_theme::kSpacingSm);
-    localCameraTile_->setVisible(false);
+    localVideoWidget_->setVisible(false);
 
-    // Отдельная плитка для локального превью демонстрации экрана (issue
+    // Отдельный виджет для локального превью демонстрации экрана (issue
     // #185) — камера и демонстрация экрана теперь независимы и могут
     // быть видны одновременно, поэтому один общий QVideoWidget на оба
     // источника больше не подходит (кто последний прислал кадр, тот и
     // виден).
-    localScreenShareVideoWidget_ = new QVideoWidget();
+    localScreenShareVideoWidget_ = new QVideoWidget(this);
     localScreenShareVideoWidget_->setObjectName(QStringLiteral("localScreenShareVideoWidget"));
-    localScreenShareTile_ = new DraggableVideoTile(localScreenShareVideoWidget_, videoStrip_);
-    localScreenShareTile_->resize(kVideoTileSize, kVideoTileSize);
-    localScreenShareTile_->move(2 * ui_theme::kSpacingSm + kVideoTileSize, ui_theme::kSpacingSm);
-    localScreenShareTile_->setVisible(false);
+    localScreenShareVideoWidget_->setVisible(false);
 
     rootLayout->addLayout(controlsRow);
     rootLayout->addLayout(reactionsRow);
@@ -166,15 +171,13 @@ void CallWindow::setMuted(bool muted) {
 void CallWindow::setVideoEnabled(bool enabled) {
     videoToggleButton_->setText(enabled ? tr("Disable Video") : tr("Enable Video"));
     videoActive_ = enabled;
-    localCameraTile_->setVisible(enabled);
-    updateVideoStripVisibility();
+    relayoutVideoGrid();
 }
 
 void CallWindow::setScreenShareEnabled(bool enabled) {
     screenShareToggleButton_->setText(enabled ? tr("Stop Sharing") : tr("Share Screen"));
     screenShareActive_ = enabled;
-    localScreenShareTile_->setVisible(enabled);
-    updateVideoStripVisibility();
+    relayoutVideoGrid();
 }
 
 void CallWindow::updateVideoStripVisibility() {
@@ -190,49 +193,77 @@ void CallWindow::setCallParticipants(const QStringList& participants) {
     callParticipantsLabel_->setVisible(true);
 }
 
-QPoint CallWindow::nextTileCascadePosition() {
-    const int step = nextTileCascadeIndex_ % kCascadeMaxSteps;
-    ++nextTileCascadeIndex_;
-    const int baseY = ui_theme::kSpacingSm + currentTileSize_ + ui_theme::kSpacingSm;
-    return {ui_theme::kSpacingSm + step * kCascadeStep, baseY + step * kCascadeStep};
+QGridLayout* CallWindow::ensureGridLayout(QWidget* host) {
+    auto* grid = qobject_cast<QGridLayout*>(host->layout());
+    if (grid == nullptr) {
+        grid = new QGridLayout(host);
+        grid->setSpacing(ui_theme::kSpacingSm);
+    }
+    return grid;
 }
 
-void CallWindow::placeTile(DraggableVideoTile* tile) {
-    // Видимость сюда не входит намеренно — setParent() ниже уже меняет
-    // её как побочный эффект (см. doc-комментарий relocateAllTiles(),
-    // issue #287), так что решать реальную видимость после этого вызова
-    // должна вызывающая сторона явно, а не эта функция.
-    tile->setParent(tileHost_);
-    tile->resize(currentTileSize_, currentTileSize_);
-    tile->move(nextTileCascadePosition());
+void CallWindow::relayoutVideoGrid() {
+    QGridLayout* grid = ensureGridLayout(tileHost_);
+    // Убираем все ячейки (не виджеты — QLayout::takeAt() не трогает
+    // родителя), чтобы заново расставить их с нуля по актуальному
+    // набору и числу колонок ниже, а не пытаться вычислить дельту.
+    // takeAt() передаёт вызывающему владение самим QLayoutItem-обёрткой
+    // (не виджетом внутри неё) — без explicit delete здесь была бы
+    // утечка QLayoutItem на каждый вызов relayoutVideoGrid().
+    while (grid->count() > 0) {
+        delete grid->takeAt(0);
+    }
+
+    QList<QWidget*> activeWidgets;
+    if (videoActive_) {
+        activeWidgets.append(localVideoWidget_);
+    }
+    if (screenShareActive_) {
+        activeWidgets.append(localScreenShareVideoWidget_);
+    }
+    for (QLabel* tile : std::as_const(remoteVideoTiles_)) {
+        activeWidgets.append(tile);
+    }
+
+    const int columns = gridColumnsFor(activeWidgets.size());
+    for (int i = 0; i < activeWidgets.size(); ++i) {
+        QWidget* widget = activeWidgets.at(i);
+        widget->setMinimumSize(currentTileSize_, currentTileSize_);
+        grid->addWidget(widget, i / columns, i % columns);
+    }
+    // QGridLayout::addWidget() зовёт QWidget::setParent(), когда родитель
+    // меняется, а тот неявно скрывает виджет как побочный эффект смены
+    // родителя (issue #287, тот же эффект актуален и для грида) —
+    // восстанавливаем реальную видимость явно, а не полагаемся на то,
+    // что addWidget() её не тронула.
+    for (QWidget* widget : std::as_const(activeWidgets)) {
+        widget->setVisible(true);
+    }
+    localVideoWidget_->setVisible(videoActive_);
+    localScreenShareVideoWidget_->setVisible(screenShareActive_);
+    updateVideoStripVisibility();
 }
 
 void CallWindow::showRemoteVideoFrame(const QString& peerLogin, const QImage& frame, bool isScreenShare) {
     const QString key = remoteTileKey(peerLogin, isScreenShare);
-    DraggableVideoTile* tile = remoteVideoTiles_.value(key, nullptr);
-    QLabel* label = nullptr;
-    if (tile == nullptr) {
-        label = new QLabel();
+    QLabel* label = remoteVideoTiles_.value(key, nullptr);
+    if (label == nullptr) {
+        label = new QLabel(this);
         label->setObjectName(QStringLiteral("remoteVideoTile"));
         label->setScaledContents(true);
-        tile = new DraggableVideoTile(label, tileHost_);
-        placeTile(tile);
-        remoteVideoTiles_.insert(key, tile);
-    } else {
-        label = qobject_cast<QLabel*>(tile->content());
+        remoteVideoTiles_.insert(key, label);
     }
-    tile->setVisible(true);
     label->setPixmap(QPixmap::fromImage(frame));
-    updateVideoStripVisibility();
+    relayoutVideoGrid();
 }
 
 void CallWindow::removeRemoteVideo(const QString& peerLogin, bool isScreenShare) {
-    DraggableVideoTile* tile = remoteVideoTiles_.take(remoteTileKey(peerLogin, isScreenShare));
-    if (tile == nullptr) {
+    QLabel* label = remoteVideoTiles_.take(remoteTileKey(peerLogin, isScreenShare));
+    if (label == nullptr) {
         return;
     }
-    delete tile;
-    updateVideoStripVisibility();
+    delete label;
+    relayoutVideoGrid();
 }
 
 void CallWindow::resetForNewCall() {
@@ -241,47 +272,24 @@ void CallWindow::resetForNewCall() {
     // в FloatingCallTilesOverlay; новый звонок не должен унаследовать ни
     // это, ни его мини-размер плиток.
     reattachTiles();
-    for (DraggableVideoTile* tile : std::as_const(remoteVideoTiles_)) {
+    for (QLabel* tile : std::as_const(remoteVideoTiles_)) {
         delete tile;
     }
     remoteVideoTiles_.clear();
+    relayoutVideoGrid();
     setCallParticipants({});
 }
 
 void CallWindow::detachTilesTo(QWidget* newParent) {
     tileHost_ = newParent;
     currentTileSize_ = kMiniVideoTileSize;
-    relocateAllTiles();
+    relayoutVideoGrid();
 }
 
 void CallWindow::reattachTiles() {
     tileHost_ = videoStrip_;
     currentTileSize_ = kVideoTileSize;
-    relocateAllTiles();
-}
-
-void CallWindow::relocateAllTiles() {
-    nextTileCascadeIndex_ = 0;
-    // QWidget::setParent() (внутри placeTile()) неявно скрывает виджет
-    // как побочный эффект смены родителя (документированное поведение
-    // Qt) — то, что было "сохранить текущую видимость" до issue #287,
-    // на деле после placeTile() всегда читало "скрыто", независимо от
-    // реального состояния до вызова. Явно восстанавливаем видимость по
-    // тем же флагам, которыми управляют setVideoEnabled()/
-    // setScreenShareEnabled(), а не по факту "как было до реparenting'а"
-    // (который к этому моменту уже потерян).
-    placeTile(localCameraTile_);
-    localCameraTile_->setVisible(videoActive_);
-    placeTile(localScreenShareTile_);
-    localScreenShareTile_->setVisible(screenShareActive_);
-    for (DraggableVideoTile* tile : std::as_const(remoteVideoTiles_)) {
-        placeTile(tile);
-        // Удалённая плитка в remoteVideoTiles_ по инварианту этого
-        // класса всегда должна быть видна, пока существует (см.
-        // removeRemoteVideo()) — та же причина, что и выше у локальных.
-        tile->setVisible(true);
-    }
-    updateVideoStripVisibility();
+    relayoutVideoGrid();
 }
 
 void CallWindow::closeEvent(QCloseEvent* event) {

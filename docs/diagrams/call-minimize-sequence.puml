@@ -5,7 +5,7 @@ participant User
 participant CallWindow
 participant MainWindow
 participant FloatingCallTilesOverlay as Overlay
-participant "DraggableVideoTile\n(local + remote)" as Tiles
+participant "Video widgets\n(QVideoWidget local, QLabel remote)" as Tiles
 
 group Minimize (клик "Minimize" ИЛИ закрытие окна)
   alt клик по minimizeButton()
@@ -19,8 +19,8 @@ group Minimize (клик "Minimize" ИЛИ закрытие окна)
   CallWindow -> MainWindow : minimizeRequested()
   MainWindow -> CallWindow : detachTilesTo(overlay.canvas())
   CallWindow -> CallWindow : tileHost_ = newParent\ncurrentTileSize_ = kMiniVideoTileSize
-  CallWindow -> Tiles : relocateAllTiles()\n(placeTile() каждой: setParent(), resize(), move())
-  Tiles -> Tiles : setParent(overlay.canvas())\n(та же плитка, тот же живой\nQVideoSink/кадры — не пересоздаётся)
+  CallWindow -> Tiles : relayoutVideoGrid()\n(ensureGridLayout(newParent) + addWidget() каждой активной)
+  Tiles -> Tiles : QGridLayout::addWidget()\nреparent'ит на overlay.canvas()\n(тот же живой QVideoSink/кадры — не пересоздаётся)
   MainWindow -> CallWindow : hide()
   MainWindow -> Overlay : show(); raise()
 end
@@ -37,7 +37,7 @@ end note
 
 ... новый удалённый видеопоток появился впервые ...
 CallWindow -> CallWindow : showRemoteVideoFrame(peerLogin, frame, isScreenShare)
-CallWindow -> Tiles : new DraggableVideoTile(label, tileHost_)\n(tileHost_ уже == overlay.canvas() — новая\nплитка сразу попадает в оверлей, не в скрытый videoStrip_)
+CallWindow -> Tiles : new QLabel(this) + relayoutVideoGrid()\n(tileHost_ уже == overlay.canvas() — новая\nплитка сразу попадает в оверлей, не в скрытый videoStrip_)
 
 group Restore (клик "Expand" в оверлее)
   User -> Overlay : click restoreButton()
@@ -45,8 +45,8 @@ group Restore (клик "Expand" в оверлее)
   Overlay -> MainWindow : restoreRequested()
   MainWindow -> CallWindow : reattachTiles()
   CallWindow -> CallWindow : tileHost_ = videoStrip_\ncurrentTileSize_ = kVideoTileSize
-  CallWindow -> Tiles : relocateAllTiles()
-  Tiles -> Tiles : setParent(videoStrip_)
+  CallWindow -> Tiles : relayoutVideoGrid()
+  Tiles -> Tiles : QGridLayout::addWidget()\nреparent'ит на videoStrip_
   MainWindow -> Overlay : hide()
   MainWindow -> CallWindow : show(); raise(); activateWindow()
 end

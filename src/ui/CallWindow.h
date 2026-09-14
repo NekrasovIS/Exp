@@ -2,11 +2,11 @@
 
 #include <QHash>
 #include <QList>
-#include <QPoint>
 #include <QStringList>
 #include <QWidget>
 
 class QCloseEvent;
+class QGridLayout;
 class QImage;
 class QLabel;
 class QPushButton;
@@ -14,8 +14,6 @@ class QTimer;
 class QVideoWidget;
 
 namespace devicehub {
-
-class DraggableVideoTile;
 
 /**
  * @brief Отдельное окно звонка (issue #185) — участники, элементы
@@ -31,27 +29,36 @@ class DraggableVideoTile;
  * скрывается MainWindow-ом по фактическому переходу в/из звонка — сама
  * не решает, когда её открыть.
  *
- * Видео-плитки (issue #185, последняя часть) — каждая обёрнута в
- * DraggableVideoTile и свободно позиционируется мышью внутри canvas
- * videoStrip_ (обычный QWidget без layout'а, а не QHBoxLayout, который
- * раньше сам решал место каждой плитки).
+ * Видео-плитки (issue #185, последняя часть; issue #437 — заменена
+ * модель раскладки) — сами виджеты содержимого (QVideoWidget для
+ * локальных превью, QLabel для удалённых участников) размещаются прямо
+ * в QGridLayout videoStrip_'а, без промежуточной обёртки: число колонок
+ * пересчитывается от текущего количества активных плиток
+ * (relayoutVideoGrid()), сам Qt-layout гарантирует, что ни одна плитка
+ * не окажется за пределами видимой области и не перекроет другую.
+ * Раньше плитки оборачивались в DraggableVideoTile и свободно
+ * перетаскивались/растягивались мышью — от этого отказались (issue
+ * #437): ручная каскадная расстановка давала точное перекрытие плиток
+ * после 8-й участника и не умела перестроиться при изменении размера
+ * окна.
  *
  * Сворачивание (issue #215): "Minimize" (или закрытие окна — closeEvent()
  * перенаправляет туда же, а не просто прячет окно) не завершает звонок,
- * а переносит (setParent(), не пересоздаёт) все текущие плитки в
- * FloatingCallTilesOverlay через detachTilesTo() — тот же живой
- * QVideoSink/кадры, только видимый в компактном окне вместо этого.
- * tileHost_ запоминает, куда сейчас нужно класть плитки (videoStrip_
- * либо canvas() оверлея), поэтому новый удалённый видеопоток, впервые
- * появившийся уже после сворачивания, тоже попадает в оверлей, а не
- * молча создаётся в скрытом videoStrip_. reattachTiles() — обратное
- * действие, вызывается MainWindow-ом по клику "Expand" в оверлее.
+ * а переносит все текущие плитки в FloatingCallTilesOverlay через
+ * detachTilesTo() — тот же живой QVideoSink/кадры, только видимый в
+ * компактном окне вместо этого. tileHost_ запоминает, куда сейчас нужно
+ * класть плитки (videoStrip_ либо canvas() оверлея), поэтому новый
+ * удалённый видеопоток, впервые появившийся уже после сворачивания,
+ * тоже попадает в оверлей, а не молча создаётся в скрытом videoStrip_.
+ * reattachTiles() — обратное действие, вызывается MainWindow-ом по
+ * клику "Expand" в оверлее.
  *
- * Видимость локальных плиток (issue #287): QWidget::setParent() внутри
- * placeTile() неявно скрывает виджет как побочный эффект смены
- * родителя — relocateAllTiles() явно восстанавливает её по videoActive_/
- * screenShareActive_ сразу после каждого detachTilesTo()/reattachTiles(),
- * а не полагается на то, что setParent() её не тронет.
+ * Видимость локальных плиток (issue #287, актуально и для issue #437):
+ * QWidget::setParent() (в том числе неявно внутри QGridLayout::addWidget(),
+ * когда родитель меняется) скрывает виджет как побочный эффект смены
+ * родителя — relayoutVideoGrid() явно восстанавливает реальную видимость
+ * по videoActive_/screenShareActive_ после каждой перестройки грида, а
+ * не полагается на то, что addWidget() её не тронет.
  */
 class CallWindow : public QWidget {
     Q_OBJECT
@@ -100,18 +107,19 @@ public:
     /// следующий звонок не унаследовал их от предыдущего.
     void resetForNewCall();
 
-    /// Переносит все текущие плитки (обе локальные + все удалённые) в
-    /// @p newParent, уменьшая их до компактного размера (issue #215) —
-    /// используется при сворачивании в FloatingCallTilesOverlay. Любая
-    /// плитка, созданная после этого вызова (showRemoteVideoFrame() для
-    /// участника, ещё не имевшего своей), тоже попадает сразу в
-    /// @p newParent, пока не будет вызван reattachTiles().
+    /// Переносит все текущие активные плитки в @p newParent, уменьшая их
+    /// до компактного размера (issue #215) — используется при
+    /// сворачивании в FloatingCallTilesOverlay. Любая плитка, созданная
+    /// после этого вызова (showRemoteVideoFrame() для участника, ещё не
+    /// имевшего своей), тоже попадает сразу в @p newParent, пока не
+    /// будет вызван reattachTiles(). Если у @p newParent ещё нет
+    /// QGridLayout, он создаётся здесь же (см. ensureGridLayout()).
     void detachTilesTo(QWidget* newParent);
 
     /// Обратное действие — переносит все текущие плитки назад в
-    /// videoStrip_, восстанавливая полный размер и заново расставляя их
-    /// каскадом (issue #215); дальнейшие новые плитки снова создаются в
-    /// videoStrip_ напрямую.
+    /// videoStrip_, восстанавливая полный размер и заново раскладывая их
+    /// по гриду (issue #215/#437); дальнейшие новые плитки снова
+    /// создаются в videoStrip_ напрямую.
     void reattachTiles();
 
     [[nodiscard]] QPushButton* muteToggleButton() const { return muteToggleButton_; }
@@ -175,25 +183,23 @@ private:
     /// теперь независимы друг от друга, а не два взаимоисключающих).
     void updateVideoStripVisibility();
 
-    /// Позиция для очередной плитки, помещаемой в tileHost_ прямо
-    /// сейчас, — по диагонали каскадом от предыдущей (с переносом после
-    /// нескольких шагов, а не бесконечно за пределы canvas'а), так что
-    /// несколько плиток подряд не садятся друг на друга ровно в одной
-    /// точке. Пользователь всё равно может перетащить любую плитку куда
-    /// угодно после появления — это только стартовая позиция. Общая для
-    /// новых удалённых плиток (showRemoteVideoFrame()) и для
-    /// detachTilesTo()/reattachTiles() (issue #215), не только для
-    /// первых, как было раньше.
-    [[nodiscard]] QPoint nextTileCascadePosition();
+    /// Возвращает QGridLayout, установленный на @p host, создавая его
+    /// при первом обращении (issue #437) — так detachTilesTo() может
+    /// принять любой QWidget как новый хост, а не только тот, что уже
+    /// заранее подготовлен своим собственным layout'ом.
+    [[nodiscard]] QGridLayout* ensureGridLayout(QWidget* host);
 
-    /// Помещает @p tile в tileHost_ текущим currentTileSize_ и очередной
-    /// каскадной позицией — общая часть showRemoteVideoFrame() и
-    /// detachTilesTo()/reattachTiles() (issue #215).
-    void placeTile(DraggableVideoTile* tile);
-    /// Общая часть detachTilesTo()/reattachTiles() — заново каскадно
-    /// расставляет обе локальные плитки и все удалённые в уже
-    /// установленных tileHost_/currentTileSize_ (issue #215).
-    void relocateAllTiles();
+    /// Перестраивает грид tileHost_ с нуля по текущему набору активных
+    /// плиток (issue #437, заменяет прежний каскад/placeTile()): очищает
+    /// все ячейки грида и заново добавляет туда localVideoWidget_ (если
+    /// videoActive_), localScreenShareVideoWidget_ (если
+    /// screenShareActive_) и все remoteVideoTiles_, в стольких колонках,
+    /// сколько нужно, чтобы грид оставался примерно квадратным при любом
+    /// числе плиток. Вызывается после любого изменения набора активных
+    /// плиток или хоста (showRemoteVideoFrame()/removeRemoteVideo()/
+    /// setVideoEnabled()/setScreenShareEnabled()/detachTilesTo()/
+    /// reattachTiles()).
+    void relayoutVideoGrid();
 
     QLabel* callParticipantsLabel_ = nullptr;
     /// Issue #312 — фиксированный набор быстрых реакций, в порядке
@@ -206,18 +212,17 @@ private:
     QPushButton* screenShareToggleButton_ = nullptr;
     QPushButton* minimizeButton_ = nullptr;
     QPushButton* leaveCallButton_ = nullptr;
-    /// Canvas без layout'а — DraggableVideoTile-плитки внутри него
-    /// позиционируются вручную (изначально) и мышью (после).
+    /// Хост грида — сам QGridLayout создаётся на нём лениво через
+    /// ensureGridLayout() (issue #437), а не сразу в конструкторе, чтобы
+    /// detachTilesTo() мог принять произвольный QWidget как новый хост.
     QWidget* videoStrip_ = nullptr;
     QVideoWidget* localVideoWidget_ = nullptr;
     QVideoWidget* localScreenShareVideoWidget_ = nullptr;
-    DraggableVideoTile* localCameraTile_ = nullptr;
-    DraggableVideoTile* localScreenShareTile_ = nullptr;
     /// Ключ — "<login>#camera" или "<login>#screen" (issue #185), чтобы
     /// камера и демонстрация экрана одного участника не делили одну
-    /// плитку.
-    QHash<QString, DraggableVideoTile*> remoteVideoTiles_;
-    int nextTileCascadeIndex_ = 0;
+    /// плитку. Значение — сам QLabel с кадром, без обёртки (issue #437 —
+    /// раньше был DraggableVideoTile).
+    QHash<QString, QLabel*> remoteVideoTiles_;
     bool videoActive_ = false;
     bool screenShareActive_ = false;
     /// Куда новые/перенесённые плитки сейчас помещаются (issue #215) —
