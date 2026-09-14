@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QAudioOutput>
 #include <QBuffer>
+#include <QColor>
 #include <QFontMetricsF>
 #include <QHBoxLayout>
 #include <QIODevice>
@@ -166,7 +167,10 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     // Issue #338 — виден только пока isPinned_ true; создаётся один раз
     // здесь и дальше только показывается/скрывается через setPinned(),
     // тот же приём, что и у reactionsRow_ (issue #334).
-    pinnedIndicatorLabel_ = new QLabel(tr("\U0001F4CC Pinned"), bubble_);
+    pinnedIndicatorLabel_ = new QLabel(
+        ui_icons::iconHtml(ui_icons::pinIcon(QColor(ui_theme::kMutedForeground)), 12) + QStringLiteral(" ") +
+            tr("Pinned"),
+        bubble_);
     pinnedIndicatorLabel_->setObjectName(QStringLiteral("chatMessagePinnedIndicator"));
     pinnedIndicatorLabel_->setVisible(isPinned_);
     if (isOwnMessage) {
@@ -199,8 +203,9 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         // "Download": вложение существует только чтобы быть
         // прослушанным на месте, сохранять WAV на диск незачем.
         attachmentId_ = message.attachmentId;
-        playButton_ = new QPushButton(QStringLiteral("▶ ") + tr("Play"), bubble_);
+        playButton_ = new QPushButton(tr("Play"), bubble_);
         playButton_->setObjectName(QStringLiteral("playVoiceMessageButton"));
+        playButton_->setIcon(ui_icons::playIcon(QColor(ui_theme::kMutedForeground)));
         if (isOwnMessage) {
             applyOwnMessageTextColor(playButton_);
         }
@@ -250,8 +255,14 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
             // файла, без автозагрузки: в отличие от изображений, у
             // видео нет дешёвого способа получить превью-кадр без
             // скачивания и декодирования всего файла.
-            auto* videoPlaceholder =
-                new QLabel(QStringLiteral("\U0001F3AC ") + message.attachmentFilename, bubble_);
+            // toHtmlEscaped() — filename идёт в rich-text QLabel рядом с
+            // <img> (issue #418), а не в обычный текстовый QLabel, как
+            // раньше; без экранирования '<'/'&' в имени файла сломали бы
+            // разметку вместо того, чтобы просто отобразиться буквально.
+            auto* videoPlaceholder = new QLabel(
+                ui_icons::iconHtml(ui_icons::videoIcon(QColor(ui_theme::kMutedForeground)), 12) +
+                    QStringLiteral(" ") + message.attachmentFilename.toHtmlEscaped(),
+                bubble_);
             videoPlaceholder->setObjectName(QStringLiteral("chatAttachmentVideoPlaceholder"));
             if (isOwnMessage) {
                 applyOwnMessageTextColor(videoPlaceholder);
@@ -400,8 +411,10 @@ void ChatMessageRow::setAudioData(const QByteArray& data) {
     audioPlayer_->setAudioOutput(audioOutput_);
     audioPlayer_->setSourceDevice(audioBuffer_);
     connect(audioPlayer_, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
-        playButton_->setText((state == QMediaPlayer::PlayingState ? QStringLiteral("⏸ ") + tr("Pause")
-                                                                   : QStringLiteral("▶ ") + tr("Play")));
+        const bool playing = state == QMediaPlayer::PlayingState;
+        playButton_->setText(playing ? tr("Pause") : tr("Play"));
+        playButton_->setIcon(playing ? ui_icons::pauseIcon(QColor(ui_theme::kMutedForeground))
+                                      : ui_icons::playIcon(QColor(ui_theme::kMutedForeground)));
     });
     playButton_->setEnabled(true);
     audioPlayer_->play();

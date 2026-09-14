@@ -57,4 +57,43 @@ QIcon settingsIcon(const QColor& fillColor);
 /// шапке ChatView (issue #184).
 QIcon membersIcon(const QColor& fillColor);
 
+/// Значок микрофона (капсула-головка + дужка-подставка) — заменяет
+/// сырой эмодзи "\U0001F3A4" у кнопки записи голосового сообщения в
+/// ChatView (issue #418), тот же приём, что и у остальных значков этого
+/// файла.
+QIcon micIcon(const QColor& fillColor);
+
+/// Значок "стоп" (скруглённый квадрат) — второе состояние той же
+/// кнопки записи голосового сообщения, что и micIcon(), пока идёт
+/// запись (issue #418).
+QIcon stopIcon(const QColor& fillColor);
+
+/// Значок канцелярской кнопки (круглая головка + треугольное остриё) —
+/// заменяет сырой эмодзи "\U0001F4CC" у индикатора закреплённого
+/// сообщения в ChatMessageRow (issue #338/#418).
+QIcon pinIcon(const QColor& fillColor);
+
+/// Значок "воспроизвести" (треугольник вправо) — заменяет символ "▶" у
+/// кнопки воспроизведения голосового сообщения в ChatMessageRow
+/// (issue #359/#418).
+QIcon playIcon(const QColor& fillColor);
+
+/// Значок "пауза" (две вертикальные полосы) — второе состояние той же
+/// кнопки воспроизведения, что и playIcon(), пока голосовое сообщение
+/// проигрывается (issue #359/#418).
+QIcon pauseIcon(const QColor& fillColor);
+
+/// Значок видеокамеры (корпус + объектив-трапеция) — заменяет сырой
+/// эмодзи "\U0001F3AC" у заглушки видео-вложения в ChatMessageRow
+/// (issue #188/#418).
+QIcon videoIcon(const QColor& fillColor);
+
+/// HTML-фрагмент `<img src="data:...">` заданного размера @p sizePx,
+/// готовый к вставке в начало rich-text QLabel::setText() — у QLabel
+/// нет штатного способа показать QIcon/QPixmap рядом с текстом (в
+/// отличие от QPushButton::setIcon()), а часть индикаторов в
+/// приложении (закреплённое сообщение, заглушка видео-вложения) — это
+/// именно QLabel с текстом, не кнопка (issue #418).
+QString iconHtml(const QIcon& icon, int sizePx);
+
 }  // namespace devicehub::ui_icons

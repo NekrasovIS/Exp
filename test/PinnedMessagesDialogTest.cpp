@@ -24,6 +24,9 @@ TEST(PinnedMessagesDialogTest, SetPinnedMessagesPopulatesListWithAuthorBodyAndPi
     EXPECT_TRUE(text.contains(QStringLiteral("hi there")));
     EXPECT_TRUE(text.contains(QStringLiteral("bob")));
     EXPECT_EQ(dialog.pinnedList()->item(0)->data(Qt::UserRole).toLongLong(), 7);
+    // Issue #418: значок канцелярской кнопки в setIcon(), не сырой эмодзи
+    // в тексте.
+    EXPECT_FALSE(dialog.pinnedList()->item(0)->icon().isNull());
 }
 
 TEST(PinnedMessagesDialogTest, SetPinnedMessagesReplacesPreviousContents) {

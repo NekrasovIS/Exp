@@ -1,12 +1,16 @@
 #include "ui/IconFactory.h"
 
+#include <QBuffer>
+#include <QByteArray>
 #include <QColor>
 #include <QFont>
+#include <QIODevice>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
 #include <QPixmap>
+#include <QString>
 
 #include "ui/Theme.h"
 
@@ -236,6 +240,167 @@ QIcon membersIcon(const QColor& fillColor) {
     }
 
     return QIcon(pixmap);
+}
+
+QIcon micIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    constexpr qreal kHeadWidth = 7.0;
+    constexpr qreal kHeadHeight = 11.0;
+    constexpr qreal kHeadTop = 2.5;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(kSize / 2.0, 0.0);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    // Капсула — головка микрофона.
+    painter.drawRoundedRect(QRectF(-kHeadWidth / 2.0, kHeadTop, kHeadWidth, kHeadHeight), kHeadWidth / 2.0,
+                             kHeadWidth / 2.0);
+
+    // Дужка-подставка (нижняя половина окружности, контуром — иначе
+    // слилась бы со сплошной заливкой головки) и ножка со стойкой.
+    painter.setPen(QPen(fillColor, 1.6, Qt::SolidLine, Qt::RoundCap));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawArc(QRectF(-5.5, kHeadTop + kHeadHeight - 4.5, 11.0, 9.0), 0, -180 * 16);
+    painter.drawLine(QPointF(0, kHeadTop + kHeadHeight), QPointF(0, 21));
+    painter.drawLine(QPointF(-3.5, 21), QPointF(3.5, 21));
+
+    return QIcon(pixmap);
+}
+
+QIcon stopIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    constexpr qreal kSquareSize = 10.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+    painter.drawRoundedRect(
+        QRectF((kSize - kSquareSize) / 2.0, (kSize - kSquareSize) / 2.0, kSquareSize, kSquareSize), 2.0, 2.0);
+
+    return QIcon(pixmap);
+}
+
+QIcon pinIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    // Круглая головка канцелярской кнопки сверху и остриё-треугольник
+    // снизу — тот же узнаваемый силуэт "pin", что и у большинства
+    // мессенджеров.
+    painter.drawEllipse(QPointF(12, 8), 5.5, 5.5);
+    QPainterPath needle;
+    needle.moveTo(8.5, 11.5);
+    needle.lineTo(15.5, 11.5);
+    needle.lineTo(12, 21);
+    needle.closeSubpath();
+    painter.drawPath(needle);
+
+    return QIcon(pixmap);
+}
+
+QIcon playIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    QPainterPath path;
+    path.moveTo(7, 4.5);
+    path.lineTo(19, 12);
+    path.lineTo(7, 19.5);
+    path.closeSubpath();
+    painter.drawPath(path);
+
+    return QIcon(pixmap);
+}
+
+QIcon pauseIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+    constexpr qreal kBarWidth = 4.0;
+    constexpr qreal kBarHeight = 14.0;
+    constexpr qreal kGap = 3.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    const qreal top = (kSize - kBarHeight) / 2.0;
+    painter.drawRoundedRect(QRectF(kSize / 2.0 - kGap / 2.0 - kBarWidth, top, kBarWidth, kBarHeight), 1.5, 1.5);
+    painter.drawRoundedRect(QRectF(kSize / 2.0 + kGap / 2.0, top, kBarWidth, kBarHeight), 1.5, 1.5);
+
+    return QIcon(pixmap);
+}
+
+QIcon videoIcon(const QColor& fillColor) {
+    constexpr int kSize = 24;
+    constexpr qreal kDevicePixelRatio = 2.0;
+
+    QPixmap pixmap(QSize(kSize, kSize) * kDevicePixelRatio);
+    pixmap.setDevicePixelRatio(kDevicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(fillColor);
+
+    // Корпус камеры (скруглённый прямоугольник) и объектив-трапеция,
+    // выступающий справа, — классический силуэт видеокамеры.
+    painter.drawRoundedRect(QRectF(3, 6, 12, 12), 2.0, 2.0);
+    QPainterPath lens;
+    lens.moveTo(15, 10);
+    lens.lineTo(21, 7);
+    lens.lineTo(21, 17);
+    lens.lineTo(15, 14);
+    lens.closeSubpath();
+    painter.drawPath(lens);
+
+    return QIcon(pixmap);
+}
+
+QString iconHtml(const QIcon& icon, int sizePx) {
+    QByteArray pngBytes;
+    QBuffer buffer(&pngBytes);
+    buffer.open(QIODevice::WriteOnly);
+    icon.pixmap(sizePx, sizePx).save(&buffer, "PNG");
+    return QStringLiteral("<img src=\"data:image/png;base64,%1\" width=\"%2\" height=\"%2\">")
+        .arg(QString::fromLatin1(pngBytes.toBase64()))
+        .arg(sizePx);
 }
 
 }  // namespace devicehub::ui_icons
