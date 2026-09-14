@@ -6,6 +6,7 @@
 // #138's ChannelCrypto has no story for attachment bytes at all).
 
 import type { ChatMessageInfo, PinnedMessageInfo } from "@devicehub/core";
+import { AsyncListStatus } from "@devicehub/ui";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { CallPanel } from "../calls/CallPanel.js";
@@ -184,8 +185,7 @@ export function EncryptedChatViewContent({
       </div>
       {pinnedOpen && <PinnedMessagesPanel pinned={decryptedPinned} />}
       <div className={styles.scrollArea}>
-        {loading && <p className={styles.statusText}>Loading messages…</p>}
-        {error !== null && <p role="alert">{error}</p>}
+        <AsyncListStatus loading={loading} error={error} loadingText="Loading messages…" />
         {hasMore && !loading && (
           <button type="button" className={styles.loadOlderButton} onClick={() => void loadOlder()}>
             Load older messages

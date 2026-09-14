@@ -2,6 +2,8 @@
 // for one thread, mirroring ChatViewContent's shape (#267) but for the
 // simpler DM feature set.
 
+import { AsyncListStatus } from "@devicehub/ui";
+
 import styles from "../chat/chatView.module.css";
 import { useSession } from "../session/SessionContext.js";
 import { DirectMessageComposer } from "./DirectMessageComposer.js";
@@ -24,8 +26,7 @@ export function DirectMessageView({ threadId, otherLogin }: DirectMessageViewPro
         <h2>{otherLogin}</h2>
       </div>
       <div className={styles.scrollArea}>
-        {loading && <p className={styles.statusText}>Loading messages…</p>}
-        {error !== null && <p role="alert">{error}</p>}
+        <AsyncListStatus loading={loading} error={error} loadingText="Loading messages…" />
         {hasMore && !loading && (
           <button type="button" className={styles.loadOlderButton} onClick={() => void loadOlder()}>
             Load older messages
