@@ -24,6 +24,26 @@ export function routedFetch(routes: Array<[RegExp, () => Response]>) {
   });
 }
 
+/** Stubs `window.matchMedia` to report a fixed narrow/wide state — jsdom
+ * doesn't implement matchMedia at all (see useIsNarrowViewport.ts's own
+ * fallback), so tests that need to exercise the narrow-viewport branch
+ * of CommunitiesMode/FriendsMode must stub it explicitly; tests that
+ * don't call this get the hook's default "not narrow" (wide) behavior
+ * unchanged. Doesn't simulate a live resize — addEventListener/
+ * removeEventListener are no-ops, which is enough for tests that render
+ * fresh per viewport size rather than resizing mid-test. */
+export function stubMatchMedia(matches: boolean): void {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
+
 export function encodePayloadBase64Url(payload: unknown): string {
   const base64 = btoa(JSON.stringify(payload));
   return base64.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
