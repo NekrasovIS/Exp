@@ -266,6 +266,15 @@ private:
         /// publishConnection_ — handle публикации; для записи в peers_ —
         /// handle подписки на конкретный чужой feed.
         qint64 janusHandle = -1;
+        /// Issue #364 — идемпотентный барьер между реальным
+        /// PeerObserver::OnIceGatheringChange() (kIceGatheringComplete) и
+        /// таймаутом ожидания в handleIceGatheringComplete(): сбрасывается
+        /// в false каждый раз, когда negotiateLocal() запускает новый
+        /// раунд SetLocalDescription(), и выставляется в true, как только
+        /// offer/answer действительно ушёл Janus'у — какой бы из двух
+        /// путей ни сработал первым, второй должен стать no-op, а не
+        /// отправить тот же (или более поздний) SDP повторно.
+        bool iceGatheringMessageSent = false;
         /// Только для subscribe-записей в peers_ (janusHandle >= 0) — id
         /// чужого Janus-feed, на который подписана эта запись; нужен,
         /// чтобы найти нужную запись по feedId, когда комната сообщает об

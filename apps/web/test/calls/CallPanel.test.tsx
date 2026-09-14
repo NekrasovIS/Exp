@@ -1,6 +1,7 @@
 import { ChatClient } from "@devicehub/core";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CallPanel } from "../../src/calls/CallPanel.js";
@@ -69,6 +70,34 @@ describe("CallPanel", () => {
 
     expect(socket?.sent.map((frame) => JSON.parse(frame))).toContainEqual({ call_leave: true });
     expect(screen.getByRole("button", { name: "Join call" })).toBeInTheDocument();
+  });
+
+  // Issue #365 — React 18 StrictMode (dev-only) deliberately mounts every
+  // effect twice (mount -> cleanup -> mount) to surface effects that
+  // don't clean up after themselves. useCall() used to build its
+  // CallManager with useMemo(), which survives that synthetic remount
+  // (same object, no re-render) — but CallManager subscribes to
+  // chatClient exactly once, in its constructor, and dispose() (called
+  // from the discarded first mount's cleanup) permanently tears those
+  // subscriptions down with no way to resubscribe short of a whole new
+  // instance. Result: under StrictMode specifically, nobody ever showed
+  // up in the participant list — this test renders under StrictMode to
+  // catch exactly that regression, which the non-StrictMode test above
+  // ("shows joined participants...") can't see.
+  it("still shows a joined participant under React StrictMode's dev-only remount", async () => {
+    const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+    client.connectToChannel("t1", 7);
+    const socket = FakeWebSocket.instances[0];
+
+    render(
+      <StrictMode>
+        <CallPanel chatClient={client} localLogin="alice" />
+      </StrictMode>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Join call" }));
+    socket?.onmessage?.({ data: JSON.stringify({ call_peer_joined: "bob" }) });
+
+    expect(await screen.findByText(/In call: bob/)).toBeInTheDocument();
   });
 
   it("clicking a reaction button sends call_reaction with that emoji", async () => {
