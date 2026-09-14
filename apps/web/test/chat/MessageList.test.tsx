@@ -145,6 +145,22 @@ describe("MessageList", () => {
     expect(chip).toHaveAttribute("title", "bob, carol");
   });
 
+  // Issue #431 — reaction chips on the current user's own message get a
+  // subtle highlight (previously a dead ".bubbleOwn .reactionChip"
+  // selector reaching into a class that moved to a different CSS module
+  // in issue #410); this asserts the actual applied class instead.
+  it("gives reaction chips on the current user's own message a highlight class, but not on others'", () => {
+    renderList({
+      messages: [
+        { ...kMessages[0]!, reactions: [{ emoji: "👍", logins: ["bob"] }] },
+        { ...kMessages[1]!, reactions: [{ emoji: "🎉", logins: ["alice"] }] },
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: "👍 1" }).className).toMatch(/reactionChipOwn/);
+    expect(screen.getByRole("button", { name: "🎉 1" }).className).not.toMatch(/reactionChipOwn/);
+  });
+
   it("clicking an existing chip toggles that reaction", async () => {
     const onToggleReaction = vi.fn();
     renderList({
