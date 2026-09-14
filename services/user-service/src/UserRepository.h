@@ -87,6 +87,15 @@ enum class SendFriendRequestResult {
     kCannotFriendSelf,
 };
 
+/// Байты сохранённого аватара (issue #384) — @p dataBase64 всё ещё в
+/// base64 (как и хранится, тот же приём, что и AttachmentData у
+/// chat-service), декодирует вызывающая сторона (HttpServer) перед
+/// записью тела HTTP-ответа.
+struct AvatarData {
+    std::string contentType;
+    std::string dataBase64;
+};
+
 /// @see UserRepository::respondToFriendRequest().
 enum class RespondToFriendRequestResult {
     kAccepted,
@@ -156,6 +165,20 @@ public:
     /// GET /internal/friendship, чтобы chat-service мог разрешить
     /// открытие нового диалога личных сообщений только между друзьями.
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
+
+    /// Сохраняет (UPSERT) байты аватара @p login и разом обновляет
+    /// avatar_url его профиля на @p avatarUrl (issue #384) — HttpServer
+    /// уже провалидировал content-type/размер до этого вызова, эта
+    /// функция им не занимается. Обе записи — в одной транзакции, чтобы
+    /// avatar_url никогда не указывал на несохранившиеся байты.
+    /// @return False, если @p login не существует — обе записи
+    /// откатываются.
+    [[nodiscard]] bool saveAvatar(const std::string& login, const std::string& contentType,
+                                   const std::string& dataBase64, const std::string& avatarUrl);
+
+    /// @return Сохранённый аватар @p login, или std::nullopt — либо
+    /// нет такого пользователя, либо он ещё не загружал аватар.
+    [[nodiscard]] std::optional<AvatarData> findAvatar(const std::string& login);
 
 private:
     std::string connectionString_;

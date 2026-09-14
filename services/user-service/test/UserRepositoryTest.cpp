@@ -570,5 +570,84 @@ TEST(UserRepositoryTest, AreFriendsReflectsCurrentFriendshipStateInEitherArgumen
     EXPECT_TRUE(repository.areFriends(loginB, loginA));
 }
 
+TEST(UserRepositoryTest, FindAvatarReturnsNulloptBeforeAnyUpload) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-avatar-none");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    EXPECT_FALSE(repository.findAvatar(login).has_value());
+}
+
+TEST(UserRepositoryTest, SaveAvatarRoundTripsThroughFindAvatarAndUpdatesAvatarUrl) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-avatar-roundtrip");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    const std::string avatarUrl = "/users/" + login + "/avatar";
+    ASSERT_TRUE(repository.saveAvatar(login, "image/png", "Zm9vYmFy", avatarUrl));
+
+    const std::optional<AvatarData> avatar = repository.findAvatar(login);
+    ASSERT_TRUE(avatar.has_value());
+    EXPECT_EQ(avatar->contentType, "image/png");
+    EXPECT_EQ(avatar->dataBase64, "Zm9vYmFy");
+
+    const std::optional<Profile> profile = repository.findProfile(login);
+    ASSERT_TRUE(profile.has_value());
+    ASSERT_TRUE(profile->avatarUrl.has_value());
+    EXPECT_EQ(*profile->avatarUrl, avatarUrl);
+}
+
+TEST(UserRepositoryTest, SaveAvatarOverwritesAPreviousUploadRatherThanAddingASecondRow) {
+    // issue #384: ровно один аватар на пользователя — повторная загрузка
+    // должна обновить ту же строку (UPSERT), не создать вторую.
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-avatar-overwrite");
+
+    bool created = false;
+    try {
+        created = repository.createUser(login, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+
+    const std::string avatarUrl = "/users/" + login + "/avatar";
+    ASSERT_TRUE(repository.saveAvatar(login, "image/png", "Zm9v", avatarUrl));
+    ASSERT_TRUE(repository.saveAvatar(login, "image/jpeg", "YmFy", avatarUrl));
+
+    const std::optional<AvatarData> avatar = repository.findAvatar(login);
+    ASSERT_TRUE(avatar.has_value());
+    EXPECT_EQ(avatar->contentType, "image/jpeg");
+    EXPECT_EQ(avatar->dataBase64, "YmFy");
+}
+
+TEST(UserRepositoryTest, SaveAvatarReturnsFalseForNonexistentLogin) {
+    UserRepository repository(connectionString());
+
+    bool result = true;
+    try {
+        result = repository.saveAvatar("no-such-login-ever-created", "image/png", "Zm9v",
+                                        "/users/no-such-login-ever-created/avatar");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_FALSE(result);
+}
+
 }  // namespace
 }  // namespace user_service

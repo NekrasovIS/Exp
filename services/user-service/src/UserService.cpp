@@ -57,4 +57,13 @@ bool UserService::areFriends(const std::string& loginA, const std::string& login
     return repository_.areFriends(loginA, loginB);
 }
 
+bool UserService::saveAvatar(const std::string& login, const std::string& contentType,
+                              const std::string& dataBase64, const std::string& avatarUrl) {
+    return repository_.saveAvatar(login, contentType, dataBase64, avatarUrl);
+}
+
+std::optional<AvatarData> UserService::findAvatar(const std::string& login) {
+    return repository_.findAvatar(login);
+}
+
 }  // namespace user_service

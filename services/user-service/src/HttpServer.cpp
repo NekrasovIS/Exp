@@ -1,9 +1,11 @@
 #include "HttpServer.h"
 
 #include "JsonGuard.h"
+#include "base64.h"
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <optional>
 #include <string_view>
 
@@ -12,6 +14,9 @@ namespace user_service {
 namespace {
 constexpr const char* kJsonContentType = "application/json";
 constexpr std::string_view kBearerPrefix = "Bearer ";
+/// Issue #384 — аватар не файл-вложение, должен быть меньше 5 МБ
+/// лимита chat-service (kMaxAttachmentSizeBytes в её HttpServer.cpp).
+constexpr std::size_t kMaxAvatarSizeBytes = 2 * 1024 * 1024;
 
 // Оба эндпоинта принимают одинаковую форму {"login", "password"}.
 struct Credentials {
@@ -89,6 +94,34 @@ nlohmann::json toJson(const FriendRequestInfo& request) {
     return nlohmann::json{
         {"id", request.id}, {"requester_login", request.requesterLogin}, {"created_at", request.createdAt}};
 }
+
+/// Тело POST /profile/avatar (issue #384) — тот же контракт, что и
+/// createAttachment у chat-service (filename там не нужен: ровно один
+/// аватар на пользователя, свой путь фиксирован).
+struct AvatarUploadRequest {
+    std::string contentType;
+    std::string dataBase64;
+};
+
+std::optional<AvatarUploadRequest> parseAvatarUpload(const std::string& body) {
+    if (json_guard::exceedsMaxNestingDepth(body, json_guard::kMaxNestingDepth)) {
+        return std::nullopt;
+    }
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (json.is_discarded() || !json.contains("content_type") || !json["content_type"].is_string() ||
+        !json.contains("data_base64") || !json["data_base64"].is_string()) {
+        return std::nullopt;
+    }
+    return AvatarUploadRequest{.contentType = json["content_type"].get<std::string>(),
+                                .dataBase64 = json["data_base64"].get<std::string>()};
+}
+
+/// Путь, который HttpServer сам присваивает avatar_url при успешной
+/// загрузке (issue #384) — собственный относительный путь этого же
+/// сервиса, а не внешний URL.
+std::string avatarUrlFor(const std::string& login) {
+    return "/users/" + login + "/avatar";
+}
 }  // namespace
 
 HttpServer::HttpServer(UserService& userService, const AuthServiceClient& authServiceClient,
@@ -150,6 +183,12 @@ void HttpServer::registerRoutes() {
     });
     server_.Get("/internal/friendship", [this](const httplib::Request& request, httplib::Response& response) {
         handleCheckFriendship(request, response);
+    });
+    server_.Post("/profile/avatar", [this](const httplib::Request& request, httplib::Response& response) {
+        handleUploadAvatar(request, response);
+    });
+    server_.Get(R"(/users/([^/]+)/avatar)", [this](const httplib::Request& request, httplib::Response& response) {
+        handleGetAvatar(request, response);
     });
 }
 
@@ -445,6 +484,73 @@ void HttpServer::handleCheckFriendship(const httplib::Request& request, httplib:
     const bool areFriends =
         userService_.areFriends(request.get_param_value("user_a"), request.get_param_value("user_b"));
     response.set_content(nlohmann::json{{"friends", areFriends}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleUploadAvatar(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const std::optional<AvatarUploadRequest> upload = parseAvatarUpload(request.body);
+    if (!upload.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'content_type' and 'data_base64' strings"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+    // Проверяется на сервере, а не полагается на клиента (CLAUDE.md,
+    // «Безопасность») — content_type начинается с "image/", как и
+    // говорит issue #384.
+    if (!upload->contentType.starts_with("image/")) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'content_type' must start with 'image/'"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> decoded = base64::decode(upload->dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'data_base64' is not valid base64"}}.dump(), kJsonContentType);
+        return;
+    }
+    if (decoded->size() > kMaxAvatarSizeBytes) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "avatar exceeds the 2 MB size limit"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::string avatarUrl = avatarUrlFor(*login);
+    if (!userService_.saveAvatar(*login, upload->contentType, upload->dataBase64, avatarUrl)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.status = 201;
+    response.set_content(nlohmann::json{{"avatar_url", avatarUrl}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleGetAvatar(const httplib::Request& request, httplib::Response& response) {
+    // Без аутентификации (issue #384) — тот же публичный доступ, что и
+    // у аватара любого другого участника в GET /users/{login}/profile
+    // (avatar_url там виден всем, см. toPublicJson()); требовать токен
+    // здесь ничего бы не скрыло, только сломало бы <img src="...">.
+    const std::optional<AvatarData> avatar = userService_.findAvatar(request.matches[1].str());
+    if (!avatar.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no avatar uploaded"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const std::optional<std::string> decoded = base64::decode(avatar->dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 500;
+        response.set_content(nlohmann::json{{"error", "stored avatar data is corrupt"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(*decoded, avatar->contentType);
 }
 
 void HttpServer::listen(const std::string& host, int port) {

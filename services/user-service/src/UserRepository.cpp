@@ -241,4 +241,39 @@ bool UserRepository::areFriends(const std::string& loginA, const std::string& lo
     return !rows.empty();
 }
 
+bool UserRepository::saveAvatar(const std::string& login, const std::string& contentType,
+                                 const std::string& dataBase64, const std::string& avatarUrl) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result updateRows =
+        transaction.exec("UPDATE users SET avatar_url = $1 WHERE login = $2 RETURNING 1",
+                          pqxx::params{avatarUrl, login});
+    if (updateRows.empty()) {
+        // Откатывает саму transaction'у неявно (её деструктор) — не
+        // вызываем commit(), так что ни одна из двух записей не
+        // применяется, если пользователя не существует.
+        return false;
+    }
+
+    transaction.exec(
+        "INSERT INTO user_avatars (login, content_type, data_base64, updated_at) VALUES ($1, $2, $3, now()) "
+        "ON CONFLICT (login) DO UPDATE SET content_type = $2, data_base64 = $3, updated_at = now()",
+        pqxx::params{login, contentType, dataBase64});
+    transaction.commit();
+    return true;
+}
+
+std::optional<AvatarData> UserRepository::findAvatar(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec("SELECT content_type, data_base64 FROM user_avatars WHERE login = $1",
+                                                pqxx::params{login});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return AvatarData{.contentType = rows[0][0].as<std::string>(), .dataBase64 = rows[0][1].as<std::string>()};
+}
+
 }  // namespace user_service
