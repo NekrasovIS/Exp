@@ -173,12 +173,14 @@ std::vector<DirectMessage> ChatService::listDirectMessages(std::int64_t threadId
     return repository_.listDirectMessages(threadId, limit, beforeId);
 }
 
-void ChatService::markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId) {
-    repository_.markChannelRead(channelId, login, messageId);
+std::int64_t ChatService::markChannelRead(std::int64_t channelId, const std::string& login,
+                                           std::int64_t messageId) {
+    return repository_.markChannelRead(channelId, login, messageId);
 }
 
-void ChatService::markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId) {
-    repository_.markDmThreadRead(threadId, login, messageId);
+std::int64_t ChatService::markDmThreadRead(std::int64_t threadId, const std::string& login,
+                                            std::int64_t messageId) {
+    return repository_.markDmThreadRead(threadId, login, messageId);
 }
 
 std::vector<ChannelUnreadCount> ChatService::listUnreadChannelCounts(const std::string& login) {
@@ -187,6 +189,14 @@ std::vector<ChannelUnreadCount> ChatService::listUnreadChannelCounts(const std::
 
 std::vector<ThreadUnreadCount> ChatService::listUnreadThreadCounts(const std::string& login) {
     return repository_.listUnreadThreadCounts(login);
+}
+
+std::vector<ReadReceipt> ChatService::listChannelReadState(std::int64_t channelId) {
+    return repository_.listChannelReadState(channelId);
+}
+
+std::vector<ReadReceipt> ChatService::listDmThreadReadState(std::int64_t threadId) {
+    return repository_.listDmThreadReadState(threadId);
 }
 
 }  // namespace chat_service

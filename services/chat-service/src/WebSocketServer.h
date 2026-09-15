@@ -166,6 +166,24 @@ public:
     /// Прекращает принимать соединения и закрывает существующие.
     void stop();
 
+    /// Рассылает `{"read_receipt": {"login", "last_read_message_id"}}`
+    /// всем подписчикам @p channelId, включая сокет самого читающего
+    /// (issue #380) — HttpServer (REST-обработчик отметки "прочитано")
+    /// вызывает это, а не наоборот: доставка в реальном времени — работа
+    /// этого класса (см. class-комментарий HttpServer), но сама мутация
+    /// остаётся REST-эндпоинтом, а не WS-фреймом, в отличие от
+    /// pin/reaction — переводить существующий, уже рабочий REST-контракт
+    /// #310/#348 на WS ради этого не требовалось. Вызывающий код сам
+    /// решает, действительно ли отметка продвинулась (см.
+    /// ChatRepository::markChannelRead()) — сюда попадают только реальные
+    /// продвижения, не повторные/устаревшие вызовы.
+    void broadcastChannelReadReceipt(std::int64_t channelId, const std::string& login,
+                                      std::int64_t lastReadMessageId);
+
+    /// То же самое для личного диалога.
+    void broadcastDmThreadReadReceipt(std::int64_t dmThreadId, const std::string& login,
+                                       std::int64_t lastReadMessageId);
+
 private:
     struct Subscription {
         std::string login;

@@ -194,6 +194,14 @@ struct ThreadUnreadCount {
     std::int64_t unreadCount = 0;
 };
 
+/// Один снимок "прочитано по" (issue #380) — строка из
+/// channel_read_state/dm_thread_read_state, для клиента, открывающего
+/// канал/диалог и заполняющего свою карту login -> last_read_message_id.
+struct ReadReceipt {
+    std::string login;
+    std::int64_t lastReadMessageId = 0;
+};
+
 /// Результат regenerateInviteCode() (issue #186) — тот же приём, что и
 /// у EditMessageResult: одного MutationResult недостаточно, чтобы
 /// передать вызывающей стороне новый код.
@@ -495,10 +503,23 @@ public:
     /// last_read_message_id уже >= @p messageId, вызов не имеет эффекта
     /// — клиент вполне может прислать устаревший id (например, гонка
     /// между несколькими открытыми окнами одного пользователя).
-    void markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId);
+    /// @return Эффективное значение last_read_message_id после вызова
+    /// (issue #380) — само @p messageId, если это был реальный сдвиг
+    /// вперёд, либо прежнее (большее) значение, если вызов оказался
+    /// устаревшим дублем; вызывающий код сравнивает с @p messageId,
+    /// чтобы решить, рассылать ли событие о прочтении.
+    std::int64_t markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId);
 
     /// То же самое для личного диалога.
-    void markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
+    std::int64_t markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
+
+    /// Снимок last_read_message_id всех участников @p channelId, у кого
+    /// есть хотя бы одна отметка (issue #380) — участник без единой
+    /// отметки просто отсутствует в списке, а не входит с нулём/null.
+    [[nodiscard]] std::vector<ReadReceipt> listChannelReadState(std::int64_t channelId);
+
+    /// То же самое для личного диалога.
+    [[nodiscard]] std::vector<ReadReceipt> listDmThreadReadState(std::int64_t threadId);
 
     /// Непрочитанные счётчики по всем каналам сообществ, в которых
     /// состоит @p login — одним запросом (без N+1 по каждому каналу

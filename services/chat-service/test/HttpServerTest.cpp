@@ -12,9 +12,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // Тесты уровня маршрутов для HttpServer, обращающиеся к реальному
@@ -73,9 +75,19 @@ public:
     ScopedServer(ChatService& chatService, const AuthServiceClient& authServiceClient)
         : ScopedServer(chatService, authServiceClient, unreachableUserServiceClient()) {}
 
+    // Issue #380 — те же ~40 существующих вызовов не должны переписываться
+    // ради необязательного колбэка: ReadReceiptBroadcaster сам по себе
+    // default-конструируется в no-op, поэтому он здесь не пятый
+    // позиционный, а последний параметр с дефолтом.
     ScopedServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
-                 const UserServiceClient& userServiceClient)
-        : server_(chatService, authServiceClient, userServiceClient),
+                 ReadReceiptBroadcaster readReceiptBroadcaster)
+        : ScopedServer(chatService, authServiceClient, unreachableUserServiceClient(),
+                        std::move(readReceiptBroadcaster)) {}
+
+    ScopedServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                 const UserServiceClient& userServiceClient, ReadReceiptBroadcaster readReceiptBroadcaster = {})
+        : server_(chatService, authServiceClient, userServiceClient, "http://localhost:5173",
+                   std::move(readReceiptBroadcaster)),
           thread_([this] { server_.listen(kTestHost, kTestPort); }) {
         httplib::Client probe(kTestHost, kTestPort);
         probe.set_connection_timeout(0, 50000);
@@ -103,6 +115,41 @@ private:
 
     HttpServer server_;
     std::thread thread_;
+};
+
+/// Записывает вызовы ReadReceiptBroadcaster (issue #380) — HttpServer
+/// зовёт эти колбэки из потока httplib, поэтому доступ к captured_
+/// защищён мьютексом, как и очередь WsTestClient в WebSocketServerTest.cpp.
+struct ReadReceiptSpy {
+    struct Call {
+        std::int64_t channelOrThreadId = 0;
+        std::string login;
+        std::int64_t lastReadMessageId = 0;
+    };
+
+    [[nodiscard]] ReadReceiptBroadcaster broadcaster() {
+        return ReadReceiptBroadcaster{
+            .onChannelRead =
+                [this](std::int64_t channelId, const std::string& login, std::int64_t lastReadMessageId) {
+                    const std::lock_guard<std::mutex> lock(mutex);
+                    channelCalls.push_back(Call{channelId, login, lastReadMessageId});
+                },
+            .onDmThreadRead =
+                [this](std::int64_t threadId, const std::string& login, std::int64_t lastReadMessageId) {
+                    const std::lock_guard<std::mutex> lock(mutex);
+                    threadCalls.push_back(Call{threadId, login, lastReadMessageId});
+                },
+        };
+    }
+
+    [[nodiscard]] std::size_t channelCallCount() {
+        const std::lock_guard<std::mutex> lock(mutex);
+        return channelCalls.size();
+    }
+
+    std::mutex mutex;
+    std::vector<Call> channelCalls;
+    std::vector<Call> threadCalls;
 };
 
 // Объединяет всё, что нужно тесту: репозиторий/auth-клиент, настоящий
@@ -1858,6 +1905,170 @@ TEST(HttpServerTest, MarkChannelReadRejectsMissingMessageIdWith400) {
     EXPECT_EQ(result->status, 400);
 }
 
+TEST(HttpServerTest, MarkChannelReadOnGenuineAdvanceInvokesTheReadReceiptBroadcaster) {
+    auto fixtureOpt = TestFixture::create("http-server-read-receipt-broadcast");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-read-receipt-broadcast-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<Message> posted = chatService.postMessage(*channelId, fixture.ownerLogin, "hello");
+    ASSERT_TRUE(posted.has_value());
+
+    ReadReceiptSpy spy;
+    const ScopedServer server(chatService, fixture.authServiceClient, spy.broadcaster());
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    const httplib::Result markResult =
+        client.Post("/channels/" + std::to_string(*channelId) + "/read", headers,
+                    nlohmann::json{{"message_id", posted->id}}.dump(), "application/json");
+    ASSERT_TRUE(markResult);
+    EXPECT_EQ(markResult->status, 200);
+
+    ASSERT_EQ(spy.channelCallCount(), 1U);
+    EXPECT_EQ(spy.channelCalls[0].channelOrThreadId, *channelId);
+    EXPECT_EQ(spy.channelCalls[0].login, fixture.ownerLogin);
+    EXPECT_EQ(spy.channelCalls[0].lastReadMessageId, posted->id);
+}
+
+TEST(HttpServerTest, MarkChannelReadOnStaleDuplicateCallDoesNotInvokeTheBroadcasterAgain) {
+    auto fixtureOpt = TestFixture::create("http-server-read-receipt-stale");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-read-receipt-stale-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<Message> firstMessage = chatService.postMessage(*channelId, fixture.ownerLogin, "one");
+    const std::optional<Message> secondMessage = chatService.postMessage(*channelId, fixture.ownerLogin, "two");
+    ASSERT_TRUE(firstMessage.has_value());
+    ASSERT_TRUE(secondMessage.has_value());
+
+    ReadReceiptSpy spy;
+    const ScopedServer server(chatService, fixture.authServiceClient, spy.broadcaster());
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    // Отметить прочитанным до самого свежего сообщения — реальный сдвиг.
+    ASSERT_TRUE(client.Post("/channels/" + std::to_string(*channelId) + "/read", headers,
+                             nlohmann::json{{"message_id", secondMessage->id}}.dump(), "application/json"));
+    ASSERT_EQ(spy.channelCallCount(), 1U);
+
+    // Повторный вызов с более старым id (гонка между двумя открытыми
+    // окнами, см. doc-комментарий ChatRepository::markChannelRead()) —
+    // указатель не двигается назад, рассылки быть не должно.
+    ASSERT_TRUE(client.Post("/channels/" + std::to_string(*channelId) + "/read", headers,
+                             nlohmann::json{{"message_id", firstMessage->id}}.dump(), "application/json"));
+    EXPECT_EQ(spy.channelCallCount(), 1U);
+}
+
+TEST(HttpServerTest, GetChannelReadReceiptsReturnsEmptyArrayWhenNoOneHasReadYet) {
+    auto fixtureOpt = TestFixture::create("http-server-read-receipts-empty");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-read-receipts-empty-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    const httplib::Result result = client.Get("/channels/" + std::to_string(*channelId) + "/read-receipts", headers);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(result->body)["receipts"].empty());
+}
+
+TEST(HttpServerTest, GetChannelReadReceiptsReturnsReceiptsAfterMarkingRead) {
+    auto fixtureOpt = TestFixture::create("http-server-read-receipts-snapshot");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-read-receipts-snapshot-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<Message> posted = chatService.postMessage(*channelId, fixture.ownerLogin, "hello");
+    ASSERT_TRUE(posted.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    ASSERT_TRUE(client.Post("/channels/" + std::to_string(*channelId) + "/read", headers,
+                             nlohmann::json{{"message_id", posted->id}}.dump(), "application/json"));
+
+    const httplib::Result result = client.Get("/channels/" + std::to_string(*channelId) + "/read-receipts", headers);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const nlohmann::json receipts = nlohmann::json::parse(result->body)["receipts"];
+    ASSERT_EQ(receipts.size(), 1U);
+    EXPECT_EQ(receipts[0]["login"].get<std::string>(), fixture.ownerLogin);
+    EXPECT_EQ(receipts[0]["last_read_message_id"].get<std::int64_t>(), posted->id);
+}
+
+TEST(HttpServerTest, GetChannelReadReceiptsRejectsNonMemberWith404) {
+    auto fixtureOpt = TestFixture::create("http-server-read-receipts-outsider");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    const std::string outsiderLogin = "http-server-read-receipts-outsider-" + uniqueSuffix();
+    const std::optional<std::string> outsiderToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, outsiderLogin);
+    ASSERT_TRUE(outsiderToken.has_value());
+
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-read-receipts-404-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers outsiderHeaders{{"Authorization", bearer(*outsiderToken)}};
+
+    const httplib::Result result =
+        client.Get("/channels/" + std::to_string(*channelId) + "/read-receipts", outsiderHeaders);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
+TEST(HttpServerTest, GetChannelReadReceiptsRejectsMissingAuthorizationHeaderWith401) {
+    auto fixtureOpt = TestFixture::create("http-server-read-receipts-401");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-read-receipts-401-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId = chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+
+    const httplib::Result result = client.Get("/channels/" + std::to_string(*channelId) + "/read-receipts");
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
 TEST(HttpServerTest, GetUnreadRejectsMissingAuthorizationHeaderWith401) {
     auto fixtureOpt = TestFixture::create("http-server-unread-401");
     if (!fixtureOpt.has_value()) {
@@ -1937,6 +2148,105 @@ TEST(HttpServerTest, MarkDmThreadReadRoundTripsThroughGetUnreadAndRejectsNonPart
     EXPECT_EQ(markResult->status, 200);
     ASSERT_TRUE(threadCount().has_value());
     EXPECT_EQ(*threadCount(), 0);
+}
+
+TEST(HttpServerTest, MarkDmThreadReadOnGenuineAdvanceInvokesTheReadReceiptBroadcaster) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::optional<DmTestAccount> accountA =
+        registerDmTestAccount(authHost, authPort, "http-server-read-receipt-dm-a");
+    const std::optional<DmTestAccount> accountB =
+        registerDmTestAccount(authHost, authPort, "http-server-read-receipt-dm-b");
+    if (!accountA.has_value() || !accountB.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    makeFriends(userServiceHost, userServicePort, *accountA, *accountB);
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient(authHost, authPort);
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    ReadReceiptSpy spy;
+    const ScopedServer server(chatService, authServiceClient, userServiceClient, spy.broadcaster());
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeaderA{{"Authorization", bearer(accountA->token)}};
+    httplib::Headers authHeaderB{{"Authorization", bearer(accountB->token)}};
+
+    const httplib::Result openResult =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountB->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(openResult);
+    const std::int64_t threadId = nlohmann::json::parse(openResult->body)["id"].get<std::int64_t>();
+    const httplib::Result postResult =
+        client.Post("/dm/threads/" + std::to_string(threadId) + "/messages", authHeaderA,
+                    nlohmann::json{{"body", "hello"}}.dump(), "application/json");
+    ASSERT_TRUE(postResult);
+    const std::int64_t messageId = nlohmann::json::parse(postResult->body)["id"].get<std::int64_t>();
+
+    ASSERT_TRUE(client.Post("/dm/threads/" + std::to_string(threadId) + "/read", authHeaderB,
+                             nlohmann::json{{"message_id", messageId}}.dump(), "application/json"));
+
+    ASSERT_EQ(spy.threadCalls.size(), 1U);
+    EXPECT_EQ(spy.threadCalls[0].channelOrThreadId, threadId);
+    EXPECT_EQ(spy.threadCalls[0].login, accountB->login);
+    EXPECT_EQ(spy.threadCalls[0].lastReadMessageId, messageId);
+}
+
+TEST(HttpServerTest, GetDmThreadReadReceiptsReturnsReceiptsAfterMarkingReadAndRejectsNonParticipants) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::optional<DmTestAccount> accountA =
+        registerDmTestAccount(authHost, authPort, "http-server-read-receipts-dm-a");
+    const std::optional<DmTestAccount> accountB =
+        registerDmTestAccount(authHost, authPort, "http-server-read-receipts-dm-b");
+    const std::optional<DmTestAccount> stranger =
+        registerDmTestAccount(authHost, authPort, "http-server-read-receipts-dm-c");
+    if (!accountA.has_value() || !accountB.has_value() || !stranger.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    makeFriends(userServiceHost, userServicePort, *accountA, *accountB);
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient(authHost, authPort);
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const ScopedServer server(chatService, authServiceClient, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeaderA{{"Authorization", bearer(accountA->token)}};
+    httplib::Headers authHeaderB{{"Authorization", bearer(accountB->token)}};
+    httplib::Headers authHeaderStranger{{"Authorization", bearer(stranger->token)}};
+
+    const httplib::Result openResult =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountB->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(openResult);
+    const std::int64_t threadId = nlohmann::json::parse(openResult->body)["id"].get<std::int64_t>();
+    const httplib::Result postResult =
+        client.Post("/dm/threads/" + std::to_string(threadId) + "/messages", authHeaderA,
+                    nlohmann::json{{"body", "hello"}}.dump(), "application/json");
+    ASSERT_TRUE(postResult);
+    const std::int64_t messageId = nlohmann::json::parse(postResult->body)["id"].get<std::int64_t>();
+    ASSERT_TRUE(client.Post("/dm/threads/" + std::to_string(threadId) + "/read", authHeaderB,
+                             nlohmann::json{{"message_id", messageId}}.dump(), "application/json"));
+
+    const httplib::Result strangerResult =
+        client.Get("/dm/threads/" + std::to_string(threadId) + "/read-receipts", authHeaderStranger);
+    ASSERT_TRUE(strangerResult);
+    EXPECT_EQ(strangerResult->status, 404);
+
+    const httplib::Result result = client.Get("/dm/threads/" + std::to_string(threadId) + "/read-receipts", authHeaderA);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const nlohmann::json receipts = nlohmann::json::parse(result->body)["receipts"];
+    ASSERT_EQ(receipts.size(), 1U);
+    EXPECT_EQ(receipts[0]["login"].get<std::string>(), accountB->login);
+    EXPECT_EQ(receipts[0]["last_read_message_id"].get<std::int64_t>(), messageId);
 }
 
 }  // namespace

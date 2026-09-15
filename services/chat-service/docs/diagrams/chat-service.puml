@@ -117,6 +117,25 @@ class ThreadUnreadCount {
   +threadId : int64
   +unreadCount : int64
 }
+class ReadReceipt {
+  +login : string
+  +lastReadMessageId : int64
+}
+class ReadReceiptBroadcaster {
+  +onChannelRead : function<void(int64, string, int64)>
+  +onDmThreadRead : function<void(int64, string, int64)>
+}
+note bottom of ReadReceiptBroadcaster
+  Issue #380 — мост HttpServer к
+  WebSocketServer::broadcastChannelReadReceipt()/
+  broadcastDmThreadReadReceipt(): эти два класса
+  не знают друг о друге (реальное время — забота
+  WebSocketServer, см. class-note HttpServer), а
+  main.cpp — единственное место, где оба существуют
+  одновременно, — связывает их парой колбэков.
+  По умолчанию — no-op, чтобы существующие тесты
+  HttpServer не должны были поднимать WebSocketServer.
+end note
 
 package "chat_service::base64" <<Rectangle>> {
   class Base64 << (N,orchid) namespace >> {
@@ -160,10 +179,12 @@ class ChatRepository {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +insertDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
-  +markChannelRead(channelId: int64, login: string, messageId: int64)
-  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +markChannelRead(channelId: int64, login: string, messageId: int64) : int64
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64) : int64
   +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
   +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
+  +listChannelReadState(channelId: int64) : vector<ReadReceipt>
+  +listDmThreadReadState(threadId: int64) : vector<ReadReceipt>
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> RegenerateInviteCodeResult : returns
@@ -180,6 +201,7 @@ ChatRepository ..> DirectMessageThread : returns
 ChatRepository ..> DirectMessage : returns
 ChatRepository ..> ChannelUnreadCount : returns
 ChatRepository ..> ThreadUnreadCount : returns
+ChatRepository ..> ReadReceipt : returns
 ChatRepository ..> PqxxConnection : opens per call
 note right of ChatRepository
   Issue #310/#348: last_read_message_id
@@ -199,6 +221,17 @@ note right of ChatRepository
   listUnreadChannelCounts()/
   listUnreadThreadCounts() — одним запросом
   по всем каналам/диалогам логина, без N+1.
+
+  Issue #380: markChannelRead()/markDmThreadRead()
+  теперь возвращают эффективное значение (SQL
+  RETURNING поверх того же upsert) — HttpServer
+  сравнивает его с запрошенным id, чтобы отличить
+  реальный сдвиг от устаревшего дубля и решить,
+  вызывать ли ReadReceiptBroadcaster.
+  listChannelReadState()/listDmThreadReadState() —
+  снимок login -> last_read_message_id целиком, для
+  клиента, открывающего канал/диалог: участник без
+  единой отметки просто отсутствует в списке.
 end note
 
 class ChatService {
@@ -237,10 +270,12 @@ class ChatService {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +postDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
-  +markChannelRead(channelId: int64, login: string, messageId: int64)
-  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +markChannelRead(channelId: int64, login: string, messageId: int64) : int64
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64) : int64
   +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
   +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
+  +listChannelReadState(channelId: int64) : vector<ReadReceipt>
+  +listDmThreadReadState(threadId: int64) : vector<ReadReceipt>
 }
 note bottom of ChatService
   issue #187, Фаза 2: ChatService не
@@ -305,12 +340,15 @@ class HttpServer {
   -handleMarkChannelRead(request, response)
   -handleMarkDmThreadRead(request, response)
   -handleGetUnreadCounts(request, response)
+  -handleGetChannelReadReceipts(request, response)
+  -handleGetDmThreadReadReceipts(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }
 HttpServer --> ChatService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
 HttpServer --> UserServiceClient : checks friendship via (const&, issue #187)
+HttpServer --> ReadReceiptBroadcaster : notifies via (issue #380)
 HttpServer ..> Base64 : decode() (validates\nupload/download payloads)
 HttpServer ..> JsonGuard : guards parse() with (issue #129)
 HttpServer *-- HttplibServer : owns
@@ -324,6 +362,8 @@ package "chat_service::json_guard" <<Rectangle>> {
 class WebSocketServer {
   +start() : bool
   +stop()
+  +broadcastChannelReadReceipt(channelId: int64, login: string, lastReadMessageId: int64)
+  +broadcastDmThreadReadReceipt(dmThreadId: int64, login: string, lastReadMessageId: int64)
   -handleMessage(connectionState, webSocket, message)
   -handleHello(webSocket, payload)
   -handleSubscribedMessage(webSocket, payload)
@@ -344,6 +384,19 @@ class WebSocketServer {
   -broadcastToCallParticipants(channelId: int64, json: string, excludeSocket)
 }
 note right of WebSocketServer
+  Issue #380: broadcastChannelReadReceipt()/
+  broadcastDmThreadReadReceipt() рассылают
+  {"read_receipt": {"login", "last_read_message_id"}}
+  всем подписчикам канала/диалога, ВКЛЮЧАЯ сокет
+  самого читающего (та же причина, что и у обычных
+  сообщений — гонка между двумя открытыми окнами
+  одного пользователя, issue #310). В отличие от
+  message_pinned/reaction_changed, вызываются не из
+  собственного WS-фрейма, а из HttpServer через
+  ReadReceiptBroadcaster — сама мутация "прочитано"
+  осталась REST-эндпоинтом (#310/#348), переводить
+  его на WS ради одной этой рассылки не требовалось.
+
   Личные диалоги (issue #187, Фаза 2b):
   Hello {"token", "dm_thread_id"} вместо
   channel_id — isThreadParticipant()
@@ -356,6 +409,7 @@ end note
 WebSocketServer --> ChatService : delegates to (&)
 WebSocketServer --> AuthServiceClient : authenticates via (const&)
 WebSocketServer *-- IxWebSocketServer : owns
+ReadReceiptBroadcaster ..> WebSocketServer : wraps broadcast*ReadReceipt() (main.cpp)
 
 note right of HttpServer
   Routes (all require
