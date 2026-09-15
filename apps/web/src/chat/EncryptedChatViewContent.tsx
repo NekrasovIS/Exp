@@ -13,6 +13,7 @@ import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
 import { decryptMessage, encryptMessage } from "../crypto/channelCrypto.js";
+import { useChannelMute } from "../notifications/mutedChannels.js";
 import { useSession } from "../session/SessionContext.js";
 import { MentionSuggestions } from "./MentionSuggestions.js";
 import composerStyles from "./MessageComposer.module.css";
@@ -62,6 +63,7 @@ export function EncryptedChatViewContent({
   } = useMessages(channelId);
   const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
   const { readPointers } = useReadReceipts({ channelId }, socket);
+  const { muted, toggle: toggleMuted } = useChannelMute(channelId);
   const [decrypted, setDecrypted] = useState<ReadonlyMap<number, string>>(new Map());
   const [decryptedPinned, setDecryptedPinned] = useState<PinnedMessageInfo[]>([]);
   const [body, setBody] = useState("");
@@ -179,6 +181,14 @@ export function EncryptedChatViewContent({
       {currentLogin !== null && <CallPanel chatClient={socket} localLogin={currentLogin} />}
       <div className={styles.header}>
         <span className={styles.encryptedBadge}>🔒 Encrypted</span>
+        <button
+          type="button"
+          aria-label={muted ? "Unmute notifications for this channel" : "Mute notifications for this channel"}
+          aria-pressed={muted}
+          onClick={toggleMuted}
+        >
+          {muted ? "🔕" : "🔔"}
+        </button>
         {pinned.length > 0 && (
           <button type="button" onClick={() => setPinnedOpen((open) => !open)}>
             📌 {pinned.length}

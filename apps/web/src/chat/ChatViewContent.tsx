@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { CallPanel } from "../calls/CallPanel.js";
 import styles from "./chatView.module.css";
 import { useIsModerator } from "../communities/useIsModerator.js";
+import { useChannelMute } from "../notifications/mutedChannels.js";
 import { useSession } from "../session/SessionContext.js";
 import { MessageComposer } from "./MessageComposer.js";
 import { MessageList, truncatedSnippet } from "./MessageList.js";
@@ -55,6 +56,7 @@ export function ChatViewContent({
   } = useMessages(channelId);
   const { pinned, pinnedIds, pin, unpin } = usePinnedMessages(channelId, socket);
   const { readPointers } = useReadReceipts({ channelId }, socket);
+  const { muted, toggle: toggleMuted } = useChannelMute(channelId);
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(false);
   // Reply target (issue #306/#331) — resolved from `messages` itself,
@@ -92,6 +94,14 @@ export function ChatViewContent({
       <div className={styles.header}>
         <button type="button" onClick={() => setSearchOpen((open) => !open)}>
           {searchOpen ? "Close search" : "Search"}
+        </button>
+        <button
+          type="button"
+          aria-label={muted ? "Unmute notifications for this channel" : "Mute notifications for this channel"}
+          aria-pressed={muted}
+          onClick={toggleMuted}
+        >
+          {muted ? "🔕" : "🔔"}
         </button>
         {pinned.length > 0 && (
           <button type="button" onClick={() => setPinnedOpen((open) => !open)}>
