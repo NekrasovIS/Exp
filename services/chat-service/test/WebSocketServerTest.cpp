@@ -428,7 +428,19 @@ TEST(WebSocketServerTest, SfuRoomIsStableAcrossRepeatedCallJoin) {
 }
 
 // issue #231: раньше call_join не проверял членство в канале вообще.
-TEST(WebSocketServerTest, CallJoinRejectsNonChannelMember) {
+// Issue #317: раньше этот тест проверял "подписан на канал, но не
+// состоит в сообществе" — issue #256 (pentest) с тех пор сделал такую
+// подписку (hello) саму по себе недостижимой (handleHello() теперь тоже
+// проверяет членство), так что тест падал раньше, чем успевал дойти до
+// проверяемого call_join. Обновлённый сценарий — единственный, которым
+// сейчас можно достичь "участник подписался, но к моменту call_join
+// членства уже нет": в продукте пока нет отдельного "выйти/исключить из
+// сообщества" (ChatService не предоставляет такого метода), но удаление
+// самого сообщества каскадно чистит и memberships, и channels (см.
+// db/init.sql, ON DELETE CASCADE) — так что проверка в handleCallJoin()
+// остаётся реальным, не мёртвым кодом уже сегодня, а не только "на
+// будущее", когда появится leave/kick.
+TEST(WebSocketServerTest, CallJoinRejectsMemberWhoseCommunityWasDeletedAfterSubscribing) {
     ix::initNetSystem();
 
     const std::string dbConnectionString = envOrDefault(
@@ -441,25 +453,22 @@ TEST(WebSocketServerTest, CallJoinRejectsNonChannelMember) {
     ChatService service(repository);
 
     const std::string suffix = uniqueSuffix();
-    const std::string owner = "ws-nonmember-owner-" + suffix;
+    const std::string owner = "ws-delcomm-owner-" + suffix;
     Community community{};
     try {
-        community = service.createCommunity("ws-nonmember-community-" + suffix, owner);
+        community = service.createCommunity("ws-delcomm-community-" + suffix, owner);
     } catch (const std::exception& error) {
         GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
     }
     const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
     ASSERT_TRUE(channelId.has_value());
 
-    // Валидный токен, но login никогда не вступал в community —
-    // подписка на текстовый чат канала (hello) сама по себе членство не
-    // проверяет (issue #231 сознательно этого не меняет, см. doc-комментарий
-    // класса), но call_join теперь должен.
-    const std::string outsider = "ws-nonmember-" + suffix;
-    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, outsider);
+    const std::string member = "ws-delcomm-member-" + suffix;
+    const std::optional<std::string> token = registerAndGetToken(authHost, authPort, member);
     if (!token.has_value()) {
         GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
     }
+    ASSERT_TRUE(service.joinCommunity(community.id, member));
 
     AuthServiceClient authServiceClient(authHost, authPort);
     const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
@@ -471,6 +480,11 @@ TEST(WebSocketServerTest, CallJoinRejectsNonChannelMember) {
     ASSERT_TRUE(client.waitConnected());
     client.send(nlohmann::json{{"token", *token}, {"channel_id", *channelId}});
     ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    // Соединение остаётся подписанным (WebSocketServer не перепроверяет
+    // членство между hello и call_join) — владелец удаляет сообщество
+    // из-под member'а прямо сейчас.
+    ASSERT_EQ(service.deleteCommunity(community.id, owner), MutationResult::kSuccess);
 
     client.send(nlohmann::json{{"call_join", true}});
     const std::optional<nlohmann::json> response =
