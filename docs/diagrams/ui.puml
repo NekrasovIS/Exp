@@ -536,6 +536,15 @@ note right of CallWindow
   текущий tileHost_. closeEvent() игнорирует закрытие окна
   и эмитит minimizeRequested() вместо него — тот же путь,
   что и кнопка "Minimize".
+
+  Issue #450: видео-плитки (локальные QVideoWidget через
+  property videoTile="true" + Qt::WA_StyledBackground,
+  удалённые QLabel#remoteVideoTile) получили тонкую рамку
+  и скругление в Theme.cpp — тот же приём, что и у
+  #chatAttachmentPreview. reactionFeedLabel_ переведён с
+  общего objectName "mutedDescription" на собственный
+  "callReactionFeed" — отдельный высококонтрастный стиль,
+  чтобы тост с реакцией читался поверх видео-плиток.
 end note
 
 class FloatingCallTilesOverlay {
