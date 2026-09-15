@@ -172,6 +172,38 @@ void UserProfileClient::listFriends(const QString& token) {
     });
 }
 
+void UserProfileClient::uploadAvatar(const QString& token, const QString& contentType, const QByteArray& data) {
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/profile/avatar")));
+    const QJsonObject body{{"content_type", contentType}, {"data_base64", QString::fromLatin1(data.toBase64())}};
+    QNetworkReply* reply =
+        networkManager_.post(buildRequest(url, token), QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit errorOccurred(extractErrorMessage(reply));
+            return;
+        }
+        const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();
+        emit avatarUploaded(object.value("avatar_url").toString());
+    });
+}
+
+void UserProfileClient::fetchAvatar(const QString& login) {
+    // Без Authorization (issue #384) — эндпоинт публичный, buildRequest()
+    // добавила бы заголовок, который здесь просто не нужен.
+    const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/users/%1/avatar").arg(login)));
+    QNetworkReply* reply = networkManager_.get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, login]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit avatarFetchFailed(login);
+            return;
+        }
+        const QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+        emit avatarFetched(login, reply->readAll(), contentType);
+    });
+}
+
 void UserProfileClient::removeFriend(const QString& token, const QString& login) {
     const QUrl url = baseUrl_.resolved(QUrl(QStringLiteral("/friends/%1").arg(login)));
     QNetworkReply* reply = networkManager_.deleteResource(buildRequest(url, token));

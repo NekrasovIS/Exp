@@ -2,12 +2,29 @@
 
 #include <gtest/gtest.h>
 
+#include <QBuffer>
+#include <QByteArray>
+#include <QImage>
 #include <QLabel>
 #include <QListWidget>
 #include <QSignalSpy>
+#include <QUrl>
+
+#include "user/AvatarCache.h"
+#include "user/UserProfileClient.h"
 
 namespace devicehub {
 namespace {
+
+QByteArray encodeTinyRedPng() {
+    QImage image(64, 64, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
 
 TEST(MemberListPanelTest, StartsEmptyWithZeroCountTitle) {
     MemberListPanel panel;
@@ -121,6 +138,26 @@ TEST(MemberListPanelTest, SetOnlineLoginsReplacesThePreviousSetEntirely) {
     // rest of this file's icon-drawing methods.
     EXPECT_EQ(panel.listWidget()->item(0)->text(), QStringLiteral("alice"));
     EXPECT_EQ(panel.listWidget()->item(1)->text(), QStringLiteral("bob"));
+}
+
+TEST(MemberListPanelTest, SetAvatarCacheAppliesARealPhotoOnceItLoadsAndRestoresTheLetterOtherwise) {
+    // Issue #384/#442 — не требует сети: UserProfileClient::avatarFetched()
+    // вызывается напрямую (Qt-сигналы всегда public-функции), тот же
+    // приём, что и в AvatarCacheTest.cpp.
+    UserProfileClient client(QUrl(QStringLiteral("http://127.0.0.1:1")));
+    AvatarCache cache(client);
+    MemberListPanel panel;
+    panel.setAvatarCache(&cache);
+    panel.setMembers({QStringLiteral("alice"), QStringLiteral("bob")});
+    const QImage aliceLetterIcon = panel.listWidget()->item(0)->icon().pixmap(28, 28).toImage();
+    const QImage bobLetterIcon = panel.listWidget()->item(1)->icon().pixmap(28, 28).toImage();
+
+    client.avatarFetched(QStringLiteral("alice"), encodeTinyRedPng(), QStringLiteral("image/png"));
+
+    // alice — только что загруженное реальное фото, bob — по-прежнему
+    // буква-заглушка (для его login ничего не приходило).
+    EXPECT_NE(panel.listWidget()->item(0)->icon().pixmap(28, 28).toImage(), aliceLetterIcon);
+    EXPECT_EQ(panel.listWidget()->item(1)->icon().pixmap(28, 28).toImage(), bobLetterIcon);
 }
 
 TEST(MemberListPanelTest, ContextMenuEmitsNothingForTheCurrentUsersOwnRow) {

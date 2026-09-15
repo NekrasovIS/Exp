@@ -2,6 +2,7 @@
 
 #include <QAction>
 #include <QFrame>
+#include <QImage>
 #include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -10,9 +11,11 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <optional>
 
 #include "ui/IconFactory.h"
 #include "ui/Theme.h"
+#include "user/AvatarCache.h"
 
 namespace devicehub {
 
@@ -58,7 +61,7 @@ void MemberListPanel::setMembers(const QStringList& logins) {
     listWidget_->clear();
     for (const QString& login : sorted) {
         auto* item = new QListWidgetItem(login, listWidget_);
-        item->setIcon(ui_icons::memberAvatarIcon(login.left(1).toUpper(), onlineLogins_.contains(login)));
+        applyAvatarIcon(item, login);
     }
 }
 
@@ -66,7 +69,7 @@ void MemberListPanel::setOnlineLogins(const QStringList& logins) {
     onlineLogins_ = QSet<QString>(logins.begin(), logins.end());
     for (int i = 0; i < listWidget_->count(); ++i) {
         QListWidgetItem* item = listWidget_->item(i);
-        item->setIcon(ui_icons::memberAvatarIcon(item->text().left(1).toUpper(), onlineLogins_.contains(item->text())));
+        applyAvatarIcon(item, item->text());
     }
 }
 
@@ -79,7 +82,7 @@ void MemberListPanel::setLoginOnline(const QString& login, bool online) {
     for (int i = 0; i < listWidget_->count(); ++i) {
         QListWidgetItem* item = listWidget_->item(i);
         if (item->text() == login) {
-            item->setIcon(ui_icons::memberAvatarIcon(login.left(1).toUpper(), online));
+            applyAvatarIcon(item, login);
             break;
         }
     }
@@ -91,6 +94,32 @@ void MemberListPanel::setCurrentUserLogin(const QString& login) {
 
 void MemberListPanel::setChannelEncrypted(bool encrypted) {
     channelEncrypted_ = encrypted;
+}
+
+void MemberListPanel::setAvatarCache(AvatarCache* cache) {
+    avatarCache_ = cache;
+    if (avatarCache_ != nullptr) {
+        connect(avatarCache_, &AvatarCache::avatarReady, this, [this](const QString& login) {
+            for (int i = 0; i < listWidget_->count(); ++i) {
+                QListWidgetItem* item = listWidget_->item(i);
+                if (item->text() == login) {
+                    applyAvatarIcon(item, login);
+                    break;
+                }
+            }
+        });
+    }
+}
+
+void MemberListPanel::applyAvatarIcon(QListWidgetItem* item, const QString& login) {
+    const bool online = onlineLogins_.contains(login);
+    if (avatarCache_ != nullptr) {
+        if (const std::optional<QImage> image = avatarCache_->imageFor(login); image.has_value()) {
+            item->setIcon(ui_icons::realMemberAvatarIcon(*image, online));
+            return;
+        }
+    }
+    item->setIcon(ui_icons::memberAvatarIcon(login.left(1).toUpper(), online));
 }
 
 void MemberListPanel::showContextMenu(const QPoint& pos) {

@@ -20,6 +20,8 @@ class QVBoxLayout;
 
 namespace devicehub {
 
+class AvatarCache;
+
 /**
  * @brief Основная область содержимого: показывает заглушку, пока в
  *        ChannelsPanel не выбран канал, а затем сгруппированный список
@@ -70,6 +72,13 @@ public:
     /// получают Pin/Unpin ретроактивно — принятое упрощение первой
     /// версии, см. doc-комментарий MainWindow.
     void setCanManageChannel(bool canManage);
+
+    /// Даёт всем строкам, которые эта ChatView создаёт, доступ к общему
+    /// кэшу реальных изображений аватара (issue #384/#442) — nullptr
+    /// (значение по умолчанию до вызова) означает "показывать только
+    /// буквы-заглушки", как раньше; MainWindow вызывает это один раз при
+    /// построении UI. Не владеет @p cache.
+    void setAvatarCache(AvatarCache* cache);
 
     /// Добавляет настоящее сообщение чата — группируется с предыдущим
     /// (без повтора аватара/имени/времени), если они от одного автора
@@ -388,6 +397,9 @@ private:
     QPushButton* pinnedMessagesButton_ = nullptr;
     /// Issue #338 — см. doc-комментарий setCanManageChannel().
     bool canManageChannel_ = false;
+    /// Issue #384/#442 — см. doc-комментарий setAvatarCache(). Не
+    /// владеет.
+    AvatarCache* avatarCache_ = nullptr;
     QLabel* typingIndicatorLabel_ = nullptr;
     /// Виден только пока editingMessageId_ >= 0 — единственный оставшийся
     /// индикатор режима редактирования с тех пор, как sendButton_ стал

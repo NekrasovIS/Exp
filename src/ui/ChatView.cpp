@@ -376,6 +376,10 @@ void ChatView::setCanManageChannel(bool canManage) {
     canManageChannel_ = canManage;
 }
 
+void ChatView::setAvatarCache(AvatarCache* cache) {
+    avatarCache_ = cache;
+}
+
 ChatMessage ChatView::resolveReplyPreview(const ChatMessage& message) const {
     if (message.replyToMessageId < 0) {
         return message;
@@ -397,7 +401,7 @@ void ChatView::appendMessage(const ChatMessage& message) {
         !hasLastMessage_ || !chat_message_grouping::shouldGroupWithPrevious(lastMessage_, resolvedMessage);
     const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
     auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
-                                    messagesContainer_);
+                                    avatarCache_, messagesContainer_);
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     requestPreviewIfImageAttachment(resolvedMessage, row);
@@ -435,7 +439,7 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
         }
         const bool isOwnMessage = !currentUserLogin_.isEmpty() && resolvedMessage.author == currentUserLogin_;
         auto* row = new ChatMessageRow(resolvedMessage, showHeader, isOwnMessage, currentUserLogin_, canManageChannel_,
-                                        messagesContainer_);
+                                        avatarCache_, messagesContainer_);
         // Issue #330: подгруженные через "Load older messages" строки
         // раньше не подключались вообще — Edit/Delete/Download на них
         // молча ничего не делали. Обнаружено при добавлении Reply,

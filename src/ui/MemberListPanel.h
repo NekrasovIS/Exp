@@ -6,9 +6,12 @@
 
 class QLabel;
 class QListWidget;
+class QListWidgetItem;
 class QPoint;
 
 namespace devicehub {
+
+class AvatarCache;
 
 /**
  * @brief Список участников выбранного сообщества, справа от ChatView —
@@ -63,6 +66,13 @@ public:
     /// канал зашифрован (issue #217).
     void setChannelEncrypted(bool encrypted);
 
+    /// Даёт панели доступ к общему кэшу реальных изображений аватара
+    /// (issue #384/#442) — nullptr (значение по умолчанию до вызова)
+    /// означает "показывать только буквы-заглушки", как раньше;
+    /// MainWindow вызывает это один раз при построении UI, до первого
+    /// setMembers(). Не владеет @p cache.
+    void setAvatarCache(AvatarCache* cache);
+
     [[nodiscard]] QLabel* titleLabel() const { return titleLabel_; }
     [[nodiscard]] QListWidget* listWidget() const { return listWidget_; }
 
@@ -79,6 +89,12 @@ signals:
 private:
     void showContextMenu(const QPoint& pos);
 
+    /// Общая часть setMembers()/setOnlineLogins()/setLoginOnline()/
+    /// onAvatarReady() (issue #384/#442) — реальное фото из
+    /// avatarCache_, если оно уже загружено, иначе прежняя буква-
+    /// заглушка через memberAvatarIcon().
+    void applyAvatarIcon(QListWidgetItem* item, const QString& login);
+
     QLabel* titleLabel_ = nullptr;
     QListWidget* listWidget_ = nullptr;
     QString currentUserLogin_;
@@ -86,6 +102,8 @@ private:
     /// Presence (issue #309) — survives setMembers() rebuilding the
     /// list (a REST refresh shouldn't blank out live presence state).
     QSet<QString> onlineLogins_;
+    /// Не владеет — см. doc-комментарий setAvatarCache().
+    AvatarCache* avatarCache_ = nullptr;
 };
 
 }  // namespace devicehub

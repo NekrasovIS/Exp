@@ -18,6 +18,7 @@
 #include "devices/ScreenCaptureDevice.h"
 #include "devices/VoiceMessageRecorder.h"
 #include "ui/ToastBanner.h"
+#include "user/AvatarCache.h"
 #include "user/IdentityKeyStore.h"
 #include "user/UserProfileClient.h"
 
@@ -80,6 +81,12 @@ private:
     /// как сработает ChatRestClient::attachmentUploaded() (см.
     /// MainWindow.cpp).
     void onAttachFileClicked();
+    /// Клик по chooseAvatarFileButton() в ProfileDialog (issue #384/
+    /// #442) — тот же паттерн, что и onAttachFileClicked(): открывает
+    /// выбор файла, читает байты, показывает оптимистичный
+    /// предпросмотр и сразу загружает через UserProfileClient::
+    /// uploadAvatar().
+    void onChooseAvatarFileClicked();
     /// Клик по кнопке записи голосового сообщения (issue #359) —
     /// переключает voiceMessageRecorder_ старт/стоп; на стоп сразу
     /// загружает готовый WAV через ChatRestClient::uploadAttachment(),
@@ -122,6 +129,13 @@ private:
     /// состояние "не авторизован" — эндпоинта отзыва токена на сервере
     /// пока не существует, поэтому это выход только на стороне клиента.
     void signOut();
+
+    /// Общая часть обработчиков profileReceived()/profileUpdated()/
+    /// AvatarCache::avatarReady() (issue #384/#442) — если у
+    /// currentUserLogin_ уже есть загруженный аватар в avatarCache_,
+    /// применяет его к footerBar_/profileDialog_; ничего не делает
+    /// (оставляет текущую букву-заглушку), если его пока нет.
+    void applyOwnAvatarIfLoaded();
 
     /// Заново запрашивает список сообществ у chat-service (ничего не
     /// делает, кроме сообщения в статус-баре, если вход ещё не
@@ -230,6 +244,13 @@ private:
     CallManager callManager_{chatClient_, audioInput_, audioOutput_, camera_, screenCapture_};
     ChatRestClient chatRestClient_;
     UserProfileClient userProfileClient_;
+    /// Общий кэш реальных изображений аватара (issue #384/#442) —
+    /// footerBar_/memberListPanel_/chatView_/profileDialog_ все делят
+    /// один экземпляр (переданный им через setAvatarCache()), чтобы один
+    /// и тот же login запрашивался по сети не больше одного раза
+    /// одновременно. Зависит от userProfileClient_ (ссылка, не
+    /// владение) — должен объявляться после неё.
+    AvatarCache avatarCache_{userProfileClient_};
     /// Конструируется, как только становится известен currentUserLogin_
     /// (issue #136) — без конструктора по умолчанию, поскольку пара
     /// ключей бессмысленна без логина, к которому привязывается файл

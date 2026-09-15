@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <QApplication>
+#include <QImage>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -35,6 +36,20 @@ TEST(FooterBarTest, SetProfileTextWithEmptyStringFallsBackToQuestionMarkAvatar) 
 
     EXPECT_EQ(bar.findChild<QLabel*>(QStringLiteral("footerProfileLabel"))->text(), QString());
     EXPECT_FALSE(bar.findChild<QLabel*>(QStringLiteral("footerAvatar"))->pixmap().isNull());
+}
+
+TEST(FooterBarTest, SetAvatarImageReplacesTheLetterPixmapWithARealPhoto) {
+    // Issue #384/#442.
+    FooterBar bar;
+    bar.setProfileText(QStringLiteral("alice"));
+    const QImage letterPixmap = bar.avatarLabel()->pixmap().toImage();
+
+    QImage realPhoto(64, 64, QImage::Format_ARGB32);
+    realPhoto.fill(Qt::red);
+    bar.setAvatarImage(realPhoto);
+
+    EXPECT_FALSE(bar.avatarLabel()->pixmap().isNull());
+    EXPECT_NE(bar.avatarLabel()->pixmap().toImage(), letterPixmap);
 }
 
 TEST(FooterBarTest, ClickingAvatarEmitsAccountSettingsRequested) {

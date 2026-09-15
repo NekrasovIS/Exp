@@ -257,9 +257,11 @@ class MemberListPanel {
   +setMembers(logins: QStringList)
   +setCurrentUserLogin(login: QString)
   +setChannelEncrypted(encrypted: bool)
+  +setAvatarCache(cache: AvatarCache*)
   +titleLabel() : QLabel*
   +listWidget() : QListWidget*
   -showContextMenu(pos: QPoint)
+  -applyAvatarIcon(item: QListWidgetItem*, login: QString)
   .. signals ..
   +grantChannelKeyAccessRequested(login: QString)
 }
@@ -288,7 +290,8 @@ note right of MemberListPanel
   grantChannelKeyAccessRequested(), показывая явную
   ошибку тостом, если ключа нет.
 end note
-MemberListPanel ..> IconFactory : communityAvatarIcon() (первая\nбуква логина) >
+MemberListPanel ..> IconFactory : memberAvatarIcon() (буква-заглушка)\nи realMemberAvatarIcon() (issue #384/#442) >
+MemberListPanel ..> AvatarCache : setAvatarCache() (issue #384/#442,\nне владеет) >
 
 class ChatView {
   +showPlaceholder()
@@ -296,6 +299,7 @@ class ChatView {
   +setEncrypted(encrypted: bool)
   +setCurrentUserLogin(login: QString)
   +setCanManageChannel(canManage: bool)
+  +setAvatarCache(cache: AvatarCache*)
   +appendMessage(message: ChatMessage)
   +prependMessages(messages: QList<ChatMessage>)
   +setLoadOlderVisible(visible: bool)
@@ -636,7 +640,7 @@ end note
 MainWindow ..> LoginWindow : requestCodeRequested()/\nverifyCodeRequested() >
 
 class ChatMessageRow {
-  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "", canManageChannel: bool = false)
+  ChatMessageRow(message: ChatMessage, showHeader: bool, isOwnMessage: bool,\n    currentUserLogin: QString = "", canManageChannel: bool = false,\n    avatarCache: AvatarCache* = nullptr)
   +messageId() : qint64
   +updateBody(newBody: QString)
   +setPinned(isPinned: bool)
@@ -666,6 +670,7 @@ note left of ChatMessageRow
   QMediaPlayer/QAudioOutput/QBuffer lazily and
   starts playback immediately.
 end note
+ChatMessageRow ..> AvatarCache : imageFor()/avatarReady()\n(issue #384/#442, не владеет; nullptr —\nтолько буква-заглушка, как раньше) >
 class ChatBubble {
   ChatBubble(isOwnMessage: bool)
   #paintEvent(event: QPaintEvent*)
@@ -745,18 +750,34 @@ ChatMessageRow ..> ChatMessageGrouping : parseSentAt() (time label) >
 
 class ProfileDialog {
   +setProfile(profile: UserProfile)
+  +setAvatarImage(image: QImage)
   +displayNameEdit() : QLineEdit*
   +avatarUrlEdit() : QLineEdit*
   +emailEdit() : QLineEdit*
   +telegramChatIdEdit() : QLineEdit*
+  +chooseAvatarFileButton() : QPushButton*
+  +avatarPreviewLabel() : QLabel*
   +saveButton() : QPushButton*
   +cancelButton() : QPushButton*
   +statusLabel() : QLabel*
   .. signals ..
   +saveRequested(edits: ProfileEdits)
+  +chooseAvatarFileRequested()
 }
 ProfileDialog ..> UserProfile : setProfile() >
 ProfileDialog ..> ProfileEdits : saveRequested() >
+note right of ProfileDialog
+  Issue #384/#442: chooseAvatarFileButton() не
+  открывает QFileDialog сама — тот же паттерн,
+  что и ChatView::attachFileRequested()/
+  MainWindow::onAttachFileClicked(): клик только
+  эмитит chooseAvatarFileRequested(), MainWindow
+  сам читает файл, показывает оптимистичный
+  предпросмотр (setAvatarImage()) и вызывает
+  UserProfileClient::uploadAvatar(). avatarUrlEdit_
+  сохранён рядом — можно и вручную задать внешний
+  URL, оба пути работают одновременно.
+end note
 
 class SettingsDialog {
   +outputCombo() : QComboBox*
@@ -792,6 +813,7 @@ class ModeratorsDialog {
 
 class FooterBar {
   +setProfileText(text: QString)
+  +setAvatarImage(image: QImage)
   +settingsButton() : QPushButton*
   +avatarLabel() : QLabel*
   #eventFilter(watched: QObject*, event: QEvent*) : bool
@@ -864,6 +886,9 @@ package "devicehub::ui_icons" <<Rectangle>> {
   class IconFactory << (N,orchid) namespace >> {
     +plusIcon(strokeColor: QColor) : QIcon
     +communityAvatarIcon(label: QString, unreadCount: int64 = 0) : QIcon
+    +memberAvatarIcon(label: QString, online: bool) : QIcon
+    +realAvatarIcon(image: QImage) : QIcon
+    +realMemberAvatarIcon(image: QImage, online: bool) : QIcon
     +sendIcon(fillColor: QColor) : QIcon
     +settingsIcon(fillColor: QColor) : QIcon
     +membersIcon(fillColor: QColor) : QIcon
@@ -884,6 +909,21 @@ note right of IconFactory
   не зелёный акцент — иначе бейдж слился бы с
   фоном самого аватара) кружок с числом,
   "99+" при переполнении.
+
+  Issue #384/#442: realAvatarIcon()/
+  realMemberAvatarIcon() — та же круглая маска
+  (и, у последней, presence-точка), что и у
+  communityAvatarIcon()/memberAvatarIcon(), но
+  центрированное по короткой стороне и
+  отмасштабированное реальное фото вместо
+  градиента с буквой; общий вспомогательный
+  drawClippedSquareImage() в .cpp избегает
+  дублирования между ними. Вызывающая сторона
+  (FooterBar/MemberListPanel/ChatMessageRow/
+  ProfileDialog) сама решает через
+  AvatarCache::imageFor(), когда есть реальное
+  фото и когда откатиться на букву-заглушку —
+  сама эта функция ничего не загружает.
 
   Issue #418: mic/stop/pin/play/pause/video
   заменяют сырые emoji-глифы (ChatView's
@@ -916,6 +956,7 @@ package "src/chat" {
 
 package "src/user" {
   class UserProfileClient
+  class AvatarCache
 }
 
 MainWindow *-- CommunitiesPanel : owns (sidebar's icon rail, far left)
@@ -929,6 +970,7 @@ MainWindow *-- DirectMessageView : owns (replaces ChatView\nin Friends mode, iss
 MainWindow *-- ProfileDialog : owns (opened from FooterBar's\naccount settings menu, issue #110)
 MainWindow *-- SettingsDialog : owns (opened from FooterBar)
 MainWindow *-- UserProfileClient : owns
+MainWindow *-- AvatarCache : owns (issue #384/#442,\nuses userProfileClient_&)
 MainWindow *-- ModeratorsDialog : owns (opened from\nCommunitiesPanel, issue #114)
 MainWindow *-- SearchDialog : owns (opened from ChatView's\n"Search" button, issue #118)
 MainWindow *-- PinnedMessagesDialog : owns (opened from ChatView's\n"📌 N" button, issue #338/#339)
@@ -966,11 +1008,17 @@ MainWindow ..> ChatRestClient : openDmThread()/listDmThreads()\nsendDirectMessag
 FriendsPanel ..> MainWindow : friendSelected()/addFriendRequested()\naccept|declineRequestRequested()\nremoveFriendRequested() >
 DirectMessageView ..> MainWindow : sendMessageRequested() >
 MainWindow ..> FooterBar : setProfileText() (display_name,\nfalls back to login) >
+MainWindow ..> FooterBar : setAvatarImage() (issue #384/#442) >
 MainWindow ..> ProfileDialog : setProfile() (via\nUserProfileClient signals) >
+MainWindow ..> ProfileDialog : setAvatarImage() (issue #384/#442) >
 MainWindow ..> MemberListPanel : setMembers() (from\nChatRestClient::membersListed()) >
 MainWindow ..> MemberListPanel : setCurrentUserLogin()/setChannelEncrypted()\n(issue #217) >
+MainWindow ..> MemberListPanel : setAvatarCache() (issue #384/#442) >
+MainWindow ..> ChatView : setAvatarCache() (issue #384/#442) >
+MainWindow ..> AvatarCache : avatarReady() -> applyOwnAvatarIfLoaded()\n(issue #384/#442) >
 MemberListPanel ..> MainWindow : grantChannelKeyAccessRequested() (issue #217) >
 ProfileDialog ..> MainWindow : saveRequested() >
+ProfileDialog ..> MainWindow : chooseAvatarFileRequested()\n(issue #384/#442) >
 
 CommunitiesPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/joinByCodeRequested()\nregenerateInviteCodeRequested()/communitySelected() >
 CommunitiesPanel ..> MainWindow : manageModeratorsRequested() (issue #114) >
@@ -981,9 +1029,10 @@ MainWindow ..> ModeratorsDialog : setCommunity()/setModerators()\n(via ChatRestC
 ChannelsPanel ..> MainWindow : createRequested()/renameRequested()\ndeleteRequested()/channelSelected() >
 CommunitiesPanel ..> IconFactory : plusIcon()/communityAvatarIcon() >
 ChannelsPanel ..> IconFactory : plusIcon() >
-FooterBar ..> IconFactory : settingsIcon()/communityAvatarIcon() >
+FooterBar ..> IconFactory : settingsIcon()/communityAvatarIcon()/\nrealAvatarIcon() (issue #384/#442) >
+ProfileDialog ..> IconFactory : communityAvatarIcon()/realAvatarIcon()\n(issue #384/#442) >
 ChatView ..> IconFactory : plusIcon()/sendIcon()/membersIcon() >
-ChatMessageRow ..> IconFactory : communityAvatarIcon() (author avatar) >
+ChatMessageRow ..> IconFactory : communityAvatarIcon() (буква-заглушка)\nи realAvatarIcon() (issue #384/#442) >
 MainWindow ..> ChatView : showChannel()/showPlaceholder()\nappendMessage()/appendSystemLine()/clearLog()\nsetCurrentUserLogin()/setCallState() >
 MainWindow ..> CallWindow : setMuted()/setVideoEnabled()/setScreenShareEnabled()\nsetCallParticipants() (issue #185) >
 MainWindow ..> CallWindow : showRemoteVideoFrame()/removeRemoteVideo()\nresetForNewCall() >

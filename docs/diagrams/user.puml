@@ -37,6 +37,8 @@ class UserProfileClient {
   +declineFriendRequest(token: QString, requestId: qint64)
   +listFriends(token: QString)
   +removeFriend(token: QString, login: QString)
+  +uploadAvatar(token: QString, contentType: QString, data: QByteArray)
+  +fetchAvatar(login: QString)
   .. signals ..
   +profileReceived(profile: UserProfile)
   +profileUpdated(profile: UserProfile)
@@ -46,6 +48,9 @@ class UserProfileClient {
   +friendRequestDeclined(requestId: qint64)
   +friendsListed(logins: QStringList)
   +friendRemoved(login: QString)
+  +avatarUploaded(avatarUrl: QString)
+  +avatarFetched(login: QString, data: QByteArray, contentType: QString)
+  +avatarFetchFailed(login: QString)
   +errorOccurred(message: QString)
 }
 UserProfileClient *-- QNetworkAccessManager : owns
@@ -54,6 +59,39 @@ UserProfileClient ..> ProfileEdits : updateOwnProfile() >
 UserProfileClient ..> FriendRequestInfo : emits (issue #187, Фаза 3)
 UserProfileClient ..> "user-service" : GET /users/{login}/profile,\nPATCH /users/me
 UserProfileClient ..> "user-service" : POST /friends/requests,\nGET /friends/requests,\nPOST /friends/requests/{id}/accept|decline,\nGET /friends, DELETE /friends/{login}\n(issue #187)
+UserProfileClient ..> "user-service" : POST /profile/avatar,\nGET /users/{login}/avatar\n(issue #384/#442)
+
+class AvatarCache {
+  +AvatarCache(client: UserProfileClient&)
+  +imageFor(login: QString) : optional<QImage>
+  +invalidate(login: QString)
+  .. signals ..
+  +avatarReady(login: QString)
+}
+AvatarCache --> UserProfileClient : uses (&)
+note bottom of AvatarCache
+  Issue #384/#442: единственная точка,
+  знающая про UserProfileClient::
+  fetchAvatar()/avatarFetched()/
+  avatarFetchFailed() — FooterBar/
+  MemberListPanel/ChatMessageRow/
+  ProfileDialog делят один экземпляр
+  (владеет MainWindow), вызывают только
+  imageFor(), сам сетевой клиент не
+  трогают. imageFor() на промахе кэша
+  сама запускает fetchAvatar() (если
+  такой запрос ещё не в процессе и
+  раньше не завершился неудачей) и
+  возвращает nullopt — вызывающая
+  сторона продолжает показывать
+  букву-заглушку (ui_icons::
+  communityAvatarIcon()/
+  memberAvatarIcon()) до avatarReady().
+  Отрисовкой (круглая маска, presence-
+  точка) не занимается — это
+  ui_icons::realAvatarIcon()/
+  realMemberAvatarIcon() (см. ui.puml).
+end note
 note bottom of ProfileEdits
   issue #156/#174: email/telegramChatId —
   заданы, значит, вход по одноразовому

@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QEvent>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -69,6 +70,10 @@ void FooterBar::setProfileText(const QString& text) {
     profileLabel_->setText(text);
     const QString initial = text.isEmpty() ? QStringLiteral("?") : text.left(1).toUpper();
     avatarLabel_->setPixmap(ui_icons::communityAvatarIcon(initial).pixmap(kAvatarDiameter, kAvatarDiameter));
+}
+
+void FooterBar::setAvatarImage(const QImage& image) {
+    avatarLabel_->setPixmap(ui_icons::realAvatarIcon(image).pixmap(kAvatarDiameter, kAvatarDiameter));
 }
 
 bool FooterBar::eventFilter(QObject* watched, QEvent* event) {

@@ -18,12 +18,14 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <optional>
 
 #include "ui/ChatBubble.h"
 #include "ui/ChatMessageGrouping.h"
 #include "ui/IconFactory.h"
 #include "ui/MessageFormatting.h"
 #include "ui/Theme.h"
+#include "user/AvatarCache.h"
 
 namespace devicehub {
 
@@ -95,15 +97,18 @@ bool isAudioAttachment(const QString& filename) {
 }
 
 ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,
-                                const QString& currentUserLogin, bool canManageChannel, QWidget* parent)
+                                const QString& currentUserLogin, bool canManageChannel, AvatarCache* avatarCache,
+                                QWidget* parent)
     : QWidget(parent),
       messageId_(message.id),
       canManageChannel_(canManageChannel),
       isPinned_(message.isPinned),
       reactions_(message.reactions),
-      currentUserLogin_(currentUserLogin) {
+      currentUserLogin_(currentUserLogin),
+      author_(message.author) {
     const qreal em = QFontMetricsF(font()).height();
     const int avatarSize = qRound(em * kAvatarEm);
+    avatarSize_ = avatarSize;
     const int spacing = qRound(em * kSpacingEm);
     const int bubblePaddingH = qRound(em * kBubblePaddingHEm);
     const int bubblePaddingV = qRound(em * kBubblePaddingVEm);
@@ -350,11 +355,29 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
         rootLayout->addWidget(bubble_);
     } else {
         if (showHeader) {
-            auto* avatarLabel = new QLabel(this);
-            avatarLabel->setFixedSize(avatarSize, avatarSize);
-            avatarLabel->setPixmap(
-                ui_icons::communityAvatarIcon(message.author.left(1).toUpper()).pixmap(avatarSize, avatarSize));
-            rootLayout->addWidget(avatarLabel, /*stretch=*/0, Qt::AlignTop);
+            avatarLabel_ = new QLabel(this);
+            avatarLabel_->setFixedSize(avatarSize, avatarSize);
+            // Issue #384/#442 — real avatar image if AvatarCache already
+            // has it cached; falls back to the letter placeholder
+            // otherwise (and, if avatarCache is non-null, that call
+            // itself kicks off the fetch — onAvatarReady below swaps the
+            // pixmap in once it completes).
+            std::optional<QImage> avatarImage = avatarCache != nullptr ? avatarCache->imageFor(author_) : std::nullopt;
+            avatarLabel_->setPixmap(avatarImage.has_value()
+                                         ? ui_icons::realAvatarIcon(*avatarImage).pixmap(avatarSize, avatarSize)
+                                         : ui_icons::communityAvatarIcon(message.author.left(1).toUpper())
+                                               .pixmap(avatarSize, avatarSize));
+            if (avatarCache != nullptr) {
+                connect(avatarCache, &AvatarCache::avatarReady, this, [this, avatarCache](const QString& login) {
+                    if (login != author_) {
+                        return;
+                    }
+                    if (const std::optional<QImage> image = avatarCache->imageFor(login); image.has_value()) {
+                        avatarLabel_->setPixmap(ui_icons::realAvatarIcon(*image).pixmap(avatarSize_, avatarSize_));
+                    }
+                });
+            }
+            rootLayout->addWidget(avatarLabel_, /*stretch=*/0, Qt::AlignTop);
         } else {
             rootLayout->addSpacing(avatarSize);
         }

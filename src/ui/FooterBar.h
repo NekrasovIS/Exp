@@ -2,6 +2,7 @@
 
 #include <QWidget>
 
+class QImage;
 class QLabel;
 class QPushButton;
 
@@ -20,6 +21,12 @@ public:
     /// Обновляет текст профиля (например, логин вошедшего пользователя
     /// или заглушку "не выполнен вход").
     void setProfileText(const QString& text);
+
+    /// Показывает настоящее изображение аватара вместо буквы-заглушки
+    /// (issue #384/#442) — вызывается MainWindow, когда AvatarCache уже
+    /// загрузила его; до этого (и если аватар не загружен вовсе)
+    /// остаётся буква, выставленная setProfileText().
+    void setAvatarImage(const QImage& image);
 
     [[nodiscard]] QPushButton* settingsButton() const { return settingsButton_; }
     [[nodiscard]] QLabel* avatarLabel() const { return avatarLabel_; }

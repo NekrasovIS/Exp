@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <QColor>
+#include <QImage>
 #include <QString>
 
 namespace devicehub {
@@ -80,6 +81,46 @@ TEST(IconFactoryTest, VideoIconIsNotNull) {
 
     EXPECT_FALSE(icon.isNull());
     EXPECT_FALSE(icon.availableSizes().isEmpty());
+}
+
+// Issue #384/#442 — реальное фото вместо буквы-заглушки.
+
+TEST(IconFactoryTest, RealAvatarIconIsNotNull) {
+    QImage image(64, 64, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+
+    const QIcon icon = ui_icons::realAvatarIcon(image);
+
+    EXPECT_FALSE(icon.isNull());
+    EXPECT_FALSE(icon.availableSizes().isEmpty());
+}
+
+TEST(IconFactoryTest, RealAvatarIconHandlesANonSquareSourceImageWithoutCrashing) {
+    // issue #442: центрируется и обрезается по короткой стороне —
+    // не должно ни падать, ни искажаться в эллипс на неквадратном фото.
+    QImage wideImage(120, 40, QImage::Format_ARGB32);
+    wideImage.fill(Qt::blue);
+    QImage tallImage(40, 120, QImage::Format_ARGB32);
+    tallImage.fill(Qt::green);
+
+    EXPECT_FALSE(ui_icons::realAvatarIcon(wideImage).isNull());
+    EXPECT_FALSE(ui_icons::realAvatarIcon(tallImage).isNull());
+}
+
+TEST(IconFactoryTest, RealMemberAvatarIconIsNotNullWithAndWithoutThePresenceDot) {
+    QImage image(64, 64, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+
+    const QIcon onlineIcon = ui_icons::realMemberAvatarIcon(image, /*online=*/true);
+    const QIcon offlineIcon = ui_icons::realMemberAvatarIcon(image, /*online=*/false);
+
+    EXPECT_FALSE(onlineIcon.isNull());
+    EXPECT_FALSE(offlineIcon.isNull());
+    // Смысловая разница между двумя состояниями — presence-точка;
+    // сравнение содержимого пикселей этот проект в тестах избегает (см.
+    // doc-комментарий выше), но хотя бы сама точка должна физически
+    // изменить итоговый рисунок, а не быть отрисована и тут же стёрта.
+    EXPECT_NE(onlineIcon.pixmap(40, 40).toImage(), offlineIcon.pixmap(40, 40).toImage());
 }
 
 TEST(IconFactoryTest, IconHtmlProducesAnImgTagEmbeddingTheIcon) {

@@ -18,6 +18,7 @@ class QResizeEvent;
 
 namespace devicehub {
 
+class AvatarCache;
 class ChatBubble;
 
 /// Одна агрегированная реакция на сообщение, для отображения (issue
@@ -122,10 +123,14 @@ public:
     /// куда идёт эта строка; управляет только видимостью Pin/Unpin в
     /// контекстном меню, не связано с @p isOwnMessage (закреплять/
     /// снимать может не автор, а тот, у кого есть эта роль — см.
-    /// doc-комментарий класса ChatClient::sendPinMessage()).
+    /// doc-комментарий класса ChatClient::sendPinMessage()). @p
+    /// avatarCache (issue #384/#442) — общий кэш реальных изображений
+    /// аватара; nullptr (значение по умолчанию) сохраняет прежнее
+    /// поведение "всегда буква-заглушка" — например, для тестов, которым
+    /// сетевой аватар не нужен.
     ChatMessageRow(const ChatMessage& message, bool showHeader, bool isOwnMessage,
                    const QString& currentUserLogin = QString(), bool canManageChannel = false,
-                   QWidget* parent = nullptr);
+                   AvatarCache* avatarCache = nullptr, QWidget* parent = nullptr);
 
     [[nodiscard]] qint64 messageId() const { return messageId_; }
 
@@ -276,6 +281,12 @@ private:
     /// перестраивается изнутри (rebuildReactionChips()), а не
     /// создаётся/удаляется заново на каждое изменение.
     QWidget* reactionsRow_ = nullptr;
+    /// Null для собственных сообщений (без аватара) и для
+    /// сгруппированных строк (showHeader false) — тот же случай, что и
+    /// timeLabel_ выше. Issue #384/#442.
+    QLabel* avatarLabel_ = nullptr;
+    QString author_;
+    int avatarSize_ = 0;
 };
 
 }  // namespace devicehub
