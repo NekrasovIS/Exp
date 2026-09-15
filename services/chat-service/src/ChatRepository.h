@@ -73,6 +73,18 @@ struct Message {
     std::optional<std::int64_t> replyToMessageId;
 };
 
+/// Issue #487 — один результат глобального поиска: сообщение плюс
+/// контекст канала/сообщества, где оно нашлось (без этого контекста
+/// глобальный список результатов был бы бесполезен — непонятно, куда
+/// перейти, чтобы увидеть его).
+struct GlobalMessageSearchResult {
+    Message message;
+    std::int64_t channelId = 0;
+    std::string channelName;
+    std::int64_t communityId = 0;
+    std::string communityName;
+};
+
 /// Результат toggleReaction() (issue #333) — kNotFound, если messageId
 /// не принадлежит переданному channelId; при kSuccess @p logins — все,
 /// кто сейчас (после применения переключения) поставил именно этот
@@ -428,6 +440,15 @@ public:
     /// версии. Пустой результат для несуществующего канала, как и у
     /// listRecentMessages().
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
+
+    /// Issue #487 — тот же регистронезависимый поиск подстроки, что и
+    /// searchMessages() выше, но по ВСЕМ каналам ВСЕХ сообществ, в
+    /// которых состоит @p login (через JOIN c memberships, без
+    /// перечисления каналов на стороне вызывающего). Зашифрованные
+    /// каналы (issue #138) пропускаются целиком — серверу нечего искать
+    /// в шифротексте, та же причина, что и у поканального поиска.
+    [[nodiscard]] std::vector<GlobalMessageSearchResult> searchAllMessages(const std::string& login,
+                                                                              const std::string& query, int limit);
 
     /// Устанавливает (или перезаписывает) обёрнутую копию симметричного
     /// ключа @p channelId для @p memberLogin (issue #138) — @p wrappedKey

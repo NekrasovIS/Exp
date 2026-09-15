@@ -67,6 +67,9 @@ public:
     [[nodiscard]] std::vector<PinnedMessage> listPinnedMessages(std::int64_t channelId);
 
     [[nodiscard]] std::vector<Message> searchMessages(std::int64_t channelId, const std::string& query, int limit);
+    /// Issue #487 — см. doc-комментарий ChatRepository::searchAllMessages().
+    [[nodiscard]] std::vector<GlobalMessageSearchResult> searchAllMessages(const std::string& login,
+                                                                              const std::string& query, int limit);
 
     /// См. ChatRepository::toggleReaction() (issue #333).
     [[nodiscard]] ToggleReactionResult toggleReaction(std::int64_t messageId, std::int64_t channelId,

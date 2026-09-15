@@ -1254,6 +1254,54 @@ TEST(HttpServerTest, SearchMessagesRejectsMissingQueryParamWith400) {
     EXPECT_EQ(result->status, 400);
 }
 
+// Issue #487 — глобальный поиск по всем каналам всех сообществ вызывающего.
+TEST(HttpServerTest, SearchAllMessagesReturnsMatchesWithChannelAndCommunityContext) {
+    auto fixtureOpt = TestFixture::create("http-server-global-search");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-global-search-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(chatService.postMessage(*channelId, fixture.ownerLogin, "a dragonfly landed here").has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/search/messages?q=dragonfly", headers);
+
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(result->body);
+    ASSERT_EQ(body.size(), 1U);
+    EXPECT_EQ(body[0]["body"].get<std::string>(), "a dragonfly landed here");
+    EXPECT_EQ(body[0]["channel_id"].get<std::int64_t>(), *channelId);
+    EXPECT_EQ(body[0]["channel_name"].get<std::string>(), "general");
+    EXPECT_EQ(body[0]["community_id"].get<std::int64_t>(), community.id);
+    EXPECT_EQ(body[0]["community_name"].get<std::string>(), community.name);
+}
+
+TEST(HttpServerTest, SearchAllMessagesRejectsMissingQueryParamWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-global-search-400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/search/messages", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
 TEST(HttpServerTest, CreateChannelWithIsEncryptedTrueSetsTheFlagInResponseAndListing) {
     auto fixtureOpt = TestFixture::create("http-server-create-encrypted-channel");
     if (!fixtureOpt.has_value()) {

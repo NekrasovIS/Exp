@@ -1357,5 +1357,87 @@ TEST(ChatServiceIntegrationTest, ListDmThreadReadStateReturnsOnlyParticipantsWho
     EXPECT_EQ(receipts[0].lastReadMessageId, message->id);
 }
 
+// Issue #487 — глобальный поиск по всем каналам всех сообществ вызывающего.
+
+TEST(ChatServiceIntegrationTest, SearchAllMessagesFindsMatchesAcrossMultipleCommunitiesWithContext) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "global-search-owner-" + suffix;
+    Community communityA{};
+    Community communityB{};
+    try {
+        communityA = service.createCommunity("global-search-a-" + suffix, owner);
+        communityB = service.createCommunity("global-search-b-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelA = service.createChannel(communityA.id, "general", owner);
+    const std::optional<std::int64_t> channelB = service.createChannel(communityB.id, "general", owner);
+    ASSERT_TRUE(channelA.has_value());
+    ASSERT_TRUE(channelB.has_value());
+    const std::string needle = "unicorn-" + suffix;
+    ASSERT_TRUE(service.postMessage(*channelA, owner, "there is a " + needle + " here").has_value());
+    ASSERT_TRUE(service.postMessage(*channelB, owner, "and another " + needle + " over there").has_value());
+    ASSERT_TRUE(service.postMessage(*channelA, owner, "nothing interesting here").has_value());
+
+    const std::vector<GlobalMessageSearchResult> results = service.searchAllMessages(owner, needle, 20);
+    ASSERT_EQ(results.size(), 2U);
+    for (const GlobalMessageSearchResult& result : results) {
+        EXPECT_NE(result.message.body.find(needle), std::string::npos);
+        EXPECT_FALSE(result.channelName.empty());
+        EXPECT_FALSE(result.communityName.empty());
+    }
+    const bool foundInA = std::any_of(results.begin(), results.end(),
+                                       [&](const GlobalMessageSearchResult& r) { return r.channelId == *channelA; });
+    const bool foundInB = std::any_of(results.begin(), results.end(),
+                                       [&](const GlobalMessageSearchResult& r) { return r.channelId == *channelB; });
+    EXPECT_TRUE(foundInA);
+    EXPECT_TRUE(foundInB);
+}
+
+TEST(ChatServiceIntegrationTest, SearchAllMessagesExcludesEncryptedChannelsAndOtherCommunities) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string member = "global-search-excl-member-" + suffix;
+    const std::string outsider = "global-search-excl-outsider-" + suffix;
+    Community memberCommunity{};
+    Community outsiderCommunity{};
+    try {
+        memberCommunity = service.createCommunity("global-search-excl-member-community-" + suffix, member);
+        outsiderCommunity = service.createCommunity("global-search-excl-outsider-community-" + suffix, outsider);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> plainChannel = service.createChannel(memberCommunity.id, "general", member);
+    const std::optional<std::int64_t> encryptedChannel =
+        service.createChannel(memberCommunity.id, "secret", member, /*isEncrypted=*/true);
+    const std::optional<std::int64_t> outsiderChannel =
+        service.createChannel(outsiderCommunity.id, "general", outsider);
+    ASSERT_TRUE(plainChannel.has_value());
+    ASSERT_TRUE(encryptedChannel.has_value());
+    ASSERT_TRUE(outsiderChannel.has_value());
+
+    const std::string needle = "griffin-" + suffix;
+    ASSERT_TRUE(service.postMessage(*plainChannel, member, "a " + needle + " in the plain channel").has_value());
+    ASSERT_TRUE(
+        service.postMessage(*encryptedChannel, member, "a " + needle + " in the encrypted channel").has_value());
+    ASSERT_TRUE(
+        service.postMessage(*outsiderChannel, outsider, "a " + needle + " in someone else's community").has_value());
+
+    const std::vector<GlobalMessageSearchResult> results = service.searchAllMessages(member, needle, 20);
+    ASSERT_EQ(results.size(), 1U);
+    EXPECT_EQ(results[0].channelId, *plainChannel);
+}
+
 }  // namespace
 }  // namespace chat_service

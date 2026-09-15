@@ -37,6 +37,18 @@ class MessageReaction {
   +logins : vector<string>
 }
 Message "1" *-- "0..*" MessageReaction : one per used emoji (issue #333)
+class GlobalMessageSearchResult {
+  +message : Message
+  +channelId : int64
+  +channelName : string
+  +communityId : int64
+  +communityName : string
+}
+note bottom of GlobalMessageSearchResult
+  Issue #487 — контекст, куда перейти, чтобы
+  увидеть найденное сообщение (глобальный поиск
+  сразу по всем сообществам вызывающего).
+end note
 enum MutationResult {
   kSuccess
   kNotFound
@@ -172,6 +184,7 @@ class ChatRepository {
   +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
   +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
+  +searchAllMessages(login: string, query: string, limit: int) : vector<GlobalMessageSearchResult>
   +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
   +findChannelKey(channelId: int64, login: string) : optional<string>
   +findOrCreateThread(loginA: string, loginB: string) : int64
@@ -190,6 +203,7 @@ ChatRepository ..> Community : creates
 ChatRepository ..> RegenerateInviteCodeResult : returns
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
+ChatRepository ..> GlobalMessageSearchResult : returns
 ChatRepository ..> PinnedMessage : returns
 ChatRepository ..> PinMessageResult : returns
 ChatRepository ..> AttachmentMetadata : creates
@@ -265,6 +279,7 @@ class ChatService {
   +listPinnedMessages(channelId: int64) : vector<PinnedMessage>
   +toggleReaction(messageId: int64, channelId: int64, login: string, emoji: string) : ToggleReactionResult
   +searchMessages(channelId: int64, query: string, limit: int) : vector<Message>
+  +searchAllMessages(login: string, query: string, limit: int) : vector<GlobalMessageSearchResult>
   +findOrCreateThread(loginA: string, loginB: string) : int64
   +listMyThreads(login: string) : vector<DirectMessageThread>
   +isThreadParticipant(threadId: int64, login: string) : bool
@@ -330,6 +345,7 @@ class HttpServer {
   -handleUploadAttachment(request, response)
   -handleDownloadAttachment(request, response)
   -handleSearchMessages(request, response)
+  -handleSearchAllMessages(request, response)
   -handleListMembers(request, response)
   -handleSetChannelKey(request, response)
   -handleGetMyChannelKey(request, response)
