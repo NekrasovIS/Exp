@@ -198,6 +198,10 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
     // have another subscription open on a different channel of this
     // community (a second tab), and should only be listed once.
     std::set<std::string> onlineMembers;
+    // Issue #479 — снимок текущего присутствия в звонке под тем же
+    // локом, что и остальные счётчики подписки ниже, чтобы не платить
+    // за отдельный lock ради одного добавочного числа.
+    std::size_t callOccupancy = 0;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
         for (const auto& [socket, existing] : subscriptions_) {
@@ -208,10 +212,15 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
         }
         subscriptions_[&webSocket] =
             Subscription{.login = *login, .channelId = channelId, .communityId = channel->communityId};
+        const auto callIt = callParticipants_.find(channelId);
+        if (callIt != callParticipants_.end()) {
+            callOccupancy = callIt->second.size();
+        }
     }
     webSocket.send(nlohmann::json{{"subscribed", true},
                                    {"channel_id", channelId},
-                                   {"online_members", onlineMembers}}
+                                   {"online_members", onlineMembers},
+                                   {"call_occupancy", callOccupancy}}
                        .dump());
     broadcastToCommunity(channel->communityId,
                           nlohmann::json{{"presence_changed", {{"login", *login}, {"online", true}}}}.dump(),
@@ -517,6 +526,7 @@ void WebSocketServer::handleCallJoin(ix::WebSocket& webSocket, const Subscriptio
                        .dump());
     broadcastToCallParticipants(subscription.channelId, nlohmann::json{{"call_peer_joined", subscription.login}}.dump(),
                                  &webSocket);
+    broadcastCallOccupancy(subscription.channelId);
 }
 
 void WebSocketServer::handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription) {
@@ -746,7 +756,21 @@ void WebSocketServer::removeCallParticipant(const Subscription& subscription, ix
     if (wasParticipant) {
         broadcastToCallParticipants(subscription.channelId, nlohmann::json{{"call_peer_left", subscription.login}}.dump(),
                                      socket);
+        broadcastCallOccupancy(subscription.channelId);
     }
+}
+
+void WebSocketServer::broadcastCallOccupancy(std::int64_t channelId) {
+    std::size_t count = 0;
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        const auto channelIt = callParticipants_.find(channelId);
+        if (channelIt != callParticipants_.end()) {
+            count = channelIt->second.size();
+        }
+    }
+    broadcastToChannel(channelId,
+                        nlohmann::json{{"call_occupancy", {{"channel_id", channelId}, {"count", count}}}}.dump());
 }
 
 void WebSocketServer::broadcastToChannel(std::int64_t channelId, const std::string& json,

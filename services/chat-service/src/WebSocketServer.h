@@ -51,6 +51,16 @@ namespace chat_service {
  *   - `{"call_leave": true}` — покинуть звонок; рассылает
  *     `{"call_peer_left": "<login>"}` оставшимся участникам.
  *     Отключение (Close/Error) без явного выхода даёт тот же эффект.
+ *   - Ambient occupancy (issue #479) — не отдельный клиентский кадр:
+ *     `call_join`/`call_leave`/отключение без явного leave дополнительно
+ *     рассылают `{"call_occupancy": {"channel_id": N, "count": M}}`
+ *     ВСЕМ подписчикам *текстового чата* канала (не только участникам
+ *     звонка, в отличие от call_peer_joined/call_peer_left выше) — так
+ *     кто-то, кто просто открыл канал, не входя в звонок, тоже видит,
+ *     что звонок идёт прямо сейчас. Успешная подписка на канал
+ *     (`{"subscribed": true, ...}`) также включает текущий
+ *     `call_occupancy` в момент подписки — не нужно ждать следующего
+ *     join/leave, чтобы узнать актуальное значение.
  *   - `{"call_signal": {"to": "<login>", "payload": {...}}}` —
  *     непрозрачные данные сигналинга (SDP offer/answer, ICE-кандидат),
  *     ретранслируемые дословно указанному участнику как
@@ -298,6 +308,15 @@ private:
     /// участнику, который только что вызвал уведомление).
     void broadcastToCallParticipants(std::int64_t channelId, const std::string& json,
                                       const ix::WebSocket* excludeSocket);
+    /// Issue #479 — в отличие от broadcastToCallParticipants() выше
+    /// (только те, кто сам в звонке), эта рассылка достигает ВСЕХ
+    /// подписчиков *текстового чата* канала как
+    /// `{"call_occupancy": {"channel_id", "count"}}`, чтобы кто-то, кто
+    /// просто открыл канал, но не входил в звонок, тоже видел, что
+    /// звонок сейчас идёт. Вызывается после каждого изменения
+    /// callParticipants_[channelId] (call_join/call_leave/обрыв
+    /// соединения).
+    void broadcastCallOccupancy(std::int64_t channelId);
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;
