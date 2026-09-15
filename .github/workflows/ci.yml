@@ -141,10 +141,40 @@ jobs:
       # Безопасно линковать release-варианты статических библиотек в
       # наш Debug-бинарник на Linux/GCC/Clang — в отличие от MSVC, здесь
       # нет ABI-несовместимости debug/release CRT для статической линковки.
+      # Issue #296: сборка Qt6 из исходников — в частности qtdeclarative,
+      # транзитивно тянущийся портом qtmultimedia через дефолтную фичу
+      # ffmpeg (DeviceHub сам этот модуль нигде не использует — он не
+      # входит даже в список фич, запрошенных в vcpkg.json) — изредка
+      # падает "No space left on device" при записи PCH, не
+      # детерминированно на этом раннере (наблюдалось дважды подряд без
+      # изменений кода между попытками — судя по всему, транзиентная
+      # нехватка диска у конкретного экземпляра раннера, а не системная
+      # причина). До сих пор чинилось вручную: gh run rerun --failed
+      # либо --admin-мерж после подтверждения того же паттерна в логе —
+      # здесь та же ретрай-логика, но внутри самого workflow, чтобы не
+      # требовать этого руками на каждом PR, задевающем C++/Qt-сторону.
+      # Между попытками стирается vcpkg/buildtrees (промежуточные
+      # объектные/PCH-файлы самой сборки) — не vcpkg_installed и не
+      # ~/.cache/vcpkg/archives (бинарный кэш, см. шаг "Cache vcpkg
+      # binary cache" выше), поэтому уже завершённые порты на повторной
+      # попытке не пересобираются с нуля, а просто восстанавливаются из
+      # кэша — освобождается место, а не время сборки.
       - name: Configure
         env:
           VCPKG_MAX_CONCURRENCY: 2
-        run: cmake -S . -B build -DVCPKG_BUILD_TYPE=release
+        run: |
+          attempt=1
+          max_attempts=3
+          until cmake -S . -B build -DVCPKG_BUILD_TYPE=release; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "Configure failed after $max_attempts attempts" >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "Configure attempt failed — freeing vcpkg build intermediates and retrying (attempt $attempt/$max_attempts)" >&2
+            rm -rf build vcpkg/buildtrees
+            df -h /
+          done
 
       - name: Build
         run: cmake --build build --parallel 2
