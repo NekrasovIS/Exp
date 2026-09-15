@@ -100,14 +100,30 @@ interface PeerEntry {
 
 const kStunServers = [{ urls: "stun:stun.l.google.com:19302" }];
 
+// Issue #364 — on a multi-interface host (e.g. a Docker/VPN/WSL adapter
+// alongside the real NIC) the browser can leave one interface's STUN
+// request hanging forever, so iceGatheringState never reaches
+// "complete" even though usable host/srflx candidates were gathered
+// within milliseconds — the same bounded-wait trade-off any non-trickle
+// ICE caller already makes, just with an upper bound instead of an
+// infinite one; whatever candidates were gathered before the timeout
+// are already folded into localDescription.sdp regardless of how
+// gathering itself ends.
+const kIceGatheringTimeoutMs = 2000;
+
 function waitForIceGatheringComplete(connection: RTCPeerConnectionLike): Promise<void> {
   return new Promise((resolve) => {
     if (connection.iceGatheringState === "complete") {
       resolve();
       return;
     }
+    const timer = setTimeout(() => {
+      connection.onicegatheringstatechange = null;
+      resolve();
+    }, kIceGatheringTimeoutMs);
     connection.onicegatheringstatechange = () => {
       if (connection.iceGatheringState === "complete") {
+        clearTimeout(timer);
         connection.onicegatheringstatechange = null;
         resolve();
       }

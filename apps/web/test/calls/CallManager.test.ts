@@ -200,6 +200,51 @@ describe("CallManager", () => {
     expect(connections[0]?.localDescription?.type).toBe("offer");
   });
 
+  it("issue #364 — negotiatePublish sends the offer after a timeout even if iceGatheringState never reaches complete", async () => {
+    vi.useFakeTimers();
+    try {
+      const { socket, manager, connections } = setup();
+      await manager.joinCall();
+      socket.simulateMessage(JSON.stringify({ call_roster: [], sfu_room: "room-1" }));
+      socket.simulateMessage(JSON.stringify({ janus_attached: { handle: 10 } }));
+
+      // Simulates a multi-interface host where one interface's STUN
+      // request hangs forever: iceGatheringState never becomes
+      // "complete" and onicegatheringstatechange never fires either.
+      const publishConnection = connections[0];
+      expect(publishConnection).toBeDefined();
+      publishConnection!.iceGatheringState = "gathering";
+
+      socket.simulateMessage(
+        JSON.stringify({
+          janus_event: {
+            sender: 10,
+            plugindata: { data: { videoroom: "joined", id: "feed-alice", publishers: [] } },
+          },
+        }),
+      );
+      await flushAsync();
+
+      const configureFrameBeforeTimeout = socket
+        .framesNamed("janus_message")
+        .map((f) => (f as { janus_message: { body: { request: string } } }).janus_message)
+        .find((m) => m.body.request === "configure");
+      expect(configureFrameBeforeTimeout).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await flushAsync();
+
+      const configureFrame = socket
+        .framesNamed("janus_message")
+        .map((f) => (f as { janus_message: { body: { request: string } } }).janus_message)
+        .find((m) => m.body.request === "configure");
+      expect(configureFrame).toBeDefined();
+      expect(connections[0]?.localDescription?.type).toBe("offer");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("subscribes to an existing publisher listed in the 'joined' event", async () => {
     const { socket, manager, connections } = setup();
     await manager.joinCall();
