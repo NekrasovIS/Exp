@@ -121,6 +121,10 @@ class UserRepository {
   +listFriends(login: string) : vector<string>
   +removeFriend(loginA: string, loginB: string) : bool
   +areFriends(loginA: string, loginB: string) : bool
+  +blockUser(blockerLogin: string, blockedLogin: string) : BlockUserResult
+  +unblockUser(blockerLogin: string, blockedLogin: string) : bool
+  +listBlockedUsers(blockerLogin: string) : vector<string>
+  +isBlocked(blockerLogin: string, blockedLogin: string) : bool
   +saveAvatar(login: string, contentType: string, dataBase64: string, avatarUrl: string) : bool
   +findAvatar(login: string) : optional<AvatarData>
 }
@@ -132,6 +136,7 @@ UserRepository ..> OtpIdentity : returns
 UserRepository ..> FriendRequestInfo : returns
 UserRepository ..> SendFriendRequestResult : returns
 UserRepository ..> RespondToFriendRequestResult : returns
+UserRepository ..> BlockUserResult : returns
 UserRepository ..> AvatarData : returns
 
 class UserService {
@@ -146,6 +151,10 @@ class UserService {
   +listFriends(login: string) : vector<string>
   +removeFriend(loginA: string, loginB: string) : bool
   +areFriends(loginA: string, loginB: string) : bool
+  +blockUser(blockerLogin: string, blockedLogin: string) : BlockUserResult
+  +unblockUser(blockerLogin: string, blockedLogin: string) : bool
+  +listBlockedUsers(blockerLogin: string) : vector<string>
+  +isBlocked(blockerLogin: string, blockedLogin: string) : bool
   +saveAvatar(login: string, contentType: string, dataBase64: string, avatarUrl: string) : bool
   +findAvatar(login: string) : optional<AvatarData>
 }
@@ -155,6 +164,11 @@ note bottom of UserService
   GET /internal/friendship — chat-service
   проверяет дружбу перед тем, как открыть
   новый диалог личных сообщений.
+
+  issue #471: isBlocked() аналогично — только
+  через GET /internal/blocked, направленно
+  (не симметрично, в отличие от дружбы), вызывается
+  chat-service в обе стороны при открытии диалога.
 end note
 UserService --> UserRepository : delegates storage to (&)
 UserService ..> password_hash.password_hash : uses
@@ -187,6 +201,10 @@ class HttpServer {
   -handleListFriends(request, response)
   -handleRemoveFriend(request, response)
   -handleCheckFriendship(request, response)
+  -handleBlockUser(request, response)
+  -handleUnblockUser(request, response)
+  -handleListBlockedUsers(request, response)
+  -handleCheckBlocked(request, response)
   -handleUploadAvatar(request, response)
   -handleGetAvatar(request, response)
 }
@@ -247,6 +265,17 @@ note right of HttpServer
                                         для chat-service, см.
                                         UserServiceClient в chat-service;
                                         отвечает {friends: bool})
+  POST  /blocks/{login}             -> handleBlockUser (issue #471; 400
+                                        на себя, 404 на несуществующего,
+                                        409 на уже заблокированного)
+  DELETE /blocks/{login}            -> handleUnblockUser (404, если не
+                                        был заблокирован)
+  GET   /blocks                     -> handleListBlockedUsers
+  GET   /internal/blocked?blocker=&blocked=
+                                     -> handleCheckBlocked (issue #471,
+                                        unauthenticated — только для
+                                        chat-service; отвечает
+                                        {blocked: bool})
   POST  /profile/avatar             -> handleUploadAvatar (issue #384,
                                         authenticated; {content_type,
                                         data_base64} — content_type

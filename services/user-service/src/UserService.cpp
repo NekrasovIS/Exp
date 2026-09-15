@@ -57,6 +57,22 @@ bool UserService::areFriends(const std::string& loginA, const std::string& login
     return repository_.areFriends(loginA, loginB);
 }
 
+BlockUserResult UserService::blockUser(const std::string& blockerLogin, const std::string& blockedLogin) {
+    return repository_.blockUser(blockerLogin, blockedLogin);
+}
+
+bool UserService::unblockUser(const std::string& blockerLogin, const std::string& blockedLogin) {
+    return repository_.unblockUser(blockerLogin, blockedLogin);
+}
+
+std::vector<std::string> UserService::listBlockedUsers(const std::string& blockerLogin) {
+    return repository_.listBlockedUsers(blockerLogin);
+}
+
+bool UserService::isBlocked(const std::string& blockerLogin, const std::string& blockedLogin) {
+    return repository_.isBlocked(blockerLogin, blockedLogin);
+}
+
 bool UserService::saveAvatar(const std::string& login, const std::string& contentType,
                               const std::string& dataBase64, const std::string& avatarUrl) {
     return repository_.saveAvatar(login, contentType, dataBase64, avatarUrl);

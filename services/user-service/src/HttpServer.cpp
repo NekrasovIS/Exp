@@ -184,6 +184,19 @@ void HttpServer::registerRoutes() {
     server_.Get("/internal/friendship", [this](const httplib::Request& request, httplib::Response& response) {
         handleCheckFriendship(request, response);
     });
+    // Issue #471 — блокировка пользователей.
+    server_.Post(R"(/blocks/([^/]+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleBlockUser(request, response);
+    });
+    server_.Delete(R"(/blocks/([^/]+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleUnblockUser(request, response);
+    });
+    server_.Get("/blocks", [this](const httplib::Request& request, httplib::Response& response) {
+        handleListBlockedUsers(request, response);
+    });
+    server_.Get("/internal/blocked", [this](const httplib::Request& request, httplib::Response& response) {
+        handleCheckBlocked(request, response);
+    });
     server_.Post("/profile/avatar", [this](const httplib::Request& request, httplib::Response& response) {
         handleUploadAvatar(request, response);
     });
@@ -484,6 +497,76 @@ void HttpServer::handleCheckFriendship(const httplib::Request& request, httplib:
     const bool areFriends =
         userService_.areFriends(request.get_param_value("user_a"), request.get_param_value("user_b"));
     response.set_content(nlohmann::json{{"friends", areFriends}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleBlockUser(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    switch (userService_.blockUser(*login, request.matches[1].str())) {
+        using enum BlockUserResult;
+        case kCannotBlockSelf:
+            response.status = 400;
+            response.set_content(nlohmann::json{{"error", "cannot block yourself"}}.dump(), kJsonContentType);
+            return;
+        case kNoSuchUser:
+            response.status = 404;
+            response.set_content(nlohmann::json{{"error", "no such user"}}.dump(), kJsonContentType);
+            return;
+        case kAlreadyBlocked:
+            response.status = 409;
+            response.set_content(nlohmann::json{{"error", "already blocked"}}.dump(), kJsonContentType);
+            return;
+        case kBlocked:
+            response.set_content(nlohmann::json{{"status", "blocked"}}.dump(), kJsonContentType);
+            return;
+    }
+}
+
+void HttpServer::handleUnblockUser(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const bool unblocked = userService_.unblockUser(*login, request.matches[1].str());
+    if (!unblocked) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "not blocked"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(nlohmann::json{{"status", "unblocked"}}.dump(), kJsonContentType);
+}
+
+void HttpServer::handleListBlockedUsers(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    nlohmann::json logins = nlohmann::json::array();
+    for (const std::string& blockedLogin : userService_.listBlockedUsers(*login)) {
+        logins.push_back(blockedLogin);
+    }
+    response.set_content(logins.dump(), kJsonContentType);
+}
+
+void HttpServer::handleCheckBlocked(const httplib::Request& request, httplib::Response& response) {
+    if (!request.has_param("blocker") || !request.has_param("blocked")) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'blocker' and 'blocked' query params"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const bool blocked =
+        userService_.isBlocked(request.get_param_value("blocker"), request.get_param_value("blocked"));
+    response.set_content(nlohmann::json{{"blocked", blocked}}.dump(), kJsonContentType);
 }
 
 void HttpServer::handleUploadAvatar(const httplib::Request& request, httplib::Response& response) {

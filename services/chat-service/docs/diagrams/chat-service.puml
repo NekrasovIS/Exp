@@ -296,14 +296,21 @@ class AuthServiceClient {
 
 class UserServiceClient {
   +areFriends(loginA: string, loginB: string) : bool
+  +isBlocked(blockerLogin: string, blockedLogin: string) : bool
 }
 note bottom of UserServiceClient
   issue #187, Фаза 2: fail closed, как и
   AuthServiceClient — недоступный
   user-service не открывает доступ к
   новым диалогам по умолчанию.
+
+  issue #471: isBlocked() тоже fail closed, но
+  в обратную сторону — недоступный user-service
+  трактуется как "заблокирован" (true), поскольку
+  здесь true запрещает, а не разрешает. Направленно,
+  handleOpenThread() зовёт её в обе стороны.
 end note
-UserServiceClient ..> "user-service" : GET /internal/friendship
+UserServiceClient ..> "user-service" : GET /internal/friendship, GET /internal/blocked
 AuthServiceClient ..> "auth-service" : POST /auth/verify
 
 class HttpServer {

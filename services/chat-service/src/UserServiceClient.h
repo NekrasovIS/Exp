@@ -22,6 +22,18 @@ public:
     /// изменения результата.
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB) const;
 
+    /// Issue #471 — вызывает GET /internal/blocked, чтобы chat-service
+    /// мог запретить открытие нового диалога, если @p blockerLogin
+    /// заблокировал @p blockedLogin. Направленно, в отличие от
+    /// areFriends() выше — вызывающая сторона (handleOpenThread) зовёт
+    /// это дважды, если нужна проверка в обе стороны. Fail closed, как
+    /// и areFriends(): любая сетевая/протокольная ошибка трактуется как
+    /// "заблокирован" — недоступный user-service не должен ОТКРЫВАТЬ
+    /// новые диалоги по умолчанию (тот же принцип, что у fail closed для
+    /// дружбы, только в другую сторону, поскольку здесь true запрещает,
+    /// а не разрешает).
+    [[nodiscard]] bool isBlocked(const std::string& blockerLogin, const std::string& blockedLogin) const;
+
 private:
     std::string host_;
     int port_;

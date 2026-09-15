@@ -25,4 +25,22 @@ bool UserServiceClient::areFriends(const std::string& loginA, const std::string&
     return response.value("friends", false);
 }
 
+bool UserServiceClient::isBlocked(const std::string& blockerLogin, const std::string& blockedLogin) const {
+    httplib::Client client(host_, port_);
+
+    const httplib::Params params{{"blocker", blockerLogin}, {"blocked", blockedLogin}};
+    const httplib::Result result = client.Get("/internal/blocked", params);
+
+    if (!result || result->status != 200) {
+        // Fail closed — см. doc-комментарий isBlocked() в заголовке.
+        return true;
+    }
+
+    const nlohmann::json response = nlohmann::json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    if (response.is_discarded()) {
+        return true;
+    }
+    return response.value("blocked", true);
+}
+
 }  // namespace chat_service

@@ -52,11 +52,11 @@ struct ReadReceiptBroadcaster {
  * этого класса — здесь только история/CRUD. Для личных диалогов (Фаза
  * 2) живой доставки пока вообще нет — только REST, см. issue #187.
  *
- * Проверка дружбы для открытия нового диалога (handleOpenThread) — тоже
- * забота этого класса, а не ChatService: дружба принадлежит
- * user-service, а не этой базе, и ChatService намеренно не знает о
- * кросс-сервисных вызовах — тот же принцип разделения, что и у
- * authenticate()/AuthServiceClient.
+ * Проверка дружбы и блокировки (issue #471) для открытия нового
+ * диалога (handleOpenThread) — тоже забота этого класса, а не
+ * ChatService: и то, и другое принадлежит user-service, а не этой базе,
+ * и ChatService намеренно не знает о кросс-сервисных вызовах — тот же
+ * принцип разделения, что и у authenticate()/AuthServiceClient.
  */
 class HttpServer {
 public:

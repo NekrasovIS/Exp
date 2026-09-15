@@ -105,6 +105,14 @@ enum class RespondToFriendRequestResult {
     kNotYourRequest,
 };
 
+/// @see UserRepository::blockUser() (issue #471).
+enum class BlockUserResult {
+    kBlocked,
+    kAlreadyBlocked,
+    kNoSuchUser,
+    kCannotBlockSelf,
+};
+
 /**
  * @brief Хранилище учётных записей пользователей на базе Postgres (libpqxx).
  *
@@ -165,6 +173,30 @@ public:
     /// GET /internal/friendship, чтобы chat-service мог разрешить
     /// открытие нового диалога личных сообщений только между друзьями.
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
+
+    /// Заносит @p blockedLogin в список блокировок @p blockerLogin
+    /// (issue #471) — направленно, не симметрично, в отличие от дружбы
+    /// выше. Идемпотентно в смысле "не создаёт вторую строку", но
+    /// сообщает о повторной попытке через kAlreadyBlocked, а не тихо
+    /// проглатывает её — тот же стиль, что и sendFriendRequest()'s
+    /// kAlreadyFriends.
+    [[nodiscard]] BlockUserResult blockUser(const std::string& blockerLogin, const std::string& blockedLogin);
+
+    /// @return True, если пара была заблокирована и блокировка снята;
+    /// false, если её не было.
+    [[nodiscard]] bool unblockUser(const std::string& blockerLogin, const std::string& blockedLogin);
+
+    /// Логины, заблокированные @p blockerLogin (порядок — по логину).
+    [[nodiscard]] std::vector<std::string> listBlockedUsers(const std::string& blockerLogin);
+
+    /// @return True, если @p blockerLogin заблокировал @p blockedLogin —
+    /// используется через внутренний эндпоинт GET /internal/blocked,
+    /// тот же принцип, что и areFriends()/GET /internal/friendship,
+    /// чтобы chat-service мог решить, разрешать ли новый диалог личных
+    /// сообщений (issue #187, Фаза 2). Направленно: не проверяет
+    /// обратную пару — вызывающая сторона (HttpServer в chat-service)
+    /// вызывает её дважды, если нужна проверка в обе стороны.
+    [[nodiscard]] bool isBlocked(const std::string& blockerLogin, const std::string& blockedLogin);
 
     /// Сохраняет (UPSERT) байты аватара @p login и разом обновляет
     /// avatar_url его профиля на @p avatarUrl (issue #384) — HttpServer

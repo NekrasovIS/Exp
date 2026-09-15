@@ -241,6 +241,70 @@ bool UserRepository::areFriends(const std::string& loginA, const std::string& lo
     return !rows.empty();
 }
 
+BlockUserResult UserRepository::blockUser(const std::string& blockerLogin, const std::string& blockedLogin) {
+    if (blockerLogin == blockedLogin) {
+        return BlockUserResult::kCannotBlockSelf;
+    }
+
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result targetRows =
+        transaction.exec("SELECT 1 FROM users WHERE login = $1", pqxx::params{blockedLogin});
+    if (targetRows.empty()) {
+        return BlockUserResult::kNoSuchUser;
+    }
+
+    const pqxx::result existingRows =
+        transaction.exec("SELECT 1 FROM blocked_users WHERE blocker_login = $1 AND blocked_login = $2",
+                          pqxx::params{blockerLogin, blockedLogin});
+    if (!existingRows.empty()) {
+        return BlockUserResult::kAlreadyBlocked;
+    }
+
+    transaction.exec("INSERT INTO blocked_users (blocker_login, blocked_login) VALUES ($1, $2)",
+                      pqxx::params{blockerLogin, blockedLogin});
+    transaction.commit();
+    return BlockUserResult::kBlocked;
+}
+
+bool UserRepository::unblockUser(const std::string& blockerLogin, const std::string& blockedLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("DELETE FROM blocked_users WHERE blocker_login = $1 AND blocked_login = $2 RETURNING 1",
+                          pqxx::params{blockerLogin, blockedLogin});
+    transaction.commit();
+    return !rows.empty();
+}
+
+std::vector<std::string> UserRepository::listBlockedUsers(const std::string& blockerLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT blocked_login FROM blocked_users WHERE blocker_login = $1 ORDER BY blocked_login",
+        pqxx::params{blockerLogin});
+
+    std::vector<std::string> logins;
+    logins.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        logins.push_back(row[0].as<std::string>());
+    }
+    return logins;
+}
+
+bool UserRepository::isBlocked(const std::string& blockerLogin, const std::string& blockedLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT 1 FROM blocked_users WHERE blocker_login = $1 AND blocked_login = $2",
+                          pqxx::params{blockerLogin, blockedLogin});
+    return !rows.empty();
+}
+
 bool UserRepository::saveAvatar(const std::string& login, const std::string& contentType,
                                  const std::string& dataBase64, const std::string& avatarUrl) {
     pqxx::connection connection(connectionString_);

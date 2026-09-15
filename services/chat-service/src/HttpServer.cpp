@@ -955,6 +955,18 @@ void HttpServer::handleOpenThread(const httplib::Request& request, httplib::Resp
         response.set_content(nlohmann::json{{"error", "can only message friends"}}.dump(), kJsonContentType);
         return;
     }
+    // Issue #471 — блокировка, как и дружба выше, принадлежит
+    // user-service; проверяется только здесь, при открытии диалога, не
+    // на каждом отдельном сообщении в уже открытом (тот же принцип, что
+    // и у дружбы: разрыв связи не закрывает уже открытый диалог).
+    // Направленно в обе стороны — не важно, кто из двоих кого
+    // заблокировал.
+    if (userServiceClient_.isBlocked(*login, *recipientLogin) ||
+        userServiceClient_.isBlocked(*recipientLogin, *login)) {
+        response.status = 403;
+        response.set_content(nlohmann::json{{"error", "cannot message a blocked user"}}.dump(), kJsonContentType);
+        return;
+    }
 
     const std::int64_t threadId = chatService_.findOrCreateThread(*login, *recipientLogin);
     response.set_content(nlohmann::json{{"id", threadId}}.dump(), kJsonContentType);

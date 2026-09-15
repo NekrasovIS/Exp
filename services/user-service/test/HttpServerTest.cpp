@@ -972,5 +972,141 @@ TEST(HttpServerTest, UploadAvatarThenGetAvatarRoundTripsBytesContentTypeAndProfi
     EXPECT_EQ(secondDownloadResult->get_header_value("Content-Type"), "image/jpeg");
 }
 
+// Issue #471 — блокировка пользователей.
+
+TEST(HttpServerTest, BlockUserRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Post("/blocks/anyone", "{}", "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, UnblockUserRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Delete("/blocks/anyone");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+TEST(HttpServerTest, ListBlockedUsersRouteRejectsMissingTokenWith401) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/blocks");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 401);
+}
+
+// Тот же принцип, что и у CheckFriendshipRouteRejectsMissingQueryParamsWith400
+// выше (issue #228) — /internal/blocked не вызывает authenticate()
+// вообще, только для chat-service, не для клиентов напрямую.
+TEST(HttpServerTest, CheckBlockedRouteRejectsMissingQueryParamsWith400) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result result = client.Get("/internal/blocked?blocker=only-one-param");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, CheckBlockedRouteReturnsFalseThenTrueAfterBlocking) {
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    const std::string blocker = uniqueLogin("http-server-checkblocked-blocker");
+    const std::string blocked = uniqueLogin("http-server-checkblocked-blocked");
+    ASSERT_TRUE(userService.registerUser(blocker, "irrelevant-password"));
+    ASSERT_TRUE(userService.registerUser(blocked, "irrelevant-password"));
+
+    httplib::Client client(kTestHost, kTestPort);
+    const httplib::Result beforeResult =
+        client.Get("/internal/blocked?blocker=" + blocker + "&blocked=" + blocked);
+    ASSERT_TRUE(beforeResult);
+    ASSERT_EQ(beforeResult->status, 200);
+    EXPECT_FALSE(nlohmann::json::parse(beforeResult->body)["blocked"].get<bool>());
+
+    ASSERT_EQ(userService.blockUser(blocker, blocked), BlockUserResult::kBlocked);
+
+    const httplib::Result afterResult =
+        client.Get("/internal/blocked?blocker=" + blocker + "&blocked=" + blocked);
+    ASSERT_TRUE(afterResult);
+    ASSERT_EQ(afterResult->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(afterResult->body)["blocked"].get<bool>());
+}
+
+// Тот же приём, что и у SendFriendRequestRouteValidationAndAcceptRoundTrip
+// выше — один тест на пару зарегистрированных через auth-service
+// аккаунтов, чтобы не множить регистрации и не упереться в rate limit
+// auth-service (issue #456-подобная причина).
+TEST(HttpServerTest, BlockUserRouteValidationAndUnblockRoundTrip) {
+    const std::optional<FriendTestAccount> blocker = registerFriendTestAccount("http-server-block-a");
+    const std::optional<FriendTestAccount> blocked = registerFriendTestAccount("http-server-block-b");
+    if (!blocker.has_value() || !blocked.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    UserRepository repository(connectionString());
+    UserService userService(repository);
+    const AuthServiceClient authServiceClient = testAuthServiceClient();
+    const ScopedServer server(userService, authServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers blockerAuth{{"Authorization", "Bearer " + blocker->token}};
+
+    const httplib::Result selfResult = client.Post("/blocks/" + blocker->login, blockerAuth, "{}", "application/json");
+    ASSERT_TRUE(selfResult);
+    EXPECT_EQ(selfResult->status, 400);
+
+    const httplib::Result nonexistentResult =
+        client.Post("/blocks/no-such-login-ever-created", blockerAuth, "{}", "application/json");
+    ASSERT_TRUE(nonexistentResult);
+    EXPECT_EQ(nonexistentResult->status, 404);
+
+    const httplib::Result blockResult = client.Post("/blocks/" + blocked->login, blockerAuth, "{}", "application/json");
+    ASSERT_TRUE(blockResult);
+    EXPECT_EQ(blockResult->status, 200);
+
+    const httplib::Result againResult = client.Post("/blocks/" + blocked->login, blockerAuth, "{}", "application/json");
+    ASSERT_TRUE(againResult);
+    EXPECT_EQ(againResult->status, 409);
+
+    const httplib::Result listResult = client.Get("/blocks", blockerAuth);
+    ASSERT_TRUE(listResult);
+    ASSERT_EQ(listResult->status, 200);
+    const nlohmann::json listBody = nlohmann::json::parse(listResult->body);
+    ASSERT_EQ(listBody.size(), 1U);
+    EXPECT_EQ(listBody[0].get<std::string>(), blocked->login);
+
+    const httplib::Result unblockResult = client.Delete("/blocks/" + blocked->login, blockerAuth);
+    ASSERT_TRUE(unblockResult);
+    EXPECT_EQ(unblockResult->status, 200);
+
+    const httplib::Result unblockAgainResult = client.Delete("/blocks/" + blocked->login, blockerAuth);
+    ASSERT_TRUE(unblockAgainResult);
+    EXPECT_EQ(unblockAgainResult->status, 404);
+}
+
 }  // namespace
 }  // namespace user_service

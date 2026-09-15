@@ -94,5 +94,37 @@ TEST(UserServiceClientTest, AreFriendsFailsClosedWhenUserServiceIsUnreachable) {
     EXPECT_FALSE(client.areFriends("anyone", "someone-else"));
 }
 
+// Issue #471.
+TEST(UserServiceClientTest, IsBlockedReflectsWhetherOneAccountBlockedTheOtherAndIsDirectional) {
+    const std::optional<TestAccount> accountA = registerViaAuthService("user-service-client-blocked-a");
+    const std::optional<TestAccount> accountB = registerViaAuthService("user-service-client-blocked-b");
+    if (!accountA.has_value() || !accountB.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+
+    const auto [userServiceHost, userServicePort] = userServiceHostAndPort();
+    httplib::Client userServiceClient(userServiceHost, userServicePort);
+    httplib::Headers authHeaderA{{"Authorization", "Bearer " + accountA->token}};
+
+    const UserServiceClient client(userServiceHost, userServicePort);
+    EXPECT_FALSE(client.isBlocked(accountA->login, accountB->login));
+    EXPECT_FALSE(client.isBlocked(accountB->login, accountA->login));
+
+    ASSERT_TRUE(userServiceClient.Post("/blocks/" + accountB->login, authHeaderA, "{}", "application/json"));
+
+    EXPECT_TRUE(client.isBlocked(accountA->login, accountB->login));
+    // Направленно — B не заблокировал A.
+    EXPECT_FALSE(client.isBlocked(accountB->login, accountA->login));
+}
+
+TEST(UserServiceClientTest, IsBlockedFailsClosedWhenUserServiceIsUnreachable) {
+    // Намеренно нет логики пропуска — цель тут неиспользуемый loopback-порт.
+    // Fail closed означает true здесь (запрет), в отличие от areFriends
+    // (где fail closed — false) — см. doc-комментарий isBlocked() в заголовке.
+    const UserServiceClient client("127.0.0.1", 1);
+
+    EXPECT_TRUE(client.isBlocked("anyone", "someone-else"));
+}
+
 }  // namespace
 }  // namespace chat_service

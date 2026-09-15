@@ -649,5 +649,98 @@ TEST(UserRepositoryTest, SaveAvatarReturnsFalseForNonexistentLogin) {
     EXPECT_FALSE(result);
 }
 
+// Issue #471 — блокировка пользователей.
+
+TEST(UserRepositoryTest, BlockUserToSelfIsRejected) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-block-self");
+
+    try {
+        ASSERT_TRUE(repository.createUser(login, "some-hash"));
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_EQ(repository.blockUser(login, login), BlockUserResult::kCannotBlockSelf);
+}
+
+TEST(UserRepositoryTest, BlockUserRejectsNonexistentTarget) {
+    UserRepository repository(connectionString());
+    const std::string login = uniqueLogin("user-repository-test-block-nouser");
+
+    try {
+        ASSERT_TRUE(repository.createUser(login, "some-hash"));
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_EQ(repository.blockUser(login, "no-such-login-ever-created"), BlockUserResult::kNoSuchUser);
+}
+
+TEST(UserRepositoryTest, BlockUserThenListBlockedUsersRoundTripsAndIsDirectional) {
+    UserRepository repository(connectionString());
+    const std::string blocker = uniqueLogin("user-repository-test-block-blocker");
+    const std::string blocked = uniqueLogin("user-repository-test-block-blocked");
+
+    bool created = false;
+    try {
+        created = repository.createUser(blocker, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(blocked, "some-hash"));
+
+    EXPECT_FALSE(repository.isBlocked(blocker, blocked));
+    EXPECT_EQ(repository.blockUser(blocker, blocked), BlockUserResult::kBlocked);
+
+    EXPECT_TRUE(repository.isBlocked(blocker, blocked));
+    // Направленно — обратная пара не блокируется автоматически.
+    EXPECT_FALSE(repository.isBlocked(blocked, blocker));
+
+    const std::vector<std::string> blockedByBlocker = repository.listBlockedUsers(blocker);
+    ASSERT_EQ(blockedByBlocker.size(), 1U);
+    EXPECT_EQ(blockedByBlocker[0], blocked);
+    EXPECT_TRUE(repository.listBlockedUsers(blocked).empty());
+}
+
+TEST(UserRepositoryTest, BlockUserTwiceIsRejectedAsAlreadyBlocked) {
+    UserRepository repository(connectionString());
+    const std::string blocker = uniqueLogin("user-repository-test-block-twice-blocker");
+    const std::string blocked = uniqueLogin("user-repository-test-block-twice-blocked");
+
+    bool created = false;
+    try {
+        created = repository.createUser(blocker, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(blocked, "some-hash"));
+
+    ASSERT_EQ(repository.blockUser(blocker, blocked), BlockUserResult::kBlocked);
+    EXPECT_EQ(repository.blockUser(blocker, blocked), BlockUserResult::kAlreadyBlocked);
+}
+
+TEST(UserRepositoryTest, UnblockUserRemovesTheBlockAndReturnsTrueOnlyOnce) {
+    UserRepository repository(connectionString());
+    const std::string blocker = uniqueLogin("user-repository-test-unblock-blocker");
+    const std::string blocked = uniqueLogin("user-repository-test-unblock-blocked");
+
+    bool created = false;
+    try {
+        created = repository.createUser(blocker, "some-hash");
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(repository.createUser(blocked, "some-hash"));
+    ASSERT_EQ(repository.blockUser(blocker, blocked), BlockUserResult::kBlocked);
+
+    EXPECT_TRUE(repository.unblockUser(blocker, blocked));
+    EXPECT_FALSE(repository.isBlocked(blocker, blocked));
+    EXPECT_FALSE(repository.unblockUser(blocker, blocked));
+}
+
 }  // namespace
 }  // namespace user_service
