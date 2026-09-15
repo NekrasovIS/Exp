@@ -277,7 +277,12 @@ describe("MessageList", () => {
   });
 
   it("lists every other member whose pointer has reached the message, not just one", () => {
-    renderList({ readPointers: new Map([["bob", 1], ["carol", 1]]) });
+    renderList({
+      readPointers: new Map([
+        ["bob", 1],
+        ["carol", 1],
+      ]),
+    });
 
     const aliceItem = screen.getAllByRole("listitem")[0]!;
     expect(aliceItem).toHaveTextContent("Seen by: bob, carol");

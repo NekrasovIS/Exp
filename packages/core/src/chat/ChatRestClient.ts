@@ -131,7 +131,10 @@ interface ReadReceiptsBody {
 }
 
 function toReadReceipts(body: ReadReceiptsBody | undefined): ReadReceipt[] {
-  return (body?.receipts ?? []).map((entry) => ({ login: entry.login, lastReadMessageId: entry.last_read_message_id }));
+  return (body?.receipts ?? []).map((entry) => ({
+    login: entry.login,
+    lastReadMessageId: entry.last_read_message_id,
+  }));
 }
 
 function messagesQuery(limit: number, beforeId?: number): string {

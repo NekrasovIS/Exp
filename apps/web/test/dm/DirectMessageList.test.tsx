@@ -11,7 +11,12 @@ const kMessages = [
 describe("DirectMessageList", () => {
   it("renders every message's author and body", () => {
     render(
-      <DirectMessageList messages={kMessages} currentLogin="alice" otherLogin="bob" readPointers={new Map()} />,
+      <DirectMessageList
+        messages={kMessages}
+        currentLogin="alice"
+        otherLogin="bob"
+        readPointers={new Map()}
+      />,
     );
 
     expect(screen.getByText("hi from alice")).toBeInTheDocument();

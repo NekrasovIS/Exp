@@ -100,7 +100,9 @@ export function MessageList({
         const isPinned = pinnedIds.has(message.id);
         const seenBy = isOwn
           ? Array.from(readPointers.entries())
-              .filter(([login, lastReadMessageId]) => login !== currentLogin && lastReadMessageId >= message.id)
+              .filter(
+                ([login, lastReadMessageId]) => login !== currentLogin && lastReadMessageId >= message.id,
+              )
               .map(([login]) => login)
           : [];
         return (

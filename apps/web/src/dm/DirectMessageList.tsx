@@ -18,7 +18,12 @@ interface DirectMessageListProps {
   readPointers: ReadonlyMap<string, number>;
 }
 
-export function DirectMessageList({ messages, currentLogin, otherLogin, readPointers }: DirectMessageListProps) {
+export function DirectMessageList({
+  messages,
+  currentLogin,
+  otherLogin,
+  readPointers,
+}: DirectMessageListProps) {
   const otherLastRead = readPointers.get(otherLogin) ?? -1;
   return (
     <ul className={rowStyles.list}>
