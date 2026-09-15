@@ -243,6 +243,9 @@ void HttpServer::registerRoutes() {
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleSearchMessages(request, response);
                  });
+    server_.Get("/search/messages", [this](const httplib::Request& request, httplib::Response& response) {
+        handleSearchAllMessages(request, response);
+    });
     server_.Get(R"(/communities/(\d+)/members)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMembers(request, response);
@@ -858,6 +861,35 @@ void HttpServer::handleSearchMessages(const httplib::Request& request, httplib::
         messages.push_back(toJson(message));
     }
     response.set_content(messages.dump(), kJsonContentType);
+}
+
+void HttpServer::handleSearchAllMessages(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (!request.has_param("q") || request.get_param_value("q").empty()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected non-empty 'q' query parameter"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+
+    const std::string query = request.get_param_value("q");
+    const int limit = request.has_param("limit") ? std::stoi(request.get_param_value("limit")) : kDefaultSearchLimit;
+
+    nlohmann::json results = nlohmann::json::array();
+    for (const GlobalMessageSearchResult& result : chatService_.searchAllMessages(*login, query, limit)) {
+        nlohmann::json entry = toJson(result.message);
+        entry["channel_id"] = result.channelId;
+        entry["channel_name"] = result.channelName;
+        entry["community_id"] = result.communityId;
+        entry["community_name"] = result.communityName;
+        results.push_back(entry);
+    }
+    response.set_content(results.dump(), kJsonContentType);
 }
 
 void HttpServer::handleListMembers(const httplib::Request& request, httplib::Response& response) {

@@ -825,6 +825,54 @@ std::vector<Message> ChatRepository::searchMessages(std::int64_t channelId, cons
     return messages;
 }
 
+std::vector<GlobalMessageSearchResult> ChatRepository::searchAllMessages(const std::string& login,
+                                                                             const std::string& query, int limit) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // Тот же position(...) > 0, что и у searchMessages() выше, теперь
+    // без привязки к одному channelId — JOIN c memberships ограничивает
+    // результат сообществами вызывающего, is_encrypted = FALSE пропускает
+    // зашифрованные каналы целиком (тело там — шифротекст).
+    const pqxx::result rows = transaction.exec(
+        "SELECT m.id, m.author_login, m.body, m.sent_at, m.edited_at, m.attachment_id, a.filename, "
+        "m.reply_to_message_id, c.id, c.name, co.id, co.name "
+        "FROM messages m "
+        "JOIN channels c ON c.id = m.channel_id "
+        "JOIN communities co ON co.id = c.community_id "
+        "JOIN memberships mem ON mem.community_id = c.community_id AND mem.member_login = $1 "
+        "LEFT JOIN attachments a ON a.id = m.attachment_id "
+        "WHERE c.is_encrypted = FALSE AND position(lower($2) in lower(m.body)) > 0 "
+        "ORDER BY m.sent_at DESC, m.id DESC LIMIT $3",
+        pqxx::params{login, query, limit});
+
+    std::vector<GlobalMessageSearchResult> results;
+    results.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        const std::int64_t messageId = row[0].as<std::int64_t>();
+        results.push_back(GlobalMessageSearchResult{
+            .message = Message{.id = messageId,
+                                .authorLogin = row[1].as<std::string>(),
+                                .body = row[2].as<std::string>(),
+                                .sentAt = row[3].as<std::string>(),
+                                .editedAt =
+                                    row[4].is_null() ? std::nullopt : std::make_optional(row[4].as<std::string>()),
+                                .attachmentId = row[5].is_null()
+                                                     ? std::nullopt
+                                                     : std::make_optional(row[5].as<std::int64_t>()),
+                                .attachmentFilename =
+                                    row[6].is_null() ? std::nullopt : std::make_optional(row[6].as<std::string>()),
+                                .reactions = reactionsForMessage(transaction, messageId),
+                                .replyToMessageId =
+                                    row[7].is_null() ? std::nullopt : std::make_optional(row[7].as<std::int64_t>())},
+            .channelId = row[8].as<std::int64_t>(),
+            .channelName = row[9].as<std::string>(),
+            .communityId = row[10].as<std::int64_t>(),
+            .communityName = row[11].as<std::string>()});
+    }
+    return results;
+}
+
 MutationResult ChatRepository::setChannelKey(std::int64_t channelId, const std::string& memberLogin,
                                               const std::string& requesterLogin, const std::string& wrappedKey) {
     pqxx::connection connection(connectionString_);

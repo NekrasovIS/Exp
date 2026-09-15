@@ -113,6 +113,10 @@ private:
     void handleUploadAttachment(const httplib::Request& request, httplib::Response& response);
     void handleDownloadAttachment(const httplib::Request& request, httplib::Response& response);
     void handleSearchMessages(const httplib::Request& request, httplib::Response& response);
+    /// GET /search/messages (issue #487) — тот же поиск, что и
+    /// handleSearchMessages() выше, но по всем каналам всех сообществ
+    /// вызывающего одним запросом.
+    void handleSearchAllMessages(const httplib::Request& request, httplib::Response& response);
     void handleListMembers(const httplib::Request& request, httplib::Response& response);
     void handleSetChannelKey(const httplib::Request& request, httplib::Response& response);
     void handleGetMyChannelKey(const httplib::Request& request, httplib::Response& response);
