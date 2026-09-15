@@ -123,5 +123,5 @@ export function useDirectMessages(threadId: number) {
     }, kTypingThrottleMs);
   }, [socket]);
 
-  return { messages, loading, error, hasMore, loadOlder, sendMessage, typingUser, sendTyping };
+  return { messages, loading, error, hasMore, loadOlder, sendMessage, socket, typingUser, sendTyping };
 }

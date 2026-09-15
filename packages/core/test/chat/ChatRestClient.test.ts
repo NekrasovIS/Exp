@@ -387,6 +387,44 @@ describe("ChatRestClient", () => {
 
       await expect(client.fetchUnreadCounts(kToken)).resolves.toEqual({ channels: [], threads: [] });
     });
+
+    it("fetchChannelReadReceipts maps receipts from /channels/{id}/read-receipts", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, { receipts: [{ login: "alice", last_read_message_id: 42 }] }),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchChannelReadReceipts(kToken, 10)).resolves.toEqual([
+        { login: "alice", lastReadMessageId: 42 },
+      ]);
+      expect(fetchImpl).toHaveBeenCalledWith(`${kBaseUrl}/channels/10/read-receipts`, expect.anything());
+    });
+
+    it("fetchChannelReadReceipts resolves with an empty array when the server omits 'receipts'", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(200, {}));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchChannelReadReceipts(kToken, 10)).resolves.toEqual([]);
+    });
+
+    it("fetchDmThreadReadReceipts maps receipts from /dm/threads/{id}/read-receipts", async () => {
+      const fetchImpl = fakeFetch(
+        jsonResponse(200, { receipts: [{ login: "bob", last_read_message_id: 7 }] }),
+      );
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchDmThreadReadReceipts(kToken, 3)).resolves.toEqual([
+        { login: "bob", lastReadMessageId: 7 },
+      ]);
+      expect(fetchImpl).toHaveBeenCalledWith(`${kBaseUrl}/dm/threads/3/read-receipts`, expect.anything());
+    });
+
+    it("fetchChannelReadReceipts rejects with ApiError on a non-2xx response", async () => {
+      const fetchImpl = fakeFetch(jsonResponse(404, { error: "no such channel" }));
+      const client = new ChatRestClient(kBaseUrl, fetchImpl);
+
+      await expect(client.fetchChannelReadReceipts(kToken, 10)).rejects.toBeInstanceOf(ApiError);
+    });
   });
 
   it("uses ApiError as the rejection type", async () => {

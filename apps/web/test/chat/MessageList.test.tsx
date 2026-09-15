@@ -17,6 +17,7 @@ function renderList(overrides: Partial<Parameters<typeof MessageList>[0]> = {}) 
       pinnedIds={new Set()}
       currentLogin="alice"
       isModerator={false}
+      readPointers={new Map()}
       onEdit={vi.fn()}
       onDelete={vi.fn()}
       onReply={vi.fn()}
@@ -233,6 +234,7 @@ describe("MessageList", () => {
         pinnedIds={new Set()}
         currentLogin="alice"
         isModerator={false}
+        readPointers={new Map()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
         onReply={vi.fn()}
@@ -248,5 +250,41 @@ describe("MessageList", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getByRole("textbox")).toHaveValue("hi @bob");
+  });
+
+  it("shows 'Seen by' on the current user's own message once another member's pointer reaches it", () => {
+    renderList({ readPointers: new Map([["bob", 1]]) });
+
+    const aliceItem = screen.getAllByRole("listitem")[0]!;
+    expect(aliceItem).toHaveTextContent("Seen by: bob");
+  });
+
+  it("does not show 'Seen by' before any other member's pointer reaches the message", () => {
+    renderList({ readPointers: new Map([["bob", 0]]) });
+
+    expect(screen.queryByText(/Seen by/)).not.toBeInTheDocument();
+  });
+
+  it("never shows 'Seen by' on someone else's message, even if the current user's own pointer qualifies", () => {
+    // alice's own pointer is irrelevant to whether SHE sees bob's
+    // message as "seen" — that line only ever appears on one's own
+    // messages (mirrors the desktop/backend design: a reader never
+    // needs to see themselves listed as having read something).
+    renderList({ readPointers: new Map([["alice", 99]]) });
+
+    const bobItem = screen.getAllByRole("listitem")[1]!;
+    expect(bobItem).not.toHaveTextContent("Seen by");
+  });
+
+  it("lists every other member whose pointer has reached the message, not just one", () => {
+    renderList({
+      readPointers: new Map([
+        ["bob", 1],
+        ["carol", 1],
+      ]),
+    });
+
+    const aliceItem = screen.getAllByRole("listitem")[0]!;
+    expect(aliceItem).toHaveTextContent("Seen by: bob, carol");
   });
 });

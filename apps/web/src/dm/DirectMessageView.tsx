@@ -5,6 +5,7 @@
 import { AsyncListStatus } from "@devicehub/ui";
 
 import styles from "../chat/chatView.module.css";
+import { useReadReceipts } from "../chat/useReadReceipts.js";
 import { useSession } from "../session/SessionContext.js";
 import { DirectMessageComposer } from "./DirectMessageComposer.js";
 import { DirectMessageList } from "./DirectMessageList.js";
@@ -17,8 +18,9 @@ interface DirectMessageViewProps {
 
 export function DirectMessageView({ threadId, otherLogin }: DirectMessageViewProps) {
   const { currentLogin } = useSession();
-  const { messages, loading, error, hasMore, loadOlder, sendMessage, typingUser, sendTyping } =
+  const { messages, loading, error, hasMore, loadOlder, sendMessage, socket, typingUser, sendTyping } =
     useDirectMessages(threadId);
+  const { readPointers } = useReadReceipts({ dmThreadId: threadId }, socket);
 
   return (
     <section className={styles.section}>
@@ -32,7 +34,12 @@ export function DirectMessageView({ threadId, otherLogin }: DirectMessageViewPro
             Load older messages
           </button>
         )}
-        <DirectMessageList messages={messages} currentLogin={currentLogin} />
+        <DirectMessageList
+          messages={messages}
+          currentLogin={currentLogin}
+          otherLogin={otherLogin}
+          readPointers={readPointers}
+        />
       </div>
       {typingUser !== null && <p className={styles.statusText}>{typingUser} is typing…</p>}
       <DirectMessageComposer threadId={threadId} onSend={sendMessage} onTyping={sendTyping} />

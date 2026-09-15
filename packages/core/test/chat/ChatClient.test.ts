@@ -259,6 +259,26 @@ describe("ChatClient", () => {
     expect(onUnpinned).toHaveBeenCalledWith(1);
   });
 
+  it("emits 'readReceiptChanged'", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onChanged = vi.fn();
+    client.on("readReceiptChanged", onChanged);
+
+    socket.simulateMessage(JSON.stringify({ read_receipt: { login: "alice", last_read_message_id: 42 } }));
+
+    expect(onChanged).toHaveBeenCalledWith("alice", 42);
+  });
+
+  it("ignores a malformed 'read_receipt' frame instead of throwing", () => {
+    const { client, socket } = makeClientAndSocket();
+    const onChanged = vi.fn();
+    client.on("readReceiptChanged", onChanged);
+
+    socket.simulateMessage(JSON.stringify({ read_receipt: { login: "alice" } }));
+
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
   it("emits 'error' for a protocol-level {error} frame", () => {
     const { client, socket } = makeClientAndSocket();
     const onError = vi.fn();

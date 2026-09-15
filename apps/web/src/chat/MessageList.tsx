@@ -44,6 +44,11 @@ interface MessageListProps {
   pinnedIds: ReadonlySet<number>;
   currentLogin: string | null;
   isModerator: boolean;
+  // issue #380 — login -> last_read_message_id for every member who has
+  // read at least one message; absent from the map means "hasn't read
+  // anything yet". "Seen by" for one's own message is derived from
+  // this right here, not passed down precomputed — see useReadReceipts.ts.
+  readPointers: ReadonlyMap<string, number>;
   onEdit: (id: number, newBody: string) => void;
   onDelete: (id: number) => void;
   onReply: (id: number) => void;
@@ -58,6 +63,7 @@ export function MessageList({
   pinnedIds,
   currentLogin,
   isModerator,
+  readPointers,
   onEdit,
   onDelete,
   onReply,
@@ -92,6 +98,13 @@ export function MessageList({
       {messages.map((message) => {
         const isOwn = message.author === currentLogin;
         const isPinned = pinnedIds.has(message.id);
+        const seenBy = isOwn
+          ? Array.from(readPointers.entries())
+              .filter(
+                ([login, lastReadMessageId]) => login !== currentLogin && lastReadMessageId >= message.id,
+              )
+              .map(([login]) => login)
+          : [];
         return (
           <MessageRow key={message.id} id={`message-${message.id}`} isOwn={isOwn} author={message.author}>
             {editingId === message.id ? (
@@ -214,6 +227,7 @@ export function MessageList({
                     </button>
                   )}
                 </div>
+                {seenBy.length > 0 && <span className={styles.seenBy}>Seen by: {seenBy.join(", ")}</span>}
               </>
             )}
           </MessageRow>
