@@ -311,6 +311,7 @@ class ChatView {
   +setReadReceipts(receipts: QList<ReadReceipt>)
   +applyReadReceiptChange(login: QString, lastReadMessageId: qint64)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
+  +setLinkPreview(url: QString, info: LinkPreviewInfo)
   +setVoiceMessageData(attachmentId: qint64, data: QByteArray)
   +setRecordingVoice(recording: bool)
   +scrollToMessage(id: qint64) : bool
@@ -340,6 +341,7 @@ class ChatView {
   -connectMessageRow(row: ChatMessageRow*)
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
   -recomputeSeenByForOwnMessages()
+  -requestLinkPreviewIfUrlPresent(message: ChatMessage, row: ChatMessageRow*)
   -resolveReplyPreview(message: ChatMessage) : ChatMessage
   -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   -updateMentionAutocomplete()
@@ -358,6 +360,7 @@ class ChatView {
   +attachFileRequested()
   +downloadAttachmentRequested(attachmentId: qint64, filename: QString)
   +previewAttachmentRequested(attachmentId: qint64)
+  +linkPreviewRequested(url: QString)
   +reactionToggleRequested(id: qint64, emoji: QString)
   +recordVoiceToggleRequested()
   +voicePlaybackRequested(attachmentId: qint64)
@@ -466,6 +469,23 @@ note right of ChatView
   не точечно — собственных показанных сообщений всегда
   мало (см. doc-комментарий метода), а логика проще и
   надёжнее инкрементального обновления.
+
+  Превью ссылок (issue #396/#398): ChatView не
+  ходит в сеть сама — requestLinkPreviewIfUrlPresent()
+  находит первую http(s)-ссылку в тексте сообщения
+  (MessageFormatting::findFirstUrl()) и складывает
+  строку-получателя в pendingLinkPreviewRows_
+  (несколько сообщений могут ссылаться на один и
+  тот же URL), затем сигнализирует
+  linkPreviewRequested(url). MainWindow сама делает
+  запрос через ChatRestClient::fetchLinkPreview() и
+  передаёт результат обратно в setLinkPreview() —
+  тот же приём "глупая строка + владелец делает
+  I/O", что и у вложений-картинок
+  (requestPreviewIfImageAttachment()/
+  setAttachmentPreview()). Картинка превью (og:image)
+  подгружается отдельно, напрямую через
+  QNetworkAccessManager внутри ChatView.
 end note
 
 class CallWindow {
@@ -672,6 +692,8 @@ class ChatMessageRow {
   +setPinned(isPinned: bool)
   +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
+  +setLinkPreview(info: LinkPreviewInfo)
+  +setLinkPreviewImage(image: QImage)
   +setAudioData(data: QByteArray)
   +setSeenBy(logins: QStringList)
   #resizeEvent(event: QResizeEvent*)
@@ -704,6 +726,19 @@ note left of ChatMessageRow
   with the FULL current list, recomputed by ChatView
   from scratch on every read-pointer change, not a delta
   this row would have to merge itself.
+
+  setLinkPreview()/setLinkPreviewImage() (issue
+  #396/#398) — конструктор сам ищет первую
+  http(s)-ссылку в теле сообщения
+  (MessageFormatting::findFirstUrl()) и, если она
+  есть, создаёт скрытый chatLinkPreview (заголовок/
+  описание/картинка/домен), сразу показывая только
+  домен (QUrl::host()). ChatView заполняет
+  остальное позже, когда придёт ответ сети —
+  ChatMessageRow сама никогда не делает сетевых
+  запросов, только рендерит переданные данные (тот
+  же принцип, что и у setAudioData()/
+  setAttachmentPreview()).
 end note
 ChatMessageRow ..> AvatarCache : imageFor()/avatarReady()\n(issue #384/#442, не владеет; nullptr —\nтолько буква-заглушка, как раньше) >
 class ChatBubble {

@@ -11,6 +11,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
@@ -19,10 +21,12 @@
 #include <QStackedWidget>
 #include <QStringListModel>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include "ui/ChatMessageGrouping.h"
 #include "ui/IconFactory.h"
+#include "ui/MessageFormatting.h"
 #include "ui/Theme.h"
 
 namespace devicehub {
@@ -405,6 +409,7 @@ void ChatView::appendMessage(const ChatMessage& message) {
     connectMessageRow(row);
     messagesLayout_->insertWidget(messagesLayout_->count() - 1, row);
     requestPreviewIfImageAttachment(resolvedMessage, row);
+    requestLinkPreviewIfUrlPresent(resolvedMessage, row);
     messagesById_.insert(resolvedMessage.id, resolvedMessage);
     lastMessage_ = resolvedMessage;
     hasLastMessage_ = true;
@@ -448,6 +453,7 @@ void ChatView::prependMessages(const QList<ChatMessage>& messages) {
         connectMessageRow(row);
         messagesLayout_->insertWidget(insertIndex++, row);
         requestPreviewIfImageAttachment(resolvedMessage, row);
+        requestLinkPreviewIfUrlPresent(resolvedMessage, row);
         messagesById_.insert(resolvedMessage.id, resolvedMessage);
         previousInBatch = resolvedMessage;
         showHeaderForNext = false;
@@ -513,6 +519,35 @@ void ChatView::setAttachmentPreview(qint64 attachmentId, const QImage& image) {
         return;
     }
     row->setAttachmentPreview(image);
+}
+
+void ChatView::requestLinkPreviewIfUrlPresent(const ChatMessage& message, ChatMessageRow* row) {
+    const QString url = message_formatting::findFirstUrl(message.body);
+    if (url.isEmpty()) {
+        return;
+    }
+    pendingLinkPreviewRows_[url].append(row);
+    emit linkPreviewRequested(url);
+}
+
+void ChatView::setLinkPreview(const QString& url, const LinkPreviewInfo& info) {
+    const QList<QPointer<ChatMessageRow>> rows = pendingLinkPreviewRows_.take(url);
+    for (const QPointer<ChatMessageRow>& row : rows) {
+        if (row.isNull()) {
+            continue;
+        }
+        row->setLinkPreview(info);
+        if (info.available && !info.imageUrl.isEmpty()) {
+            QNetworkReply* reply = linkPreviewImageNetworkManager_.get(QNetworkRequest(QUrl(info.imageUrl)));
+            connect(reply, &QNetworkReply::finished, this, [reply, row]() {
+                reply->deleteLater();
+                if (reply->error() != QNetworkReply::NoError || row.isNull()) {
+                    return;
+                }
+                row->setLinkPreviewImage(QImage::fromData(reply->readAll()));
+            });
+        }
+    }
 }
 
 void ChatView::setVoiceMessageData(qint64 attachmentId, const QByteArray& data) {

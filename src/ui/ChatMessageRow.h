@@ -8,6 +8,8 @@
 
 #include <optional>
 
+#include "chat/ChatRestClient.h"
+
 class QAudioOutput;
 class QBuffer;
 class QImage;
@@ -181,6 +183,23 @@ public:
     /// сообщение, есть смысл только у автора.
     void setSeenBy(const QStringList& logins);
 
+    /// Заполняет карточку превью ссылки (issue #396/#398) — вызывается
+    /// ChatView в ответ на ChatRestClient::linkPreviewFetched() для URL,
+    /// найденного в теле этого сообщения. Ничего не делает, если у этой
+    /// строки нет обнаруженного URL (см. message_formatting::
+    /// findFirstUrl()) или @p info.available false — карточка остаётся
+    /// скрытой, тело сообщения уже отрендерено независимо от неё.
+    void setLinkPreview(const LinkPreviewInfo& info);
+
+    /// Заменяет плейсхолдер картинки карточки превью на реально
+    /// загруженную @p image — отдельный шаг от setLinkPreview() выше:
+    /// ChatView скачивает саму картинку отдельным запросом
+    /// (произвольный URL с чужого домена, не эндпоинт chat-service) уже
+    /// после того, как метаданные показаны, чтобы текст карточки не
+    /// ждал картинку. Ничего не делает, если у карточки нет картинки
+    /// (info.imageUrl был пуст) или строка не показывает превью вовсе.
+    void setLinkPreviewImage(const QImage& image);
+
 signals:
     /// Выбор "Edit" в контекстном меню по правому клику (только для
     /// собственных сообщений, issue #107/#150) — @p currentBody
@@ -300,6 +319,16 @@ private:
     /// для собственных сообщений (isOwnMessage true), изначально скрыт;
     /// null для чужого сообщения, setSeenBy() тогда — no-op.
     QLabel* seenByLabel_ = nullptr;
+    /// Карточка превью ссылки (issue #396/#398) — null, если в теле
+    /// сообщения не нашлось http(s)-URL (см. message_formatting::
+    /// findFirstUrl()); иначе создаётся сразу, но остаётся скрытой
+    /// (setVisible(false)) до setLinkPreview() с available true —
+    /// сервер мог не найти превью для этой ссылки, и тогда карточка не
+    /// должна появиться вовсе.
+    QWidget* linkPreviewFrame_ = nullptr;
+    QLabel* linkPreviewImageLabel_ = nullptr;
+    QLabel* linkPreviewTitleLabel_ = nullptr;
+    QLabel* linkPreviewDescriptionLabel_ = nullptr;
 };
 
 }  // namespace devicehub

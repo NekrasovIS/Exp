@@ -471,6 +471,11 @@ MainWindow::MainWindow(QWidget* parent)
     // настоящим кликом по "Download").
     connect(chatView_, &ChatView::previewAttachmentRequested, this,
             [this](qint64 attachmentId) { chatRestClient_.downloadAttachment(lastToken_, attachmentId); });
+    // Issue #396/#398 — превью ссылок.
+    connect(chatView_, &ChatView::linkPreviewRequested, this,
+            [this](const QString& url) { chatRestClient_.fetchLinkPreview(lastToken_, url); });
+    connect(&chatRestClient_, &ChatRestClient::linkPreviewFetched, this,
+            [this](const QString& url, const LinkPreviewInfo& info) { chatView_->setLinkPreview(url, info); });
     connect(&chatRestClient_, &ChatRestClient::attachmentUploaded, this,
             [this](qint64 id, const QString& /*filename*/) {
                 chatClient_.sendMessage(chatView_->messageEdit()->text(), id, chatView_->consumeReplyTarget());

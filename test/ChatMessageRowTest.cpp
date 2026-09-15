@@ -79,6 +79,11 @@ ChatMessage sampleMessageWithAudioAttachment() {
                         .attachmentFilename = "voice-message-123.wav"};
 }
 
+ChatMessage sampleMessageWithUrl() {
+    return ChatMessage{
+        .author = "alice", .body = "check this out: https://example.test/article", .sentAt = "2026-08-05 09:00:00"};
+}
+
 TEST(ChatMessageRowTest, NonOwnMessageWithHeaderHasAvatarAuthorAndTimeLabels) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
 
@@ -693,6 +698,92 @@ TEST(ChatMessageRowTest, SetSeenByOnANonOwnMessageIsANoop) {
     row.setSeenBy({"bob"});  // must not crash
 
     EXPECT_EQ(row.findChild<QLabel*>(QStringLiteral("chatMessageSeenBy")), nullptr);
+}
+
+// Issue #396/#398 — link previews.
+
+TEST(ChatMessageRowTest, MessageWithoutAUrlHasNoLinkPreviewFrame) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_EQ(row.findChild<QWidget*>("chatLinkPreview"), nullptr);
+}
+
+TEST(ChatMessageRowTest, MessageWithAUrlHasAHiddenLinkPreviewFrameShowingTheDomain) {
+    ChatMessageRow row(sampleMessageWithUrl(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    auto* frame = row.findChild<QWidget*>("chatLinkPreview");
+    ASSERT_NE(frame, nullptr);
+    EXPECT_TRUE(frame->isHidden());
+    EXPECT_TRUE(frame->findChild<QLabel*>("mutedDescription") != nullptr);
+    EXPECT_EQ(frame->findChild<QLabel*>("mutedDescription")->text(), QStringLiteral("example.test"));
+}
+
+TEST(ChatMessageRowTest, SetLinkPreviewShowsTitleAndDescriptionAndTheFrame) {
+    ChatMessageRow row(sampleMessageWithUrl(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    LinkPreviewInfo info;
+    info.available = true;
+    info.title = "Example Article";
+    info.description = "A short summary.";
+    row.setLinkPreview(info);
+
+    auto* frame = row.findChild<QWidget*>("chatLinkPreview");
+    ASSERT_NE(frame, nullptr);
+    // isHidden(), не isVisible() — тест не показывает окно (см. пояснение выше в файле).
+    EXPECT_FALSE(frame->isHidden());
+    auto* title = row.findChild<QLabel*>("chatLinkPreviewTitle");
+    ASSERT_NE(title, nullptr);
+    EXPECT_EQ(title->text(), QStringLiteral("Example Article"));
+    EXPECT_FALSE(title->isHidden());
+    auto* description = row.findChild<QLabel*>("chatLinkPreviewDescription");
+    ASSERT_NE(description, nullptr);
+    EXPECT_EQ(description->text(), QStringLiteral("A short summary."));
+}
+
+TEST(ChatMessageRowTest, SetLinkPreviewWithUnavailableLeavesTheFrameHidden) {
+    ChatMessageRow row(sampleMessageWithUrl(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    LinkPreviewInfo info;
+    info.available = false;
+    row.setLinkPreview(info);
+
+    auto* frame = row.findChild<QWidget*>("chatLinkPreview");
+    ASSERT_NE(frame, nullptr);
+    EXPECT_TRUE(frame->isHidden());
+}
+
+TEST(ChatMessageRowTest, SetLinkPreviewOnARowWithoutAUrlIsANoop) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    LinkPreviewInfo info;
+    info.available = true;
+    info.title = "Should not appear";
+    row.setLinkPreview(info);  // must not crash
+
+    EXPECT_EQ(row.findChild<QWidget*>("chatLinkPreview"), nullptr);
+}
+
+TEST(ChatMessageRowTest, SetLinkPreviewImageShowsThePixmap) {
+    ChatMessageRow row(sampleMessageWithUrl(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    QImage image(8, 8, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    row.setLinkPreviewImage(image);
+
+    auto* imageLabel = row.findChild<QLabel*>("chatLinkPreviewImage");
+    ASSERT_NE(imageLabel, nullptr);
+    EXPECT_FALSE(imageLabel->isHidden());
+    EXPECT_FALSE(imageLabel->pixmap().isNull());
+}
+
+TEST(ChatMessageRowTest, SetLinkPreviewImageWithANullImageIsANoop) {
+    ChatMessageRow row(sampleMessageWithUrl(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    row.setLinkPreviewImage(QImage());  // must not crash
+
+    auto* imageLabel = row.findChild<QLabel*>("chatLinkPreviewImage");
+    ASSERT_NE(imageLabel, nullptr);
+    EXPECT_TRUE(imageLabel->isHidden());
 }
 
 }  // namespace
