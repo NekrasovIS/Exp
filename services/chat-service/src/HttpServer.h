@@ -104,6 +104,14 @@ private:
     void handleListChannels(const httplib::Request& request, httplib::Response& response);
     void handleRenameChannel(const httplib::Request& request, httplib::Response& response);
     void handleDeleteChannel(const httplib::Request& request, httplib::Response& response);
+    /// Issue #467 — категории (группы) каналов внутри сообщества.
+    void handleCreateChannelCategory(const httplib::Request& request, httplib::Response& response);
+    void handleListChannelCategories(const httplib::Request& request, httplib::Response& response);
+    void handleRenameChannelCategory(const httplib::Request& request, httplib::Response& response);
+    void handleDeleteChannelCategory(const httplib::Request& request, httplib::Response& response);
+    /// PATCH /channels/{id}/category — переносит канал в другую
+    /// категорию (или снимает её) и/или меняет порядок отображения.
+    void handleSetChannelCategory(const httplib::Request& request, httplib::Response& response);
     void handleListMessages(const httplib::Request& request, httplib::Response& response);
     /// GET /channels/{id}/pinned-messages (issue #338) — доступно любому
     /// участнику сообщества (не только владельцу/модератору — читать

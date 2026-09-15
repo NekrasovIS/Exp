@@ -22,7 +22,22 @@ class Channel {
   +name : string
   +ownerLogin : string
   +isEncrypted : bool
+  +categoryId : optional<int64>
+  +sortOrder : int
 }
+class ChannelCategory {
+  +id : int64
+  +communityId : int64
+  +name : string
+  +sortOrder : int
+}
+note bottom of ChannelCategory
+  Issue #467 — Discord-style группы каналов
+  внутри сообщества, чисто для отображения/
+  навигации. Удаление категории делает её
+  каналы "без категории" (ON DELETE SET NULL),
+  а не удаляет их вместе с ней.
+end note
 class Message {
   +id : int64
   +authorLogin : string
@@ -57,6 +72,10 @@ end note
 class RegenerateInviteCodeResult {
   +result : MutationResult
   +inviteCode : string
+}
+class CreateCategoryResult {
+  +result : MutationResult
+  +categoryId : int64
 }
 class AttachmentMetadata {
   +id : int64
@@ -157,6 +176,11 @@ class ChatRepository {
   +listMembers(communityId: int64) : vector<string>
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
+  +createChannelCategory(communityId: int64, name: string, requesterLogin: string) : CreateCategoryResult
+  +renameChannelCategory(id: int64, newName: string, requesterLogin: string) : MutationResult
+  +deleteChannelCategory(id: int64, requesterLogin: string) : MutationResult
+  +listChannelCategories(communityId: int64) : vector<ChannelCategory>
+  +setChannelCategory(channelId: int64, categoryId: optional<int64>,\n    sortOrder: int, requesterLogin: string) : MutationResult
   +joinCommunity(communityId: int64, login: string) : bool
   +promoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
   +demoteModerator(communityId: int64, targetLogin: string, requesterLogin: string) : MutationResult
@@ -188,6 +212,8 @@ class ChatRepository {
 }
 ChatRepository ..> Community : creates
 ChatRepository ..> RegenerateInviteCodeResult : returns
+ChatRepository ..> CreateCategoryResult : returns
+ChatRepository ..> ChannelCategory : returns
 ChatRepository ..> Channel : creates
 ChatRepository ..> Message : creates
 ChatRepository ..> PinnedMessage : returns
@@ -248,6 +274,11 @@ class ChatService {
   +listMembers(communityId: int64) : vector<string>
   +renameChannel(id: int64, newName: string, requesterLogin: string) : MutationResult
   +deleteChannel(id: int64, requesterLogin: string) : MutationResult
+  +createChannelCategory(communityId: int64, name: string, requesterLogin: string) : CreateCategoryResult
+  +renameChannelCategory(id: int64, newName: string, requesterLogin: string) : MutationResult
+  +deleteChannelCategory(id: int64, requesterLogin: string) : MutationResult
+  +listChannelCategories(communityId: int64) : vector<ChannelCategory>
+  +setChannelCategory(channelId: int64, categoryId: optional<int64>,\n    sortOrder: int, requesterLogin: string) : MutationResult
   +setChannelKey(channelId: int64, memberLogin: string, requesterLogin: string,\n    wrappedKey: string) : MutationResult
   +findChannelKey(channelId: int64, login: string) : optional<string>
   +joinCommunity(communityId: int64, login: string) : bool
@@ -325,6 +356,11 @@ class HttpServer {
   -handleListChannels(request, response)
   -handleRenameChannel(request, response)
   -handleDeleteChannel(request, response)
+  -handleCreateChannelCategory(request, response)
+  -handleListChannelCategories(request, response)
+  -handleRenameChannelCategory(request, response)
+  -handleDeleteChannelCategory(request, response)
+  -handleSetChannelCategory(request, response)
   -handleListMessages(request, response)
   -handleListPinnedMessages(request, response)
   -handleUploadAttachment(request, response)

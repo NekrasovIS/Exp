@@ -210,3 +210,21 @@ CREATE TABLE IF NOT EXISTS channel_janus_rooms (
     janus_room_id TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Категории (группы) каналов внутри сообщества (issue #467, Discord-
+-- style) — чисто для отображения/навигации, никак не влияет на права
+-- доступа к каналу (те по-прежнему определяются членством в
+-- сообществе). ON DELETE CASCADE на community_id — категория не имеет
+-- смысла без своего сообщества.
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id BIGSERIAL PRIMARY KEY,
+    community_id BIGINT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (community_id, name)
+);
+
+-- ON DELETE SET NULL (не CASCADE) — удаление категории делает её
+-- каналы "без категории", а не удаляет их вместе с ней.
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS category_id BIGINT REFERENCES channel_categories(id) ON DELETE SET NULL;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;

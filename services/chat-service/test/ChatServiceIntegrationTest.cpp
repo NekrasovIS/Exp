@@ -1357,5 +1357,161 @@ TEST(ChatServiceIntegrationTest, ListDmThreadReadStateReturnsOnlyParticipantsWho
     EXPECT_EQ(receipts[0].lastReadMessageId, message->id);
 }
 
+// Issue #467 — категории (группы) каналов внутри сообщества.
+
+TEST(ChatServiceIntegrationTest, CreateChannelCategoryThenListChannelCategoriesRoundTrips) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "category-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("category-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_TRUE(service.listChannelCategories(community.id).empty());
+
+    const CreateCategoryResult result = service.createChannelCategory(community.id, "Text channels", owner);
+    ASSERT_EQ(result.result, MutationResult::kSuccess);
+    ASSERT_GT(result.categoryId, 0);
+
+    const std::vector<ChannelCategory> categories = service.listChannelCategories(community.id);
+    ASSERT_EQ(categories.size(), 1U);
+    EXPECT_EQ(categories[0].id, result.categoryId);
+    EXPECT_EQ(categories[0].communityId, community.id);
+    EXPECT_EQ(categories[0].name, "Text channels");
+}
+
+TEST(ChatServiceIntegrationTest, CreateChannelCategoryRejectsNonOwnerNonModeratorWithForbidden) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "category-forbidden-owner-" + suffix;
+    const std::string member = "category-forbidden-member-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("category-forbidden-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(service.joinCommunity(community.id, member));
+
+    EXPECT_EQ(service.createChannelCategory(community.id, "Voice channels", member).result,
+              MutationResult::kForbidden);
+}
+
+TEST(ChatServiceIntegrationTest, CreateChannelCategoryRejectsNonMemberWithNotFound) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "category-notfound-owner-" + suffix;
+    const std::string outsider = "category-notfound-outsider-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("category-notfound-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_EQ(service.createChannelCategory(community.id, "Voice channels", outsider).result,
+              MutationResult::kNotFound);
+}
+
+TEST(ChatServiceIntegrationTest, RenameChannelCategorySucceedsForModeratorNotJustOwner) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "category-rename-owner-" + suffix;
+    const std::string moderator = "category-rename-moderator-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("category-rename-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(service.joinCommunity(community.id, moderator));
+    ASSERT_EQ(service.promoteModerator(community.id, moderator, owner), MutationResult::kSuccess);
+    const CreateCategoryResult created = service.createChannelCategory(community.id, "Old name", owner);
+    ASSERT_EQ(created.result, MutationResult::kSuccess);
+
+    EXPECT_EQ(service.renameChannelCategory(created.categoryId, "New name", moderator), MutationResult::kSuccess);
+    const std::vector<ChannelCategory> categories = service.listChannelCategories(community.id);
+    ASSERT_EQ(categories.size(), 1U);
+    EXPECT_EQ(categories[0].name, "New name");
+}
+
+TEST(ChatServiceIntegrationTest, DeleteChannelCategoryDetachesItsChannelsInsteadOfDeletingThem) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "category-delete-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("category-delete-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const CreateCategoryResult created = service.createChannelCategory(community.id, "Doomed category", owner);
+    ASSERT_EQ(created.result, MutationResult::kSuccess);
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_EQ(service.setChannelCategory(*channelId, created.categoryId, 0, owner), MutationResult::kSuccess);
+
+    EXPECT_EQ(service.deleteChannelCategory(created.categoryId, owner), MutationResult::kSuccess);
+    EXPECT_TRUE(service.listChannelCategories(community.id).empty());
+
+    const std::optional<Channel> channel = service.findChannel(*channelId);
+    ASSERT_TRUE(channel.has_value());
+    EXPECT_FALSE(channel->categoryId.has_value());
+}
+
+TEST(ChatServiceIntegrationTest, SetChannelCategoryRejectsACategoryBelongingToAnotherCommunity) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "category-crosscomm-owner-" + suffix;
+    Community communityA{};
+    Community communityB{};
+    try {
+        communityA = service.createCommunity("category-crosscomm-a-" + suffix, owner);
+        communityB = service.createCommunity("category-crosscomm-b-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const CreateCategoryResult categoryInB = service.createChannelCategory(communityB.id, "Belongs to B", owner);
+    ASSERT_EQ(categoryInB.result, MutationResult::kSuccess);
+    const std::optional<std::int64_t> channelInA = service.createChannel(communityA.id, "general", owner);
+    ASSERT_TRUE(channelInA.has_value());
+
+    EXPECT_EQ(service.setChannelCategory(*channelInA, categoryInB.categoryId, 0, owner),
+              MutationResult::kNotFound);
+}
+
 }  // namespace
 }  // namespace chat_service

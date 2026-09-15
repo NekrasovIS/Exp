@@ -276,7 +276,10 @@ Channel channelFromRow(const Row& row) {
                    .communityId = row[1].template as<std::int64_t>(),
                    .name = row[2].template as<std::string>(),
                    .ownerLogin = row[3].template as<std::string>(),
-                   .isEncrypted = row[4].template as<bool>()};
+                   .isEncrypted = row[4].template as<bool>(),
+                   .categoryId = row[5].is_null() ? std::nullopt
+                                                    : std::make_optional(row[5].template as<std::int64_t>()),
+                   .sortOrder = row[6].template as<int>()};
 }
 }  // namespace
 
@@ -285,8 +288,8 @@ std::vector<Channel> ChatRepository::listChannels(std::int64_t communityId) {
     pqxx::work transaction(connection);
 
     const pqxx::result rows = transaction.exec(
-        "SELECT id, community_id, name, owner_login, is_encrypted FROM channels WHERE community_id = $1 "
-        "ORDER BY id",
+        "SELECT id, community_id, name, owner_login, is_encrypted, category_id, sort_order FROM channels "
+        "WHERE community_id = $1 ORDER BY id",
         pqxx::params{communityId});
 
     std::vector<Channel> channels;
@@ -301,8 +304,10 @@ std::optional<Channel> ChatRepository::findChannel(std::int64_t id) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    const pqxx::result rows = transaction.exec(
-        "SELECT id, community_id, name, owner_login, is_encrypted FROM channels WHERE id = $1", pqxx::params{id});
+    const pqxx::result rows =
+        transaction.exec("SELECT id, community_id, name, owner_login, is_encrypted, category_id, sort_order "
+                          "FROM channels WHERE id = $1",
+                          pqxx::params{id});
     if (rows.empty()) {
         return std::nullopt;
     }
@@ -393,6 +398,172 @@ MutationResult ChatRepository::deleteChannel(std::int64_t id, const std::string&
 
     // messages каскадно удаляются через ON DELETE CASCADE (см. db/init.sql).
     transaction.exec("DELETE FROM channels WHERE id = $1", pqxx::params{id});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+CreateCategoryResult ChatRepository::createChannelCategory(std::int64_t communityId, const std::string& name,
+                                                             const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{communityId});
+    if (ownerRows.empty()) {
+        return CreateCategoryResult{.result = MutationResult::kNotFound};
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest) — см. тот же комментарий в renameCommunity().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return CreateCategoryResult{.result = MutationResult::kNotFound};
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return CreateCategoryResult{.result = MutationResult::kForbidden};
+        }
+    }
+
+    try {
+        const pqxx::result rows =
+            transaction.exec("INSERT INTO channel_categories (community_id, name) VALUES ($1, $2) RETURNING id",
+                              pqxx::params{communityId, name});
+        transaction.commit();
+        return CreateCategoryResult{.result = MutationResult::kSuccess,
+                                     .categoryId = rows[0][0].as<std::int64_t>()};
+    } catch (const pqxx::unique_violation&) {
+        return CreateCategoryResult{.result = MutationResult::kConflict};
+    }
+}
+
+namespace {
+/// Общая проверка полномочий для методов категорий ниже: возвращает
+/// id сообщества-владельца категории при успехе, либо сразу
+/// MutationResult при провале (kNotFound — категория не существует
+/// или вызывающий не состоит в сообществе, kForbidden — состоит, но не
+/// владелец/модератор) — тот же принцип разделения 404 против 403, что
+/// и у renameChannel()/deleteChannel().
+struct CategoryAuthorization {
+    MutationResult failure = MutationResult::kSuccess;  // kSuccess здесь означает "авторизация пройдена"
+    std::int64_t communityId = 0;
+};
+
+CategoryAuthorization authorizeChannelCategoryMutation(pqxx::work& transaction, std::int64_t categoryId,
+                                                          const std::string& requesterLogin) {
+    const pqxx::result rows = transaction.exec(
+        "SELECT cc.community_id, co.owner_login FROM channel_categories cc "
+        "JOIN communities co ON co.id = cc.community_id WHERE cc.id = $1",
+        pqxx::params{categoryId});
+    if (rows.empty()) {
+        return CategoryAuthorization{.failure = MutationResult::kNotFound};
+    }
+    const auto communityId = rows[0][0].as<std::int64_t>();
+    const std::string communityOwner = rows[0][1].as<std::string>();
+    if (requesterLogin != communityOwner) {
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return CategoryAuthorization{.failure = MutationResult::kNotFound};
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return CategoryAuthorization{.failure = MutationResult::kForbidden};
+        }
+    }
+    return CategoryAuthorization{.failure = MutationResult::kSuccess, .communityId = communityId};
+}
+}  // namespace
+
+MutationResult ChatRepository::renameChannelCategory(std::int64_t id, const std::string& newName,
+                                                       const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const CategoryAuthorization authorization = authorizeChannelCategoryMutation(transaction, id, requesterLogin);
+    if (authorization.failure != MutationResult::kSuccess) {
+        return authorization.failure;
+    }
+
+    try {
+        transaction.exec("UPDATE channel_categories SET name = $1 WHERE id = $2", pqxx::params{newName, id});
+        transaction.commit();
+        return MutationResult::kSuccess;
+    } catch (const pqxx::unique_violation&) {
+        return MutationResult::kConflict;
+    }
+}
+
+MutationResult ChatRepository::deleteChannelCategory(std::int64_t id, const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const CategoryAuthorization authorization = authorizeChannelCategoryMutation(transaction, id, requesterLogin);
+    if (authorization.failure != MutationResult::kSuccess) {
+        return authorization.failure;
+    }
+
+    // Каналы этой категории становятся без категории через
+    // ON DELETE SET NULL (db/init.sql), не удаляются вместе с ней.
+    transaction.exec("DELETE FROM channel_categories WHERE id = $1", pqxx::params{id});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::vector<ChannelCategory> ChatRepository::listChannelCategories(std::int64_t communityId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows =
+        transaction.exec("SELECT id, community_id, name, sort_order FROM channel_categories "
+                          "WHERE community_id = $1 ORDER BY sort_order, id",
+                          pqxx::params{communityId});
+
+    std::vector<ChannelCategory> categories;
+    categories.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        categories.push_back(ChannelCategory{.id = row[0].as<std::int64_t>(),
+                                              .communityId = row[1].as<std::int64_t>(),
+                                              .name = row[2].as<std::string>(),
+                                              .sortOrder = row[3].as<int>()});
+    }
+    return categories;
+}
+
+MutationResult ChatRepository::setChannelCategory(std::int64_t channelId, std::optional<std::int64_t> categoryId,
+                                                    int sortOrder, const std::string& requesterLogin) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT ch.owner_login, ch.community_id, co.owner_login FROM channels ch "
+        "JOIN communities co ON co.id = ch.community_id WHERE ch.id = $1",
+        pqxx::params{channelId});
+    if (rows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    const std::string channelOwner = rows[0][0].as<std::string>();
+    const auto communityId = rows[0][1].as<std::int64_t>();
+    const std::string communityOwner = rows[0][2].as<std::string>();
+    if (requesterLogin != channelOwner && requesterLogin != communityOwner) {
+        // Issue #256 (pentest) — см. тот же комментарий в renameChannel().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        if (!isModerator(transaction, communityId, requesterLogin)) {
+            return MutationResult::kForbidden;
+        }
+    }
+
+    if (categoryId.has_value()) {
+        // Категория должна принадлежать тому же сообществу, что и канал
+        // — иначе можно было бы привязать чужой канал к категории
+        // другого сообщества, зная только числовой id (issue #256
+        // pentest — тот же принцип, что и везде в этом сервисе).
+        const pqxx::result categoryRows =
+            transaction.exec("SELECT 1 FROM channel_categories WHERE id = $1 AND community_id = $2",
+                              pqxx::params{*categoryId, communityId});
+        if (categoryRows.empty()) {
+            return MutationResult::kNotFound;
+        }
+    }
+
+    transaction.exec("UPDATE channels SET category_id = $1, sort_order = $2 WHERE id = $3",
+                      pqxx::params{categoryId, sortOrder, channelId});
     transaction.commit();
     return MutationResult::kSuccess;
 }

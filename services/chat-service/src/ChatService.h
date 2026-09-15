@@ -36,6 +36,16 @@ public:
                                                 const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteChannel(std::int64_t id, const std::string& requesterLogin);
 
+    /// Issue #467 — см. doc-комментарии соответствующих методов ChatRepository.
+    [[nodiscard]] CreateCategoryResult createChannelCategory(std::int64_t communityId, const std::string& name,
+                                                               const std::string& requesterLogin);
+    [[nodiscard]] MutationResult renameChannelCategory(std::int64_t id, const std::string& newName,
+                                                        const std::string& requesterLogin);
+    [[nodiscard]] MutationResult deleteChannelCategory(std::int64_t id, const std::string& requesterLogin);
+    [[nodiscard]] std::vector<ChannelCategory> listChannelCategories(std::int64_t communityId);
+    [[nodiscard]] MutationResult setChannelCategory(std::int64_t channelId, std::optional<std::int64_t> categoryId,
+                                                     int sortOrder, const std::string& requesterLogin);
+
     [[nodiscard]] MutationResult setChannelKey(std::int64_t channelId, const std::string& memberLogin,
                                                 const std::string& requesterLogin, const std::string& wrappedKey);
     [[nodiscard]] std::optional<std::string> findChannelKey(std::int64_t channelId, const std::string& login);

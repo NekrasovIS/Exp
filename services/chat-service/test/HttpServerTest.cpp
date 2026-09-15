@@ -2249,5 +2249,211 @@ TEST(HttpServerTest, GetDmThreadReadReceiptsReturnsReceiptsAfterMarkingReadAndRe
     EXPECT_EQ(receipts[0]["last_read_message_id"].get<std::int64_t>(), messageId);
 }
 
+// Issue #467 — категории (группы) каналов внутри сообщества.
+
+TEST(HttpServerTest, CreateChannelCategoryThenListChannelCategoriesRoundTrip) {
+    auto fixtureOpt = TestFixture::create("http-server-category-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-200-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    const httplib::Result createResult =
+        client.Post("/communities/" + std::to_string(community.id) + "/categories", headers,
+                     nlohmann::json{{"name", "Text channels"}}.dump(), "application/json");
+    ASSERT_TRUE(createResult);
+    ASSERT_EQ(createResult->status, 201);
+    const nlohmann::json createdBody = nlohmann::json::parse(createResult->body);
+    EXPECT_EQ(createdBody["name"].get<std::string>(), "Text channels");
+    const auto categoryId = createdBody["id"].get<std::int64_t>();
+    ASSERT_GT(categoryId, 0);
+
+    const httplib::Result listResult = client.Get("/communities/" + std::to_string(community.id) + "/categories", headers);
+    ASSERT_TRUE(listResult);
+    ASSERT_EQ(listResult->status, 200);
+    const nlohmann::json categories = nlohmann::json::parse(listResult->body);
+    ASSERT_EQ(categories.size(), 1U);
+    EXPECT_EQ(categories[0]["id"].get<std::int64_t>(), categoryId);
+    EXPECT_EQ(categories[0]["name"].get<std::string>(), "Text channels");
+}
+
+TEST(HttpServerTest, CreateChannelCategoryRejectsMissingNameWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-category-400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-400-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Post("/communities/" + std::to_string(community.id) + "/categories",
+                                                  headers, nlohmann::json::object().dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, CreateChannelCategoryRejectsNonOwnerNonModeratorWith403) {
+    auto fixtureOpt = TestFixture::create("http-server-category-403");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-403-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::string memberLogin = "http-server-category-403-member-" + uniqueSuffix();
+    const std::optional<std::string> memberToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, memberLogin);
+    ASSERT_TRUE(memberToken.has_value());
+    ASSERT_TRUE(chatService.joinCommunity(community.id, memberLogin));
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*memberToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/categories", headers,
+                     nlohmann::json{{"name", "Voice channels"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 403);
+}
+
+TEST(HttpServerTest, ListChannelCategoriesRejectsNonMemberWith404) {
+    auto fixtureOpt = TestFixture::create("http-server-category-list404");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-list404-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::string outsiderLogin = "http-server-category-list404-outsider-" + uniqueSuffix();
+    const std::optional<std::string> outsiderToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, outsiderLogin);
+    ASSERT_TRUE(outsiderToken.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*outsiderToken)}};
+    const httplib::Result result = client.Get("/communities/" + std::to_string(community.id) + "/categories", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
+TEST(HttpServerTest, RenameThenDeleteChannelCategoryRoundTrip) {
+    auto fixtureOpt = TestFixture::create("http-server-category-rndel");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-rndel-" + uniqueSuffix(), fixture.ownerLogin);
+    const CreateCategoryResult created =
+        chatService.createChannelCategory(community.id, "Old name", fixture.ownerLogin);
+    ASSERT_EQ(created.result, MutationResult::kSuccess);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    const httplib::Result renameResult =
+        client.Patch("/categories/" + std::to_string(created.categoryId), headers,
+                      nlohmann::json{{"name", "New name"}}.dump(), "application/json");
+    ASSERT_TRUE(renameResult);
+    EXPECT_EQ(renameResult->status, 200);
+
+    const httplib::Result listResult = client.Get("/communities/" + std::to_string(community.id) + "/categories", headers);
+    ASSERT_TRUE(listResult);
+    EXPECT_EQ(nlohmann::json::parse(listResult->body)[0]["name"].get<std::string>(), "New name");
+
+    const httplib::Result deleteResult = client.Delete("/categories/" + std::to_string(created.categoryId), headers);
+    ASSERT_TRUE(deleteResult);
+    EXPECT_EQ(deleteResult->status, 200);
+
+    const httplib::Result listAfterDeleteResult =
+        client.Get("/communities/" + std::to_string(community.id) + "/categories", headers);
+    ASSERT_TRUE(listAfterDeleteResult);
+    EXPECT_EQ(nlohmann::json::parse(listAfterDeleteResult->body).size(), 0U);
+}
+
+TEST(HttpServerTest, SetChannelCategoryRoundTripAndDeletingCategoryDetachesTheChannel) {
+    auto fixtureOpt = TestFixture::create("http-server-category-setchan");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-setchan-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const CreateCategoryResult created =
+        chatService.createChannelCategory(community.id, "Text channels", fixture.ownerLogin);
+    ASSERT_EQ(created.result, MutationResult::kSuccess);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    const httplib::Result setResult =
+        client.Patch("/channels/" + std::to_string(*channelId) + "/category", headers,
+                      nlohmann::json{{"category_id", created.categoryId}, {"sort_order", 5}}.dump(),
+                      "application/json");
+    ASSERT_TRUE(setResult);
+    EXPECT_EQ(setResult->status, 200);
+
+    const httplib::Result listResult = client.Get("/communities/" + std::to_string(community.id) + "/channels", headers);
+    ASSERT_TRUE(listResult);
+    const nlohmann::json channels = nlohmann::json::parse(listResult->body);
+    ASSERT_EQ(channels.size(), 1U);
+    EXPECT_EQ(channels[0]["category_id"].get<std::int64_t>(), created.categoryId);
+    EXPECT_EQ(channels[0]["sort_order"].get<int>(), 5);
+
+    ASSERT_TRUE(client.Delete("/categories/" + std::to_string(created.categoryId), headers));
+
+    const httplib::Result listAfterDeleteResult =
+        client.Get("/communities/" + std::to_string(community.id) + "/channels", headers);
+    ASSERT_TRUE(listAfterDeleteResult);
+    EXPECT_TRUE(nlohmann::json::parse(listAfterDeleteResult->body)[0]["category_id"].is_null());
+}
+
+TEST(HttpServerTest, SetChannelCategoryRejectsMissingFieldsWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-category-setchan400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-category-setchan400-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Patch("/channels/" + std::to_string(*channelId) + "/category", headers,
+                                                   nlohmann::json{{"sort_order", 0}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
 }  // namespace
 }  // namespace chat_service

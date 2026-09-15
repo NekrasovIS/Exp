@@ -31,6 +31,24 @@ struct Channel {
     /// setChannelKey()/findChannelKey()) — он никогда не видит сырой
     /// ключ или открытый текст тела.
     bool isEncrypted = false;
+    /// Issue #467 — nullopt, если канал не отнесён ни к одной категории
+    /// (значение по умолчанию, в т.ч. для каналов, созданных до этой
+    /// миграции). Чисто для отображения/навигации — не влияет на права
+    /// доступа к каналу.
+    std::optional<std::int64_t> categoryId;
+    /// Issue #467 — порядок отображения внутри своей категории (или
+    /// среди прочих каналов без категории); не гарантированно плотный
+    /// диапазон, клиент просто сортирует по этому значению.
+    int sortOrder = 0;
+};
+
+/// Issue #467 — группа каналов внутри сообщества (Discord-style), чисто
+/// для отображения/навигации.
+struct ChannelCategory {
+    std::int64_t id = 0;
+    std::int64_t communityId = 0;
+    std::string name;
+    int sortOrder = 0;
 };
 
 /// Результат попытки переименования/удаления — различает "не существует"
@@ -210,6 +228,12 @@ struct RegenerateInviteCodeResult {
     std::string inviteCode;  // имеет смысл только при result == kSuccess
 };
 
+/// Issue #467 — см. doc-комментарий createChannelCategory().
+struct CreateCategoryResult {
+    MutationResult result = MutationResult::kNotFound;
+    std::int64_t categoryId = 0;  // имеет смысл только при result == kSuccess
+};
+
 /**
  * @brief Хранилище на базе Postgres для сообществ/каналов/членств/
  *        сообщений/вложений.
@@ -311,6 +335,31 @@ public:
 
     /// То же правило полномочий, что и у renameChannel().
     [[nodiscard]] MutationResult deleteChannel(std::int64_t id, const std::string& requesterLogin);
+
+    /// Issue #467 — категории каналов. Право создавать/переименовывать/
+    /// удалять — то же, что и у управления каналами (issue #114):
+    /// владелец сообщества или модератор (не любой владелец отдельного
+    /// канала — категория принадлежит сообществу целиком).
+    [[nodiscard]] CreateCategoryResult createChannelCategory(std::int64_t communityId, const std::string& name,
+                                                               const std::string& requesterLogin);
+    [[nodiscard]] MutationResult renameChannelCategory(std::int64_t id, const std::string& newName,
+                                                        const std::string& requesterLogin);
+    /// Каналы этой категории становятся без категории (ON DELETE SET
+    /// NULL, db/init.sql), а не удаляются вместе с ней.
+    [[nodiscard]] MutationResult deleteChannelCategory(std::int64_t id, const std::string& requesterLogin);
+    [[nodiscard]] std::vector<ChannelCategory> listChannelCategories(std::int64_t communityId);
+
+    /// Переносит канал в категорию @p categoryId (std::nullopt — снять
+    /// категорию, канал становится "без категории") и задаёт его
+    /// @p sortOrder — то же правило полномочий, что и у renameChannel()/
+    /// deleteChannel() (владелец канала, владелец сообщества или
+    /// модератор). @p categoryId, если задан, должен принадлежать тому
+    /// же сообществу, что и канал (иначе kNotFound) — иначе можно было
+    /// бы привязать канал к категории чужого сообщества, зная только
+    /// числовой id (issue #256 pentest — тот же принцип, что и везде в
+    /// этом сервисе).
+    [[nodiscard]] MutationResult setChannelCategory(std::int64_t channelId, std::optional<std::int64_t> categoryId,
+                                                     int sortOrder, const std::string& requesterLogin);
 
     /// Идемпотентно: вступление в сообщество, в котором вы уже состоите, успешно.
     /// @return False, если @p communityId не существует.
