@@ -194,6 +194,15 @@ struct ThreadUnreadCount {
     std::int64_t unreadCount = 0;
 };
 
+/// Issue #475 — в отличие от ChannelUnreadCount выше, только каналы, где
+/// count > 0 включаются в список (не для каждого канала участника):
+/// упоминания редки, отдавать явный ноль для каждого канала участника —
+/// накладные расходы без пользы, клиент трактует отсутствие записи как 0.
+struct ChannelMentionCount {
+    std::int64_t channelId = 0;
+    std::int64_t unreadMentionCount = 0;
+};
+
 /// Один снимок "прочитано по" (issue #380) — строка из
 /// channel_read_state/dm_thread_read_state, для клиента, открывающего
 /// канал/диалог и заполняющего свою карту login -> last_read_message_id.
@@ -528,6 +537,12 @@ public:
 
     /// То же самое для личных диалогов @p login.
     [[nodiscard]] std::vector<ThreadUnreadCount> listUnreadThreadCounts(const std::string& login);
+
+    /// Issue #475 — количество непрочитанных @упоминаний @p login по
+    /// каждому каналу, где оно больше 0 (см. doc-комментарий
+    /// ChannelMentionCount). Упоминания заполняются в insertMessage() —
+    /// эта функция только считает уже сохранённые строки message_mentions.
+    [[nodiscard]] std::vector<ChannelMentionCount> listUnreadMentionCounts(const std::string& login);
 
 private:
     std::string connectionString_;

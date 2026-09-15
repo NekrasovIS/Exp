@@ -1357,5 +1357,109 @@ TEST(ChatServiceIntegrationTest, ListDmThreadReadStateReturnsOnlyParticipantsWho
     EXPECT_EQ(receipts[0].lastReadMessageId, message->id);
 }
 
+// Issue #475 — счётчик непрочитанных @упоминаний.
+
+TEST(ChatServiceIntegrationTest, MentioningARealMemberCreatesAnUnreadMentionCountThatMarkingReadClears) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "mention-test-owner-" + suffix;
+    const std::string mentioned = "mention-test-mentioned-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("mention-test-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, mentioned));
+
+    auto findMentionCount = [&](const std::string& login) -> std::optional<std::int64_t> {
+        for (const ChannelMentionCount& count : service.listUnreadMentionCounts(login)) {
+            if (count.channelId == *channelId) {
+                return count.unreadMentionCount;
+            }
+        }
+        return std::nullopt;
+    };
+
+    EXPECT_FALSE(findMentionCount(mentioned).has_value());
+
+    const std::optional<Message> message =
+        service.postMessage(*channelId, owner, "hey @" + mentioned + ", check this out");
+    ASSERT_TRUE(message.has_value());
+
+    ASSERT_TRUE(findMentionCount(mentioned).has_value());
+    EXPECT_EQ(*findMentionCount(mentioned), 1);
+    // Не упомянутый в этом сообщении участник — не должен получить счётчик.
+    EXPECT_FALSE(findMentionCount(owner).has_value());
+
+    service.markChannelRead(*channelId, mentioned, message->id);
+    EXPECT_FALSE(findMentionCount(mentioned).has_value());
+}
+
+TEST(ChatServiceIntegrationTest, MentioningTextThatIsNotARealMemberLoginIsIgnored) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "mention-test-fake-owner-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("mention-test-fake-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    // "@example.com" в адресе электронной почты — не реальный логин
+    // участника, не должно стать упоминанием.
+    const std::optional<Message> message =
+        service.postMessage(*channelId, owner, "contact me at name@example.com");
+    ASSERT_TRUE(message.has_value());
+
+    for (const ChannelMentionCount& count : service.listUnreadMentionCounts(owner)) {
+        EXPECT_NE(count.channelId, *channelId);
+    }
+}
+
+TEST(ChatServiceIntegrationTest, SelfMentionByTheAuthorDoesNotCountAsAMention) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "mention-test-self-owner-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("mention-test-self-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<Message> message = service.postMessage(*channelId, owner, "note to self: @" + owner);
+    ASSERT_TRUE(message.has_value());
+
+    for (const ChannelMentionCount& count : service.listUnreadMentionCounts(owner)) {
+        EXPECT_NE(count.channelId, *channelId);
+    }
+}
+
 }  // namespace
 }  // namespace chat_service

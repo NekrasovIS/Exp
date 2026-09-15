@@ -191,6 +191,10 @@ std::vector<ThreadUnreadCount> ChatService::listUnreadThreadCounts(const std::st
     return repository_.listUnreadThreadCounts(login);
 }
 
+std::vector<ChannelMentionCount> ChatService::listUnreadMentionCounts(const std::string& login) {
+    return repository_.listUnreadMentionCounts(login);
+}
+
 std::vector<ReadReceipt> ChatService::listChannelReadState(std::int64_t channelId) {
     return repository_.listChannelReadState(channelId);
 }

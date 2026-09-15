@@ -117,6 +117,16 @@ class ThreadUnreadCount {
   +threadId : int64
   +unreadCount : int64
 }
+class ChannelMentionCount {
+  +channelId : int64
+  +unreadMentionCount : int64
+}
+note bottom of ChannelMentionCount
+  Issue #475 — только каналы с count > 0
+  (в отличие от ChannelUnreadCount), заполняется
+  из message_mentions, которую populate'ит
+  insertMessage() при отправке сообщения.
+end note
 class ReadReceipt {
   +login : string
   +lastReadMessageId : int64
@@ -183,6 +193,7 @@ class ChatRepository {
   +markDmThreadRead(threadId: int64, login: string, messageId: int64) : int64
   +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
   +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
+  +listUnreadMentionCounts(login: string) : vector<ChannelMentionCount>
   +listChannelReadState(channelId: int64) : vector<ReadReceipt>
   +listDmThreadReadState(threadId: int64) : vector<ReadReceipt>
 }
@@ -201,6 +212,7 @@ ChatRepository ..> DirectMessageThread : returns
 ChatRepository ..> DirectMessage : returns
 ChatRepository ..> ChannelUnreadCount : returns
 ChatRepository ..> ThreadUnreadCount : returns
+ChatRepository ..> ChannelMentionCount : returns
 ChatRepository ..> ReadReceipt : returns
 ChatRepository ..> PqxxConnection : opens per call
 note right of ChatRepository
@@ -274,6 +286,7 @@ class ChatService {
   +markDmThreadRead(threadId: int64, login: string, messageId: int64) : int64
   +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
   +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
+  +listUnreadMentionCounts(login: string) : vector<ChannelMentionCount>
   +listChannelReadState(channelId: int64) : vector<ReadReceipt>
   +listDmThreadReadState(threadId: int64) : vector<ReadReceipt>
 }

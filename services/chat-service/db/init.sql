@@ -210,3 +210,18 @@ CREATE TABLE IF NOT EXISTS channel_janus_rooms (
     janus_room_id TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- @упоминания (issue #475) — заполняется при отправке сообщения
+-- (ChatRepository::insertMessage(), простой парсинг "@login" против
+-- реальных участников сообщества), не постфактум. channel_id
+-- денормализован (не только message_id) — GET /unread считает
+-- непрочитанные упоминания по каналу одним запросом без join через
+-- messages, тот же приём, что и у остальных unread-таблиц.
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    mentioned_login TEXT NOT NULL,
+    PRIMARY KEY (message_id, mentioned_login)
+);
+
+CREATE INDEX IF NOT EXISTS message_mentions_channel_login_idx ON message_mentions (channel_id, mentioned_login);

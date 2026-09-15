@@ -105,6 +105,8 @@ public:
     std::int64_t markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
     [[nodiscard]] std::vector<ChannelUnreadCount> listUnreadChannelCounts(const std::string& login);
     [[nodiscard]] std::vector<ThreadUnreadCount> listUnreadThreadCounts(const std::string& login);
+    /// Issue #475 — см. doc-комментарий ChatRepository::listUnreadMentionCounts().
+    [[nodiscard]] std::vector<ChannelMentionCount> listUnreadMentionCounts(const std::string& login);
 
     /// Issue #380 — см. doc-комментарии соответствующих методов
     /// ChatRepository.
