@@ -34,6 +34,15 @@ MutationResult ChatService::deleteCommunity(std::int64_t id, const std::string& 
     return repository_.deleteCommunity(id, requesterLogin);
 }
 
+MutationResult ChatService::saveCommunityIcon(std::int64_t communityId, const std::string& requesterLogin,
+                                               const std::string& contentType, const std::string& dataBase64) {
+    return repository_.saveCommunityIcon(communityId, requesterLogin, contentType, dataBase64);
+}
+
+std::optional<CommunityIconData> ChatService::findCommunityIcon(std::int64_t communityId) {
+    return repository_.findCommunityIcon(communityId);
+}
+
 std::optional<std::int64_t> ChatService::createChannel(std::int64_t communityId, const std::string& name,
                                                          const std::string& ownerLogin, bool isEncrypted) {
     return repository_.createChannel(communityId, name, ownerLogin, isEncrypted);

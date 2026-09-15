@@ -19,6 +19,10 @@ constexpr int kDefaultMessageLimit = 50;
 /// doc-комментарий класса ChatRepository о том, почему вложения
 /// хранятся как base64 TEXT, а не как BYTEA/на диске.
 constexpr std::size_t kMaxAttachmentSizeBytes = 5 * 1024 * 1024;
+/// Issue #463 — тот же лимит, что и у пользовательского аватара
+/// (user-service, kMaxAvatarSizeBytes), не у вложений выше — иконка
+/// сообщества рендерится маленькой, 5 МБ ей не нужны.
+constexpr std::size_t kMaxCommunityIconSizeBytes = 2 * 1024 * 1024;
 /// Issue #226 (pentest) — см. doc-комментарий у проверки в
 /// handleUploadAttachment().
 constexpr std::size_t kMaxAttachmentFilenameLength = 255;
@@ -198,6 +202,14 @@ void HttpServer::registerRoutes() {
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleRegenerateInviteCode(request, response);
                   });
+    server_.Post(R"(/communities/(\d+)/icon)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleUploadCommunityIcon(request, response);
+                  });
+    server_.Get(R"(/communities/(\d+)/icon)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleGetCommunityIcon(request, response);
+                 });
     server_.Post(R"(/communities/(\d+)/channels)",
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleCreateChannel(request, response);
@@ -450,6 +462,81 @@ void HttpServer::handleDeleteCommunity(const httplib::Request& request, httplib:
 
     const auto communityId = std::stoll(request.matches[1].str());
     writeMutationResult(chatService_.deleteCommunity(communityId, *login), response);
+}
+
+void HttpServer::handleUploadCommunityIcon(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("content_type") || !body["content_type"].is_string() ||
+        !body.contains("data_base64") || !body["data_base64"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'content_type', 'data_base64' strings"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+    const std::string contentType = body["content_type"].get<std::string>();
+    if (contentType.rfind("image/", 0) != 0) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'content_type' must be an image/* type"}}.dump(),
+                              kJsonContentType);
+        return;
+    }
+    const std::string dataBase64 = body["data_base64"].get<std::string>();
+    const std::optional<std::string> decoded = base64::decode(dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "'data_base64' is not valid base64"}}.dump(), kJsonContentType);
+        return;
+    }
+    if (decoded->size() > kMaxCommunityIconSizeBytes) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "icon exceeds the 2 MB size limit"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.saveCommunityIcon(communityId, *login, contentType, dataBase64), response);
+}
+
+void HttpServer::handleGetCommunityIcon(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    // Иконка сообщества доступна только участникам (issue #463) — то же
+    // 404-приватность, что и везде в этом сервисе, не подтверждаем
+    // существование сообщества не-участнику.
+    const auto communityId = std::stoll(request.matches[1].str());
+    if (!chatService_.isMember(communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such community"}}.dump(), kJsonContentType);
+        return;
+    }
+    const std::optional<CommunityIconData> icon = chatService_.findCommunityIcon(communityId);
+    if (!icon.has_value()) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no icon set for this community"}}.dump(), kJsonContentType);
+        return;
+    }
+    const std::optional<std::string> decoded = base64::decode(icon->dataBase64);
+    if (!decoded.has_value()) {
+        response.status = 500;
+        response.set_content(nlohmann::json{{"error", "stored icon data is corrupt"}}.dump(), kJsonContentType);
+        return;
+    }
+    response.set_content(*decoded, icon->contentType);
 }
 
 void HttpServer::handleJoinCommunity(const httplib::Request& request, httplib::Response& response) {

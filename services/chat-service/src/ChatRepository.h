@@ -134,6 +134,14 @@ struct AttachmentData {
     std::int64_t channelId = 0;
 };
 
+/// Кастомная иконка сообщества (issue #463) — та же форма, что и
+/// AttachmentData выше, без отдельного updatedAt (HttpServer его никак
+/// не использует, в отличие от last_read_message_id у read receipts).
+struct CommunityIconData {
+    std::string contentType;
+    std::string dataBase64;
+};
+
 /// Поля, нужные createAttachment() помимо целевого channelId —
 /// сгруппированы по правилу CLAUDE.md "предпочитать меньше аргументов
 /// функции", а не 6-параметровая сигнатура createAttachment().
@@ -273,6 +281,20 @@ public:
     [[nodiscard]] MutationResult renameCommunity(std::int64_t id, const std::string& newName,
                                                   const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);
+
+    /// Кастомная иконка сообщества (issue #463) — только владелец, тот
+    /// же kNotFound/kForbidden разбор прав, что и у renameCommunity()
+    /// (не-участник получает kNotFound, чтобы не подтверждать
+    /// существование сообщества). Upsert — повторная загрузка заменяет
+    /// прежнюю иконку целиком, не создаёт вторую строку.
+    [[nodiscard]] MutationResult saveCommunityIcon(std::int64_t communityId, const std::string& requesterLogin,
+                                                    const std::string& contentType, const std::string& dataBase64);
+
+    /// @return std::nullopt, если у сообщества нет загруженной иконки —
+    /// HttpServer отличает это от "сообщество не существует"/"не
+    /// участник" сам, эта проверка сюда не входит (см. её вызов в
+    /// handleGetCommunityIcon()).
+    [[nodiscard]] std::optional<CommunityIconData> findCommunityIcon(std::int64_t communityId);
 
     /// @return Id нового канала, либо std::nullopt, если @p communityId не существует
     ///         или уже имеет канал с именем @p name.

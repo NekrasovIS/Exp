@@ -1357,5 +1357,98 @@ TEST(ChatServiceIntegrationTest, ListDmThreadReadStateReturnsOnlyParticipantsWho
     EXPECT_EQ(receipts[0].lastReadMessageId, message->id);
 }
 
+// Issue #463 — community custom icon.
+TEST(ChatServiceIntegrationTest, SaveCommunityIconThenFindCommunityIconRoundTrips) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "community-icon-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("community-icon-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_FALSE(service.findCommunityIcon(community.id).has_value());
+
+    ASSERT_EQ(service.saveCommunityIcon(community.id, owner, "image/png", "aGVsbG8="), MutationResult::kSuccess);
+
+    const std::optional<CommunityIconData> icon = service.findCommunityIcon(community.id);
+    ASSERT_TRUE(icon.has_value());
+    EXPECT_EQ(icon->contentType, "image/png");
+    EXPECT_EQ(icon->dataBase64, "aGVsbG8=");
+}
+
+TEST(ChatServiceIntegrationTest, SaveCommunityIconOverwritesThePreviousOneInsteadOfAddingASecondRow) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "community-icon-overwrite-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("community-icon-overwrite-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    ASSERT_EQ(service.saveCommunityIcon(community.id, owner, "image/png", "Zmlyc3Q="), MutationResult::kSuccess);
+    ASSERT_EQ(service.saveCommunityIcon(community.id, owner, "image/jpeg", "c2Vjb25k"), MutationResult::kSuccess);
+
+    const std::optional<CommunityIconData> icon = service.findCommunityIcon(community.id);
+    ASSERT_TRUE(icon.has_value());
+    EXPECT_EQ(icon->contentType, "image/jpeg");
+    EXPECT_EQ(icon->dataBase64, "c2Vjb25k");
+}
+
+TEST(ChatServiceIntegrationTest, SaveCommunityIconRejectsNonOwnerMemberWithForbidden) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "community-icon-forbidden-owner-" + suffix;
+    const std::string member = "community-icon-forbidden-member-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("community-icon-forbidden-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(service.joinCommunity(community.id, member));
+
+    EXPECT_EQ(service.saveCommunityIcon(community.id, member, "image/png", "aGVsbG8="), MutationResult::kForbidden);
+}
+
+TEST(ChatServiceIntegrationTest, SaveCommunityIconRejectsNonMemberWithNotFound) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "community-icon-notfound-owner-" + suffix;
+    const std::string outsider = "community-icon-notfound-outsider-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("community-icon-notfound-test-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    EXPECT_EQ(service.saveCommunityIcon(community.id, outsider, "image/png", "aGVsbG8="), MutationResult::kNotFound);
+}
+
 }  // namespace
 }  // namespace chat_service

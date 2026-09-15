@@ -210,3 +210,18 @@ CREATE TABLE IF NOT EXISTS channel_janus_rooms (
     janus_room_id TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Кастомная иконка сообщества (issue #463) — та же форма, что и
+-- user_avatars в user-service (content_type/data_base64), только
+-- community_id вместо login: одна строка на сообщество, PRIMARY KEY —
+-- сам community_id (не отдельный serial id), upsert при повторной
+-- загрузке заменяет её целиком. Пока строки нет, сообщество показывает
+-- сгенерированную аватарку-градиент с буквой (IconFactory), как и
+-- раньше — то же ненавязчивое отсутствие данных, что и у пользователя
+-- без загруженного аватара.
+CREATE TABLE IF NOT EXISTS community_icons (
+    community_id BIGINT PRIMARY KEY REFERENCES communities(id) ON DELETE CASCADE,
+    content_type TEXT NOT NULL,
+    data_base64 TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

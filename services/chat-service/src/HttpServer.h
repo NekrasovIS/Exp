@@ -96,6 +96,10 @@ private:
     void handleRegenerateInviteCode(const httplib::Request& request, httplib::Response& response);
     void handleRenameCommunity(const httplib::Request& request, httplib::Response& response);
     void handleDeleteCommunity(const httplib::Request& request, httplib::Response& response);
+    /// POST /communities/{id}/icon (issue #463) — только владелец.
+    void handleUploadCommunityIcon(const httplib::Request& request, httplib::Response& response);
+    /// GET /communities/{id}/icon (issue #463) — только участники.
+    void handleGetCommunityIcon(const httplib::Request& request, httplib::Response& response);
     void handleJoinCommunity(const httplib::Request& request, httplib::Response& response);
     void handlePromoteModerator(const httplib::Request& request, httplib::Response& response);
     void handleDemoteModerator(const httplib::Request& request, httplib::Response& response);
