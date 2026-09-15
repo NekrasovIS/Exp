@@ -15,7 +15,10 @@ QString darkStyleSheet() {
     // kSpacingSm/Md/Lg (подставляются через .arg() в конце), а не
     // зашитые числа, так что отступы в QSS не могут незаметно
     // разойтись с той же шкалой, которую использует код layout'а на C++.
-    return QStringLiteral(R"(
+    // Issue #450 — разбито на два конкатенируемых QStringLiteral: MSVC
+    // ограничивает один строковый литерал 65535 символами, а этот QSS
+    // разросся достаточно, чтобы упереться в этот предел одним куском.
+    return (QStringLiteral(R"(
         QMainWindow, QDialog {
             background-color: #1c1e21;
         }
@@ -179,6 +182,31 @@ QString darkStyleSheet() {
             font-size: 12px;
         }
 
+        /* Issue #450: видео-плитки звонка (локальные превью камеры/
+           демонстрации экрана — QVideoWidget с property videoTile=true,
+           требует Qt::WA_StyledBackground, иначе не QFrame-наследник и
+           фон/рамку из QSS не рисует — и удалённые участники, уже
+           QLabel#remoteVideoTile) — тот же приём тонкой рамки и
+           скругления, что и у #chatAttachmentPreview, чтобы плитки не
+           сливались с фоном окна звонка. */
+        QVideoWidget[videoTile="true"], QLabel#remoteVideoTile {
+            border: 1px solid #2a2d31;
+            border-radius: 8px;
+        }
+
+        /* Issue #450: reactionFeedLabel_ раньше делил стиль с
+           mutedDescription (тусклый текст без фона), рассчитанный на
+           непрозрачную панель под собой — поверх видео-плиток звонка
+           текст читался плохо. Отдельный высококонтрастный стиль: светлее
+           текст, собственный тёмный фон и скругление, как у отдельного
+           тоста. */
+        QLabel#callReactionFeed {
+            color: #e3e6e8;
+            background: #202327;
+            border-radius: 8px;
+            padding: 4px 8px;
+        }
+
         QScrollArea#chatMessagesScrollArea, QScrollArea#chatMessagesScrollArea > QWidget > QWidget,
         QWidget#chatMessagesContainer {
             background: transparent;
@@ -225,7 +253,7 @@ QString darkStyleSheet() {
         QPushButton[accent="true"]:pressed {
             background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #059669, stop:1 #047857);
         }
-
+    )") + QStringLiteral(R"(
         QPushButton[iconOnly="true"] {
             padding: 0;
         }
@@ -478,7 +506,7 @@ QString darkStyleSheet() {
         QWidget#toastBanner[variant="info"] QLabel {
             color: #e3e6e8;
         }
-    )")
+    )"))
         .arg(kSpacingSm)
         .arg(kSpacingMd)
         .arg(kSpacingLg);

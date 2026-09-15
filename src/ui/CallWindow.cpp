@@ -117,7 +117,12 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     reactionsRow->addStretch(1);
 
     reactionFeedLabel_ = new QLabel(this);
-    reactionFeedLabel_->setObjectName(QStringLiteral("mutedDescription"));
+    // Issue #450 — свой objectName вместо общего "mutedDescription": этот
+    // текст — лёгкий тост поверх окна звонка (полупрозрачные видео-плитки
+    // и разный фон под ним), тогда как "mutedDescription" расчитан на
+    // контраст с непрозрачным фоном панели настроек/чата — тусклого цвета
+    // не хватало, чтобы читаться поверх звонка.
+    reactionFeedLabel_->setObjectName(QStringLiteral("callReactionFeed"));
     reactionFeedLabel_->setVisible(false);
     reactionFeedHideTimer_ = new QTimer(this);
     reactionFeedHideTimer_->setSingleShot(true);
@@ -140,6 +145,16 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
 
     localVideoWidget_ = new QVideoWidget(this);
     localVideoWidget_->setObjectName(QStringLiteral("localVideoWidget"));
+    // Issue #450 — QVideoWidget — plain QWidget, не QFrame/QLabel, так
+    // что без этого атрибута QSS-рамка ниже ([videoTile="true"]) вообще
+    // не нарисуется (тот же приём, что и у DraggableVideoTile's
+    // resizeGrip_ до issue #437). Свойство, а не objectName, — обе
+    // локальные плитки уже используют objectName как уникальный
+    // идентификатор для тестов/логики, "videoTile" здесь — это класс
+    // общего вида, а не имя конкретного виджета (тот же приём, что и
+    // [sectionTitle="true"]/[chatAuthor="true"] в Theme.cpp).
+    localVideoWidget_->setAttribute(Qt::WA_StyledBackground, true);
+    localVideoWidget_->setProperty("videoTile", true);
     localVideoWidget_->setVisible(false);
 
     // Отдельный виджет для локального превью демонстрации экрана (issue
@@ -149,6 +164,8 @@ CallWindow::CallWindow(QWidget* parent) : QWidget(parent) {
     // виден).
     localScreenShareVideoWidget_ = new QVideoWidget(this);
     localScreenShareVideoWidget_->setObjectName(QStringLiteral("localScreenShareVideoWidget"));
+    localScreenShareVideoWidget_->setAttribute(Qt::WA_StyledBackground, true);
+    localScreenShareVideoWidget_->setProperty("videoTile", true);
     localScreenShareVideoWidget_->setVisible(false);
 
     rootLayout->addLayout(controlsRow);
