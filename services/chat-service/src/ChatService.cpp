@@ -64,6 +64,29 @@ MutationResult ChatService::deleteChannel(std::int64_t id, const std::string& re
     return repository_.deleteChannel(id, requesterLogin);
 }
 
+CreateCategoryResult ChatService::createChannelCategory(std::int64_t communityId, const std::string& name,
+                                                           const std::string& requesterLogin) {
+    return repository_.createChannelCategory(communityId, name, requesterLogin);
+}
+
+MutationResult ChatService::renameChannelCategory(std::int64_t id, const std::string& newName,
+                                                    const std::string& requesterLogin) {
+    return repository_.renameChannelCategory(id, newName, requesterLogin);
+}
+
+MutationResult ChatService::deleteChannelCategory(std::int64_t id, const std::string& requesterLogin) {
+    return repository_.deleteChannelCategory(id, requesterLogin);
+}
+
+std::vector<ChannelCategory> ChatService::listChannelCategories(std::int64_t communityId) {
+    return repository_.listChannelCategories(communityId);
+}
+
+MutationResult ChatService::setChannelCategory(std::int64_t channelId, std::optional<std::int64_t> categoryId,
+                                                 int sortOrder, const std::string& requesterLogin) {
+    return repository_.setChannelCategory(channelId, categoryId, sortOrder, requesterLogin);
+}
+
 MutationResult ChatService::setChannelKey(std::int64_t channelId, const std::string& memberLogin,
                                            const std::string& requesterLogin, const std::string& wrappedKey) {
     return repository_.setChannelKey(channelId, memberLogin, requesterLogin, wrappedKey);

@@ -57,11 +57,22 @@ nlohmann::json toJson(const Community& community, bool includeInviteCode) {
 }
 
 nlohmann::json toJson(const Channel& channel) {
-    return nlohmann::json{{"id", channel.id},
-                           {"community_id", channel.communityId},
-                           {"name", channel.name},
-                           {"owner", channel.ownerLogin},
-                           {"is_encrypted", channel.isEncrypted}};
+    return nlohmann::json{
+        {"id", channel.id},
+        {"community_id", channel.communityId},
+        {"name", channel.name},
+        {"owner", channel.ownerLogin},
+        {"is_encrypted", channel.isEncrypted},
+        {"category_id", channel.categoryId.has_value() ? nlohmann::json(*channel.categoryId) : nlohmann::json(nullptr)},
+        {"sort_order", channel.sortOrder}};
+}
+
+/// Issue #467.
+nlohmann::json toJson(const ChannelCategory& category) {
+    return nlohmann::json{{"id", category.id},
+                           {"community_id", category.communityId},
+                           {"name", category.name},
+                           {"sort_order", category.sortOrder}};
 }
 
 nlohmann::json toJson(const MessageReaction& reaction) {
@@ -212,6 +223,25 @@ void HttpServer::registerRoutes() {
     server_.Delete(R"(/channels/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
         handleDeleteChannel(request, response);
     });
+    // Issue #467 — категории (группы) каналов внутри сообщества.
+    server_.Post(R"(/communities/(\d+)/categories)",
+                  [this](const httplib::Request& request, httplib::Response& response) {
+                      handleCreateChannelCategory(request, response);
+                  });
+    server_.Get(R"(/communities/(\d+)/categories)",
+                 [this](const httplib::Request& request, httplib::Response& response) {
+                     handleListChannelCategories(request, response);
+                 });
+    server_.Patch(R"(/categories/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleRenameChannelCategory(request, response);
+    });
+    server_.Delete(R"(/categories/(\d+))", [this](const httplib::Request& request, httplib::Response& response) {
+        handleDeleteChannelCategory(request, response);
+    });
+    server_.Patch(R"(/channels/(\d+)/category)",
+                   [this](const httplib::Request& request, httplib::Response& response) {
+                       handleSetChannelCategory(request, response);
+                   });
     server_.Get(R"(/channels/(\d+)/messages)",
                  [this](const httplib::Request& request, httplib::Response& response) {
                      handleListMessages(request, response);
@@ -571,6 +601,129 @@ void HttpServer::handleDeleteChannel(const httplib::Request& request, httplib::R
 
     const auto channelId = std::stoll(request.matches[1].str());
     writeMutationResult(chatService_.deleteChannel(channelId, *login), response);
+}
+
+void HttpServer::handleCreateChannelCategory(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'name' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    const CreateCategoryResult result =
+        chatService_.createChannelCategory(communityId, body["name"].get<std::string>(), *login);
+    if (result.result != MutationResult::kSuccess) {
+        writeMutationResult(result.result, response);
+        return;
+    }
+    response.status = 201;
+    response.set_content(nlohmann::json{{"id", result.categoryId}, {"community_id", communityId},
+                                          {"name", body["name"].get<std::string>()}, {"sort_order", 0}}
+                              .dump(),
+                          kJsonContentType);
+}
+
+void HttpServer::handleListChannelCategories(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto communityId = std::stoll(request.matches[1].str());
+    // Issue #256 (pentest) — тот же принцип, что и везде в этом сервисе:
+    // не подтверждаем существование сообщества не-участнику.
+    if (!chatService_.isMember(communityId, *login)) {
+        response.status = 404;
+        response.set_content(nlohmann::json{{"error", "no such community"}}.dump(), kJsonContentType);
+        return;
+    }
+    nlohmann::json categories = nlohmann::json::array();
+    for (const ChannelCategory& category : chatService_.listChannelCategories(communityId)) {
+        categories.push_back(toJson(category));
+    }
+    response.set_content(categories.dump(), kJsonContentType);
+}
+
+void HttpServer::handleRenameChannelCategory(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    if (body.is_discarded() || !body.contains("name") || !body["name"].is_string()) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "expected 'name' string"}}.dump(), kJsonContentType);
+        return;
+    }
+
+    const auto categoryId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.renameChannelCategory(categoryId, body["name"].get<std::string>(), *login),
+                         response);
+}
+
+void HttpServer::handleDeleteChannelCategory(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    const auto categoryId = std::stoll(request.matches[1].str());
+    writeMutationResult(chatService_.deleteChannelCategory(categoryId, *login), response);
+}
+
+void HttpServer::handleSetChannelCategory(const httplib::Request& request, httplib::Response& response) {
+    const std::optional<std::string> login = authenticate(request);
+    if (!login.has_value()) {
+        response.status = 401;
+        return;
+    }
+
+    if (json_guard::exceedsMaxNestingDepth(request.body, json_guard::kMaxNestingDepth)) {
+        response.status = 400;
+        response.set_content(nlohmann::json{{"error", "payload too deeply nested"}}.dump(), kJsonContentType);
+        return;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+    // category_id может быть числом (перенести) или null (снять
+    // категорию) — но должен присутствовать явно, чтобы не путать
+    // "снять категорию" с "не менять её" в одном и том же PATCH.
+    if (body.is_discarded() || !body.contains("category_id") ||
+        !(body["category_id"].is_number_integer() || body["category_id"].is_null()) || !body.contains("sort_order") ||
+        !body["sort_order"].is_number_integer()) {
+        response.status = 400;
+        response.set_content(
+            nlohmann::json{{"error", "expected 'category_id' (int or null) and 'sort_order' (int)"}}.dump(),
+            kJsonContentType);
+        return;
+    }
+    const std::optional<std::int64_t> categoryId =
+        body["category_id"].is_null() ? std::nullopt : std::make_optional(body["category_id"].get<std::int64_t>());
+
+    const auto channelId = std::stoll(request.matches[1].str());
+    writeMutationResult(
+        chatService_.setChannelCategory(channelId, categoryId, body["sort_order"].get<int>(), *login), response);
 }
 
 void HttpServer::handleListMessages(const httplib::Request& request, httplib::Response& response) {
