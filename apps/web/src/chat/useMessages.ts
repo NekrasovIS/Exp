@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChatSocket } from "./useChatSocket.js";
 import { chatServiceRestUrl } from "../config.js";
 import { shouldNotify, showMessageNotification } from "../notifications/browserNotifications.js";
+import { isChannelMuted } from "../notifications/mutedChannels.js";
 import { useSession } from "../session/SessionContext.js";
 
 const kPageSize = 50;
@@ -79,8 +80,10 @@ export function useMessages(channelId: number) {
       }
       // Issue #311 — web analog of DesktopNotifier: only while this tab
       // isn't the one being looked at, never for the caller's own
-      // message, same as notification_policy::shouldNotify().
-      if (shouldNotify(document.hidden, message.author, currentLogin)) {
+      // message, same as notification_policy::shouldNotify(). Issue
+      // #457 — never while this channel is muted, checked last since
+      // it's the rarer reason to skip.
+      if (shouldNotify(document.hidden, message.author, currentLogin) && !isChannelMuted(channelId)) {
         showMessageNotification(message.author, message.body);
       }
     });

@@ -3,6 +3,7 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMessages } from "../../src/chat/useMessages.js";
+import { setChannelMuted } from "../../src/notifications/mutedChannels.js";
 import { SessionProvider } from "../../src/session/SessionContext.js";
 import { fakeToken, FakeWebSocket, jsonResponse, routedFetch } from "../testUtils.js";
 
@@ -323,6 +324,27 @@ describe("useMessages", () => {
       act(() => {
         socket.onmessage?.({
           data: JSON.stringify({ id: 2, author: "alice", body: "hello", sent_at: "2026-01-01T00:01:00Z" }),
+        });
+      });
+
+      expect(NotificationCtor).not.toHaveBeenCalled();
+    });
+
+    // Issue #457 — per-channel mute takes priority over an otherwise
+    // notify-worthy message (hidden tab, another author).
+    it("does not notify while this channel is muted", async () => {
+      setChannelMuted(7, true);
+      const NotificationCtor = vi.fn();
+      vi.stubGlobal("Notification", Object.assign(NotificationCtor, { permission: "granted" }));
+      Object.defineProperty(document, "hidden", { value: true, configurable: true });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])));
+      const { result } = renderHook(() => useMessages(7), { wrapper: Wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => {
+        socket.onmessage?.({
+          data: JSON.stringify({ id: 2, author: "bob", body: "hello", sent_at: "2026-01-01T00:01:00Z" }),
         });
       });
 
