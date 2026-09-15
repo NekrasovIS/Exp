@@ -74,6 +74,20 @@ void WebSocketServer::stop() {
     server_.stop();
 }
 
+void WebSocketServer::notifyChannelRead(std::int64_t channelId, const std::string& login,
+                                         std::int64_t lastReadMessageId) {
+    broadcastToChannel(
+        channelId,
+        nlohmann::json{{"read_receipt", {{"login", login}, {"last_read_message_id", lastReadMessageId}}}}.dump());
+}
+
+void WebSocketServer::notifyDmThreadRead(std::int64_t dmThreadId, const std::string& login,
+                                          std::int64_t lastReadMessageId) {
+    broadcastToDmThread(
+        dmThreadId,
+        nlohmann::json{{"read_receipt", {{"login", login}, {"last_read_message_id", lastReadMessageId}}}}.dump());
+}
+
 void WebSocketServer::handleMessage(const std::shared_ptr<ix::ConnectionState>& /*connectionState*/,
                                      ix::WebSocket& webSocket, const ix::WebSocketMessagePtr& message) {
     switch (message->type) {

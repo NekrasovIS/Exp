@@ -154,6 +154,24 @@ namespace chat_service {
  * не реализует), поэтому подписка на диалог не проходит через общую
  * диспетчеризацию handleSubscribedMessage(), а сразу и только через
  * handleDirectMessage().
+ *
+ * Отметки "прочитано" (issue #402) — единственное исключение из
+ * "клиент отправляет WS-сообщение, класс отвечает/рассылает": сам
+ * POST /channels/{id}/read (или .../dm/threads/{id}/read) идёт через
+ * REST в HttpServer, а не через это WS-соединение (issue #310/#348 уже
+ * сделал их REST-эндпоинтами, менять транспорт задним числом не стали).
+ * notifyChannelRead()/notifyDmThreadRead() — единственные ДВА публичных
+ * метода этого класса, вызываемые ИЗВНЕ, а не из собственного цикла
+ * обработки сообщений — HttpServer держит ссылку на этот класс
+ * исключительно ради них (см. main.cpp) и вызывает их сам после
+ * успешного маркирования, только если отметка реально продвинулась (не
+ * устаревший/гоночный вызов — см. doc-комментарий
+ * ChatRepository::markChannelRead()). Рассылают
+ * `{"read_receipt": {"login", "last_read_message_id"}}` ВСЕМ
+ * подписчикам, включая сокет самого читающего (issue #310 уже
+ * зафиксировал этот приём для случая "два открытых окна одного и того
+ * же пользователя" — второе окно должно узнать о продвижении отметки
+ * первым тоже).
  */
 class WebSocketServer {
 public:
@@ -165,6 +183,14 @@ public:
 
     /// Прекращает принимать соединения и закрывает существующие.
     void stop();
+
+    /// См. doc-комментарий класса про исключение из общей модели —
+    /// вызывается из HttpServer::handleMarkChannelRead() после успешного
+    /// (реально продвинувшего отметку) markChannelRead().
+    void notifyChannelRead(std::int64_t channelId, const std::string& login, std::int64_t lastReadMessageId);
+
+    /// Аналог notifyChannelRead() для личного диалога.
+    void notifyDmThreadRead(std::int64_t dmThreadId, const std::string& login, std::int64_t lastReadMessageId);
 
 private:
     struct Subscription {

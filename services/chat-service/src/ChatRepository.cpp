@@ -1000,7 +1000,8 @@ void ChatRepository::recordJanusRoom(std::int64_t channelId, const std::string& 
     transaction.commit();
 }
 
-void ChatRepository::markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId) {
+std::int64_t ChatRepository::markChannelRead(std::int64_t channelId, const std::string& login,
+                                              std::int64_t messageId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
@@ -1009,24 +1010,60 @@ void ChatRepository::markChannelRead(std::int64_t channelId, const std::string& 
     // row for (channelId, login) and, on repeat calls, never moves
     // last_read_message_id backward (a client can legitimately send a
     // stale id, e.g. a race between two open windows of the same user).
-    transaction.exec(
+    // RETURNING (issue #402) hands back whatever actually ended up in
+    // the column — the caller (HttpServer) compares it against
+    // messageId to tell a real advance from a stale/racy no-op call.
+    const pqxx::result rows = transaction.exec(
         "INSERT INTO channel_read_state (channel_id, login, last_read_message_id) VALUES ($1, $2, $3) "
         "ON CONFLICT (channel_id, login) DO UPDATE "
-        "SET last_read_message_id = GREATEST(channel_read_state.last_read_message_id, EXCLUDED.last_read_message_id)",
+        "SET last_read_message_id = GREATEST(channel_read_state.last_read_message_id, EXCLUDED.last_read_message_id) "
+        "RETURNING last_read_message_id",
         pqxx::params{channelId, login, messageId});
     transaction.commit();
+    return rows[0][0].as<std::int64_t>();
 }
 
-void ChatRepository::markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId) {
+std::int64_t ChatRepository::markDmThreadRead(std::int64_t threadId, const std::string& login,
+                                               std::int64_t messageId) {
     pqxx::connection connection(connectionString_);
     pqxx::work transaction(connection);
 
-    transaction.exec(
+    const pqxx::result rows = transaction.exec(
         "INSERT INTO dm_thread_read_state (thread_id, login, last_read_message_id) VALUES ($1, $2, $3) "
         "ON CONFLICT (thread_id, login) DO UPDATE "
-        "SET last_read_message_id = GREATEST(dm_thread_read_state.last_read_message_id, EXCLUDED.last_read_message_id)",
+        "SET last_read_message_id = GREATEST(dm_thread_read_state.last_read_message_id, EXCLUDED.last_read_message_id) "
+        "RETURNING last_read_message_id",
         pqxx::params{threadId, login, messageId});
     transaction.commit();
+    return rows[0][0].as<std::int64_t>();
+}
+
+std::vector<ReadReceipt> ChatRepository::listChannelReadState(std::int64_t channelId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT login, last_read_message_id FROM channel_read_state WHERE channel_id = $1", pqxx::params{channelId});
+    std::vector<ReadReceipt> receipts;
+    receipts.reserve(rows.size());
+    for (const auto& row : rows) {
+        receipts.push_back(ReadReceipt{.login = row[0].as<std::string>(), .lastReadMessageId = row[1].as<std::int64_t>()});
+    }
+    return receipts;
+}
+
+std::vector<ReadReceipt> ChatRepository::listDmThreadReadState(std::int64_t threadId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT login, last_read_message_id FROM dm_thread_read_state WHERE thread_id = $1", pqxx::params{threadId});
+    std::vector<ReadReceipt> receipts;
+    receipts.reserve(rows.size());
+    for (const auto& row : rows) {
+        receipts.push_back(ReadReceipt{.login = row[0].as<std::string>(), .lastReadMessageId = row[1].as<std::int64_t>()});
+    }
+    return receipts;
 }
 
 std::vector<ChannelUnreadCount> ChatRepository::listUnreadChannelCounts(const std::string& login) {

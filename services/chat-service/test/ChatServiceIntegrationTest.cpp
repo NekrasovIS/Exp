@@ -1112,7 +1112,7 @@ TEST(ChatServiceIntegrationTest, UnreadChannelCountGrowsWithNewMessagesAndDropsT
     ASSERT_TRUE(findChannelCount(owner).has_value());
     EXPECT_EQ(*findChannelCount(owner), 2);
 
-    service.markChannelRead(*channelId, reader, second->id);
+    static_cast<void>(service.markChannelRead(*channelId, reader, second->id));
     EXPECT_EQ(*findChannelCount(reader), 0);
 
     const std::optional<Message> third = service.postMessage(*channelId, owner, "three");
@@ -1159,10 +1159,14 @@ TEST(ChatServiceIntegrationTest, MarkChannelReadNeverMovesTheMarkerBackward) {
     // scrolled to the bottom), then a stale/late call for an older id
     // (e.g. a race between two open windows) must not resurrect
     // messages that are already marked read.
-    service.markChannelRead(*channelId, reader, second->id);
+    EXPECT_EQ(service.markChannelRead(*channelId, reader, second->id), second->id);
     ASSERT_EQ(findChannelCount(), 0);
 
-    service.markChannelRead(*channelId, reader, first->id);
+    // Issue #402 — the stale call's return value is the effective
+    // (unchanged) marker, second->id, NOT the id it was called with —
+    // this is what tells HttpServer apart a real advance from a no-op
+    // one, so it knows whether to broadcast a read_receipt.
+    EXPECT_EQ(service.markChannelRead(*channelId, reader, first->id), second->id);
     EXPECT_EQ(findChannelCount(), 0);
 }
 
@@ -1189,7 +1193,7 @@ TEST(ChatServiceIntegrationTest, DeletingTheLastReadMessageDoesNotResurrectOlder
 
     const std::optional<Message> lastRead = service.postMessage(*channelId, owner, "will be read then deleted");
     ASSERT_TRUE(lastRead.has_value());
-    service.markChannelRead(*channelId, reader, lastRead->id);
+    static_cast<void>(service.markChannelRead(*channelId, reader, lastRead->id));
 
     // Deleting the very message the read marker points at (issue
     // #310/#348's whole reason last_read_message_id carries no FK —
@@ -1241,12 +1245,129 @@ TEST(ChatServiceIntegrationTest, UnreadThreadCountGrowsWithNewMessagesAndDropsTo
     ASSERT_TRUE(findThreadCount().has_value());
     EXPECT_EQ(*findThreadCount(), 2);
 
-    service.markDmThreadRead(threadId, loginB, second->id);
+    static_cast<void>(service.markDmThreadRead(threadId, loginB, second->id));
     EXPECT_EQ(*findThreadCount(), 0);
 
     const std::optional<DirectMessage> third = service.postDirectMessage(threadId, loginA, "you there?");
     ASSERT_TRUE(third.has_value());
     EXPECT_EQ(*findThreadCount(), 1);
+}
+
+// Issue #402 — listChannelReadState()/listDmThreadReadState() snapshot
+// tests. A member with no row at all (never marked read) is simply
+// absent, not present with a zero/null lastReadMessageId — see
+// doc-comment on ReadReceipt.
+TEST(ChatServiceIntegrationTest, ListChannelReadStateIsEmptyUntilSomeoneMarksReadThenReflectsEachMember) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "read-state-owner-" + suffix;
+    const std::string memberA = "read-state-member-a-" + suffix;
+    const std::string memberB = "read-state-member-b-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("read-state-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, memberA));
+    ASSERT_TRUE(service.joinCommunity(community.id, memberB));
+
+    const std::optional<Message> first = service.postMessage(*channelId, owner, "one");
+    const std::optional<Message> second = service.postMessage(*channelId, owner, "two");
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    EXPECT_TRUE(service.listChannelReadState(*channelId).empty());
+
+    static_cast<void>(service.markChannelRead(*channelId, memberA, second->id));
+    static_cast<void>(service.markChannelRead(*channelId, memberB, first->id));
+
+    const std::vector<ReadReceipt> receipts = service.listChannelReadState(*channelId);
+    ASSERT_EQ(receipts.size(), 2);
+    auto findReceipt = [&](const std::string& login) -> std::optional<std::int64_t> {
+        for (const ReadReceipt& receipt : receipts) {
+            if (receipt.login == login) {
+                return receipt.lastReadMessageId;
+            }
+        }
+        return std::nullopt;
+    };
+    ASSERT_TRUE(findReceipt(memberA).has_value());
+    EXPECT_EQ(*findReceipt(memberA), second->id);
+    ASSERT_TRUE(findReceipt(memberB).has_value());
+    EXPECT_EQ(*findReceipt(memberB), first->id);
+    // owner never called markChannelRead — absent, not a zero-valued entry.
+    EXPECT_FALSE(findReceipt(owner).has_value());
+}
+
+TEST(ChatServiceIntegrationTest, ListChannelReadStateDoesNotLeakReceiptsFromAnotherChannel) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "read-state-leak-owner-" + suffix;
+    const std::string member = "read-state-leak-member-" + suffix;
+
+    Community community{};
+    try {
+        community = service.createCommunity("read-state-leak-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelOne = service.createChannel(community.id, "one", owner);
+    const std::optional<std::int64_t> channelTwo = service.createChannel(community.id, "two", owner);
+    ASSERT_TRUE(channelOne.has_value());
+    ASSERT_TRUE(channelTwo.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, member));
+
+    const std::optional<Message> posted = service.postMessage(*channelOne, owner, "only in channel one");
+    ASSERT_TRUE(posted.has_value());
+    static_cast<void>(service.markChannelRead(*channelOne, member, posted->id));
+
+    EXPECT_EQ(service.listChannelReadState(*channelOne).size(), 1);
+    EXPECT_TRUE(service.listChannelReadState(*channelTwo).empty());
+}
+
+TEST(ChatServiceIntegrationTest, ListDmThreadReadStateReflectsEachParticipantIndependently) {
+    const std::string connectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+
+    ChatRepository repository(connectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "read-state-dm-a-" + suffix;
+    const std::string loginB = "read-state-dm-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+
+    const std::optional<DirectMessage> message = service.postDirectMessage(threadId, loginA, "hi");
+    ASSERT_TRUE(message.has_value());
+
+    EXPECT_TRUE(service.listDmThreadReadState(threadId).empty());
+
+    static_cast<void>(service.markDmThreadRead(threadId, loginB, message->id));
+
+    const std::vector<ReadReceipt> receipts = service.listDmThreadReadState(threadId);
+    ASSERT_EQ(receipts.size(), 1);
+    EXPECT_EQ(receipts[0].login, loginB);
+    EXPECT_EQ(receipts[0].lastReadMessageId, message->id);
 }
 
 }  // namespace

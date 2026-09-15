@@ -1,7 +1,9 @@
 #include "AuthServiceClient.h"
 #include "ChatRepository.h"
 #include "ChatService.h"
+#include "HttpServer.h"
 #include "JanusClient.h"
+#include "UserServiceClient.h"
 #include "WebSocketServer.h"
 
 #include <gtest/gtest.h>
@@ -20,6 +22,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Требует работающий Postgres (см. docker-compose.yml,
@@ -131,6 +134,50 @@ private:
     std::condition_variable cv_;
     std::deque<nlohmann::json> queue_;
     bool connected_ = false;
+};
+
+/// Issue #402 — read_receipt рассылается WebSocketServer'ом, но
+/// запускается REST-вызовом (POST .../read) в HttpServer, поэтому эти
+/// тесты (в отличие от остальных в этом файле) нуждаются в обоих
+/// серверах поднятыми одновременно, как в main.cpp. userServiceClient_
+/// недостижим намеренно — ни один из этих тестов не открывает диалог
+/// через REST (используют уже готовый threadId от
+/// ChatService::findOrCreateThread() напрямую, как и остальные
+/// DM-тесты этого файла), так что HttpServer никогда его не трогает.
+class ScopedRestServer {
+public:
+    ScopedRestServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
+                      WebSocketServer& webSocketServer, int port)
+        : server_(chatService, authServiceClient, unreachableUserServiceClient(), webSocketServer),
+          port_(port),
+          thread_([this] { server_.listen("127.0.0.1", port_); }) {
+        httplib::Client probe("127.0.0.1", port_);
+        probe.set_connection_timeout(0, 50000);
+        for (int attempt = 0; attempt < 100; ++attempt) {
+            if (probe.Get("/")) {
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+
+    ~ScopedRestServer() {
+        server_.stop();
+        thread_.join();
+    }
+
+    ScopedRestServer(const ScopedRestServer&) = delete;
+    ScopedRestServer& operator=(const ScopedRestServer&) = delete;
+
+private:
+    static const UserServiceClient& unreachableUserServiceClient() {
+        static const UserServiceClient instance("127.0.0.1", 1);
+        return instance;
+    }
+
+    HttpServer server_;
+    int port_;
+    std::thread thread_;
 };
 
 }  // namespace
@@ -1938,6 +1985,311 @@ TEST(WebSocketServerTest, DirectMessageWithMissingBodyReturnsError) {
     EXPECT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("error"); }).has_value());
 
     server.stop();
+}
+
+// Issue #402 — read_receipt рассылка (HttpServer::handleMarkChannelRead()
+// -> WebSocketServer::notifyChannelRead()): подписчик получает
+// read_receipt после ЧУЖОГО POST /channels/{id}/read, и (issue #310's
+// "два открытых окна одного пользователя") сам читающий тоже — рассылка
+// никогда не исключает отправителя действия.
+TEST(WebSocketServerTest, ReadReceiptBroadcastsToChannelSubscribersIncludingTheReaderAfterRestMarkRead) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18097"));
+    const int restPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_REST_PORT", "18098"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-read-receipt-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-read-receipt-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string reader = "ws-read-receipt-reader-" + suffix;
+    const std::optional<std::string> ownerToken = registerAndGetToken(authHost, authPort, owner);
+    const std::optional<std::string> readerToken = registerAndGetToken(authHost, authPort, reader);
+    if (!ownerToken.has_value() || !readerToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    ASSERT_TRUE(service.joinCommunity(community.id, reader));
+    const std::optional<Message> posted = service.postMessage(*channelId, owner, "hello");
+    ASSERT_TRUE(posted.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer wsServer(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(wsServer.start());
+    ScopedRestServer restServer(service, authServiceClient, wsServer, restPort);
+
+    WsTestClient ownerSocket("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(ownerSocket.waitConnected());
+    ownerSocket.send(nlohmann::json{{"token", *ownerToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(ownerSocket.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    WsTestClient readerSocket("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(readerSocket.waitConnected());
+    readerSocket.send(nlohmann::json{{"token", *readerToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(readerSocket.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    httplib::Client restClient("127.0.0.1", restPort);
+    const httplib::Result markResult =
+        restClient.Post("/channels/" + std::to_string(*channelId) + "/read",
+                         httplib::Headers{{"Authorization", "Bearer " + *readerToken}},
+                         nlohmann::json{{"message_id", posted->id}}.dump(), "application/json");
+    ASSERT_TRUE(markResult);
+    ASSERT_EQ(markResult->status, 200);
+
+    auto isReadReceiptForReader = [&](const nlohmann::json& m) {
+        return m.contains("read_receipt") && m["read_receipt"]["login"].get<std::string>() == reader;
+    };
+    const std::optional<nlohmann::json> ownerSaw = ownerSocket.waitFor(isReadReceiptForReader);
+    ASSERT_TRUE(ownerSaw.has_value());
+    EXPECT_EQ((*ownerSaw)["read_receipt"]["last_read_message_id"].get<std::int64_t>(), posted->id);
+
+    const std::optional<nlohmann::json> readerSaw = readerSocket.waitFor(isReadReceiptForReader);
+    ASSERT_TRUE(readerSaw.has_value());
+    EXPECT_EQ((*readerSaw)["read_receipt"]["last_read_message_id"].get<std::int64_t>(), posted->id);
+
+    wsServer.stop();
+}
+
+// Issue #402 — a stale (smaller) message_id sent via a second REST call
+// must not re-broadcast: HttpServer only calls notifyChannelRead() when
+// ChatRepository::markChannelRead()'s return value (the EFFECTIVE
+// marker) equals the message_id the request carried — see doc-comment
+// on markChannelRead().
+TEST(WebSocketServerTest, StaleRestMarkChannelReadDoesNotBroadcastASecondReadReceipt) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18099"));
+    const int restPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_REST_PORT", "18100"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-read-receipt-stale-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-read-receipt-stale-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string reader = "ws-read-receipt-stale-reader-" + suffix;
+    const std::optional<std::string> readerToken = registerAndGetToken(authHost, authPort, reader);
+    if (!readerToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    ASSERT_TRUE(service.joinCommunity(community.id, reader));
+    const std::optional<Message> first = service.postMessage(*channelId, owner, "one");
+    const std::optional<Message> second = service.postMessage(*channelId, owner, "two");
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer wsServer(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(wsServer.start());
+    ScopedRestServer restServer(service, authServiceClient, wsServer, restPort);
+
+    WsTestClient readerSocket("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(readerSocket.waitConnected());
+    readerSocket.send(nlohmann::json{{"token", *readerToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(readerSocket.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    httplib::Client restClient("127.0.0.1", restPort);
+    const httplib::Headers readerHeaders{{"Authorization", "Bearer " + *readerToken}};
+
+    ASSERT_TRUE(restClient.Post("/channels/" + std::to_string(*channelId) + "/read", readerHeaders,
+                                 nlohmann::json{{"message_id", second->id}}.dump(), "application/json"));
+    ASSERT_TRUE(readerSocket.waitFor([](const nlohmann::json& m) { return m.contains("read_receipt"); }).has_value());
+
+    // Stale call — smaller id, already superseded by the one above.
+    const httplib::Result staleResult =
+        restClient.Post("/channels/" + std::to_string(*channelId) + "/read", readerHeaders,
+                         nlohmann::json{{"message_id", first->id}}.dump(), "application/json");
+    ASSERT_TRUE(staleResult);
+    ASSERT_EQ(staleResult->status, 200);
+    EXPECT_FALSE(
+        readerSocket.waitFor([](const nlohmann::json& m) { return m.contains("read_receipt"); }, 500).has_value());
+
+    wsServer.stop();
+}
+
+// Issue #402 — same notifyDmThreadRead() path, for a personal thread.
+TEST(WebSocketServerTest, ReadReceiptBroadcastsToDmThreadSubscribersAfterRestMarkRead) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18101"));
+    const int restPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_REST_PORT", "18102"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+    const std::string suffix = uniqueSuffix();
+    const std::string loginA = "ws-read-receipt-dm-a-" + suffix;
+    const std::string loginB = "ws-read-receipt-dm-b-" + suffix;
+
+    std::int64_t threadId = 0;
+    try {
+        threadId = service.findOrCreateThread(loginA, loginB);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    if (!tokenA.has_value() || !tokenB.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<DirectMessage> posted = service.postDirectMessage(threadId, loginA, "hi");
+    ASSERT_TRUE(posted.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer wsServer(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(wsServer.start());
+    ScopedRestServer restServer(service, authServiceClient, wsServer, restPort);
+
+    WsTestClient socketA("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+    ASSERT_TRUE(socketA.waitConnected());
+    socketA.send(nlohmann::json{{"token", *tokenA}, {"dm_thread_id", threadId}});
+    ASSERT_TRUE(socketA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    httplib::Client restClient("127.0.0.1", restPort);
+    const httplib::Result markResult =
+        restClient.Post("/dm/threads/" + std::to_string(threadId) + "/read",
+                         httplib::Headers{{"Authorization", "Bearer " + *tokenB}},
+                         nlohmann::json{{"message_id", posted->id}}.dump(), "application/json");
+    ASSERT_TRUE(markResult);
+    ASSERT_EQ(markResult->status, 200);
+
+    const std::optional<nlohmann::json> receipt =
+        socketA.waitFor([](const nlohmann::json& m) { return m.contains("read_receipt"); });
+    ASSERT_TRUE(receipt.has_value());
+    EXPECT_EQ((*receipt)["read_receipt"]["login"].get<std::string>(), loginB);
+    EXPECT_EQ((*receipt)["read_receipt"]["last_read_message_id"].get<std::int64_t>(), posted->id);
+
+    wsServer.stop();
+}
+
+// Issue #380/#402 — тест производительности: несколько десятков
+// подписчиков одного канала, один POST /channels/{id}/read, рассылка
+// read_receipt должна дойти до всех за разумное время (с запасом под
+// уже известную медленность CI, issue #296).
+//
+// Все подписчики используют ОДИН И ТОТ ЖЕ логин/токен (не по одному на
+// каждого, как в остальных тестах этого файла) — auth-service намеренно
+// ограничивает регистрации до 10 в минуту с одного IP (см.
+// services/auth-service/src/main.cpp, rateLimitMaxRequests), и 127.0.0.1
+// здесь один на все параллельные тесты; несколько десятков регистраций
+// подряд надёжно перегружают этот лимит, роняя вообще ВСЕ тесты этого
+// бинарника, которым в ближайшую минуту тоже понадобится auth-service
+// (обнаружено эмпирически). broadcastToChannel() рассылает по каждому
+// подключённому сокету независимо от login (см. её собственный
+// doc-комментарий про "тот же логин, вторая вкладка"), так что для
+// проверки пропускной способности рассылки достаточно много SOCKET'ов,
+// а не много РАЗНЫХ пользователей.
+TEST(WebSocketServerTest, ReadReceiptReachesManySubscribersWithinAReasonableTime) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18103"));
+    const int restPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_REST_PORT", "18104"));
+    constexpr int kSubscriberCount = 40;
+    constexpr int kBroadcastTimeoutMs = 10000;
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-read-receipt-load-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-read-receipt-load-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+    const std::optional<std::string> ownerToken = registerAndGetToken(authHost, authPort, owner);
+    if (!ownerToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<Message> posted = service.postMessage(*channelId, owner, "hello everyone");
+    ASSERT_TRUE(posted.has_value());
+
+    const std::string subscriberLogin = "ws-read-receipt-load-sub-" + suffix;
+    const std::optional<std::string> subscriberToken = registerAndGetToken(authHost, authPort, subscriberLogin);
+    if (!subscriberToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    ASSERT_TRUE(service.joinCommunity(community.id, subscriberLogin));
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer wsServer(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(wsServer.start());
+    ScopedRestServer restServer(service, authServiceClient, wsServer, restPort);
+
+    std::vector<std::unique_ptr<WsTestClient>> subscribers;
+    subscribers.reserve(kSubscriberCount);
+    for (int i = 0; i < kSubscriberCount; ++i) {
+        auto client = std::make_unique<WsTestClient>("ws://127.0.0.1:" + std::to_string(wsPort) + "/");
+        ASSERT_TRUE(client->waitConnected());
+        client->send(nlohmann::json{{"token", *subscriberToken}, {"channel_id", *channelId}});
+        ASSERT_TRUE(client->waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+        subscribers.push_back(std::move(client));
+    }
+
+    const auto startedAt = std::chrono::steady_clock::now();
+    httplib::Client restClient("127.0.0.1", restPort);
+    const httplib::Result markResult =
+        restClient.Post("/channels/" + std::to_string(*channelId) + "/read",
+                         httplib::Headers{{"Authorization", "Bearer " + *ownerToken}},
+                         nlohmann::json{{"message_id", posted->id}}.dump(), "application/json");
+    ASSERT_TRUE(markResult);
+    ASSERT_EQ(markResult->status, 200);
+
+    for (const std::unique_ptr<WsTestClient>& client : subscribers) {
+        EXPECT_TRUE(client
+                        ->waitFor([&](const nlohmann::json& m) { return m.contains("read_receipt"); },
+                                  kBroadcastTimeoutMs)
+                        .has_value());
+    }
+    const auto elapsedMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startedAt).count();
+    EXPECT_LT(elapsedMs, kBroadcastTimeoutMs)
+        << "read_receipt took " << elapsedMs << "ms to reach " << kSubscriberCount << " subscribers";
+
+    wsServer.stop();
 }
 
 }  // namespace chat_service

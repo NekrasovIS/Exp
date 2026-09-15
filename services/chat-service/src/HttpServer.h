@@ -8,6 +8,7 @@
 #include "AuthServiceClient.h"
 #include "ChatService.h"
 #include "UserServiceClient.h"
+#include "WebSocketServer.h"
 
 namespace chat_service {
 
@@ -47,8 +48,12 @@ public:
     /// к этому REST API вообще — запрос блокируется самим браузером ещё
     /// до того, как доходит до сервера. По умолчанию — адрес Vite dev
     /// server для локальной разработки.
+    /// @p webSocketServer — issue #402: единственная причина, по которой
+    /// этот REST-класс вообще держит ссылку на WebSocketServer — см. её
+    /// doc-комментарий о notifyChannelRead()/notifyDmThreadRead(), паре
+    /// её методов, вызываемых именно отсюда.
     HttpServer(ChatService& chatService, const AuthServiceClient& authServiceClient,
-               const UserServiceClient& userServiceClient,
+               const UserServiceClient& userServiceClient, WebSocketServer& webSocketServer,
                const std::string& corsAllowedOrigin = "http://localhost:5173");
 
     /// Блокируется, обслуживая запросы, пока stop() не будет вызван из другого потока.
@@ -106,11 +111,17 @@ private:
     /// GET /unread (issue #310/#348) — агрегированные счётчики по всем
     /// каналам/диалогам вызывающего логина одним запросом.
     void handleGetUnreadCounts(const httplib::Request& request, httplib::Response& response);
+    /// GET /channels/{id}/read-receipts (issue #402) — снимок "кто на
+    /// каком сообщении" для всего канала одним запросом.
+    void handleGetChannelReadReceipts(const httplib::Request& request, httplib::Response& response);
+    /// Аналог handleGetChannelReadReceipts() для личного диалога.
+    void handleGetDmThreadReadReceipts(const httplib::Request& request, httplib::Response& response);
     void writeMutationResult(MutationResult result, httplib::Response& response);
 
     ChatService& chatService_;
     const AuthServiceClient& authServiceClient_;
     const UserServiceClient& userServiceClient_;
+    WebSocketServer& webSocketServer_;
     httplib::Server server_;
 };
 

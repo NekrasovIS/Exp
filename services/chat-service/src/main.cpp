@@ -54,7 +54,8 @@ int main() {
     }
     std::cout << "chat-service: WebSocket listening on " << host << ":" << wsPort << "\n";
 
-    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, corsAllowedOrigin);
+    chat_service::HttpServer httpServer(chatService, authServiceClient, userServiceClient, webSocketServer,
+                                         corsAllowedOrigin);
     std::cout << "chat-service: REST listening on " << host << ":" << restPort << "\n";
     httpServer.listen(host, restPort);
 

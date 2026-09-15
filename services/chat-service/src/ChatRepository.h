@@ -194,6 +194,18 @@ struct ThreadUnreadCount {
     std::int64_t unreadCount = 0;
 };
 
+/// Одна строка снимка "кто на каком сообщении" (issue #402) — сырая
+/// пара (login, last_read_message_id), без привязки к конкретному
+/// каналу/диалогу (это уже несёт сам вызов listChannelReadState()/
+/// listDmThreadReadState()). Участник, никогда не отмечавший канал/
+/// диалог прочитанным, просто отсутствует в списке — клиент трактует
+/// отсутствие как "ещё ничего не видел", а не как ReadReceipt с нулевым
+/// lastReadMessageId.
+struct ReadReceipt {
+    std::string login;
+    std::int64_t lastReadMessageId = 0;
+};
+
 /// Результат regenerateInviteCode() (issue #186) — тот же приём, что и
 /// у EditMessageResult: одного MutationResult недостаточно, чтобы
 /// передать вызывающей стороне новый код.
@@ -495,10 +507,28 @@ public:
     /// last_read_message_id уже >= @p messageId, вызов не имеет эффекта
     /// — клиент вполне может прислать устаревший id (например, гонка
     /// между несколькими открытыми окнами одного пользователя).
-    void markChannelRead(std::int64_t channelId, const std::string& login, std::int64_t messageId);
+    /// @return Эффективное значение last_read_message_id ПОСЛЕ этого
+    /// вызова (issue #402) — не обязательно @p messageId: устаревший/
+    /// гоночный вызов с меньшим id оставляет уже существующее большее
+    /// значение нетронутым. Вызывающая сторона (HttpServer) сравнивает
+    /// возврат с @p messageId, чтобы разослать read_receipt только на
+    /// действительно продвинувшую отметку попытку, а не на каждый вызов.
+    [[nodiscard]] std::int64_t markChannelRead(std::int64_t channelId, const std::string& login,
+                                                std::int64_t messageId);
 
     /// То же самое для личного диалога.
-    void markDmThreadRead(std::int64_t threadId, const std::string& login, std::int64_t messageId);
+    [[nodiscard]] std::int64_t markDmThreadRead(std::int64_t threadId, const std::string& login,
+                                                 std::int64_t messageId);
+
+    /// Снимок "кто на каком сообщении" для @p channelId целиком (issue
+    /// #402) — сырые пары (login, last_read_message_id), без какого-либо
+    /// пересчёта "кто прочитал сообщение X" на сервере (дорого на
+    /// больших каналах); клиент выводит это сам, зная полный ростер
+    /// участников. Не проверяет членство (HttpServer уже это делает).
+    [[nodiscard]] std::vector<ReadReceipt> listChannelReadState(std::int64_t channelId);
+
+    /// То же самое для личного диалога.
+    [[nodiscard]] std::vector<ReadReceipt> listDmThreadReadState(std::int64_t threadId);
 
     /// Непрочитанные счётчики по всем каналам сообществ, в которых
     /// состоит @p login — одним запросом (без N+1 по каждому каналу

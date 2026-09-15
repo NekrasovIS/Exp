@@ -117,6 +117,10 @@ class ThreadUnreadCount {
   +threadId : int64
   +unreadCount : int64
 }
+class ReadReceipt {
+  +login : string
+  +lastReadMessageId : int64
+}
 
 package "chat_service::base64" <<Rectangle>> {
   class Base64 << (N,orchid) namespace >> {
@@ -160,8 +164,10 @@ class ChatRepository {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +insertDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
-  +markChannelRead(channelId: int64, login: string, messageId: int64)
-  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +markChannelRead(channelId: int64, login: string, messageId: int64) : int64
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64) : int64
+  +listChannelReadState(channelId: int64) : vector<ReadReceipt>
+  +listDmThreadReadState(threadId: int64) : vector<ReadReceipt>
   +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
   +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
 }
@@ -180,6 +186,7 @@ ChatRepository ..> DirectMessageThread : returns
 ChatRepository ..> DirectMessage : returns
 ChatRepository ..> ChannelUnreadCount : returns
 ChatRepository ..> ThreadUnreadCount : returns
+ChatRepository ..> ReadReceipt : returns
 ChatRepository ..> PqxxConnection : opens per call
 note right of ChatRepository
   Issue #310/#348: last_read_message_id
@@ -199,6 +206,25 @@ note right of ChatRepository
   listUnreadChannelCounts()/
   listUnreadThreadCounts() — одним запросом
   по всем каналам/диалогам логина, без N+1.
+
+  Issue #402: markChannelRead()/markDmThreadRead()
+  теперь возвращают эффективный
+  last_read_message_id (RETURNING) — не
+  обязательно messageId, переданный вызовом:
+  устаревший/гоночный вызов с меньшим id
+  возвращает уже существующее большее
+  значение нетронутым. HttpServer сравнивает
+  возврат с переданным messageId, чтобы
+  разослать read_receipt только на реально
+  продвинувшую отметку попытку.
+  listChannelReadState()/listDmThreadReadState() —
+  сырой снимок (login, last_read_message_id)
+  для ВСЕГО канала/диалога одним запросом, без
+  пересчёта "кто прочитал сообщение X" на
+  сервере (дорого на больших каналах) —
+  участник без строки просто отсутствует в
+  списке, клиент выводит это сам, зная полный
+  ростер участников.
 end note
 
 class ChatService {
@@ -237,8 +263,10 @@ class ChatService {
   +isThreadParticipant(threadId: int64, login: string) : bool
   +postDirectMessage(threadId: int64, authorLogin: string, body: string) : optional<DirectMessage>
   +listDirectMessages(threadId: int64, limit: int, beforeId: optional<int64>) : vector<DirectMessage>
-  +markChannelRead(channelId: int64, login: string, messageId: int64)
-  +markDmThreadRead(threadId: int64, login: string, messageId: int64)
+  +markChannelRead(channelId: int64, login: string, messageId: int64) : int64
+  +markDmThreadRead(threadId: int64, login: string, messageId: int64) : int64
+  +listChannelReadState(channelId: int64) : vector<ReadReceipt>
+  +listDmThreadReadState(threadId: int64) : vector<ReadReceipt>
   +listUnreadChannelCounts(login: string) : vector<ChannelUnreadCount>
   +listUnreadThreadCounts(login: string) : vector<ThreadUnreadCount>
 }
@@ -305,12 +333,15 @@ class HttpServer {
   -handleMarkChannelRead(request, response)
   -handleMarkDmThreadRead(request, response)
   -handleGetUnreadCounts(request, response)
+  -handleGetChannelReadReceipts(request, response)
+  -handleGetDmThreadReadReceipts(request, response)
   -writeMutationResult(result: MutationResult, response)
   -sanitizeForHeaderValue(value: string) : string
 }
 HttpServer --> ChatService : delegates to (&)
 HttpServer --> AuthServiceClient : authenticates via (const&)
 HttpServer --> UserServiceClient : checks friendship via (const&, issue #187)
+HttpServer --> WebSocketServer : notifies read_receipt via (&, issue #402)
 HttpServer ..> Base64 : decode() (validates\nupload/download payloads)
 HttpServer ..> JsonGuard : guards parse() with (issue #129)
 HttpServer *-- HttplibServer : owns
@@ -324,6 +355,8 @@ package "chat_service::json_guard" <<Rectangle>> {
 class WebSocketServer {
   +start() : bool
   +stop()
+  +notifyChannelRead(channelId: int64, login: string, lastReadMessageId: int64)
+  +notifyDmThreadRead(dmThreadId: int64, login: string, lastReadMessageId: int64)
   -handleMessage(connectionState, webSocket, message)
   -handleHello(webSocket, payload)
   -handleSubscribedMessage(webSocket, payload)
@@ -352,6 +385,19 @@ note right of WebSocketServer
   подписки — только {"body"}, минуя
   handleSubscribedMessage() (звонки/typing/
   edit/delete не реализованы для диалогов).
+
+  Issue #402: notifyChannelRead()/
+  notifyDmThreadRead() — единственные
+  публичные методы этого класса, вызываемые
+  ИЗВНЕ (из HttpServer, а не из собственного
+  цикла обработки сообщений) — сам
+  POST .../read идёт через REST, не через это
+  WS-соединение. Рассылают
+  {"read_receipt": {"login", "last_read_message_id"}}
+  ВСЕМ подписчикам, включая сокет самого
+  читающего (та же причина, что и у остальных
+  broadcast* — "два открытых окна одного
+  пользователя", issue #310).
 end note
 WebSocketServer --> ChatService : delegates to (&)
 WebSocketServer --> AuthServiceClient : authenticates via (const&)
@@ -409,6 +455,13 @@ note right of HttpServer
                               та же пагинация, что и у
                               /channels/{id}/messages;
                               тоже 404 для не-участника)
+  POST   /channels/{id}/read            (issue #310/#348, {"message_id"})
+  POST   /dm/threads/{id}/read          (issue #310/#348, {"message_id"})
+  GET    /unread                        (issue #310/#348, агрегированные
+                              счётчики по всем каналам/диалогам)
+  GET    /channels/{id}/read-receipts   (issue #402, снимок "кто на
+                              каком сообщении" для всего канала)
+  GET    /dm/threads/{id}/read-receipts (issue #402, аналогично для диалога)
 
   Owner-only routes answer 403 for
   non-owners, 404 for a nonexistent
