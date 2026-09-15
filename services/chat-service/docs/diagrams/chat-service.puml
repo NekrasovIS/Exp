@@ -377,6 +377,7 @@ class WebSocketServer {
   -handleCallJoin(webSocket, subscription)
   -handleCallLeave(webSocket, subscription)
   -handleCallSignal(webSocket, subscription, body)
+  -handleSetPresence(webSocket, subscription, body)
   -handleTyping(webSocket, subscription)
   -removeCallParticipant(subscription, socket)
   -broadcastToChannel(channelId: int64, json: string, excludeSocket)
@@ -396,6 +397,15 @@ note right of WebSocketServer
   ReadReceiptBroadcaster — сама мутация "прочитано"
   осталась REST-эндпоинтом (#310/#348), переводить
   его на WS ради одной этой рассылки не требовалось.
+
+  Issue #483: handleSetPresence() пишет в
+  presenceState_ (login -> PresenceState, эфемерно)
+  и рассылает через broadcastToCommunity() — "invisible"
+  рассылается как обычный offline (без "status"), не
+  как presence_changed с полем status. online_members
+  в ответе handleHello() на подписку — теперь объекты
+  {"login", "status", "message"}, не просто логины;
+  "invisible"-участники не входят в этот список вовсе.
 
   Личные диалоги (issue #187, Фаза 2b):
   Hello {"token", "dm_thread_id"} вместо

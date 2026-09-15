@@ -6,8 +6,8 @@
 
 #include <chrono>
 #include <optional>
-#include <set>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace chat_service {
@@ -27,6 +27,10 @@ constexpr std::size_t kMaxReactionEmojiBytes = 64;
 /// сотни; предел только чтобы отказать явно неэмодзи-строке, а не
 /// точно проверять, что это ровно один codepoint/grapheme.
 constexpr std::size_t kMaxCallReactionEmojiBytes = 64;
+/// Issue #483 — щедрый предел для произвольного текстового статуса
+/// присутствия ("на встрече", "уехал на обед" и т.п.), не для полноценных
+/// сообщений — того же порядка, что и у типичного статуса в других чатах.
+constexpr std::size_t kMaxPresenceMessageLength = 128;
 
 nlohmann::json toJson(const MessageReaction& reaction) {
     return nlohmann::json{{"emoji", reaction.emoji}, {"logins", reaction.logins}};
@@ -194,24 +198,39 @@ void WebSocketServer::handleHello(ix::WebSocket& webSocket, const std::string& p
     }
     // Issue #309 — collected under the same lock as the insert below, so
     // the snapshot is consistent with what other threads could observe
-    // concurrently. A std::set, not vector: the same login can already
-    // have another subscription open on a different channel of this
-    // community (a second tab), and should only be listed once.
-    std::set<std::string> onlineMembers;
+    // concurrently. Keyed by login, not a plain set: the same login can
+    // already have another subscription open on a different channel of
+    // this community (a second tab), and should only be listed once —
+    // and issue #483 attaches each login's current presence status/
+    // message to this same snapshot.
+    std::unordered_map<std::string, PresenceState> onlineMembers;
     {
         const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
         for (const auto& [socket, existing] : subscriptions_) {
             if (!existing.isDirectMessage && existing.communityId == channel->communityId &&
                 existing.login != *login) {
-                onlineMembers.insert(existing.login);
+                const auto presenceIt = presenceState_.find(existing.login);
+                const PresenceState state = presenceIt != presenceState_.end() ? presenceIt->second : PresenceState{};
+                // Invisible (issue #483) — не входит в снимок, тот же
+                // принцип, что и у настоящего offline.
+                if (state.status != "invisible") {
+                    onlineMembers[existing.login] = state;
+                }
             }
         }
         subscriptions_[&webSocket] =
             Subscription{.login = *login, .channelId = channelId, .communityId = channel->communityId};
     }
+    nlohmann::json onlineMembersJson = nlohmann::json::array();
+    for (const auto& [memberLogin, state] : onlineMembers) {
+        onlineMembersJson.push_back(
+            nlohmann::json{{"login", memberLogin},
+                            {"status", state.status},
+                            {"message", state.message.has_value() ? nlohmann::json(*state.message) : nlohmann::json(nullptr)}});
+    }
     webSocket.send(nlohmann::json{{"subscribed", true},
                                    {"channel_id", channelId},
-                                   {"online_members", onlineMembers}}
+                                   {"online_members", onlineMembersJson}}
                        .dump());
     broadcastToCommunity(channel->communityId,
                           nlohmann::json{{"presence_changed", {{"login", *login}, {"online", true}}}}.dump(),
@@ -261,6 +280,8 @@ void WebSocketServer::handleSubscribedMessage(ix::WebSocket& webSocket, const st
         handleJanusAttach(webSocket);
     } else if (body.contains("janus_message")) {
         handleJanusMessage(webSocket, subscription, body["janus_message"]);
+    } else if (body.contains("set_presence")) {
+        handleSetPresence(webSocket, subscription, body["set_presence"]);
     } else if (body.contains("typing")) {
         handleTyping(webSocket, subscription);
     } else if (body.contains("edit_message")) {
@@ -717,6 +738,56 @@ void WebSocketServer::stopJanusProxySession(ix::WebSocket* socket) {
     // session разрушается здесь, уже вне лока — деструктор std::jthread
     // запрашивает остановку и join'ится, что может занять время вплоть до
     // тайм-аута текущего long-poll внутри pumpJanusEvents().
+}
+
+void WebSocketServer::handleSetPresence(ix::WebSocket& webSocket, const Subscription& subscription,
+                                          const nlohmann::json& body) {
+    if (!body.contains("status") || !body["status"].is_string()) {
+        webSocket.send(nlohmann::json{{"error", "expected {\"status\"}"}}.dump());
+        return;
+    }
+    const std::string status = body["status"].get<std::string>();
+    if (status != "online" && status != "idle" && status != "dnd" && status != "invisible") {
+        webSocket.send(
+            nlohmann::json{{"error", "'status' must be one of online/idle/dnd/invisible"}}.dump());
+        return;
+    }
+    std::optional<std::string> message;
+    if (body.contains("message")) {
+        if (!body["message"].is_string() || body["message"].get<std::string>().size() > kMaxPresenceMessageLength) {
+            webSocket.send(
+                nlohmann::json{{"error", "'message' must be a string up to " +
+                                              std::to_string(kMaxPresenceMessageLength) + " characters"}}
+                    .dump());
+            return;
+        }
+        message = body["message"].get<std::string>();
+    }
+
+    {
+        const std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+        presenceState_[subscription.login] = PresenceState{.status = status, .message = message};
+    }
+
+    // Invisible (issue #483) — рассылается неотличимо от настоящего
+    // отключения (см. doc-комментарий класса), не как обычный
+    // presence_changed с полем "status".
+    if (status == "invisible") {
+        broadcastToCommunity(subscription.communityId,
+                              nlohmann::json{{"presence_changed", {{"login", subscription.login}, {"online", false}}}}
+                                  .dump(),
+                              &webSocket);
+        return;
+    }
+    broadcastToCommunity(
+        subscription.communityId,
+        nlohmann::json{{"presence_changed",
+                        {{"login", subscription.login},
+                         {"online", true},
+                         {"status", status},
+                         {"message", message.has_value() ? nlohmann::json(*message) : nlohmann::json(nullptr)}}}}
+            .dump(),
+        &webSocket);
 }
 
 void WebSocketServer::handleTyping(ix::WebSocket& webSocket, const Subscription& subscription) {

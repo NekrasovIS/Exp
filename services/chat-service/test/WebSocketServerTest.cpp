@@ -1621,7 +1621,13 @@ TEST(WebSocketServerTest, PresenceIsReportedOnSubscribeAndBroadcastOnDisconnect)
     const std::optional<nlohmann::json> subscribedB =
         clientB->waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); });
     ASSERT_TRUE(subscribedB.has_value());
-    EXPECT_EQ((*subscribedB)["online_members"], nlohmann::json::array({loginA}));
+    // Issue #483 — online_members — теперь объекты {"login", "status",
+    // "message"}, не просто логины; A ни разу не звал set_presence,
+    // поэтому его статус — умолчание "online" без сообщения.
+    ASSERT_EQ((*subscribedB)["online_members"].size(), 1U);
+    EXPECT_EQ((*subscribedB)["online_members"][0]["login"].get<std::string>(), loginA);
+    EXPECT_EQ((*subscribedB)["online_members"][0]["status"].get<std::string>(), "online");
+    EXPECT_TRUE((*subscribedB)["online_members"][0]["message"].is_null());
 
     const std::optional<nlohmann::json> presenceOnA =
         clientA.waitFor([](const nlohmann::json& m) { return m.contains("presence_changed"); });
@@ -2178,6 +2184,230 @@ TEST(WebSocketServerTest, BroadcastChannelReadReceiptFansOutToManySubscribersQui
     const auto elapsed = std::chrono::steady_clock::now() - start;
     EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 5000)
         << "broadcasting to " << kSubscriberCount << " subscribers took too long — possible O(n^2) regression";
+
+    server.stop();
+}
+
+// Issue #483 — пользовательский статус присутствия.
+
+TEST(WebSocketServerTest, SetPresenceBroadcastsStatusAndMessageAndIsVisibleToNewSubscribers) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18114"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-presence-status-owner-" + suffix;
+    Community community{};
+    std::optional<std::int64_t> channel1Id;
+    std::optional<std::int64_t> channel2Id;
+    try {
+        community = service.createCommunity("ws-presence-status-community-" + suffix, owner);
+        channel1Id = service.createChannel(community.id, "general", owner);
+        channel2Id = service.createChannel(community.id, "random", owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(channel1Id.has_value());
+    ASSERT_TRUE(channel2Id.has_value());
+
+    const std::string loginA = "ws-presence-status-a-" + suffix;
+    const std::string loginB = "ws-presence-status-b-" + suffix;
+    const std::string loginC = "ws-presence-status-c-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, loginA));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginB));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginC));
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    if (!tokenA.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    ASSERT_TRUE(tokenB.has_value());
+    const std::optional<std::string> tokenC = registerAndGetToken(authHost, authPort, loginC);
+    ASSERT_TRUE(tokenC.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient clientA(wsUrl);
+    WsTestClient clientB(wsUrl);
+    ASSERT_TRUE(clientA.waitConnected());
+    ASSERT_TRUE(clientB.waitConnected());
+
+    clientA.send(nlohmann::json{{"token", *tokenA}, {"channel_id", *channel1Id}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    // B — другой канал ТОГО ЖЕ сообщества (та же "presence — на всё
+    // сообщество" семантика, что и у issue #309).
+    clientB.send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channel2Id}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    clientA.send(nlohmann::json{{"set_presence", {{"status", "dnd"}, {"message", "in a meeting"}}}});
+    const std::optional<nlohmann::json> presenceOnB =
+        clientB.waitFor([](const nlohmann::json& m) { return m.contains("presence_changed"); });
+    ASSERT_TRUE(presenceOnB.has_value());
+    EXPECT_EQ((*presenceOnB)["presence_changed"]["login"].get<std::string>(), loginA);
+    EXPECT_TRUE((*presenceOnB)["presence_changed"]["online"].get<bool>());
+    EXPECT_EQ((*presenceOnB)["presence_changed"]["status"].get<std::string>(), "dnd");
+    EXPECT_EQ((*presenceOnB)["presence_changed"]["message"].get<std::string>(), "in a meeting");
+
+    // C подписывается ПОСЛЕ того, как A уже выставил статус — должен
+    // увидеть его сразу в снимке online_members, не только через будущую
+    // рассылку.
+    WsTestClient clientC(wsUrl);
+    ASSERT_TRUE(clientC.waitConnected());
+    clientC.send(nlohmann::json{{"token", *tokenC}, {"channel_id", *channel1Id}});
+    const std::optional<nlohmann::json> subscribedC =
+        clientC.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); });
+    ASSERT_TRUE(subscribedC.has_value());
+    bool foundA = false;
+    for (const auto& entry : (*subscribedC)["online_members"]) {
+        if (entry["login"].get<std::string>() == loginA) {
+            foundA = true;
+            EXPECT_EQ(entry["status"].get<std::string>(), "dnd");
+            EXPECT_EQ(entry["message"].get<std::string>(), "in a meeting");
+        }
+    }
+    EXPECT_TRUE(foundA);
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, SetPresenceInvisibleLooksLikeOfflineToOthers) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18115"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-presence-invisible-owner-" + suffix;
+    Community community{};
+    std::optional<std::int64_t> channel1Id;
+    std::optional<std::int64_t> channel2Id;
+    try {
+        community = service.createCommunity("ws-presence-invisible-community-" + suffix, owner);
+        channel1Id = service.createChannel(community.id, "general", owner);
+        channel2Id = service.createChannel(community.id, "random", owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(channel1Id.has_value());
+    ASSERT_TRUE(channel2Id.has_value());
+
+    const std::string loginA = "ws-presence-invisible-a-" + suffix;
+    const std::string loginB = "ws-presence-invisible-b-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, loginA));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginB));
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    if (!tokenA.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    ASSERT_TRUE(tokenB.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient clientA(wsUrl);
+    WsTestClient clientB(wsUrl);
+    ASSERT_TRUE(clientA.waitConnected());
+    ASSERT_TRUE(clientB.waitConnected());
+
+    clientA.send(nlohmann::json{{"token", *tokenA}, {"channel_id", *channel1Id}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    clientB.send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channel2Id}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    clientA.send(nlohmann::json{{"set_presence", {{"status", "invisible"}}}});
+    const std::optional<nlohmann::json> presenceOnB =
+        clientB.waitFor([](const nlohmann::json& m) { return m.contains("presence_changed"); });
+    ASSERT_TRUE(presenceOnB.has_value());
+    // Неотличимо от настоящего отключения — нет ни "status", ни "message".
+    EXPECT_FALSE((*presenceOnB)["presence_changed"]["online"].get<bool>());
+    EXPECT_FALSE((*presenceOnB)["presence_changed"].contains("status"));
+
+    // Новый подписчик не должен увидеть A в online_members вовсе.
+    WsTestClient clientC(wsUrl);
+    ASSERT_TRUE(clientC.waitConnected());
+    const std::optional<std::string> tokenC =
+        registerAndGetToken(authHost, authPort, "ws-presence-invisible-c-" + suffix);
+    ASSERT_TRUE(tokenC.has_value());
+    ASSERT_TRUE(service.joinCommunity(community.id, "ws-presence-invisible-c-" + suffix));
+    clientC.send(nlohmann::json{{"token", *tokenC}, {"channel_id", *channel1Id}});
+    const std::optional<nlohmann::json> subscribedC =
+        clientC.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); });
+    ASSERT_TRUE(subscribedC.has_value());
+    for (const auto& entry : (*subscribedC)["online_members"]) {
+        EXPECT_NE(entry["login"].get<std::string>(), loginA);
+    }
+
+    server.stop();
+}
+
+TEST(WebSocketServerTest, SetPresenceRejectsUnknownStatusWithoutBroadcasting) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18116"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-presence-bad-owner-" + suffix;
+    Community community{};
+    std::optional<std::int64_t> channelId;
+    try {
+        community = service.createCommunity("ws-presence-bad-community-" + suffix, owner);
+        channelId = service.createChannel(community.id, "general", owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::optional<std::string> ownerToken = registerAndGetToken(authHost, authPort, owner);
+    if (!ownerToken.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient client(wsUrl);
+    ASSERT_TRUE(client.waitConnected());
+    client.send(nlohmann::json{{"token", *ownerToken}, {"channel_id", *channelId}});
+    ASSERT_TRUE(client.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    client.send(nlohmann::json{{"set_presence", {{"status", "on-the-moon"}}}});
+    const std::optional<nlohmann::json> errorResponse =
+        client.waitFor([](const nlohmann::json& m) { return m.contains("error"); });
+    ASSERT_TRUE(errorResponse.has_value());
 
     server.stop();
 }
