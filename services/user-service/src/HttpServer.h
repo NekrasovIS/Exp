@@ -19,13 +19,17 @@ namespace user_service {
  *        POST /friends/requests, GET /friends/requests,
  *        POST /friends/requests/{id}/accept,
  *        POST /friends/requests/{id}/decline, GET /friends,
- *        DELETE /friends/{login} (issue #187, заявки в друзья) —
+ *        DELETE /friends/{login} (issue #187, заявки в друзья),
+ *        POST /blocks/{login}, DELETE /blocks/{login}, GET /blocks
+ *        (issue #471, блокировка пользователей — направленная, в
+ *        отличие от дружбы) —
  *        которым нужен валидный заголовок
  *        `Authorization: Bearer <token>`, проверяемый через
  *        AuthServiceClient у auth-service. Плюс
- *        GET /internal/friendship?user_a=&user_b= (issue #187, Фаза 2) —
+ *        GET /internal/friendship?user_a=&user_b= (issue #187, Фаза 2) и
+ *        GET /internal/blocked?blocker=&blocked= (issue #471) —
  *        без аутентификации, как и /users/resolve-otp-identifier: не
- *        вызывается напрямую клиентами, только chat-service, чтобы
+ *        вызываются напрямую клиентами, только chat-service, чтобы
  *        решить, можно ли открыть новый диалог личных сообщений.
  *        POST /profile/avatar (issue #384, аутентифицированный) —
  *        загружает изображение аватара вызывающего, тот же
@@ -79,6 +83,11 @@ private:
     void handleListFriends(const httplib::Request& request, httplib::Response& response);
     void handleRemoveFriend(const httplib::Request& request, httplib::Response& response);
     void handleCheckFriendship(const httplib::Request& request, httplib::Response& response);
+    /// Issue #471 — блокировка пользователей.
+    void handleBlockUser(const httplib::Request& request, httplib::Response& response);
+    void handleUnblockUser(const httplib::Request& request, httplib::Response& response);
+    void handleListBlockedUsers(const httplib::Request& request, httplib::Response& response);
+    void handleCheckBlocked(const httplib::Request& request, httplib::Response& response);
     void handleUploadAvatar(const httplib::Request& request, httplib::Response& response);
     void handleGetAvatar(const httplib::Request& request, httplib::Response& response);
 

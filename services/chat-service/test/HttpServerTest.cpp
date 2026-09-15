@@ -1703,6 +1703,14 @@ void makeFriends(const std::string& userServiceHost, int userServicePort, const 
                             nlohmann::json{{"recipient_login", accountA.login}}.dump(), "application/json");
 }
 
+// Issue #471 — @p blocker блокирует @p blocked через user-service.
+void blockUser(const std::string& userServiceHost, int userServicePort, const DmTestAccount& blocker,
+                const DmTestAccount& blocked) {
+    httplib::Client userServiceClient(userServiceHost, userServicePort);
+    userServiceClient.Post("/blocks/" + blocked.login, httplib::Headers{{"Authorization", bearer(blocker.token)}},
+                            "{}", "application/json");
+}
+
 TEST(HttpServerTest, OpenThreadRouteRejectsNonFriendsThenSucceedsAfterBefriending) {
     const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
     const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
@@ -1748,6 +1756,36 @@ TEST(HttpServerTest, OpenThreadRouteRejectsNonFriendsThenSucceedsAfterBefriendin
     const nlohmann::json threadsForB = nlohmann::json::parse(client.Get("/dm/threads", authHeaderB)->body);
     EXPECT_TRUE(std::any_of(threadsForB.begin(), threadsForB.end(),
                              [&](const nlohmann::json& item) { return item["id"].get<std::int64_t>() == threadId; }));
+}
+
+// Issue #471 — блокировка не даёт открыть новый диалог, даже между
+// друзьями, независимо от того, кто из двоих кого заблокировал.
+TEST(HttpServerTest, OpenThreadRouteRejectsBlockedUsersEvenIfTheyAreFriends) {
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const std::optional<DmTestAccount> accountA = registerDmTestAccount(authHost, authPort, "http-server-dm-block-a");
+    const std::optional<DmTestAccount> accountB = registerDmTestAccount(authHost, authPort, "http-server-dm-block-b");
+    if (!accountA.has_value() || !accountB.has_value()) {
+        GTEST_SKIP() << "auth-service (and the user-service it forwards to) not reachable — start the full stack.";
+    }
+    const std::string userServiceHost = envOrDefault("USER_SERVICE_HOST", "127.0.0.1");
+    const int userServicePort = std::stoi(envOrDefault("USER_SERVICE_PORT", "8081"));
+    makeFriends(userServiceHost, userServicePort, *accountA, *accountB);
+    blockUser(userServiceHost, userServicePort, *accountB, *accountA);
+
+    ChatRepository repository(dbConnectionString());
+    ChatService chatService(repository);
+    const AuthServiceClient authServiceClient(authHost, authPort);
+    const UserServiceClient userServiceClient(userServiceHost, userServicePort);
+    const ScopedServer server(chatService, authServiceClient, userServiceClient);
+
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers authHeaderA{{"Authorization", bearer(accountA->token)}};
+    const httplib::Result result =
+        client.Post("/dm/threads", authHeaderA, nlohmann::json{{"recipient_login", accountB->login}}.dump(),
+                    "application/json");
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 403);
 }
 
 TEST(HttpServerTest, DirectMessageRoutesRejectNonParticipantsAndRoundTripForParticipants) {

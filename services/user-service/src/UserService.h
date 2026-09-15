@@ -46,6 +46,13 @@ public:
     /// См. UserRepository::areFriends() (issue #187, Фаза 2).
     [[nodiscard]] bool areFriends(const std::string& loginA, const std::string& loginB);
 
+    /// См. UserRepository::blockUser()/unblockUser()/listBlockedUsers()/
+    /// isBlocked() (issue #471).
+    [[nodiscard]] BlockUserResult blockUser(const std::string& blockerLogin, const std::string& blockedLogin);
+    [[nodiscard]] bool unblockUser(const std::string& blockerLogin, const std::string& blockedLogin);
+    [[nodiscard]] std::vector<std::string> listBlockedUsers(const std::string& blockerLogin);
+    [[nodiscard]] bool isBlocked(const std::string& blockerLogin, const std::string& blockedLogin);
+
     /// См. UserRepository::saveAvatar() (issue #384) — @p avatarUrl
     /// вычисляет вызывающая сторона (HttpServer), сама эта функция
     /// формат пути не определяет.

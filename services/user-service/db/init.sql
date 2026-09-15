@@ -90,3 +90,14 @@ CREATE TABLE IF NOT EXISTS user_avatars (
     data_base64 TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Блокировка пользователей (issue #471) — направленная связь, в
+-- отличие от friendships выше: A блокирует B не означает, что B
+-- заблокировал A, поэтому login'ы хранятся как есть, а не в
+-- каноническом порядке.
+CREATE TABLE IF NOT EXISTS blocked_users (
+    blocker_login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    blocked_login TEXT NOT NULL REFERENCES users(login) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (blocker_login, blocked_login)
+);
