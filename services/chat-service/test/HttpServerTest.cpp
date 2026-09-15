@@ -2249,5 +2249,195 @@ TEST(HttpServerTest, GetDmThreadReadReceiptsReturnsReceiptsAfterMarkingReadAndRe
     EXPECT_EQ(receipts[0]["last_read_message_id"].get<std::int64_t>(), messageId);
 }
 
+// Issue #463 — community custom icon.
+
+TEST(HttpServerTest, UploadThenGetCommunityIconRoundTrip) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-200");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-icon-200-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+
+    // "hello" в base64.
+    const httplib::Result uploadResult =
+        client.Post("/communities/" + std::to_string(community.id) + "/icon", headers,
+                     nlohmann::json{{"content_type", "image/png"}, {"data_base64", "aGVsbG8="}}.dump(),
+                     "application/json");
+    ASSERT_TRUE(uploadResult);
+    EXPECT_EQ(uploadResult->status, 200);
+
+    const httplib::Result getResult = client.Get("/communities/" + std::to_string(community.id) + "/icon", headers);
+    ASSERT_TRUE(getResult);
+    ASSERT_EQ(getResult->status, 200);
+    EXPECT_EQ(getResult->body, "hello");
+    EXPECT_EQ(getResult->get_header_value("Content-Type"), "image/png");
+}
+
+TEST(HttpServerTest, UploadCommunityIconRejectsMissingFieldsWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-400");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-icon-400-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/icon", headers,
+                     nlohmann::json{{"content_type", "image/png"}}.dump(), "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadCommunityIconRejectsNonImageContentTypeWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-nonimg");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-icon-nonimg-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/icon", headers,
+                     nlohmann::json{{"content_type", "text/plain"}, {"data_base64", "aGVsbG8="}}.dump(),
+                     "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadCommunityIconRejectsInvalidBase64With400) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-badb64");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-icon-badb64-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/icon", headers,
+                     nlohmann::json{{"content_type", "image/png"}, {"data_base64", "not!valid$$$"}}.dump(),
+                     "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadCommunityIconRejectsOversizedPayloadWith400) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-oversized");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-icon-oversized-" + uniqueSuffix(), fixture.ownerLogin);
+
+    // 3 000 000 символов 'A' декодируются без остатка (делится на 4) в
+    // 2 250 000 нулевых байт — сверх лимита в 2 МБ (2 097 152 байта).
+    const std::string oversizedBase64(3000000, 'A');
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/icon", headers,
+                     nlohmann::json{{"content_type", "image/png"}, {"data_base64", oversizedBase64}}.dump(),
+                     "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 400);
+}
+
+TEST(HttpServerTest, UploadCommunityIconRejectsNonOwnerMemberWith403) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-403");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community = chatService.createCommunity("http-test-icon-403-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::string memberLogin = "http-server-icon-403-member-" + uniqueSuffix();
+    const std::optional<std::string> memberToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, memberLogin);
+    ASSERT_TRUE(memberToken.has_value());
+    ASSERT_TRUE(chatService.joinCommunity(community.id, memberLogin));
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*memberToken)}};
+    const httplib::Result result =
+        client.Post("/communities/" + std::to_string(community.id) + "/icon", headers,
+                     nlohmann::json{{"content_type", "image/png"}, {"data_base64", "aGVsbG8="}}.dump(),
+                     "application/json");
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 403);
+}
+
+TEST(HttpServerTest, GetCommunityIconRejectsNonMemberWith404) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-get404");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-icon-get404-" + uniqueSuffix(), fixture.ownerLogin);
+    ASSERT_EQ(chatService.saveCommunityIcon(community.id, fixture.ownerLogin, "image/png", "aGVsbG8="),
+              MutationResult::kSuccess);
+    const std::string outsiderLogin = "http-server-icon-get404-outsider-" + uniqueSuffix();
+    const std::optional<std::string> outsiderToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, outsiderLogin);
+    ASSERT_TRUE(outsiderToken.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(*outsiderToken)}};
+    const httplib::Result result = client.Get("/communities/" + std::to_string(community.id) + "/icon", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
+TEST(HttpServerTest, GetCommunityIconRejectsMissingIconWith404) {
+    auto fixtureOpt = TestFixture::create("http-server-icon-noicon");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-icon-noicon-" + uniqueSuffix(), fixture.ownerLogin);
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers headers{{"Authorization", bearer(fixture.ownerToken)}};
+    const httplib::Result result = client.Get("/communities/" + std::to_string(community.id) + "/icon", headers);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 404);
+}
+
 }  // namespace
 }  // namespace chat_service

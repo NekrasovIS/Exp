@@ -245,6 +245,45 @@ MutationResult ChatRepository::deleteCommunity(std::int64_t id, const std::strin
     return MutationResult::kSuccess;
 }
 
+MutationResult ChatRepository::saveCommunityIcon(std::int64_t communityId, const std::string& requesterLogin,
+                                                  const std::string& contentType, const std::string& dataBase64) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result ownerRows =
+        transaction.exec("SELECT owner_login FROM communities WHERE id = $1", pqxx::params{communityId});
+    if (ownerRows.empty()) {
+        return MutationResult::kNotFound;
+    }
+    if (ownerRows[0][0].as<std::string>() != requesterLogin) {
+        // Issue #256 (pentest) — см. тот же комментарий в renameCommunity()/deleteCommunity().
+        if (!isMemberOfCommunity(transaction, communityId, requesterLogin)) {
+            return MutationResult::kNotFound;
+        }
+        return MutationResult::kForbidden;
+    }
+
+    transaction.exec(
+        "INSERT INTO community_icons (community_id, content_type, data_base64) VALUES ($1, $2, $3) "
+        "ON CONFLICT (community_id) DO UPDATE "
+        "SET content_type = EXCLUDED.content_type, data_base64 = EXCLUDED.data_base64, updated_at = now()",
+        pqxx::params{communityId, contentType, dataBase64});
+    transaction.commit();
+    return MutationResult::kSuccess;
+}
+
+std::optional<CommunityIconData> ChatRepository::findCommunityIcon(std::int64_t communityId) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    const pqxx::result rows = transaction.exec(
+        "SELECT content_type, data_base64 FROM community_icons WHERE community_id = $1", pqxx::params{communityId});
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+    return CommunityIconData{.contentType = rows[0][0].as<std::string>(), .dataBase64 = rows[0][1].as<std::string>()};
+}
+
 std::optional<std::int64_t> ChatRepository::createChannel(std::int64_t communityId, const std::string& name,
                                                             const std::string& ownerLogin, bool isEncrypted) {
     pqxx::connection connection(connectionString_);

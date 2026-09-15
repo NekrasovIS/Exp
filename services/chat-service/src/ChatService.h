@@ -25,6 +25,11 @@ public:
                                                   const std::string& requesterLogin);
     [[nodiscard]] MutationResult deleteCommunity(std::int64_t id, const std::string& requesterLogin);
 
+    /// Issue #463 — см. doc-комментарии соответствующих методов ChatRepository.
+    [[nodiscard]] MutationResult saveCommunityIcon(std::int64_t communityId, const std::string& requesterLogin,
+                                                    const std::string& contentType, const std::string& dataBase64);
+    [[nodiscard]] std::optional<CommunityIconData> findCommunityIcon(std::int64_t communityId);
+
     [[nodiscard]] std::optional<std::int64_t> createChannel(std::int64_t communityId, const std::string& name,
                                                              const std::string& ownerLogin,
                                                              bool isEncrypted = false);
