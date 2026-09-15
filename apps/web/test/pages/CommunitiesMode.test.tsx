@@ -76,6 +76,65 @@ describe("CommunitiesMode on a wide viewport", () => {
   });
 });
 
+// Issue #459 — Ctrl+K quick switcher.
+describe("CommunitiesMode's quick switcher", () => {
+  it("Ctrl+K opens it listing communities and the current community's channels", async () => {
+    stubOneCommunityWithOneChannel();
+
+    render(
+      <SessionProvider>
+        <CommunitiesMode />
+      </SessionProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Acme" }));
+
+    await userEvent.keyboard("{Control>}k{/Control}");
+
+    expect(screen.getByRole("textbox", { name: "Jump to a community or channel" })).toBeInTheDocument();
+    // "Acme"/"general" also appear as the sidebar's own buttons — the
+    // switcher's own list items are buttons whose accessible name
+    // includes the group label ("Community Acme"/"Channel general").
+    expect(screen.getByRole("button", { name: "Community Acme" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Channel general" })).toBeInTheDocument();
+  });
+
+  it("selecting a channel from the switcher opens it, same as clicking it in the sidebar", async () => {
+    stubOneCommunityWithOneChannel();
+
+    render(
+      <SessionProvider>
+        <CommunitiesMode />
+      </SessionProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Acme" }));
+    await userEvent.keyboard("{Control>}k{/Control}");
+
+    // Two "general" matches by now (the switcher's own entry and the
+    // channel sidebar's button) — the switcher's list item is a button
+    // whose accessible name also includes its group label.
+    await userEvent.click(screen.getByRole("button", { name: "Channel general" }));
+
+    expect(screen.queryByRole("textbox", { name: "Jump to a community or channel" })).not.toBeInTheDocument();
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+  });
+
+  it("Escape closes the switcher without navigating anywhere", async () => {
+    stubOneCommunityWithOneChannel();
+
+    render(
+      <SessionProvider>
+        <CommunitiesMode />
+      </SessionProvider>,
+    );
+    await userEvent.keyboard("{Control>}k{/Control}");
+    expect(screen.getByRole("textbox", { name: "Jump to a community or channel" })).toBeInTheDocument();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("textbox", { name: "Jump to a community or channel" })).not.toBeInTheDocument();
+  });
+});
+
 describe("CommunitiesMode on a narrow viewport", () => {
   beforeEach(() => {
     stubMatchMedia(true);

@@ -10,8 +10,10 @@ import { useUnreadCounts } from "../chat/useUnreadCounts.js";
 import { ChannelsSidebar } from "../channels/ChannelsSidebar.js";
 import { useChannels } from "../channels/useChannels.js";
 import { CommunitiesSidebar } from "../communities/CommunitiesSidebar.js";
+import { useCommunities } from "../communities/useCommunities.js";
 import { MembersSidebar } from "../members/MembersSidebar.js";
 import styles from "./pageLayout.module.css";
+import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher.js";
 import { useIsNarrowViewport } from "./useIsNarrowViewport.js";
 
 export function CommunitiesMode() {
@@ -47,6 +49,45 @@ export function CommunitiesMode() {
   const { channels } = useChannels(selectedCommunityId);
 
   const { channelCounts, refresh: refreshUnreadCounts, clearChannelLocally } = useUnreadCounts();
+
+  // Issue #459 — a second useCommunities() call, same duplication
+  // CommunitiesSidebar's own internal call already has with this one
+  // (neither shares state with the other — accepted precedent in this
+  // codebase, see ChannelsSidebar's own independent useChannels() call
+  // alongside this component's, rather than lifting/sharing state for a
+  // quick-switcher list that's opened rarely).
+  const { communities } = useCommunities();
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && event.key === "k") {
+        event.preventDefault();
+        setQuickSwitcherOpen(true);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Scope note (issue #459): only communities the user is in, plus the
+  // channels of whichever one is CURRENTLY open (already loaded above)
+  // — not a global cross-community channel index server-side.
+  const quickSwitcherItems = useMemo((): QuickSwitcherItem[] => {
+    const communityItems = communities.map((community): QuickSwitcherItem => ({
+      key: `community:${community.id}`,
+      label: community.name,
+      group: "Community",
+      onSelect: () => handleSelectCommunity(community.id),
+    }));
+    const channelItems = channels.map((channel): QuickSwitcherItem => ({
+      key: `channel:${channel.id}`,
+      label: channel.name,
+      group: "Channel",
+      onSelect: () => handleSelectChannel(channel),
+    }));
+    return [...communityItems, ...channelItems];
+  }, [communities, channels]);
 
   // Issue #310/#350 — accumulates channel→community across whichever
   // communities have actually been opened this session (fetchUnreadCounts()
@@ -158,6 +199,9 @@ export function CommunitiesMode() {
         <div className={styles.sidebarColumn}>
           <MembersSidebar communityId={selectedCommunityId} onlineLogins={onlineLogins} />
         </div>
+      )}
+      {quickSwitcherOpen && (
+        <QuickSwitcher items={quickSwitcherItems} onClose={() => setQuickSwitcherOpen(false)} />
       )}
     </div>
   );
