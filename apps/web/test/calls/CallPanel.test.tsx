@@ -27,6 +27,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe("CallPanel", () => {
@@ -112,5 +113,62 @@ describe("CallPanel", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // Issue #461 — push-to-talk.
+  describe("push-to-talk", () => {
+    it("shows the toggle before joining, off by default", () => {
+      const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+      client.connectToChannel("t1", 7);
+
+      render(<CallPanel chatClient={client} localLogin="alice" />);
+
+      expect(screen.getByRole("checkbox", { name: "Push to talk (hold Ctrl)" })).not.toBeChecked();
+    });
+
+    it("enabling it while in a call replaces the Mute button with a hold-to-talk status", async () => {
+      const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+      client.connectToChannel("t1", 7);
+
+      render(<CallPanel chatClient={client} localLogin="alice" />);
+      await userEvent.click(screen.getByRole("checkbox", { name: "Push to talk (hold Ctrl)" }));
+      await userEvent.click(screen.getByRole("button", { name: "Join call" }));
+
+      expect(screen.queryByRole("button", { name: "Mute" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Unmute" })).not.toBeInTheDocument();
+      expect(await screen.findByText("🔴 Hold Ctrl to talk")).toBeInTheDocument();
+    });
+
+    it("holding Control while in push-to-talk mode shows the speaking status", async () => {
+      const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+      client.connectToChannel("t1", 7);
+
+      render(<CallPanel chatClient={client} localLogin="alice" />);
+      await userEvent.click(screen.getByRole("checkbox", { name: "Push to talk (hold Ctrl)" }));
+      await userEvent.click(screen.getByRole("button", { name: "Join call" }));
+      await screen.findByText("🔴 Hold Ctrl to talk");
+
+      // Dispatched directly rather than via userEvent.keyboard() —
+      // userEvent's `{Control>}`/`{/Control}` DSL treats Control as a
+      // modifier applied to OTHER keys, not as a plain key with its own
+      // keydown/keyup, which is what usePushToTalk actually listens for.
+      act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Control" })));
+      expect(await screen.findByText("🟢 Speaking")).toBeInTheDocument();
+
+      act(() => document.dispatchEvent(new KeyboardEvent("keyup", { key: "Control" })));
+      expect(await screen.findByText("🔴 Hold Ctrl to talk")).toBeInTheDocument();
+    });
+
+    it("the normal Mute toggle still works when push-to-talk is off", async () => {
+      const client = new ChatClient("wss://chat.example.test", (url) => new FakeWebSocket(url));
+      client.connectToChannel("t1", 7);
+
+      render(<CallPanel chatClient={client} localLogin="alice" />);
+      await userEvent.click(screen.getByRole("button", { name: "Join call" }));
+
+      await userEvent.click(await screen.findByRole("button", { name: "Mute" }));
+
+      expect(await screen.findByRole("button", { name: "Unmute" })).toBeInTheDocument();
+    });
   });
 });
