@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -95,6 +96,20 @@ namespace chat_service {
  *     не оффлайн, пока закрыта только одна). Эфемерно, как и typing
  *     ниже — ничего не сохраняется, нет отдельного REST-эндпоинта для
  *     истории присутствия.
+ *   - `{"set_presence": {"status": "online"|"idle"|"dnd"|"invisible",
+ *     "message"?: "..."}}` (issue #483) — статус присутствия, выбранный
+ *     самим пользователем, поверх бинарного online/offline выше;
+ *     `"status"` не входящий в эту четвёрку — `{"error"}` только
+ *     отправителю, без записи/рассылки. Эфемерно (как и typing/online-
+ *     присутствие), хранится по логину, не по соединению. Рассылает
+ *     остальным участникам ТОГО ЖЕ сообщества (тот же адресат, что и
+ *     presence_changed выше) `{"presence_changed": {"login", "online":
+ *     true, "status", "message"}}` — КРОМЕ `"invisible"`, для которого
+ *     рассылается `{"presence_changed": {"login", "online": false}}`,
+ *     неотличимо от настоящего отключения (в этом весь смысл invisible).
+ *     `online_members` в ответе на подписку на канал — теперь список
+ *     объектов `{"login", "status", "message"}` (а не просто логинов);
+ *     участники со статусом `"invisible"` не входят в этот список вовсе.
  *   - `{"typing": true}` — issue #96: рассылает
  *     `{"user_typing": "<login>"}` каждому другому подписчику того же
  *     канала (никогда не отправителю обратно). Эфемерно, как и
@@ -205,6 +220,18 @@ private:
         std::int64_t dmThreadId = 0;
     };
 
+    /// Issue #483 — статус присутствия, выбранный самим пользователем,
+    /// поверх бинарного online/offline (issue #309). Полностью эфемерно
+    /// и хранится по логину (не по соединению/каналу) — тот же принцип
+    /// "ничего не персистится", что и у typing/online-присутствия выше.
+    struct PresenceState {
+        /// Один из "online"/"idle"/"dnd"/"invisible" — валидируется в
+        /// handleSetPresence() перед записью сюда, эта структура сама
+        /// ничего не проверяет.
+        std::string status = "online";
+        std::optional<std::string> message;
+    };
+
     /// Janus-сессия, проксируемая через одно WS-подключение (issue #232)
     /// — создаётся при первом `janus_attach`, живёт до закрытия
     /// соединения (не до `call_leave`: простая привязка ко времени жизни
@@ -235,6 +262,10 @@ private:
     /// {"toggle_reaction": {"message_id", "emoji"}} (issue #333) — см.
     /// doc-комментарий класса.
     void handleToggleReaction(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
+    /// {"set_presence": {"status", "message"?}} (issue #483) — см.
+    /// doc-комментарий класса. "status" не входит в четвёрку известных
+    /// значений -> {"error"} только отправителю, без записи/рассылки.
+    void handleSetPresence(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
     void handleCallJoin(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallLeave(ix::WebSocket& webSocket, const Subscription& subscription);
     void handleCallSignal(ix::WebSocket& webSocket, const Subscription& subscription, const nlohmann::json& body);
@@ -310,6 +341,11 @@ private:
     // отдельно от подписки на *чат* канала выше — клиент может быть
     // подписан на текстовый чат канала, не будучи в его звонке.
     std::unordered_map<std::int64_t, std::unordered_map<std::string, ix::WebSocket*>> callParticipants_;
+    // Issue #483 — по логину, не по соединению/каналу (см. doc-комментарий
+    // PresenceState); тот же subscriptionsMutex_ — читается/пишется
+    // рядом с subscriptions_/callParticipants_ в тех же критических
+    // секциях (handleHello(), handleSetPresence()).
+    std::unordered_map<std::string, PresenceState> presenceState_;
 
     // Отдельный мьютекс, не subscriptionsMutex_ — janusSessions_ живёт по
     // своему собственному циклу (привязан к сокету, не к call_join/leave)
