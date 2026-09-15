@@ -46,6 +46,11 @@ export interface CallActions {
   join: () => void;
   leave: () => void;
   toggleMute: () => void;
+  /** Sets the mute state directly rather than flipping it (issue #461,
+   * push-to-talk) — a keydown/keyup-driven caller wants "muted while
+   * not held" as its steady state, which a toggle can't express without
+   * tracking its own extra "was it already down" flag. */
+  setMuted: (muted: boolean) => void;
   toggleVideo: () => void;
   toggleScreenShare: () => void;
   sendReaction: (emoji: string) => void;
@@ -140,6 +145,14 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
     setState((prev) => ({ ...prev, muted: manager.isMuted() }));
   }, [manager]);
 
+  const setMuted = useCallback(
+    (muted: boolean) => {
+      manager.setMuted(muted);
+      setState((prev) => ({ ...prev, muted: manager.isMuted() }));
+    },
+    [manager],
+  );
+
   const toggleVideo = useCallback(() => {
     if (manager.videoEnabled()) {
       manager.disableVideo();
@@ -170,5 +183,5 @@ export function useCall(chatClient: ChatClient, localLogin: string): [CallState,
 
   const sendReaction = useCallback((emoji: string) => manager.sendReaction(emoji), [manager]);
 
-  return [state, { join, leave, toggleMute, toggleVideo, toggleScreenShare, sendReaction }];
+  return [state, { join, leave, toggleMute, setMuted, toggleVideo, toggleScreenShare, sendReaction }];
 }
