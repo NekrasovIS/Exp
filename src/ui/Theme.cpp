@@ -142,7 +142,7 @@ QString darkStyleSheet() {
             font-weight: 700;
         }
 
-        QLabel#mutedDescription {
+        QLabel#mutedDescription, QLabel#chatMessageSeenBy {
             color: #8b939c;
             font-size: 12px;
         }

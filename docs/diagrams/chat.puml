@@ -50,6 +50,7 @@ class ChatClient {
   +messagePinned(id: qint64, pinnedBy: QString, pinnedAt: QString)
   +messageUnpinned(id: qint64)
   +reactionChanged(id: qint64, emoji: QString, logins: QStringList)
+  +readReceiptChanged(login: QString, lastReadMessageId: qint64)
   +errorOccurred(message: QString)
   +callRosterReceived(participants: QStringList)
   +sfuRoomAssigned(room: QString)
@@ -71,6 +72,7 @@ ChatClient ..> "chat-service" : toggle_reaction ->\nreaction_changed (issue #305
 ChatClient ..> "chat-service" : {"body", "attachment_id"?} (issue #116,\nattachment_id references an upload\nalready done via ChatRestClient)
 ChatClient ..> "chat-service" : {"body", "reply_to_message_id"?}\n(issue #306, id only — no FK server-side,\nclient resolves quote author/text itself)
 ChatClient ..> "chat-service" : {"token", "dm_thread_id"} then\n{"body"} (issue #187, Phase 2b —\nno call/typing/edit/delete for DM threads)
+ChatClient ..> "chat-service" : read_receipt (issue #380) <-\ntriggered by ChatRestClient::markChannelRead()/\nmarkDmThreadRead(), a REST call, not a frame\nsent from here — this class only ever listens
 
 class CallManager {
   +joinCall(inputDevice: QAudioDevice, outputDevice: QAudioDevice)
@@ -281,6 +283,8 @@ class ChatRestClient {
   +markChannelRead(token: QString, channelId: qint64, messageId: qint64)
   +markDmThreadRead(token: QString, threadId: qint64, messageId: qint64)
   +fetchUnreadCounts(token: QString)
+  +fetchChannelReadReceipts(token: QString, channelId: qint64)
+  +fetchDmThreadReadReceipts(token: QString, threadId: qint64)
   .. signals ..
   +communityCreated(id: qint64, name: QString)
   +communitiesListed(communities: QList<ChatItem>)
@@ -307,6 +311,8 @@ class ChatRestClient {
   +channelMarkedRead(channelId: qint64)
   +dmThreadMarkedRead(threadId: qint64)
   +unreadCountsFetched(channels: QList<ChannelUnreadCount>, threads: QList<ThreadUnreadCount>)
+  +channelReadReceiptsFetched(channelId: qint64, receipts: QList<ReadReceipt>)
+  +dmThreadReadReceiptsFetched(threadId: qint64, receipts: QList<ReadReceipt>)
   +errorOccurred(message: QString)
 }
 
@@ -318,6 +324,20 @@ class ThreadUnreadCount {
   +threadId: qint64
   +unreadCount: qint64
 }
+class ReadReceipt {
+  +login: QString
+  +lastReadMessageId: qint64
+}
+note bottom of ReadReceipt
+  Issue #380 — a login absent from a fetched list
+  simply hasn't read anything yet; the server never
+  computes "who has read message X" itself (explicitly
+  called out as expensive for large channels), so
+  ChatView derives that client-side from these raw
+  pointers against the roster it already has
+  (channelMemberLogins_, see ui.puml).
+end note
+ChatRestClient ..> ReadReceipt : emits lists of (issue #380)
 ChatRestClient ..> ChannelUnreadCount : emits lists of (issue #310/#349)
 ChatRestClient ..> ThreadUnreadCount : emits lists of (issue #310/#349)
 

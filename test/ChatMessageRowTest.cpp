@@ -144,8 +144,9 @@ TEST(ChatMessageRowTest, OwnMessageWithHeaderHasNoAuthorLabel) {
     ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
 
     // Время + индикатор "Pinned" (всегда создаётся, скрыт — issue #338)
-    // + текст — у собственных сообщений нет аватара и метки автора.
-    EXPECT_EQ(row.findChildren<QLabel*>().size(), 3);
+    // + текст + "Seen by" (всегда создаётся для своих сообщений, скрыт
+    // — issue #380) — у собственных сообщений нет аватара и метки автора.
+    EXPECT_EQ(row.findChildren<QLabel*>().size(), 4);
     for (const QLabel* label : row.findChildren<QLabel*>()) {
         EXPECT_FALSE(label->property("chatAuthor").toBool());
     }
@@ -650,6 +651,48 @@ TEST(ChatMessageRowTest, SetAudioDataOnARowWithoutAnAudioAttachmentIsANoop) {
     row.setAudioData(QByteArray("not really audio"));  // must not crash
 
     EXPECT_EQ(row.findChild<QPushButton*>("playVoiceMessageButton"), nullptr);
+}
+
+TEST(ChatMessageRowTest, OwnMessageHasAHiddenSeenByLabel) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    // isHidden(), не isVisible() — тест не показывает окно (см.
+    // пояснение выше в файле про PinActionOnAnUnpinnedMessage...).
+    EXPECT_TRUE(row.findChild<QLabel*>(QStringLiteral("chatMessageSeenBy"))->isHidden());
+}
+
+TEST(ChatMessageRowTest, NonOwnMessageHasNoSeenByLabel) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    EXPECT_EQ(row.findChild<QLabel*>(QStringLiteral("chatMessageSeenBy")), nullptr);
+}
+
+TEST(ChatMessageRowTest, SetSeenByWithNonEmptyListShowsTheLabelWithJoinedNames) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+
+    row.setSeenBy({"bob", "carol"});
+
+    auto* label = row.findChild<QLabel*>(QStringLiteral("chatMessageSeenBy"));
+    ASSERT_NE(label, nullptr);
+    EXPECT_FALSE(label->isHidden());
+    EXPECT_EQ(label->text(), QStringLiteral("Seen by: bob, carol"));
+}
+
+TEST(ChatMessageRowTest, SetSeenByWithEmptyListHidesTheLabelAgain) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/true);
+    row.setSeenBy({"bob"});
+
+    row.setSeenBy({});
+
+    EXPECT_TRUE(row.findChild<QLabel*>(QStringLiteral("chatMessageSeenBy"))->isHidden());
+}
+
+TEST(ChatMessageRowTest, SetSeenByOnANonOwnMessageIsANoop) {
+    ChatMessageRow row(sampleMessage(), /*showHeader=*/true, /*isOwnMessage=*/false);
+
+    row.setSeenBy({"bob"});  // must not crash
+
+    EXPECT_EQ(row.findChild<QLabel*>(QStringLiteral("chatMessageSeenBy")), nullptr);
 }
 
 }  // namespace

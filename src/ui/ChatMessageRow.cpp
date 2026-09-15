@@ -288,6 +288,16 @@ ChatMessageRow::ChatMessageRow(const ChatMessage& message, bool showHeader, bool
     bubbleLayout->addWidget(reactionsRow_);
     rebuildReactionChips();
 
+    // "Seen by" (issue #380) — только для собственных сообщений, скрыт
+    // до первого setSeenBy() с непустым списком; см. doc-комментарий
+    // seenByLabel_ в заголовке.
+    if (isOwnMessage) {
+        seenByLabel_ = new QLabel(bubble_);
+        seenByLabel_->setObjectName(QStringLiteral("chatMessageSeenBy"));
+        seenByLabel_->setVisible(false);
+        bubbleLayout->addWidget(seenByLabel_);
+    }
+
     // Контекстное меню по правому клику вместо всегда видимых кнопок
     // (issue #150) — доступно на каждой строке независимо от showHeader,
     // поскольку сгруппированные (последовательные) сообщения не
@@ -441,6 +451,14 @@ void ChatMessageRow::setAudioData(const QByteArray& data) {
     });
     playButton_->setEnabled(true);
     audioPlayer_->play();
+}
+
+void ChatMessageRow::setSeenBy(const QStringList& logins) {
+    if (seenByLabel_ == nullptr) {
+        return;
+    }
+    seenByLabel_->setText(tr("Seen by: %1").arg(logins.join(QStringLiteral(", "))));
+    seenByLabel_->setVisible(!logins.isEmpty());
 }
 
 void ChatMessageRow::applyReactionChange(const QString& emoji, const QStringList& logins) {

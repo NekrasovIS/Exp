@@ -308,6 +308,8 @@ class ChatView {
   +updatePinned(id: qint64, isPinned: bool)
   +setPinnedMessagesCount(count: int)
   +updateReactions(id: qint64, emoji: QString, logins: QStringList)
+  +setReadReceipts(receipts: QList<ReadReceipt>)
+  +applyReadReceiptChange(login: QString, lastReadMessageId: qint64)
   +setAttachmentPreview(attachmentId: qint64, image: QImage)
   +setVoiceMessageData(attachmentId: qint64, data: QByteArray)
   +setRecordingVoice(recording: bool)
@@ -337,6 +339,7 @@ class ChatView {
   #eventFilter(watched: QObject*, event: QEvent*) : bool
   -connectMessageRow(row: ChatMessageRow*)
   -requestPreviewIfImageAttachment(message: ChatMessage, row: ChatMessageRow*)
+  -recomputeSeenByForOwnMessages()
   -resolveReplyPreview(message: ChatMessage) : ChatMessage
   -buildDateSeparatorLabel(sentAt: QString) : QLabel*
   -updateMentionAutocomplete()
@@ -449,6 +452,20 @@ note right of ChatView
   consumeReplyTarget() — вызывается ровно один
   раз при фактической отправке (MainWindow),
   возвращает текущую цель и сразу её снимает.
+
+  "Seen by" (issue #380): readPointers_ —
+  QHash<QString, qint64> login -> last_read_message_id,
+  заполняется целиком setReadReceipts() (ответ на
+  MainWindow: ChatRestClient::fetchChannelReadReceipts()
+  при открытии канала) и обновляется по одному логину
+  applyReadReceiptChange() (ChatClient::readReceiptChanged()).
+  Оба вызывают recomputeSeenByForOwnMessages() — идёт по
+  messagesById_, для каждого СВОЕГО сообщения фильтрует
+  channelMemberLogins_ по readPointers_ и зовёт
+  ChatMessageRow::setSeenBy(). Пересчёт всегда целиком,
+  не точечно — собственных показанных сообщений всегда
+  мало (см. doc-комментарий метода), а логика проще и
+  надёжнее инкрементального обновления.
 end note
 
 class CallWindow {
@@ -656,6 +673,7 @@ class ChatMessageRow {
   +applyReactionChange(emoji: QString, logins: QStringList)
   +setAttachmentPreview(image: QImage)
   +setAudioData(data: QByteArray)
+  +setSeenBy(logins: QStringList)
   #resizeEvent(event: QResizeEvent*)
   -rebuildReactionChips()
   .. signals ..
@@ -678,6 +696,14 @@ note left of ChatMessageRow
   and calls setAudioData(), which builds a
   QMediaPlayer/QAudioOutput/QBuffer lazily and
   starts playback immediately.
+
+  setSeenBy() (issue #380) — the "Seen by: ..." label
+  is only ever created for isOwnMessage true (a viewer
+  has no reason to see themselves listed as having read
+  their own message); a no-op otherwise. Always called
+  with the FULL current list, recomputed by ChatView
+  from scratch on every read-pointer change, not a delta
+  this row would have to merge itself.
 end note
 ChatMessageRow ..> AvatarCache : imageFor()/avatarReady()\n(issue #384/#442, не владеет; nullptr —\nтолько буква-заглушка, как раньше) >
 class ChatBubble {
