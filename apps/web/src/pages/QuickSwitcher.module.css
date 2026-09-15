@@ -1,0 +1,68 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 15vh;
+  background: rgb(0 0 0 / 40%);
+}
+
+.dialog {
+  width: min(480px, 90vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.input {
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: var(--space-3);
+  font-size: var(--font-size-md);
+  background: transparent;
+  color: inherit;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--radius-sm);
+}
+
+.itemActive {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+
+.group {
+  font-size: var(--font-size-sm);
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.empty {
+  padding: var(--space-2);
+  opacity: 0.7;
+}
