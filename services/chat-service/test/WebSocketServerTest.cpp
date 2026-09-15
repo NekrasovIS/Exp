@@ -2182,4 +2182,97 @@ TEST(WebSocketServerTest, BroadcastChannelReadReceiptFansOutToManySubscribersQui
     server.stop();
 }
 
+// Issue #479 — call_occupancy рассылается всем подписчикам текстового
+// чата канала, включая того, кто ни разу не заходил в звонок.
+TEST(WebSocketServerTest, CallOccupancyReachesChannelSubscribersWhoNeverJoinedTheCall) {
+    ix::initNetSystem();
+
+    const std::string dbConnectionString = envOrDefault(
+        "CHAT_SERVICE_DATABASE_URL", "postgresql://chat_service:dev-only-password@localhost:5434/chat_service");
+    const std::string authHost = envOrDefault("AUTH_SERVICE_HOST", "127.0.0.1");
+    const int authPort = std::stoi(envOrDefault("AUTH_SERVICE_PORT", "8080"));
+    const int wsPort = std::stoi(envOrDefault("CHAT_SERVICE_TEST_WS_PORT", "18114"));
+
+    ChatRepository repository(dbConnectionString);
+    ChatService service(repository);
+
+    const std::string suffix = uniqueSuffix();
+    const std::string owner = "ws-occupancy-owner-" + suffix;
+    Community community{};
+    try {
+        community = service.createCommunity("ws-occupancy-community-" + suffix, owner);
+    } catch (const std::exception& error) {
+        GTEST_SKIP() << "Postgres not reachable (" << error.what() << ") — run `docker compose up` to run this test.";
+    }
+    const std::optional<std::int64_t> channelId = service.createChannel(community.id, "general", owner);
+    ASSERT_TRUE(channelId.has_value());
+
+    const std::string loginA = "ws-occupancy-a-" + suffix;
+    const std::string loginB = "ws-occupancy-b-" + suffix;
+    const std::string loginWatcher = "ws-occupancy-watcher-" + suffix;
+    ASSERT_TRUE(service.joinCommunity(community.id, loginA));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginB));
+    ASSERT_TRUE(service.joinCommunity(community.id, loginWatcher));
+    const std::optional<std::string> tokenA = registerAndGetToken(authHost, authPort, loginA);
+    if (!tokenA.has_value()) {
+        GTEST_SKIP() << "auth-service not reachable — start it locally to run this test.";
+    }
+    const std::optional<std::string> tokenB = registerAndGetToken(authHost, authPort, loginB);
+    ASSERT_TRUE(tokenB.has_value());
+    const std::optional<std::string> tokenWatcher = registerAndGetToken(authHost, authPort, loginWatcher);
+    ASSERT_TRUE(tokenWatcher.has_value());
+
+    AuthServiceClient authServiceClient(authHost, authPort);
+    const JanusClient janusClient(envOrDefault("JANUS_HOST", "127.0.0.1"),
+                                   std::stoi(envOrDefault("JANUS_PORT", "8088")));
+    WebSocketServer server(service, authServiceClient, janusClient, wsPort);
+    ASSERT_TRUE(server.start());
+
+    const std::string wsUrl = "ws://127.0.0.1:" + std::to_string(wsPort) + "/";
+    WsTestClient clientA(wsUrl);
+    WsTestClient clientB(wsUrl);
+    // "Watcher" — открывает только текстовый чат канала, никогда не
+    // вызывает call_join.
+    WsTestClient clientWatcher(wsUrl);
+    ASSERT_TRUE(clientA.waitConnected());
+    ASSERT_TRUE(clientB.waitConnected());
+    ASSERT_TRUE(clientWatcher.waitConnected());
+
+    clientA.send(nlohmann::json{{"token", *tokenA}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+    clientB.send(nlohmann::json{{"token", *tokenB}, {"channel_id", *channelId}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); }).has_value());
+
+    clientWatcher.send(nlohmann::json{{"token", *tokenWatcher}, {"channel_id", *channelId}});
+    const std::optional<nlohmann::json> initialSubscribed =
+        clientWatcher.waitFor([](const nlohmann::json& m) { return m.contains("subscribed"); });
+    ASSERT_TRUE(initialSubscribed.has_value());
+    // Никто пока не в звонке — счётчик присутствия в самом ответе на
+    // подписку должен быть 0, не отсутствовать вовсе.
+    EXPECT_EQ((*initialSubscribed)["call_occupancy"].get<std::int64_t>(), 0);
+
+    clientA.send(nlohmann::json{{"call_join", true}});
+    ASSERT_TRUE(clientA.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
+    const std::optional<nlohmann::json> occupancyAfterA =
+        clientWatcher.waitFor([](const nlohmann::json& m) { return m.contains("call_occupancy"); });
+    ASSERT_TRUE(occupancyAfterA.has_value());
+    EXPECT_EQ((*occupancyAfterA)["call_occupancy"]["channel_id"].get<std::int64_t>(), *channelId);
+    EXPECT_EQ((*occupancyAfterA)["call_occupancy"]["count"].get<std::int64_t>(), 1);
+
+    clientB.send(nlohmann::json{{"call_join", true}});
+    ASSERT_TRUE(clientB.waitFor([](const nlohmann::json& m) { return m.contains("call_roster"); }).has_value());
+    const std::optional<nlohmann::json> occupancyAfterB =
+        clientWatcher.waitFor([](const nlohmann::json& m) { return m.contains("call_occupancy"); });
+    ASSERT_TRUE(occupancyAfterB.has_value());
+    EXPECT_EQ((*occupancyAfterB)["call_occupancy"]["count"].get<std::int64_t>(), 2);
+
+    clientB.send(nlohmann::json{{"call_leave", true}});
+    const std::optional<nlohmann::json> occupancyAfterLeave =
+        clientWatcher.waitFor([](const nlohmann::json& m) { return m.contains("call_occupancy"); });
+    ASSERT_TRUE(occupancyAfterLeave.has_value());
+    EXPECT_EQ((*occupancyAfterLeave)["call_occupancy"]["count"].get<std::int64_t>(), 1);
+
+    server.stop();
+}
+
 }  // namespace chat_service

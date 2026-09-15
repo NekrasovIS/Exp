@@ -382,6 +382,7 @@ class WebSocketServer {
   -broadcastToChannel(channelId: int64, json: string, excludeSocket)
   -broadcastToDmThread(dmThreadId: int64, json: string)
   -broadcastToCallParticipants(channelId: int64, json: string, excludeSocket)
+  -broadcastCallOccupancy(channelId: int64)
 }
 note right of WebSocketServer
   Issue #380: broadcastChannelReadReceipt()/
@@ -396,6 +397,16 @@ note right of WebSocketServer
   ReadReceiptBroadcaster — сама мутация "прочитано"
   осталась REST-эндпоинтом (#310/#348), переводить
   его на WS ради одной этой рассылки не требовалось.
+
+  Issue #479: broadcastCallOccupancy() вызывается
+  из handleCallJoin()/removeCallParticipant() и
+  рассылает {"call_occupancy": {"channel_id",
+  "count"}} через broadcastToChannel() — ВСЕМ
+  подписчикам текстового чата, не только
+  callParticipants_ (в отличие от
+  broadcastToCallParticipants()). handleHello()
+  дополнительно включает текущий count в сам ответ
+  {"subscribed": ...} на подписку.
 
   Личные диалоги (issue #187, Фаза 2b):
   Hello {"token", "dm_thread_id"} вместо
