@@ -1855,6 +1855,55 @@ TEST(HttpServerTest, MarkChannelReadRoundTripsThroughGetUnread) {
     EXPECT_EQ(*channelCount(), 0);
 }
 
+// Issue #475 — GET /unread дополнительно отдаёт mention_channels.
+TEST(HttpServerTest, GetUnreadIncludesMentionChannelsAndMarkingReadClearsIt) {
+    auto fixtureOpt = TestFixture::create("http-server-mention-unread");
+    if (!fixtureOpt.has_value()) {
+        GTEST_SKIP() << "Postgres or auth-service not reachable — run `docker compose up` + start auth-service.";
+    }
+    auto& fixture = *fixtureOpt;
+    ChatService chatService(fixture.repository);
+    const Community community =
+        chatService.createCommunity("http-test-mention-unread-" + uniqueSuffix(), fixture.ownerLogin);
+    const std::optional<std::int64_t> channelId =
+        chatService.createChannel(community.id, "general", fixture.ownerLogin);
+    ASSERT_TRUE(channelId.has_value());
+    const std::string memberLogin = "http-server-mention-unread-member-" + uniqueSuffix();
+    const std::optional<std::string> memberToken =
+        registerAndGetToken(fixture.authHost, fixture.authPort, memberLogin);
+    ASSERT_TRUE(memberToken.has_value());
+    ASSERT_TRUE(chatService.joinCommunity(community.id, memberLogin));
+    const std::optional<Message> posted =
+        chatService.postMessage(*channelId, fixture.ownerLogin, "hey @" + memberLogin + ", look at this");
+    ASSERT_TRUE(posted.has_value());
+
+    const ScopedServer server(chatService, fixture.authServiceClient);
+    httplib::Client client(kTestHost, kTestPort);
+    httplib::Headers memberHeaders{{"Authorization", bearer(*memberToken)}};
+
+    auto mentionCount = [&]() -> std::optional<std::int64_t> {
+        const httplib::Result result = client.Get("/unread", memberHeaders);
+        if (!result || result->status != 200) {
+            return std::nullopt;
+        }
+        const nlohmann::json parsed = nlohmann::json::parse(result->body);
+        for (const auto& entry : parsed["mention_channels"]) {
+            if (entry["channel_id"].get<std::int64_t>() == *channelId) {
+                return entry["unread_mention_count"].get<std::int64_t>();
+            }
+        }
+        return std::nullopt;
+    };
+
+    ASSERT_TRUE(mentionCount().has_value());
+    EXPECT_EQ(*mentionCount(), 1);
+
+    ASSERT_TRUE(client.Post("/channels/" + std::to_string(*channelId) + "/read", memberHeaders,
+                             nlohmann::json{{"message_id", posted->id}}.dump(), "application/json"));
+
+    EXPECT_FALSE(mentionCount().has_value());
+}
+
 TEST(HttpServerTest, MarkChannelReadRejectsNonMemberWith404) {
     auto fixtureOpt = TestFixture::create("http-server-mark-read-outsider");
     if (!fixtureOpt.has_value()) {

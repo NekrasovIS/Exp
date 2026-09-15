@@ -1119,7 +1119,18 @@ void HttpServer::handleGetUnreadCounts(const httplib::Request& request, httplib:
     for (const ThreadUnreadCount& count : chatService_.listUnreadThreadCounts(*login)) {
         threads.push_back(nlohmann::json{{"thread_id", count.threadId}, {"unread_count", count.unreadCount}});
     }
-    response.set_content(nlohmann::json{{"channels", channels}, {"dm_threads", threads}}.dump(), kJsonContentType);
+    // Issue #475 — отдельно от общего unread_count выше: каналов без
+    // единого непрочитанного упоминания в этом списке не будет вовсе
+    // (см. doc-комментарий ChannelMentionCount).
+    nlohmann::json mentionChannels = nlohmann::json::array();
+    for (const ChannelMentionCount& count : chatService_.listUnreadMentionCounts(*login)) {
+        mentionChannels.push_back(
+            nlohmann::json{{"channel_id", count.channelId}, {"unread_mention_count", count.unreadMentionCount}});
+    }
+    response.set_content(
+        nlohmann::json{{"channels", channels}, {"dm_threads", threads}, {"mention_channels", mentionChannels}}
+            .dump(),
+        kJsonContentType);
 }
 
 void HttpServer::handleGetChannelReadReceipts(const httplib::Request& request, httplib::Response& response) {

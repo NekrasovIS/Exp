@@ -6,12 +6,40 @@
 
 #include <algorithm>
 #include <array>
+#include <regex>
 #include <string_view>
 #include <utility>
 
 namespace chat_service {
 
 namespace {
+
+/// Issue #475 — извлекает логины, действительно упомянутые в @p body
+/// ("@login"), сверяя каждый токен против @p members: произвольный текст
+/// после "@" не становится упоминанием, если он не совпадает с реальным
+/// участником сообщества (иначе "email вроде name@example.com" или
+/// случайное "@" в тексте создавали бы ложные упоминания). Автора
+/// сообщения исключает — самоупоминание не имеет смысла. Возвращает
+/// каждый совпавший логин не более одного раза, даже если он упомянут в
+/// теле несколько раз.
+std::vector<std::string> extractMentionedLogins(const std::string& body, const std::vector<std::string>& members,
+                                                 const std::string& authorLogin) {
+    static const std::regex mentionPattern(R"(@([A-Za-z0-9_.-]+))");
+    std::vector<std::string> mentioned;
+    for (std::sregex_iterator it(body.begin(), body.end(), mentionPattern), end; it != end; ++it) {
+        const std::string candidate = (*it)[1].str();
+        if (candidate == authorLogin) {
+            continue;
+        }
+        if (std::find(members.begin(), members.end(), candidate) == members.end()) {
+            continue;
+        }
+        if (std::find(mentioned.begin(), mentioned.end(), candidate) == mentioned.end()) {
+            mentioned.push_back(candidate);
+        }
+    }
+    return mentioned;
+}
 
 /// @return True, если @p login — модератор @p communityId, в рамках уже
 /// открытой @p transaction — используется совместно deleteMessage()/
@@ -502,8 +530,28 @@ std::optional<Message> ChatRepository::insertMessage(std::int64_t channelId, con
             }
         }
 
+        // Issue #475 — @упоминания: разбираются здесь, а не постфактум,
+        // чтобы message_mentions всегда отражало реальное содержимое
+        // сообщения на момент отправки.
+        const std::int64_t messageId = rows[0][0].as<std::int64_t>();
+        const pqxx::result communityRows =
+            transaction.exec("SELECT community_id FROM channels WHERE id = $1", pqxx::params{channelId});
+        const pqxx::result memberRows =
+            transaction.exec("SELECT member_login FROM memberships WHERE community_id = $1",
+                              pqxx::params{communityRows[0][0].as<std::int64_t>()});
+        std::vector<std::string> members;
+        members.reserve(static_cast<std::size_t>(memberRows.size()));
+        for (const auto& memberRow : memberRows) {
+            members.push_back(memberRow[0].as<std::string>());
+        }
+        for (const std::string& mentionedLogin : extractMentionedLogins(body, members, authorLogin)) {
+            transaction.exec("INSERT INTO message_mentions (message_id, channel_id, mentioned_login) "
+                              "VALUES ($1, $2, $3)",
+                              pqxx::params{messageId, channelId, mentionedLogin});
+        }
+
         transaction.commit();
-        return Message{.id = rows[0][0].as<std::int64_t>(),
+        return Message{.id = messageId,
                         .authorLogin = authorLogin,
                         .body = body,
                         .sentAt = rows[0][1].as<std::string>(),
@@ -1116,6 +1164,31 @@ std::vector<ThreadUnreadCount> ChatRepository::listUnreadThreadCounts(const std:
     for (const auto& row : rows) {
         counts.push_back(
             ThreadUnreadCount{.threadId = row[0].as<std::int64_t>(), .unreadCount = row[1].as<std::int64_t>()});
+    }
+    return counts;
+}
+
+std::vector<ChannelMentionCount> ChatRepository::listUnreadMentionCounts(const std::string& login) {
+    pqxx::connection connection(connectionString_);
+    pqxx::work transaction(connection);
+
+    // Не JOIN через все каналы участника (в отличие от
+    // listUnreadChannelCounts()) — упоминания редки, поэтому запрос
+    // просто начинается от message_mentions и группирует то, что нашёл;
+    // каналов без единого непрочитанного упоминания в результате не
+    // будет вовсе (см. doc-комментарий ChannelMentionCount).
+    const pqxx::result rows = transaction.exec(
+        "SELECT mm.channel_id, count(*) FROM message_mentions mm "
+        "LEFT JOIN channel_read_state crs ON crs.channel_id = mm.channel_id AND crs.login = $1 "
+        "WHERE mm.mentioned_login = $1 AND mm.message_id > COALESCE(crs.last_read_message_id, 0) "
+        "GROUP BY mm.channel_id",
+        pqxx::params{login});
+
+    std::vector<ChannelMentionCount> counts;
+    counts.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto& row : rows) {
+        counts.push_back(ChannelMentionCount{.channelId = row[0].as<std::int64_t>(),
+                                              .unreadMentionCount = row[1].as<std::int64_t>()});
     }
     return counts;
 }
